@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (256), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (244), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -47,25 +47,15 @@ A customer acting on its own account.
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/me/checkout-sessions` | customer | — | `CheckoutSessionMintRequest` | 201 `CheckoutSessionLink` | when `checkout_sessions` |
-| POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `HandlersCancelSubscriptionRequest` | 202 untyped | scope `subscription_management` |
-| POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 202 untyped | scope `subscription_management` |
-| PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `UpdateSubscriptionPaymentMethodRequest` | 200 untyped | scope `subscription_management` |
-| GET | `/v1/me/tier` | customer | — | — | 200 `EffectiveTierResponse` | scope `billing_management` |
-| GET | `/v1/me/subscriptions` | customer | — | — | 200 `PathPageOfSubscription` | scope `billing_management` |
+| POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `CustomerCancelSubscriptionRequest` | 200 `Subscription` | scope `subscription_management` |
+| POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 200 `Subscription` | scope `subscription_management` |
+| PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `UpdateSubscriptionPaymentMethodParams` | 200 `Subscription` | scope `subscription_management` |
+| GET | `/v1/me/subscriptions` | customer | — | — | 200 `ListPage<Subscription>` | scope `billing_management` |
 | GET | `/v1/me/subscriptions/{id}` | customer | — | — | 200 `Subscription` | scope `billing_management` |
 | POST | `/v1/me/subscriptions/{id}/retry-now` | customer | — | `RetrySubscriptionNowRequest` | 200 `SubscriptionRetryNowResult`<br>202 `SubscriptionRetryNowResult` | scope `billing_management` |
-| POST | `/v1/me/subscriptions/{id}/change-tier` | customer | — | `ChangeTierRequest` | 200 `TierChangeResponse`<br>202 `TierChangeResponse` | `Idempotency-Key` |
-| POST | `/v1/me/subscriptions/{id}/change-tier/preview` | customer | — | `ChangeTierRequest` | 200 `TierChangePreviewResponse` |  |
-| POST | `/v1/me/subscriptions/{id}/provider-cutover` | customer | — | `ProviderCutoverRequest` | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
-| GET | `/v1/me/subscriptions/{id}/provider-cutover` | customer | — | — | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
-| POST | `/v1/me/subscriptions/{id}/provider-cutover/preview` | customer | — | `ProviderCutoverRequest` | 200 `ProviderCutover` |  |
-| POST | `/v1/me/subscriptions/{id}/solana-cancel-tx` | customer | — | — | 200 untyped | when `solana_signing`; scope `billing_management` |
-| POST | `/v1/me/subscriptions/{id}/solana-cancel` | customer | — | `ConfirmSolanaCancelRequest` | 200 untyped | when `solana_signing`; scope `billing_management` |
-| POST | `/v1/me/subscriptions/{id}/solana-tier-change` | customer | — | `SolanaTierChangeRequest` | 200 untyped | when `solana_signing` |
-| POST | `/v1/me/subscriptions/{id}/solana-tier-change/confirm` | customer | — | `SolanaTierChangeConfirmRequest` | 200 untyped | when `solana_signing` |
-| GET | `/v1/me/entitlements/active` | customer | — | — | 200 untyped | scope `billing_management` |
-| GET | `/v1/me/products` | customer | — | — | 200 `ProductAccessList` | scope `billing_management` |
-| GET | `/v1/me/products/{product_id}/access` | customer | — | — | 200 `ProductAccessCheck` | scope `billing_management` |
+| POST | `/v1/me/subscriptions/{id}/change-tier` | customer | — | `CustomerChangeTierRequest` | 200 `TierChange`<br>202 `TierChange` | `Idempotency-Key` |
+| POST | `/v1/me/subscriptions/{id}/change-tier/preview` | customer | — | `ChangeTierParams` | 200 `TierChangePreview` |  |
+| GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<EntitlementRecord>` | scope `billing_management` |
 | GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` | scope `billing_management` |
 | GET | `/v1/me/balance` | customer | — | — | 200 `Balance` | scope `billing_management` |
 | GET | `/v1/me/transactions` | customer | — | — | 200 `ListPage<CreditTransaction>` | scope `billing_management` |
@@ -133,39 +123,37 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | POST | `/v1/merchant/catalog/offers/lookup` | merchant | `merchant:catalog:read` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
-| GET | `/v1/merchant/customers/{customer_id}/effective-tier` | merchant | `merchant:customer-settings:read` | — | 200 `EffectiveTier` |  |
-| GET | `/v1/merchant/subscriptions` | merchant | `merchant:subscriptions:read` | — | 200 `PageOfSubscription` |  |
+| GET | `/v1/merchant/subscriptions` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/merchant/subscriptions/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Subscription` |  |
-| POST | `/v1/merchant/subscriptions/{id}/cancel` | merchant | `merchant:subscriptions:update` | `CancelSubscriptionRequest` | 200 `Message` | limit `destructive` |
-| POST | `/v1/merchant/subscriptions/{id}/resume` | merchant | `merchant:subscriptions:update` | — | 202 untyped |  |
-| POST | `/v1/merchant/subscriptions/{id}/change-tier` | merchant | `merchant:subscriptions:update` | `ChangeTierRequest` | 200 `TierChangeResponse`<br>202 `TierChangeResponse` | limit `off_channel`; `Idempotency-Key` |
-| POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | merchant | `merchant:subscriptions:update` | `ChangeTierRequest` | 200 `TierChangePreviewResponse` |  |
-| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `merchant:subscriptions:update` | `UpdateSubscriptionPaymentMethodRequest` | 200 untyped |  |
+| POST | `/v1/merchant/subscriptions/{id}/cancel` | merchant | `merchant:subscriptions:update` | `CancelSubscriptionParams` | 200 `Subscription` | limit `destructive` |
+| POST | `/v1/merchant/subscriptions/{id}/resume` | merchant | `merchant:subscriptions:update` | — | 200 `Subscription` |  |
+| POST | `/v1/merchant/subscriptions/{id}/change-tier` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | limit `off_channel`; `Idempotency-Key` |
+| POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChangePreview` |  |
+| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `merchant:subscriptions:update` | `UpdateSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:update` | `ProviderCutoverRequest` | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:read` | — | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | merchant | `merchant:subscriptions:read` | `ProviderCutoverRequest` | 200 `ProviderCutover` |  |
 | POST | `/v1/merchant/provider-refresh` | merchant | `merchant:subscriptions:update` | — | 202 `ProviderRefresh` |  |
-| POST | `/v1/merchant/subscriptions/{id}/reprice` | merchant | `merchant:subscriptions:update` | `CreateSubscriptionRepriceRequest` | 201 `SubscriptionRepriceView` |  |
-| POST | `/v1/merchant/catalog/reprice-all-prior-versions` | merchant | `merchant:subscriptions:update` | `RepriceAllPriorVersionsRequest` | 201 `RepriceBatchResult` |  |
-| GET | `/v1/merchant/catalog/reprice-all-prior-versions/preview` | merchant | `merchant:subscriptions:read` | — | 200 `RepricePreviewResult` |  |
+| POST | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:update` | `CreateRepriceBatchParams` | 201 `RepriceBatchResult` |  |
+| POST | `/v1/merchant/reprice-batches/preview` | merchant | `merchant:subscriptions:read` | `RepriceBatchPreviewParams` | 200 `RepriceBatchPreview` |  |
+| GET | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<RepriceBatch>` |  |
+| GET | `/v1/merchant/reprice-batches/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `RepriceBatch` |  |
+| POST | `/v1/merchant/reprice-batches/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `RepriceBatchCancel` |  |
 | POST | `/v1/merchant/plan-migrations` | merchant | `merchant:subscriptions:update` | `PlanMigrationRequest` | 201 `PlanMigrationResult` |  |
 | POST | `/v1/merchant/plan-migrations/preview` | merchant | `merchant:subscriptions:read` | `PlanMigrationRequest` | 200 `PlanMigrationResult` |  |
-| GET | `/v1/merchant/plan-migrations/{id}` | merchant | `merchant:subscriptions:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/plan-migrations/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `PlanMigrationCancelResult` |  |
-| GET | `/v1/merchant/reprices` | merchant | `merchant:subscriptions:read` | — | 200 `PaginatedResponseOfSubscriptionRepriceView` |  |
-| GET | `/v1/merchant/reprices/batches` | merchant | `merchant:subscriptions:read` | — | 200 `PaginatedResponseOfRepriceBatchView` |  |
-| GET | `/v1/merchant/reprices/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `SubscriptionRepriceView` |  |
-| POST | `/v1/merchant/reprices/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `Message` |  |
-| POST | `/v1/merchant/customers/entitlements:batch` | merchant | `merchant:customer-settings:read` | `ServiceExternalSubjectEntitlementsRequest` | 200 untyped |  |
-| GET | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:read` | — | 200 `EntitlementRecord[]` |  |
-| GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `merchant:customer-settings:read` | untyped | 200 untyped |  |
-| POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `merchant:customer-settings:read` | untyped | 200 untyped |  |
-| GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ProductAccessCheck`<br>200 `ProductAccessList` |  |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:update` | `GrantEntitlementRequest` | 201 `EntitlementRecord` | limit `grant` |
-| DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | merchant | `merchant:customer-settings:update` | — | 200 `Message` | limit `destructive` |
-| POST | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:update` | `GrantProductAccessRequest` | 201 `ProductAccessGrant` | limit `grant` |
-| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `merchant:customer-settings:update` | — | 200 `Message` | limit `destructive` |
+| GET | `/v1/merchant/reprices` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<Reprice>` |  |
+| GET | `/v1/merchant/reprices/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Reprice` |  |
+| POST | `/v1/merchant/reprices/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `Reprice` |  |
+| POST | `/v1/merchant/entitlements/lookup` | merchant | `merchant:customer-settings:read` | `EntitlementListParams` | 200 `EntitlementLookup` |  |
+| GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<string>` |  |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `merchant:customer-settings:read` | `EntitlementCheckParams` | 200 `EntitlementCheck` |  |
+| GET | `/v1/merchant/customers/{customer_id}/tier` | merchant | `merchant:customer-settings:read` | — | 200 `EffectiveTier` |  |
+| POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `merchant:customer-settings:read` | `ProductAccessCheckParams` | 200 `ProductAccessCheck` |  |
+| GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:update` | `CreateEntitlementParams` | 201 `EntitlementRecord` | limit `grant` |
+| DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
+| POST | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:update` | `CreateProductAccessParams` | 201 `ProductAccessGrant` | limit `grant` |
+| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
 | GET | `/v1/merchant/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Customer>` |  |
 | GET | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:read` | — | 200 `Customer` |  |
 | PUT | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:update` | `CustomerParams` | 200 `Customer` |  |

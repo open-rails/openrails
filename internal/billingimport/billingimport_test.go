@@ -26,7 +26,7 @@ func declaredBook() DeclaredBilling {
 		}},
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "sub_" + uuid.NewString(), Customer: customer, Price: billing.PriceID(uuid.New()),
-			Rail: "nmi", RailSubscriptionID: uuid.NewString(), UserEmail: "payer@example.test",
+			Rail: "nmi", RailSubscriptionID: uuid.NewString(),
 			Evidence: json.RawMessage(`{"legacy_id":"` + uuid.NewString() + `"}`),
 		}},
 		Transactions: []DeclaredTransaction{{RailSubscriptionID: uuid.NewString(), TransactionID: uuid.NewString(), Currency: "USD", OccurredAt: time.Now().UTC()}},
@@ -62,7 +62,6 @@ func TestDeclaredBookPANFirewall(t *testing.T) {
 		"pm.psp.key":                  func(b *DeclaredBilling) { b.PaymentMethods[0].PSP.Key = visa },
 		"sub.source_id":               func(b *DeclaredBilling) { b.Subscriptions[0].SourceID = visa },
 		"sub.rail_subscription_id":    func(b *DeclaredBilling) { b.Subscriptions[0].RailSubscriptionID = visa },
-		"sub.user_email":              func(b *DeclaredBilling) { b.Subscriptions[0].UserEmail = visa + "@example.test" },
 		"sub.cancel.kind":             func(b *DeclaredBilling) { b.Subscriptions[0].Cancel.Kind = visa },
 		"sub.evidence":                func(b *DeclaredBilling) { b.Subscriptions[0].Evidence = json.RawMessage(`{"card":"` + visa + `"}`) },
 		"sub.payment_method": func(b *DeclaredBilling) {

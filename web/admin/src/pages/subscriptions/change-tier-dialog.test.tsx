@@ -232,7 +232,7 @@ describe("tier change options", () => {
 
   it.each([
     [{}, undefined],
-    [{ status: "cancelled" as const }, "Only active or past-due subscriptions can change tier"],
+    [{ status: "canceled" as const }, "Only active or past-due subscriptions can change tier"],
     [{ scheduledPriceId: "price-next" }, "A tier change is already scheduled"],
     [{ hasPendingReprice: true }, "A price change is already scheduled"],
     [{ rail: "ccbill" }, "CCBill tier changes require customer self-service"],

@@ -27,20 +27,20 @@ export function SolanaBody({
     const container = qrRef.current
     if (!container || !payload) return
 
-    let cancelled = false
+    let canceled = false
     container.replaceChildren()
     setQrState("loading")
     void import("@solana/pay")
       .then(({ createQR }) => {
-        if (cancelled) return
+        if (canceled) return
         createQR(payload, QR_SIZE, "#ffffff", "#18181b").append(container)
         setQrState("ready")
       })
       .catch(() => {
-        if (!cancelled) setQrState("failed")
+        if (!canceled) setQrState("failed")
       })
     return () => {
-      cancelled = true
+      canceled = true
       container.replaceChildren()
     }
   }, [payload])

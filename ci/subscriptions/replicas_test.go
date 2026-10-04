@@ -41,7 +41,7 @@ func TestReplicasManyDueAtOnce(t *testing.T) {
 	// A remote Client host reading through another replica sees the same book.
 	sub, err := f.replicas[2].client[remote].GetSubscription(t.Context(), cases[0].sub)
 	require.NoError(t, err)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.Empty(t, f.base.stripe.unexpected())
 	require.Empty(t, f.base.nmi.Unexpected())
 }
@@ -115,7 +115,7 @@ func TestReplicasSettledBeforeAdmission(t *testing.T) {
 			f.toDue(late)
 			f.passes()
 			retry := f.subscription(late)
-			require.Equal(t, "past_due", retry.Status)
+			require.Equal(t, billing.SubscriptionPastDue, retry.Status)
 			late.setDecline(visa.Last4, "", "") // the member's bank now approves
 			// first falls due before late's retry, so a pass reaches it first.
 			require.True(t, f.periodEnd(first).Before(*retry.NextRetryAt))
@@ -435,7 +435,7 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			f.toDue(e)
 			f.passes()
 			sub := f.subscription(e)
-			require.Equal(t, "past_due", sub.Status)
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			require.NotNil(t, sub.NextRetryAt)
 			require.Equal(t, 2, f.submissions(e))
 
@@ -446,7 +446,7 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			lock.release()
 			f.awaitPasses(passes)
 			require.Equal(t, 3, f.submissions(e), "one attempt for the first retry slot")
-			require.Equal(t, "past_due", f.subscription(e).Status)
+			require.Equal(t, billing.SubscriptionPastDue, f.subscription(e).Status)
 
 			e.replaceCard(mastercard)
 			lock = f.lockCustomer(e)
@@ -471,7 +471,7 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			f.until(func() bool { return f.periodEnd(e).After(end) }, "the new card recovers the period")
 			f.passes()
 			sub = f.subscription(e)
-			require.Equal(t, "active", sub.Status)
+			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.True(t, end.Add(monthHours*time.Hour).Equal(*sub.CurrentPeriodEndsAt))
 			f.requireExactlyOnce(e, 1, 4)
 			attempts := map[string]int{}
@@ -504,7 +504,8 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 	}
 	afterFence := func(f *fleet, e *engineCase) (func(*http.Request) bool, bool) { return submission(e.rail), true }
 	cancel := func(t *testing.T, f *fleet, r *world, e *engineCase) {
-		require.NoError(t, r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionRequest{Reason: "member left"}))
+		_, err := r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "member left"})
+		require.NoError(t, err)
 	}
 	refund := func(t *testing.T, f *fleet, r *world, e *engineCase) {
 		page, err := r.client[remote].ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 10}})
@@ -543,8 +544,8 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 					return true
 				}, "the raced renewal resolves")
 				sub := f.subscription(e)
-				require.Equal(t, "cancelled", sub.Status)
-				require.True(t, sub.CurrentPeriodEndsAt.Before(end.Add(monthHours*time.Hour)), "a cancelled membership is not extended")
+				require.Equal(t, billing.SubscriptionCanceled, sub.Status)
+				require.True(t, sub.CurrentPeriodEndsAt.Before(end.Add(monthHours*time.Hour)), "a canceled membership is not extended")
 				want := 1
 				if rc.charge {
 					want = 2 // sent before the cancel committed; recorded for review, never lost
@@ -564,7 +565,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 					f.advance(monthHours * time.Hour)
 					f.passes()
 				}
-				require.Equal(t, want, f.submissions(e), "a cancelled membership is never charged again")
+				require.Equal(t, want, f.submissions(e), "a canceled membership is never charged again")
 			})
 		}
 	}
@@ -622,7 +623,7 @@ func TestReplicasProviderOwned(t *testing.T) {
 		f.passes()
 		f.passes()
 		sub := f.replicas[2].subscription(embedded, l.sub)
-		require.Equal(t, "past_due", sub.Status, "a decline is never retried at once")
+		require.Equal(t, billing.SubscriptionPastDue, sub.Status, "a decline is never retried at once")
 		require.NotNil(t, sub.NextRetryAt)
 		require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from NMI's decline")
 		require.Zero(t, len(f.base.nmi.Attempts()))

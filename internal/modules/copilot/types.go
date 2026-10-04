@@ -70,8 +70,8 @@ type CreatePriceDraft struct {
 	Providers           []string `json:"providers,omitempty"`
 }
 
-// RepriceDraft mirrors the #773 bulk reprice-all-prior-versions body
-// (subscriptions.RepriceAllPriorVersionsRequest's wire shape).
+// RepriceDraft mirrors the reprice-batch create body
+// (billing.CreateRepriceBatchParams).
 type RepriceDraft struct {
 	PriceKey    string    `json:"price_key"`
 	EffectiveAt time.Time `json:"effective_at"`

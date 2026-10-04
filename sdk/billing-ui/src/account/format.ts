@@ -2,8 +2,8 @@ import type {
   CardSummary,
   CurrencyScales,
   Payment,
+  Price,
   Subscription,
-  SubscriptionPrice,
 } from "../client/types"
 import type { Translator } from "../i18n/messages"
 import { formatAmount } from "../lib/money"
@@ -38,7 +38,7 @@ export function formatMoney(
 
 /** "every 30 days", "30 days of access" or "one-time". */
 export function intervalLabel(
-  price: SubscriptionPrice | null | undefined,
+  price: Pick<Price, "access_duration_hours" | "auto_renew"> | null | undefined,
   m: Translator
 ): string | null {
   if (!price) return null
@@ -105,16 +105,16 @@ export const LIVE_STATUSES = new Set([
 const future = (at: string | null | undefined) =>
   !!at && new Date(at).getTime() > Date.now()
 
-/** Still grants access: live, or cancelled with the paid period running. */
+/** Still grants access: live, or canceled with the paid period running. */
 export const isLive = (s: Subscription) =>
   LIVE_STATUSES.has(s.status) ||
-  (s.status === "cancelled" &&
+  (s.status === "canceled" &&
     (!!s.cancel_scheduled || !!s.resumable) &&
     future(s.current_period_ends_at))
 
 /** Access ends at period end and nothing renews it. */
 export const isEnding = (s: Subscription) =>
-  isLive(s) && (!!s.cancel_scheduled || s.status === "cancelled")
+  isLive(s) && (!!s.cancel_scheduled || s.status === "canceled")
 
 export type StatusTone = "success" | "warning" | "destructive" | "neutral"
 
@@ -132,7 +132,6 @@ const TONE: Record<string, StatusTone> = {
   partially_refunded: "neutral",
   failed: "destructive",
   expired: "destructive",
-  cancelled: "neutral",
   canceled: "neutral",
   refunded: "neutral",
 }

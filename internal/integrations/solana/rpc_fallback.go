@@ -499,7 +499,7 @@ func (c *RPCFallbackClient) GetTokenAccountBalanceAtSlot(ctx context.Context, ac
 }
 
 // retryMinContextSlot runs read() until it succeeds without a min-context-slot
-// error, ctx is cancelled, or the attempt bound is reached. A min-context-slot
+// error, ctx is canceled, or the attempt bound is reached. A min-context-slot
 // error means every active node still lags the requested slot; we back off and
 // retry (nodes catch up within a few hundred ms). Non-slot errors and success
 // return immediately.

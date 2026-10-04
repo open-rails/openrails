@@ -126,7 +126,7 @@ func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdu
 }
 
 const listOverdueRebills = `-- name: ListOverdueRebills :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy FROM billing.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
   AND ((sub.collection_policy = 'engine' AND sub.current_period_ends_at <= $2::timestamptz)
@@ -175,7 +175,6 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 			&i.Rail,
 			&i.CollectionPolicy,
 			&i.RailSubscriptionID,
-			&i.UserEmail,
 			&i.PaymentMethodID,
 			&i.CurrentPeriodStartsAt,
 			&i.CurrentPeriodEndsAt,
@@ -186,7 +185,7 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
-			&i.CancelledAt,
+			&i.CanceledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
 			&i.EntitlementsSpecSnapshot,
@@ -225,7 +224,7 @@ WITH cf AS (
                 WHEN f.category = 'approved' THEN 'approved'
                 WHEN f.category = 'system_error' THEN 'error'
                 ELSE 'declined' END::text AS first_outcome,
-           LEAST(w.attempted_at, CASE WHEN s.cancelled_at IS NOT NULL THEN GREATEST(s.cancelled_at, c.due_at) END,
+           LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END,
                  c.due_at + interval '15 days')::timestamptz AS closed_at,
            CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
                 WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
@@ -300,7 +299,7 @@ type ListRebillCyclesRow struct {
 
 // The merchant's rebill cycles, latest due first, each with its first attempt,
 // the attempt that collected it and when it closes: collected, the subscription
-// cancelled, or 15 days past due (the dunning window is at most 14), whichever
+// canceled, or 15 days past due (the dunning window is at most 14), whichever
 // is first. Outcome is collected, lost (closed by now uncollected) or open; a
 // text filter matches any of its values; a page continues after its cursor.
 // The metrics rebill_cycles family derives the same facts.

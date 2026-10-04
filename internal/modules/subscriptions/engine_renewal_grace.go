@@ -61,7 +61,7 @@ type graceWriter interface {
 // merchant suspends held renewals. Other collection policies project their own
 // access (provider cohorts hold standing windows).
 func pushEngineRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, names []string, periodStart, periodEnd time.Time) error {
-	if ent == nil || sub == nil || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.CancelledAt != nil || sub.Status == models.StatusCancelled {
+	if ent == nil || sub == nil || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.CanceledAt != nil || sub.Status == models.StatusCanceled {
 		return nil
 	}
 	grace, err := EngineRenewalGrace(periodEnd.Sub(periodStart))

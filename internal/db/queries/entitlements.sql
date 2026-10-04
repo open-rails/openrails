@@ -1,21 +1,6 @@
 -- billing.entitlements. The model is bun-soft-delete (deleted_at): every
 -- read filters deleted_at IS NULL explicitly here (bun added it implicitly).
 
--- name: CreateEntitlement :one
-INSERT INTO billing.entitlements (
-    id, merchant_id, customer_id, entitlement, start_at, end_at,
-    source_id, source_type, grant_id, revoked_at, revoke_reason, created_at, updated_at
-) VALUES (
-    COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    sqlc.arg(merchant_id)::uuid,
-    NULLIF(sqlc.arg(customer_id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-    $1, $2, sqlc.narg(end_at), sqlc.narg(source_id), $3, sqlc.narg(grant_id),
-    sqlc.narg(revoked_at), sqlc.narg(revoke_reason),
-    COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
-)
-RETURNING id;
-
 -- name: EntitlementExistsActive :one
 SELECT EXISTS (
     SELECT 1 FROM billing.entitlements ent
@@ -134,7 +119,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
 -- name: EndActiveEntitlementsBySubscription :exec
 -- #691 closure write: bound a subscription's live windows to a PROVEN end
 -- (user cancel at period end, terminal resolution). Advance-written on disk —
--- a dead system cannot extend a cancelled sub. start_at < end_at keeps the
+-- a dead system cannot extend a canceled sub. start_at < end_at keeps the
 -- generated period range valid; future-start windows are handled by
 -- SoftDeleteFutureEntitlementsBySubscription.
 UPDATE billing.entitlements ent SET
@@ -204,7 +189,7 @@ WITH retracted AS (
 UPDATE billing.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'purchase'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -219,7 +204,7 @@ SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.sour
        'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
 FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+  AND g.id IN (SELECT grant_id FROM retracted)
 ORDER BY g.id
 ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
@@ -231,7 +216,7 @@ UPDATE billing.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.narg(revoke_reason),
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'purchase'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -245,7 +230,7 @@ SELECT EXISTS (
       AND ent.source_id = $2
       AND ent.entitlement = $3
       -- A purchase projects once: a revoked or retracted window is final.
-      AND (ent.source_type = 'one_off' OR (ent.revoked_at IS NULL AND ent.deleted_at IS NULL))
+      AND (ent.source_type = 'purchase' OR (ent.revoked_at IS NULL AND ent.deleted_at IS NULL))
 );
 
 -- name: ListEntitlementsByCustomer :many
@@ -348,7 +333,7 @@ SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.sour
        'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
 FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+  AND g.id IN (SELECT grant_id FROM retracted)
 ORDER BY g.id
 ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
@@ -394,7 +379,7 @@ SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.sour
        'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
 FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+  AND g.id IN (SELECT grant_id FROM retracted)
 ORDER BY g.id
 ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
@@ -449,9 +434,9 @@ INSERT INTO billing.entitlements (
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(entitlement)::text,
     sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
-    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.narg(grant_id)::uuid
+    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.arg(grant_id)::uuid
 )
-ON CONFLICT (merchant_id, grant_id, entitlement) WHERE grant_id IS NOT NULL AND deleted_at IS NULL DO NOTHING;
+ON CONFLICT (merchant_id, grant_id, entitlement) WHERE deleted_at IS NULL DO NOTHING;
 
 -- name: GetLatestEntitlementBySource :one
 SELECT * FROM billing.entitlements

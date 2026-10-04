@@ -166,7 +166,7 @@ func TestActiveMembersRosterRejectsPartialBatches(t *testing.T) {
 }
 
 func TestDataLinkActiveStatus(t *testing.T) {
-	for status, want := range map[string]bool{"1": true, "Y": true, "yes": true, " ACTIVE ": true, "a": true, "0": false, "cancelled": false, "": false, "inactive": false} {
+	for status, want := range map[string]bool{"1": true, "Y": true, "yes": true, " ACTIVE ": true, "a": true, "0": false, "canceled": false, "": false, "inactive": false} {
 		require.Equal(t, want, IsDataLinkActiveStatus(status), status)
 	}
 }

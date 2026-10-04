@@ -65,7 +65,7 @@ type Options struct {
 	Clock clockwork.Clock
 }
 
-// Import lands a host-declared billing book. Explicitly-cancelled facts
+// Import lands a host-declared billing book. Explicitly-canceled facts
 // are written directly (settled history, faithful cancel_type/dates); the
 // ambiguous cohort is seeded `unknown` and resolved by the #665 decider against
 // the declared snapshot at AsOf — park-as-unknown and cancellation-last-resort
@@ -278,7 +278,6 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				Rail:               s.Rail,
 				RailSubscriptionID: s.RailSubscriptionID,
 				PspID:              subPSP,
-				UserEmail:          nilIfEmpty(s.UserEmail),
 				StartedAt:          s.StartedAt.UTC(),
 				PaidThrough:        s.PaidThrough,
 				CancelKind:         reconcile.DeclaredCancelKind(s.Cancel.Kind),

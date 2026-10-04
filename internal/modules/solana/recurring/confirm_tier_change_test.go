@@ -197,7 +197,7 @@ func signedBy(t *testing.T, c *tierChain, payer solanago.PrivateKey, ixs ...sola
 	return signAs(t, tx, payer)
 }
 
-// #272: after the atomic switch lands, the old membership+row are cancelled
+// #272: after the atomic switch lands, the old membership+row are canceled
 // and the new ones created in one DB tx. Upgrade: period 1 was pulled in the
 // tx, so the next pull is now+period. Downgrade: no charge; the first pull is
 // deferred to the OLD period end.
@@ -216,7 +216,7 @@ func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 		require.Len(t, life.cancels, 1)
 		require.Equal(t, c.old.SubscriptionID, *life.cancels[0].SubscriptionID)
 		require.True(t, life.cancels[0].RevokeAccess)
-		require.Equal(t, []string{models.SolanaSubscriptionCancelled}, store.statuses)
+		require.Equal(t, []string{models.SolanaSubscriptionCanceled}, store.statuses)
 
 		wantNext, wantMeta := *in.OldPeriodEndsAt, map[string]any{"solana_tier_change": "downgrade"}
 		if upgrade {

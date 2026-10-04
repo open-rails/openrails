@@ -26,7 +26,7 @@ func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 		const key = "upgrade-1"
 		for _, tp := range []topology{embedded, remote} {
 			_, sub := w.engineMember(rail, tp, from)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, key, billing.ChangeTierRequest{PriceID: to.ID.String()})
+			done, err := w.client[tp].ChangeTier(t.Context(), sub, billing.ChangeTierParams{PriceID: to.ID, IdempotencyKey: key})
 			require.NoError(t, err, "%s: a key another customer used is still this customer's", tp)
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.NotEqual(t, sub, *done.SubscriptionID)

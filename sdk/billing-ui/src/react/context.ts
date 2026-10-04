@@ -5,10 +5,8 @@ import type { TierChange } from "../client/types"
 
 export type BillingChange =
   | {
-      type: "subscription.cancelled" | "subscription.resumed"
+      type: "subscription.canceled" | "subscription.resumed"
       subscriptionId: string
-      /** False when the server had not applied the queued change yet. */
-      settled: boolean
     }
   | {
       type: "subscription.payment_method_changed"
@@ -36,7 +34,6 @@ export interface BillingContextValue {
   notify(change: BillingChange): void
   /** Refetch every hook after a host-side change such as a plan switch. */
   refresh(): void
-  settle: { intervalMs: number; attempts: number }
 }
 
 export const BillingContext = createContext<BillingContextValue | null>(null)

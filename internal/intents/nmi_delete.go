@@ -60,7 +60,7 @@ func acceptedNMIDeleteTarget(in gen.BillingRailIntent) (NMIDeletePayload, error)
 // recurring subscription:
 //
 //   - relevance: the delete applies only while the subscription is still
-//     cancelled with its DeletionScheduledAt marker set; a resume (status
+//     canceled with its DeletionScheduledAt marker set; a resume (status
 //     active again) or an already-finalized delete supersedes the intent.
 //   - execute: query the subscription at NMI first — absent IS success
 //     (deletes are idempotent by observation); present -> delete. Any error
@@ -95,7 +95,7 @@ func (h *NMIDeleteHandler) now() time.Time {
 }
 
 // CheckRelevance: the deferred delete is applicable while the subscription is
-// still cancelled with a pending deferred delete. This re-check at execution
+// still canceled with a pending deferred delete. This re-check at execution
 // time is the AUTHORITATIVE resume guard (a missed advisory supersede on
 // resume cannot cause an erroneous delete), mirroring the retired worker.
 func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
@@ -106,7 +106,7 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Billin
 		}
 		return Relevance{}, err
 	}
-	if sub.Status != models.StatusCancelled || sub.DeletionScheduledAt == nil {
+	if sub.Status != models.StatusCanceled || sub.DeletionScheduledAt == nil {
 		return SupersededBy(fmt.Sprintf("subscription no longer awaiting deferred delete (status=%s, marker_set=%t) — resumed or already finalized", sub.Status, sub.DeletionScheduledAt != nil)), nil
 	}
 	return StillRelevant(), nil
@@ -136,7 +136,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingRailIn
 		// (no provider write attempted) retryable failure.
 		return Retryable("load subscription: " + err.Error())
 	}
-	if sub.Status != models.StatusCancelled || sub.DeletionScheduledAt == nil {
+	if sub.Status != models.StatusCanceled || sub.DeletionScheduledAt == nil {
 		return Parked("subscription is no longer awaiting this deletion")
 	}
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
@@ -158,7 +158,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingRailIn
 	if err != nil {
 		return Parked(err.Error())
 	}
-	if current.Status != models.StatusCancelled || current.DeletionScheduledAt == nil {
+	if current.Status != models.StatusCanceled || current.DeletionScheduledAt == nil {
 		return Parked("subscription is no longer awaiting this deletion")
 	}
 	if err := client.DeleteRecurringSubscription(ctx, psid); err != nil {
@@ -238,7 +238,7 @@ func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.BillingRailI
 }
 
 // subscriptionPresent reads GET /v5/subscriptions/{id}. NMI drops deleted/
-// cancelled subscriptions entirely (the v5 GET answers 404), so "not found"
+// canceled subscriptions entirely (the v5 GET answers 404), so "not found"
 // means deleted.
 func (h *NMIDeleteHandler) subscriptionPresent(ctx context.Context, client *nmi.NMIClient, railSubscriptionID string) (bool, error) {
 	_, found, err := client.GetSubscription(ctx, railSubscriptionID)

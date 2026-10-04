@@ -43,7 +43,7 @@ func TestMerchantDunningPolicy(t *testing.T) {
 		w.runRenewals()
 	}
 	require.Equal(t, []time.Duration{24 * time.Hour, 48 * time.Hour}, offsets)
-	require.Equal(t, "cancelled", w.subscription(embedded, e.sub).Status, "the policy's last retry ends it")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, e.sub).Status, "the policy's last retry ends it")
 	require.Equal(t, 4, e.providerAttempts(), "initial charge plus three renewal attempts")
 }
 
@@ -63,14 +63,14 @@ func TestDunningAccessPolicy(t *testing.T) {
 			e.toPeriodEnd()
 			w.runRenewals()
 			sub := w.subscription(embedded, e.sub)
-			require.Equal(t, "past_due", sub.Status)
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			w.advance(24 * time.Hour)
 			require.Equal(t, access == billing.DunningAccessKeep, e.c.entitled(e.ent), "access during dunning follows the policy")
 
 			e.setDecline(visa.Last4, "", "")
 			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 			w.runRenewals()
-			require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
+			require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 			require.True(t, e.c.entitled(e.ent), "the recovered renewal restores access")
 		})
 	}
@@ -91,7 +91,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(false)))
 			w.settle()
-			require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status)
+			require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 			require.False(t, l.c.entitled(l.ent), "suspend ends access with the paid period")
 
 			if rail == "stripe" {
@@ -104,7 +104,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 				w.runRenewals()
 			}
 			w.settle()
-			require.Equal(t, "active", w.subscription(embedded, l.sub).Status)
+			require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
 			require.True(t, l.c.entitled(l.ent), "the recovered renewal reopens access")
 		})
 	}
@@ -123,7 +123,7 @@ func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	first := w.clock.Now()
 	w.runRenewals()
 	sub := w.subscription(embedded, e.sub)
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	require.Equal(t, 24*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour))
 
 	edited := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{36, 60}}}}

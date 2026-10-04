@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -82,31 +83,28 @@ type AdminSubscriptionResponse struct {
 	Payments []*models.Payment `json:"payments,omitempty"`
 }
 
-// GetAllSubscriptions retrieves all subscriptions with filtering (admin)
-func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, queryOpts *query.QueryOptions[GetSubscriptionsFilters]) ([]*AdminSubscriptionResponse, int64, error) {
-	subscriptions, total, err := s.SubscriptionService.GetSubscribers(ctx, *queryOpts)
+// ListSubscriptions is one page of the merchant's subscriptions matching f,
+// newest first, with their prices and products.
+func (s *AdminSubscriptionService) ListSubscriptions(ctx context.Context, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*AdminSubscriptionResponse], error) {
+	subs, err := s.SubscriptionService.ListSubscribers(ctx, f, page)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get subscriptions: %w", err)
+		return billing.ListPage[*AdminSubscriptionResponse]{}, err
 	}
-
-	ids := make([]uuid.UUID, 0, len(subscriptions))
-	for _, sub := range subscriptions {
+	ids := make([]uuid.UUID, 0, len(subs.Items))
+	for _, sub := range subs.Items {
 		ids = append(ids, sub.PriceID)
 	}
 	prices, err := s.PriceService.GetWithProductByIDs(ctx, ids)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to load subscription prices: %w", err)
+		return billing.ListPage[*AdminSubscriptionResponse]{}, fmt.Errorf("failed to load subscription prices: %w", err)
 	}
-	responses := make([]*AdminSubscriptionResponse, len(subscriptions))
-	for i, sub := range subscriptions {
-		responses[i] = &AdminSubscriptionResponse{Subscription: sub}
+	return pagination.Map(subs, func(sub *models.Subscription) *AdminSubscriptionResponse {
+		out := &AdminSubscriptionResponse{Subscription: sub}
 		if price := prices[sub.PriceID]; price != nil {
-			responses[i].Price = price
-			responses[i].Product = price.Product
+			out.Price, out.Product = price, price.Product
 		}
-	}
-
-	return responses, total, nil
+		return out
+	}), nil
 }
 
 // requireSubscription loads a subscription or returns the typed not-found
@@ -222,7 +220,7 @@ func (s *AdminSubscriptionService) requireLockedSubscription(ctx context.Context
 // user-initiated cancel uses (#674 write-through provider intents). It used to
 // call the gateway synchronously with no intent and no verify leg, and an
 // unresolvable PSP only logged a warning — so the local row flipped to
-// cancelled while NMI happily kept rebilling. Now the local cancellation and
+// canceled while NMI happily kept rebilling. Now the local cancellation and
 // the remote-cancel intent commit in ONE transaction: the row is never
 // terminal while the rail-side schedule survives unconfirmed (the
 // DeletionScheduledAt marker stays set until the intent's own verify-then-
@@ -278,7 +276,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 			return fmt.Errorf("provider cancel scheduler unavailable")
 		}
 	case subscription.Rail == models.RailSolana:
-		return ErrSolanaCancelNeedsWalletSignature
+		return ErrCustomerActionRequired
 	default:
 		return fmt.Errorf("%w: %s", ErrCancelUnsupportedOnRail, subscription.Rail)
 	}

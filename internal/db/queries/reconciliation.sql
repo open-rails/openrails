@@ -316,11 +316,13 @@ WHERE id = sqlc.arg(id)
 
 -- name: ReconcileListSubscriptionsByRails :many
 SELECT id, customer_id, price_id, product_id, status, rail,
-       rail_subscription_id, user_email, payment_method_id,
+       rail_subscription_id, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
-       cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
+       canceled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot, scheduled_price_id,
+       (SELECT c.email FROM billing.customers c
+        WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
        EXISTS (SELECT 1 FROM billing.rail_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
@@ -376,28 +378,6 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 -- repair: revoke the LIVE subscription-sourced entitlements of one
 -- subscription. Admin grants and grace windows are different source types and
 -- are untouchable by construction.
--- PS-4/PS-1: grant one subscription-sourced entitlement window unless an
--- equivalent live window already exists (idempotent via NOT EXISTS; the
--- re-run inserts nothing).
--- name: ReconcileGrantSubscriptionEntitlement :execrows
-INSERT INTO billing.entitlements (
-    merchant_id, customer_id, entitlement, start_at, end_at,
-    source_id, source_type
-)
-SELECT sqlc.arg(merchant_id), sqlc.arg(customer_id), sqlc.arg(entitlement),
-       sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
-       sqlc.arg(subscription_id), 'subscription'
-WHERE NOT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
-    WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = sqlc.arg(customer_id)
-      AND ent.entitlement = sqlc.arg(entitlement)
-      AND ent.source_type = 'subscription'
-      AND ent.source_id = sqlc.arg(subscription_id)
-      AND ent.revoked_at IS NULL
-      AND ent.deleted_at IS NULL
-      AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(now)::timestamptz)
-);
-
 -- PS-4: backfill a rail charge that has no local payment record.
 -- Dedupe rides the uq_payments_merchant_rail_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
@@ -454,12 +434,11 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 -- name: ReconcileMaterializeSubscription :many
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
-    user_email, current_period_starts_at, current_period_ends_at, started_at,
+    current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), sqlc.arg(rail_subscription_id),
-       sqlc.narg(user_email),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
@@ -752,7 +731,7 @@ FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
-  AND s.status = 'cancelled'
+  AND s.status = 'canceled'
   AND EXISTS (
       SELECT 1 FROM billing.entitlements e
       WHERE e.merchant_id = s.merchant_id
@@ -780,7 +759,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- window past paid-through" is NORMAL for a standing auto-renew projection
 -- (stale ≠ freeloader) — a freeloader's SOURCE is proven absent or reversed:
 --   missing_subscription           - source_type=subscription, no sub row at all
---   refunded_payment               - one_off window whose payment was refunded,
+--   refunded_payment               - purchase window whose payment was refunded,
 --                                    with no live grant justifying the access
 -- Grant-justification guard: never fires when a live un-terminated entitlement
 -- grant covers now (matches MaterializeGrant's standing-access projection:
@@ -811,7 +790,7 @@ FROM billing.entitlements e
 LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
-       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
+       ON e.source_type = 'purchase' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
 LEFT JOIN billing.prices pr
        ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -819,7 +798,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
   AND e.start_at <= sqlc.arg(now)::timestamptz
   AND (e.end_at IS NULL OR e.end_at > sqlc.arg(now)::timestamptz)
-  AND e.source_type IN ('subscription', 'one_off')
+  AND e.source_type IN ('subscription', 'purchase')
   -- no live un-terminated entitlement grant covering now justifies the window
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
@@ -829,7 +808,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
         AND (g.id = e.grant_id
              OR (g.source_id = e.source_id::text
                  AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                      OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+                      OR (e.source_type = 'purchase' AND g.source_type = 'purchase'))))
         AND g.starts_at <= sqlc.arg(now)::timestamptz
         AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)
         AND NOT EXISTS (
@@ -846,7 +825,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   )
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
-      OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
+      OR (e.source_type = 'purchase' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
 -- or#837: oldest window first, capped. Surface-only findings, so truncation
 -- delays an operator decision rather than losing one.
@@ -870,7 +849,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- Episode analytics totals for the gauges header. Freeloader episodes are spans
 -- of entitlement access not covered by payment (subscription paid-through
--- snapshot, completed one_off payment, or a live matching grant); their cause
+-- snapshot, completed purchase payment, or a live matching grant); their cause
 -- separates sanctioned unpaid access (sanctioned_dunning, awaiting_verification)
 -- from failure (unsanctioned). Orphaned episodes are the mirror: payment
 -- coverage with no entitlement window. Open = the span still accrues at now().
@@ -894,7 +873,7 @@ WITH win AS (
                AND (g.id = e.grant_id
                     OR (g.source_id = e.source_id::text
                         AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                             OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+                             OR (e.source_type = 'purchase' AND g.source_type = 'purchase'))))
                AND NOT EXISTS (SELECT 1 FROM billing.grants t
                                 WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
                                   AND t.event IN ('revoke', 'expire', 'supersede'))) AS grant_covered_until
@@ -902,9 +881,9 @@ WITH win AS (
       LEFT JOIN billing.subscriptions s
         ON e.source_type = 'subscription' AND s.merchant_id = e.merchant_id AND s.id = e.source_id AND s.deleted_at IS NULL
       LEFT JOIN billing.payments p
-        ON e.source_type = 'one_off' AND p.merchant_id = e.merchant_id AND p.id = e.source_id AND p.deleted_at IS NULL
+        ON e.source_type = 'purchase' AND p.merchant_id = e.merchant_id AND p.id = e.source_id AND p.deleted_at IS NULL
      WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
-       AND e.source_type IN ('subscription', 'one_off')
+       AND e.source_type IN ('subscription', 'purchase')
 ), freeloader AS (
     SELECT CASE WHEN w.sub_status = 'past_due' AND w.next_retry_at IS NOT NULL THEN 'sanctioned_dunning'
                 WHEN w.sub_status = 'unverified' THEN 'awaiting_verification'
@@ -934,7 +913,7 @@ WITH win AS (
        AND ((pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
             OR (s.entitlements_spec_snapshot IS NOT NULL AND s.entitlements_spec_snapshot <> '{}'::jsonb))
     UNION ALL
-    SELECT p.merchant_id, p.customer_id, 'one_off'::text, p.id, p.purchased_at,
+    SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
            p.purchased_at + make_interval(hours => pr.access_duration_hours)
       FROM billing.payments p
       JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id
@@ -1038,7 +1017,7 @@ SELECT count(*)::int AS held,
        COALESCE(min(s.current_period_ends_at), sqlc.arg(now)::timestamptz)::timestamptz AS oldest_due_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND s.deleted_at IS NULL AND s.cancelled_at IS NULL
+  AND s.deleted_at IS NULL AND s.canceled_at IS NULL
   AND s.status = 'active' AND s.collection_policy = 'engine'
   AND s.current_period_ends_at > s.current_period_starts_at
   AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '5 minutes',

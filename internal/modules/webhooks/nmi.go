@@ -612,14 +612,14 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 	}
 
 	var (
-		reconciledCount  int
-		cancelledCount   int
-		unmatchedCount   int
-		reconcileErrors  int
-		alreadyCancelled int
-		ledgerErr        error
-		ledgerAlertErr   error
-		terminationErr   error
+		reconciledCount int
+		canceledCount   int
+		unmatchedCount  int
+		reconcileErrors int
+		alreadyCanceled int
+		ledgerErr       error
+		ledgerAlertErr  error
+		terminationErr  error
 	)
 	rememberTerminationError := func(err error) {
 		if terminationErr == nil {
@@ -792,12 +792,12 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							cbMetadata["termination_error"] = err.Error()
 							rememberTerminationError(fmt.Errorf("cancel subscription %s: %w", match.SubscriptionID, err))
 						} else {
-							if subscription.Status == models.StatusCancelled {
-								alreadyCancelled++
-								cbMetadata["termination_status"] = "already_cancelled"
+							if subscription.Status == models.StatusCanceled {
+								alreadyCanceled++
+								cbMetadata["termination_status"] = "already_canceled"
 							} else {
-								cancelledCount++
-								cbMetadata["termination_status"] = "cancelled_immediate"
+								canceledCount++
+								cbMetadata["termination_status"] = "canceled_immediate"
 							}
 						}
 					}
@@ -850,8 +850,8 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		"eventType":          s.Data.EventType,
 		"chargeback_count":   chargebackCount,
 		"reconciled_count":   reconciledCount,
-		"cancelled_count":    cancelledCount,
-		"already_cancelled":  alreadyCancelled,
+		"canceled_count":     canceledCount,
+		"already_canceled":   alreadyCanceled,
 		"unmatched_count":    unmatchedCount,
 		"reconcile_failures": reconcileErrors,
 	}).Warn("NMI chargeback batch processed with automated reconciliation")

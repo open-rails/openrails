@@ -83,7 +83,7 @@ func TestSourceRefSpellsTheSourceKind(t *testing.T) {
 	u := uuid.New()
 	for sourceType, want := range map[string]string{
 		"subscription": billing.SubscriptionID(u).String(), "grace": billing.SubscriptionID(u).String(),
-		"one_off": billing.PaymentID(u).String(), "purchase": billing.PaymentID(u).String(), "admin": u.String(),
+		"purchase": billing.PaymentID(u).String(), "admin": u.String(),
 	} {
 		require.Equal(t, want, billing.SourceRef(sourceType, u.String()), sourceType)
 	}

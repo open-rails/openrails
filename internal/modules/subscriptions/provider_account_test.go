@@ -31,7 +31,7 @@ func TestPlanProviderAccountCutover(t *testing.T) {
 		{"missing target", func(r *ProviderAccountCutoverRequest) { r.TargetPSPID = uuid.Nil }, ProviderAccountCutoverBlocked, ProviderAccountCutoverIdentityMissing},
 		{"stripe", func(r *ProviderAccountCutoverRequest) { r.Rail = models.RailStripe }, ProviderAccountCutoverBlocked, ProviderAccountCutoverRailUnsupported},
 		{"ccbill", func(r *ProviderAccountCutoverRequest) { r.Rail = models.RailCCBill }, ProviderAccountCutoverBlocked, ProviderAccountCutoverRailUnsupported},
-		{"cancelled", func(r *ProviderAccountCutoverRequest) { r.Status = models.StatusCancelled }, ProviderAccountCutoverBlocked, ProviderAccountCutoverSubscriptionNotRebilling},
+		{"canceled", func(r *ProviderAccountCutoverRequest) { r.Status = models.StatusCanceled }, ProviderAccountCutoverBlocked, ProviderAccountCutoverSubscriptionNotRebilling},
 		{"no provider record", func(r *ProviderAccountCutoverRequest) { r.HasRailSubscription = false }, ProviderAccountCutoverBlocked, ProviderAccountCutoverSubscriptionNotAtProvider},
 		{"target on another rail", func(r *ProviderAccountCutoverRequest) { r.TargetRail = models.RailStripe }, ProviderAccountCutoverBlocked, ProviderAccountCutoverTargetRailMismatch},
 		{"archived target", func(r *ProviderAccountCutoverRequest) { r.TargetArchived = true }, ProviderAccountCutoverBlocked, ProviderAccountCutoverTargetArchived},

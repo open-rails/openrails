@@ -52,7 +52,7 @@ const (
 	dunningOutcomeSucceeded
 	// dunningOutcomeWindowExpired: the missed rebill is older than the dunning
 	// window — the charge was skipped and the subscription PARKED as unknown
-	// for provider verification (#839; it is never cancelled here).
+	// for provider verification (#839; it is never canceled here).
 	dunningOutcomeWindowExpired
 	// dunningOutcomeMaterialized (#366, mode=limited): the charge decision was
 	// recorded as a parked system-origin intent on the ledger instead of

@@ -66,13 +66,13 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: l.c.customerID()})
 	require.NoError(t, err)
-	require.Len(t, subs.Data, 1)
-	l.sub = subs.Data[0].ID
-	require.Equal(t, "active", subs.Data[0].Status)
-	require.Equal(t, "ccbill", subs.Data[0].Rail)
-	require.Equal(t, l.railSub, subs.Data[0].RailSubscriptionID)
+	require.Len(t, subs.Items, 1)
+	l.sub = subs.Items[0].ID
+	require.Equal(t, billing.SubscriptionActive, subs.Items[0].Status)
+	require.Equal(t, "ccbill", subs.Items[0].Rail)
+	require.Equal(t, l.railSub, subs.Items[0].RailSubscriptionID)
 	w.converge()
 	require.True(t, l.c.entitled(l.ent))
 	return m
@@ -182,7 +182,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		w.deliverCCBill("RenewalSuccess", m.renewal(txn, next))
 
 		sub := w.subscription(embedded, m.sub)
-		require.Equal(t, "active", sub.Status)
+		require.Equal(t, billing.SubscriptionActive, sub.Status)
 		require.NotNil(t, sub.CurrentPeriodEndsAt)
 		require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
 		renewal := m.payment(txn)
@@ -213,7 +213,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 			"cardType": "VISA", "paymentType": "CREDIT",
 		})
 		sub := w.subscription(embedded, m.sub)
-		require.Equal(t, "past_due", sub.Status)
+		require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 		require.NotNil(t, sub.NextRetryAt)
 		require.Nil(t, m.payment(failed), "a decline is an attempt, never a payment")
 		rebill := w.attempts(m.c.id)
@@ -227,7 +227,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		recovered := ccbillNumericID()
 		w.deliverCCBill("RenewalSuccess", m.renewal(recovered, next))
 		sub = w.subscription(embedded, m.sub)
-		require.Equal(t, "active", sub.Status)
+		require.Equal(t, billing.SubscriptionActive, sub.Status)
 		require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
 		require.Equal(t, billing.PaymentSucceeded, m.payment(recovered).Status)
 		retry := w.attempts(m.c.id)
@@ -241,13 +241,13 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		m := importCCBill(t, w)
 		w.deliverCCBill("Cancellation", map[string]string{"subscriptionId": m.railSub, "reason": "Too expensive", "source": "webAdmin"})
 		sub := w.subscription(embedded, m.sub)
-		require.Equal(t, "cancelled", sub.Status)
-		require.NotNil(t, sub.CancelledAt)
-		require.True(t, m.c.entitled(m.ent), "a cancelled CCBill member keeps the paid period")
+		require.Equal(t, billing.SubscriptionCanceled, sub.Status)
+		require.NotNil(t, sub.CanceledAt)
+		require.True(t, m.c.entitled(m.ent), "a canceled CCBill member keeps the paid period")
 
 		// A redelivered cancellation is a no-op on the terminal row.
 		w.deliverCCBill("Cancellation", map[string]string{"subscriptionId": m.railSub, "reason": "Too expensive", "source": "webAdmin"})
-		require.Equal(t, sub.CancelledAt.UTC(), w.subscription(embedded, m.sub).CancelledAt.UTC())
+		require.Equal(t, sub.CanceledAt.UTC(), w.subscription(embedded, m.sub).CanceledAt.UTC())
 
 		w.advance(21 * day)
 		require.False(t, m.c.entitled(m.ent), "access ends with the paid period")
@@ -258,7 +258,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		m := importCCBill(t, w)
 		w.deliverCCBill("Cancellation", map[string]string{"subscriptionId": m.railSub, "reason": "Transaction Declined", "source": "failedRB"})
 		sub := w.subscription(embedded, m.sub)
-		require.Equal(t, "cancelled", sub.Status)
+		require.Equal(t, billing.SubscriptionCanceled, sub.Status)
 		require.False(t, m.c.entitled(m.ent))
 	})
 
@@ -266,13 +266,13 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		w := newWorld(t)
 		m := importCCBill(t, w)
 		w.deliverCCBill("Expiration", map[string]string{"subscriptionId": m.railSub})
-		require.Equal(t, "active", w.subscription(embedded, m.sub).Status, "an early expiration cannot end a paid period")
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status, "an early expiration cannot end a paid period")
 		require.True(t, m.c.entitled(m.ent))
 
 		w.advance(21 * day)
 		w.deliverCCBill("Expiration", map[string]string{"subscriptionId": m.railSub})
 		sub := w.subscription(embedded, m.sub)
-		require.Equal(t, "cancelled", sub.Status, "expiry is terminal: never rebilled")
+		require.Equal(t, billing.SubscriptionCanceled, sub.Status, "expiry is terminal: never rebilled")
 		require.NotNil(t, sub.CancelType)
 		require.Equal(t, "expired", *sub.CancelType)
 		require.False(t, m.c.entitled(m.ent))
@@ -284,7 +284,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		refund := ccbillNumericID()
 		w.deliverCCBill("Refund", m.reversal(refund, "9.99"))
 		require.False(t, m.c.entitled(m.ent), "a refunded member loses access")
-		require.NotEqual(t, "active", w.subscription(embedded, m.sub).Status)
+		require.NotEqual(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
 		m.requireReversal("refund:"+refund, "refund")
 
 		before := len(w.payments(embedded, m.c.id))
@@ -298,7 +298,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		chargeback := ccbillNumericID()
 		w.deliverCCBill("Chargeback", m.reversal(chargeback, "9.99"))
 		require.False(t, m.c.entitled(m.ent))
-		require.NotEqual(t, "active", w.subscription(embedded, m.sub).Status)
+		require.NotEqual(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
 		m.requireReversal("chargeback:"+chargeback, "chargeback")
 	})
 
@@ -310,7 +310,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, "the loopback peer is a proxy, not CCBill")
 		status, _ = w.postCCBill("Cancellation", "203.0.113.9", cancel)
 		require.Equal(t, http.StatusForbidden, status)
-		require.Equal(t, "active", w.subscription(embedded, m.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
 	})
 }
 
@@ -338,9 +338,9 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 	body := w.deliverCCBill("NewSaleSuccess", sale(ccbillNumericID(), txn))
 	require.Equal(t, "refused", body["status"], "%v", body)
 	require.Equal(t, "ccbill_new_subscription_unsupported", body["code"], "%v", body)
-	subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: stranger.id})
+	subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: stranger.customerID()})
 	require.NoError(t, err)
-	require.Empty(t, subs.Data, "no CCBill agreement is enrolled")
+	require.Empty(t, subs.Items, "no CCBill agreement is enrolled")
 	require.False(t, stranger.entitled(m.ent))
 
 	status, raw := w.staff(http.MethodGet, "/v1/merchant/repair-alerts")
@@ -351,11 +351,11 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 	// A replayed sale for a membership OpenRails already holds changes nothing.
 	body = w.deliverCCBill("NewSaleSuccess", sale(m.railSub, m.saleTxn))
 	require.Equal(t, "accepted", body["status"], "%v", body)
-	subs, err = w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: m.c.id})
+	subs, err = w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: m.c.customerID()})
 	require.NoError(t, err)
-	require.Len(t, subs.Data, 1)
-	require.Equal(t, "active", subs.Data[0].Status)
-	require.True(t, subs.Data[0].CurrentPeriodEndsAt.Equal(m.paidThrough), "%v", subs.Data[0].CurrentPeriodEndsAt)
+	require.Len(t, subs.Items, 1)
+	require.Equal(t, billing.SubscriptionActive, subs.Items[0].Status)
+	require.True(t, subs.Items[0].CurrentPeriodEndsAt.Equal(m.paidThrough), "%v", subs.Items[0].CurrentPeriodEndsAt)
 }
 
 // engineCharges counts every charge OpenRails submitted on any rail.

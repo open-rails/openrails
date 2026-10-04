@@ -18,7 +18,6 @@ embedded and remote clients:
 | GetCheckoutAttempt | GET /v1/merchant/checkout-attempts/{id} | merchant:customer-settings:read |
 | ConfirmCheckoutAttempt | POST /v1/merchant/checkout-attempts/{id}/confirm | merchant:checkout:create |
 | GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|price_key=… | merchant:customer-settings:read |
-| ResolveEffectiveTier | GET /v1/merchant/customers/{customer_id}/effective-tier?group=... | merchant:customer-settings:read |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
 host assertions made under merchant checkout authority. The permission is
@@ -50,8 +49,7 @@ no subscription and no saved card. A provider refusal is a coded 402/502 (see
 [errors](errors.md#payment-refusals)); the attempt is recorded as failed and a
 new one may be made with another instrument. `GetCheckoutConfig` with a price
 lists the `options` that can sell it, in routing order; options report local
-readiness and never probe a gateway. An effective-tier read returns null when
-the customer has no active tier.
+readiness and never probe a gateway.
 
 Amounts use native currency units (micros for fiat) as decimal strings in JSON
 and `int64` in Go. `created_at`/`expires_at` are RFC3339 instants

@@ -211,7 +211,7 @@ export async function apiResponse<T>(
       })
     )
   } catch (error) {
-    // Cancelled, or no dialog to answer it: the console sees OpenRails' 403.
+    // Canceled, or no dialog to answer it: the console sees OpenRails' 403.
     if (refusal && isAuthKitError(error)) throw refusal
     throw error
   }
@@ -249,6 +249,12 @@ export interface ListEnvelope<T> {
   limit: number
   offset: number
   has_more: boolean
+}
+
+// The cursor list envelope: next_cursor is null on the last page.
+export interface CursorEnvelope<T> {
+  data: T[]
+  next_cursor: string | null
 }
 
 // Catalog/findings-style envelope ({items,...} instead of {data,...}).

@@ -315,7 +315,7 @@ evidence there is. So it is built to be undone and hard to fire by accident:
 
 `--prune` retires rows; an **enforcing** pull (mutation flags set) overwrites
 them — the measured incident is a bad NMI roster cancelling 40/40 subscriptions,
-which changed `status`, `ended_at`, `cancelled_at`, the grace/retry schedule and
+which changed `status`, `ended_at`, `canceled_at`, the grace/retry schedule and
 the period bounds, and queued deferred NMI vault deletes behind them. Tombstones
 cannot undo that, so an enforcing pass records what it is about to overwrite:
 
@@ -401,7 +401,7 @@ findings and re-arms enforcement by hand.
 A pull is authoritative only for the `(merchant, rail, psp)` it actually
 queried; mirror reads/writes are scoped to that PSP row, and historical rows
 with NULL PSP attribution are never used as proof for destructive absence
-handling. NMI safety: cancelled subscriptions *vanish* from NMI's recurring
+handling. NMI safety: canceled subscriptions *vanish* from NMI's recurring
 report rather than changing status, so a circuit breaker refuses
 absence-based conclusions when the remote active set is implausibly small
 versus local (protection against mass-cancellation from a bad fetch). Every
@@ -523,7 +523,7 @@ table (`internal/decline`), the same for every owner:
 
 The staleness window ("never
 charge a months-old failure") derives from the same schedule — last offset +
-min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is cancelled +
+min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is canceled +
 downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements
 + rail-side delete via the intent ledger's deferred-delete mechanism.
 
@@ -579,7 +579,7 @@ member keeps access until the renewal decides; a qualified renewal
 supersedes it, and a decline or cancellation revokes it. A card-fixable
 decline, or a stored method that is gone, parked or no longer qualified, moves
 the membership to `awaiting_method`: the customer is asked for a new card,
-access follows the dunning access policy, and the wait ends (cancelled, access
+access follows the dunning access policy, and the wait ends (canceled, access
 ended) when the cycle's dunning window does, unless the destructive switch is
 off. A new card retries at the next due pass. A terminal outcome while the
 destructive switch is off leaves the membership `past_due`.
@@ -627,14 +627,14 @@ against ONE verdict set:
 |---|---|
 | verified renewal charge | renewed — period advanced, the charge backfilled exactly once, never a second charge |
 | declined / roster stalled, within the dunning window | `past_due` — dunning owns it from here |
-| declined / stalled, beyond the window | cancelled; the remote record may still exist, so the deferred rail-side delete is queued |
+| declined / stalled, beyond the window | canceled; the remote record may still exist, so the deferred rail-side delete is queued |
 | no charge, remote alive with future next-billing | adopt the remote period end (clock misalignment); never for a `past_due` row |
 | remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
 | no conclusive evidence / rail unreachable | stays `unverified`; the next pass re-derives the cohort and retries |
 
 Mode gating: Provider Refresh runs under `full` AND `limited`; skipped under
 `readonly`. Each pass logs a heartbeat plus a per-merchant summary
-(`renewed/adopted/past_due/cancelled/still_unknown/probed/backfilled/rail_errors`).
+(`renewed/adopted/past_due/canceled/still_unknown/probed/backfilled/rail_errors`).
 
 **Access during silence — standing access (#691).** There is no timed grace
 window (the #368 trailing-grace mechanism was deleted). An auto-renew
@@ -716,7 +716,7 @@ per-save version (a counter, not a timestamp, so tokens never collide), so a
 pass finishing after a newer one keeps the newer position.
 
 No job runs under a clock (xs-007). River's one-minute `JobTimeout` default is
-overridden to "never" on every OpenRails worker; a running job is cancelled
+overridden to "never" on every OpenRails worker; a running job is canceled
 only when it reports no progress past the same staleness rule the health
 checker uses for its kind (3× the declared cadence, floored at 30 min), and
 the job row records what it last reported. A job that dies with its process
@@ -861,9 +861,9 @@ stopped.
 -- 1. the switch itself
 SELECT enabled, updated_by, reason, updated_at FROM billing.destructive_action_switch;
 
--- 2. nothing has been cancelled since the flip
+-- 2. nothing has been canceled since the flip
 SELECT count(*) FROM billing.subscriptions
- WHERE cancelled_at > (SELECT updated_at FROM billing.destructive_action_switch);
+ WHERE canceled_at > (SELECT updated_at FROM billing.destructive_action_switch);
 
 -- 3. no entitlement has been revoked since the flip
 SELECT count(*) FROM billing.entitlements
@@ -908,7 +908,7 @@ gates one merchant. Disabling either stops that merchant.
 Independently of the switch, one pass may cancel at most
 `min(25, max(3, 5% of the merchant's live linked book))` subscriptions, or the
 whole book when it holds at most 5 live subscriptions (a tiny book whose
-schedules the provider ended must converge; no larger book is ever cancelled
+schedules the provider ended must converge; no larger book is ever canceled
 entirely by one pass). Over
 that, **none** are applied, the merchant's pass halts, and a
 `pull.cancellation.capped` finding lands in the review queue. It is all-or-

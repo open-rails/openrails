@@ -125,9 +125,9 @@ resolve --not-executed` releases it on the strength of the absent fence, and
 refuses one that carries the fence. There is no evidence-free unpark/force-resend method. No automatic
 compensating cancel or refund is triggered by uncertainty.
 
-A manual rebill confirmed after dunning parked or the customer cancelled the
+A manual rebill confirmed after dunning parked or the customer canceled the
 subscription still records its payment exactly once: a parked (`unverified`) or
-active subscription renews from the confirmed charge; a terminally cancelled
+active subscription renews from the confirmed charge; a terminally canceled
 one gets the completed payment row without reactivation, flagged for refund
 review.
 

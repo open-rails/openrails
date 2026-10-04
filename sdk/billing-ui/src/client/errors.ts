@@ -10,7 +10,8 @@ export interface BillingErrorBody {
 }
 
 // Local codes: network_error, invalid_response, unknown_error, and the wallet
-// codes the Solana cancel flow raises.
+// codes a wallet next action raises (wallet_rejected, wallet_no_signature,
+// wallet_required).
 export class BillingError extends Error {
   readonly status: number
   readonly type: string

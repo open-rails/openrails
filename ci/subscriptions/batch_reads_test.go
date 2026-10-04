@@ -77,15 +77,15 @@ func TestListReadsAreBatched(t *testing.T) {
 	}
 
 	for _, tp := range []topology{embedded, remote} {
-		var subs *billing.Page[billing.Subscription]
+		var subs *billing.ListPage[billing.Subscription]
 		got := w.count(func() {
 			var err error
-			subs, err = w.client[tp].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
+			subs, err = w.client[tp].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 			require.NoError(t, err)
 		})
 		requireBatched(t, got, "ListPricesWithProductByIDs")
-		require.Len(t, subs.Data, 3)
-		requireEnriched(t, prices, subs.Data)
+		require.Len(t, subs.Items, 3)
+		requireEnriched(t, prices, subs.Items)
 	}
 
 	var mine []billing.Subscription
@@ -99,17 +99,17 @@ func TestListReadsAreBatched(t *testing.T) {
 		owned = append(owned, w.permanent(fmt.Sprintf("post:batch-%d", i)))
 		c.buy(owned[i].ID.String(), fmt.Sprintf("post:batch-%d", i), method)
 	}
-	var access *billing.ProductAccessList
+	var access *billing.ListPage[billing.ProductAccessGrant]
 	got = w.count(func() {
 		var err error
-		access, err = w.client[remote].ProductAccess.List(t.Context(), &billing.ProductAccessListParams{CustomerID: c.id})
+		access, err = w.client[remote].ListProductAccess(t.Context(), c.customerID(), billing.PageRequest{})
 		require.NoError(t, err)
 	})
 	requireBatched(t, got, "ListProductsByIDs")
-	require.Len(t, access.Data, 3)
+	require.Len(t, access.Items, 3)
 	names := map[string]string{}
-	for _, grant := range access.Data {
-		names[grant.ProductID] = grant.ProductName
+	for _, grant := range access.Items {
+		names[grant.ProductID.String()] = grant.ProductName
 		require.NotEmpty(t, grant.ProductKey)
 	}
 	for _, price := range owned {
@@ -159,16 +159,17 @@ func decodeSubs(t *testing.T, body map[string]any) []billing.Subscription {
 
 func requireEnriched(t *testing.T, prices []*billing.Price, subs []billing.Subscription) {
 	t.Helper()
-	byID := map[string]*billing.Price{}
+	byID := map[billing.PriceID]*billing.Price{}
 	for _, price := range prices {
-		byID[price.ID.String()] = price
+		byID[price.ID] = price
 	}
 	for _, sub := range subs {
 		price := byID[sub.PriceID]
 		require.NotNil(t, price, "subscription %s price %s", sub.ID, sub.PriceID)
 		require.NotNil(t, sub.Price, "price enriched")
+		require.Equal(t, price.ID, sub.Price.ID)
 		require.NotNil(t, sub.Product, "product enriched")
-		require.Equal(t, price.ProductID.String(), sub.Product.ID)
+		require.Equal(t, price.ProductID, sub.Product.ID)
 		require.Equal(t, "Membership", sub.Product.DisplayName)
 	}
 }
@@ -186,7 +187,7 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	now := w.clock.Now()
 	for key, days := range map[string]int{"content:cov-a": 5, "content:cov-c": 10} {
 		end := now.Add(time.Duration(days) * 24 * time.Hour)
-		_, err := client.GrantEntitlement(t.Context(), c.id, billing.GrantEntitlementRequest{Entitlement: key, EndAt: &end})
+		_, err := client.CreateEntitlement(t.Context(), c.customerID(), billing.CreateEntitlementParams{Entitlement: key, EndsAt: &end})
 		require.NoError(t, err)
 	}
 	method := c.saveCard("stripe", visa)
@@ -195,14 +196,14 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	require.Zero(t, got["EntitlementHasActiveIndefinite"], "no per-key coverage reads: %v", got)
 	// The rental stacks after the latest finite window across all product keys.
 	start := now.Add(10 * 24 * time.Hour)
-	records, err := client.ListEntitlements(t.Context(), c.id, start.Add(time.Hour))
+	lookup, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{c.customerID()}, At: start.Add(time.Hour)})
 	require.NoError(t, err)
 	rented := map[string]bool{}
-	for _, r := range records {
-		if r.SourceType == "one_off" {
+	for _, r := range lookup.Customers[c.customerID()] {
+		if r.SourceType == billing.EntitlementSourcePurchase {
 			rented[r.Entitlement] = true
-			require.True(t, start.Equal(r.StartAt), "%s starts %s", r.Entitlement, r.StartAt)
-			require.True(t, start.Add(48*time.Hour).Equal(*r.EndAt), "%s ends %v", r.Entitlement, r.EndAt)
+			require.True(t, start.Equal(r.StartsAt), "%s starts %s", r.Entitlement, r.StartsAt)
+			require.True(t, start.Add(48*time.Hour).Equal(*r.EndsAt), "%s ends %v", r.Entitlement, r.EndsAt)
 		}
 	}
 	require.Len(t, rented, 3)

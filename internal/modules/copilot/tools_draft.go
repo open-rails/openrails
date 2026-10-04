@@ -211,7 +211,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	affected := 0
 	if s.reprices != nil {
-		if preview, err := s.reprices.PreviewAllPriorVersions(ctx, key); err == nil {
+		if preview, err := s.reprices.PreviewBatch(ctx, key); err == nil {
 			affected = preview.Matched
 		}
 	}

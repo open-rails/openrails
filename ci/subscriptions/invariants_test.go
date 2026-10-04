@@ -43,7 +43,7 @@ func (w *world) checkMoneyInvariants() {
 		return
 	}
 	schema := pgx.Identifier{w.schema}.Sanitize()
-	// t.Context is already cancelled while cleanups run.
+	// t.Context is already canceled while cleanups run.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

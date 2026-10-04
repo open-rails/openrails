@@ -245,11 +245,11 @@ type CustomerBilling struct {
 }
 
 func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (CustomerBilling, error) {
-	subs, err := r.Client.ListSubscriptions(ctx, billing.SubscriptionFilter{CustomerID: customerID})
+	customer, err := billing.ParseCustomerID(customerID)
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	customer, err := billing.ParseCustomerID(customerID)
+	subs, err := r.Client.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: customer})
 	if err != nil {
 		return CustomerBilling{}, err
 	}
@@ -257,7 +257,7 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	return CustomerBilling{Subscriptions: subs.Data, PaymentMethods: methods.Items, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
+	return CustomerBilling{Subscriptions: subs.Items, PaymentMethods: methods.Items, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
 }
 
 func ptr[T any](v T) *T { return &v }

@@ -28,7 +28,7 @@ import (
 //
 // Doctrine: custody-side instrument problems PARK the instrument
 // (cancellation-last-resort) — charges fail loudly and the operator is
-// notified; nothing is terminally cancelled and nothing rail-side is deleted.
+// notified; nothing is terminally canceled and nothing rail-side is deleted.
 type BasisTheoryWebhookHandler struct{}
 
 func (BasisTheoryWebhookHandler) Rail() string { return string(models.EventSourceBasisTheory) }
@@ -180,7 +180,7 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 	if len(rows) > 0 {
 		// Operator-visible: a parked instrument means renewals on it will fail
 		// loudly until re-collection (#657 cutover) or vault repair.
-		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-cancelled)")
+		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-canceled)")
 	}
 	return nil
 }
@@ -358,7 +358,7 @@ type AccountUpdaterFoldStats struct {
 // deliberately no second update path: the batch runner (or#795) and the
 // account-updater.job.completed webhook both land here.
 //
-// Doctrine: nothing is ever deleted and nothing is terminally cancelled. A
+// Doctrine: nothing is ever deleted and nothing is terminally canceled. A
 // closed account or a contact-cardholder answer PARKS the instrument (or#870
 // bucket 2) so charges fail loudly and an operator decides.
 func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, jobRef string, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
@@ -397,7 +397,7 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, jobRef strin
 			stats.Parked++
 			log.WithContext(ctx).WithFields(log.Fields{
 				"bt_token_id": token, "park_reason": reason,
-			}).Error("basistheory account updater: instrument PARKED — " + why + "; operator action required (never auto-cancelled)")
+			}).Error("basistheory account updater: instrument PARKED — " + why + "; operator action required (never auto-canceled)")
 		}
 		return nil
 	}

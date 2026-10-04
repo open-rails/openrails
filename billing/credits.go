@@ -349,53 +349,6 @@ type BillingPolicyBindingInput struct {
 	Tier       string `json:"tier,omitempty"`
 }
 
-// EntitlementRecord is one entitlement window. SourceID is the source
-// resource's own wire id beside SourceType (see SourceRef): sub_… for
-// subscription and grace sources, pay_… for one_off sources, the host's
-// declared id for admin sources.
-type EntitlementRecord struct {
-	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id,omitzero"`
-	Entitlement  string     `json:"entitlement"`
-	StartAt      time.Time  `json:"start_at"`
-	EndAt        *time.Time `json:"end_at,omitempty"`
-	SourceID     *string    `json:"source_id,omitempty"`
-	SourceType   string     `json:"source_type"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason *string    `json:"revoke_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-}
-
-// ProductAccessGrant is one active product-access row from the merchant lookup
-// API. SourceID follows the EntitlementRecord rule (pay_… for purchase,
-// sub_… for subscription, the declared id for admin).
-type ProductAccessGrant struct {
-	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id"`
-	ProductID    string     `json:"product_id"`
-	ProductKey   string     `json:"product_key,omitempty"`
-	ProductName  string     `json:"product_name,omitempty"`
-	SourceType   string     `json:"source_type"`
-	SourceID     string     `json:"source_id,omitempty"`
-	PaymentID    *string    `json:"payment_id,omitempty"`
-	Status       string     `json:"status"`
-	StartsAt     time.Time  `json:"starts_at"`
-	EndsAt       *time.Time `json:"ends_at,omitempty"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason *string    `json:"revoke_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-}
-
-// ProductAccessCheck is the response from a single product-access check.
-type ProductAccessCheck struct {
-	CustomerID string `json:"customer_id"`
-	ProductID  string `json:"product_id"`
-	ProductKey string `json:"product_key,omitempty"`
-	HasAccess  bool   `json:"has_access"`
-}
-
 // DunningPolicy is a merchant's retry schedule for declined renewals. A
 // dunning case runs under the policy in force at its first decline; an edit
 // applies to the next case. Tiers (default: the built-in schedule) are

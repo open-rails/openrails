@@ -60,7 +60,7 @@ type EnrollInput struct {
 	// CheckoutAttemptID is the checkout the first payment settles.
 	CheckoutAttemptID uuid.UUID
 	UserID            string
-	UserEmail         string
+	CustomerEmail     string
 	PriceID           uuid.UUID
 	// SubscriberWallet is the wallet the checkout expects to sign; it becomes
 	// the subscriber only once the landed payment proves it signed.
@@ -164,16 +164,12 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	}
 	periodEnd := now.Add(time.Duration(periodHoursI64) * time.Hour)
 	subPDAStr := subPDA.String()
-	var emailPtr *string
-	if in.UserEmail != "" {
-		emailPtr = &in.UserEmail
-	}
 	sub, err := s.lifecycle.CreateMembership(ctx, &submod.CreateMembershipParams{
 		UserID:                in.UserID,
 		PriceID:               in.PriceID,
 		Rail:                  models.RailSolana,
 		RailSubscriptionID:    &subPDAStr,
-		UserEmail:             emailPtr,
+		CustomerEmail:         in.CustomerEmail,
 		TransactionID:         sig,
 		Amount:                in.FiatAmount,
 		AmountProvided:        true,

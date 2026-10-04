@@ -18,7 +18,7 @@ const (
 	// unresolvable findings stay requires_review.
 	FindingRemoteSubMissingLocal FindingType = "pull.subscription.missing"
 	// FindingLocalActiveRemoteDead (PS-2): local says active/past_due, the
-	// rail says cancelled/expired (on NMI: absent from the recurring
+	// rail says canceled/expired (on NMI: absent from the recurring
 	// report). Enforce: cancel locally + revoke subscription-sourced
 	// entitlements.
 	FindingLocalActiveRemoteDead FindingType = "pull.subscription.dead"
@@ -187,7 +187,7 @@ type MaterializeSubscriptionAction struct {
 	PeriodStartsAt *time.Time
 	PeriodEndsAt   *time.Time
 	StartedAt      *time.Time
-	UserEmail      string
+	CustomerEmail  string
 	// IdentityVia documents how identity resolved (vault_id | email) for the
 	// resolution evidence.
 	IdentityVia string

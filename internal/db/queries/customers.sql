@@ -32,6 +32,12 @@ RETURNING *;
 UPDATE billing.customers SET email = sqlc.arg(email)
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
 
+-- An email seen at signup or at the provider fills an unset one; a declared
+-- email stands.
+-- name: FillCustomerEmail :exec
+UPDATE billing.customers SET email = sqlc.arg(email)::text
+WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id) AND email IS NULL;
+
 -- name: GetCustomer :one
 SELECT * FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);

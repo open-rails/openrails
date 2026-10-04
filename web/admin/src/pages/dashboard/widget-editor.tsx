@@ -162,7 +162,7 @@ export function WidgetEditor({
                   placeholder={
                     query
                       ? 'Refine it. For example "make it weekly" or "split by rail"'
-                      : 'e.g. "count of users who cancelled per day, for the past 7 days"'
+                      : 'e.g. "count of users who canceled per day, for the past 7 days"'
                   }
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}

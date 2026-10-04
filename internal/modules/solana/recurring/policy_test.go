@@ -45,7 +45,7 @@ func TestRecurringAllowlist(t *testing.T) {
 
 // #257/#263: an operational failure (transport, liveness, cranker out of SOL)
 // retries and never duns; subscriber faults and unknowns dun (recoverable);
-// cap-reached means already paid; revoked delegate, cancelled-at-period-end
+// cap-reached means already paid; revoked delegate, canceled-at-period-end
 // and ghost plans are terminal.
 func TestClassifyCrankError(t *testing.T) {
 	type want struct {

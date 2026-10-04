@@ -148,8 +148,8 @@ func TestHTTPCatalogMutationsOmittedWhenDisabled(t *testing.T) {
 	require.NoError(t, err)
 	reads := 0
 	for _, route := range routes {
-		// Repricing changes agreements, not definitions; offer lookup is a read with a POST body.
-		if strings.Contains(route.Path, "/catalog") && !strings.Contains(route.Path, "/catalog/reprice-") && !strings.HasSuffix(route.Path, "/offers/lookup") {
+		// Offer lookup is a read with a POST body.
+		if strings.Contains(route.Path, "/catalog") && !strings.HasSuffix(route.Path, "/offers/lookup") {
 			require.Contains(t, []string{http.MethodGet, http.MethodHead, http.MethodOptions}, route.Method, route.Path)
 			reads++
 		}
@@ -291,10 +291,10 @@ func TestCustomerExposureValidation(t *testing.T) {
 func TestCustomerBillingManagementScope(t *testing.T) {
 	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/v1/me", Scope: config.CustomerBillingManagement, Delegated: true}}}, false)
 	mux := mountAt(t, rt, "/api/pay")
-	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods"} {
+	for _, path := range []string{"/payments", "/invoices", "/subscriptions", "/payment-methods"} {
 		require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, "/api/pay/v1/me"+path, "").Code, path)
 	}
-	for _, path := range []string{"/checkout-sessions", "/subscriptions/x/change-tier", "/subscriptions/x/provider-cutover", "/billing-portal", "/subscriptions/x/solana-tier-change"} {
+	for _, path := range []string{"/checkout-sessions", "/subscriptions/x/change-tier", "/billing-portal"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay/v1/me"+path, "").Code, path)
 	}
 	rec := serve(mux, http.MethodGet, "/api/pay/v1/capabilities", "")

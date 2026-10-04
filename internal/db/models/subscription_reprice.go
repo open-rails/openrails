@@ -4,29 +4,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/billing"
 )
 
-// RepriceStatus is the lifecycle of one SubscriptionReprice row.
-type RepriceStatus string
-
-const (
-	RepriceStatusScheduled RepriceStatus = "scheduled"
-	RepriceStatusApplied   RepriceStatus = "applied"
-	RepriceStatusCanceled  RepriceStatus = "canceled"
-	// RepriceStatusBlocked (#813): a plan-migration cohort member the engine
-	// could not auto-schedule (rail requires user action / missing rail
-	// config / rail push failure). Terminal at insert; BlockedReason says why.
-	RepriceStatusBlocked RepriceStatus = "blocked"
+// RepriceStatus and RepriceKind are the wire enums.
+type (
+	RepriceStatus = billing.RepriceStatus
+	RepriceKind   = billing.RepriceKind
 )
 
-// RepriceKind (#813) distinguishes #773's same-product price move from a
-// cross-product plan migration, which also moves the subscription's product
-// and cuts entitlement/credit snapshots over at the same boundary.
-type RepriceKind string
-
 const (
-	RepriceKindReprice    RepriceKind = "reprice"
-	RepriceKindPlanChange RepriceKind = "plan_change"
+	RepriceStatusScheduled = billing.RepriceScheduled
+	RepriceStatusApplied   = billing.RepriceApplied
+	RepriceStatusCanceled  = billing.RepriceCanceled
+	RepriceStatusBlocked   = billing.RepriceBlocked
+	RepriceKindReprice     = billing.RepriceKindReprice
+	RepriceKindPlanChange  = billing.RepriceKindPlanChange
 )
 
 // Plan-migration fallback policies (#813) for rails that cannot be
@@ -69,24 +63,4 @@ type SubscriptionReprice struct {
 // subscription's first renewal on/after EffectiveAt.
 func (r *SubscriptionReprice) IsDue(now time.Time) bool {
 	return r != nil && r.Status == RepriceStatusScheduled && !r.EffectiveAt.After(now)
-}
-
-// RepriceBatch (#773) is the header row for one bulk reprice operation
-// (reprice_all_prior_versions or a single ad-hoc reprice), giving callers one
-// handle to inspect per-subscription progress.
-type RepriceBatch struct {
-	ID                     uuid.UUID `json:"id"`
-	MerchantID             uuid.UUID `json:"merchant_id"`
-	PriceKey               *string   `json:"price_key,omitempty"`
-	ToPriceID              uuid.UUID `json:"to_price_id"`
-	EffectiveAt            time.Time `json:"effective_at"`
-	SubscriptionsMatched   int       `json:"subscriptions_matched"`
-	SubscriptionsScheduled int       `json:"subscriptions_scheduled"`
-	SubscriptionsSkipped   int       `json:"subscriptions_skipped"`
-	CreatedAt              time.Time `json:"created_at"`
-	// #813 plan-migration header fields; zero-valued on #773 reprice batches.
-	Kind                 RepriceKind `json:"kind"`
-	SourcePriceID        *uuid.UUID  `json:"source_price_id,omitempty"`
-	FallbackPolicy       string      `json:"fallback_policy,omitempty"`
-	SubscriptionsBlocked int         `json:"subscriptions_blocked"`
 }

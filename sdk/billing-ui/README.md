@@ -93,7 +93,7 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
       plansHref="/plans"
       psps={checkoutConfig.psps} // OpenRails checkout config; enables "Add card"
       collectionCurrency="USD" // offers "Use for invoices"
-      sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // Solana-rail cancel
+      sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // signs a Solana cancel
     />
   </BillingProvider>
 </BillingUiProvider>
@@ -111,9 +111,8 @@ checkout routes.
 | `listProducts()`, `listPrices({ currency, product, type })`                                         | `GET /products`, `GET /prices`                                  |
 | `listCurrencies()` (`client.currencies` is the pinned copy)                                         | `GET /currencies`                                               |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
-| `changeTier(id, { priceId, idempotencyKey })`                                                       | `POST /me/subscriptions/{id}/change-tier`                       |
+| `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |
 | `getCheckoutConfig()` (PSPs; `solana.network` and tokens), `listSolanaTokens({ priceId, wallet })`  | `GET /checkout-config`, `GET /solana/tokens`                    |
-| `prepareSolanaTierChange(id, newPriceId)`, `confirmSolanaTierChange(id, { signature, newPriceId })` | `POST /me/subscriptions/{id}/solana-tier-change`, `.../confirm` |
 
 ```ts
 const preview = await billing.previewTierChange(sub.id, price.id) // amount_due_now, effective
@@ -129,9 +128,14 @@ const change = await billing.changeTier(sub.id, {
   lost response), so OpenRails replays the stored result instead of charging
   twice. `requires_action` carries `operation_id` for `authenticatePayment`;
   replay the same key afterwards.
-- Solana rail: the wallet signs and sends `prepareSolanaTierChange`'s
-  `transaction`; pass its signature to `confirmSolanaTierChange`. Keep the
-  signature until the confirm succeeds; confirming again replays the result.
+- A rail that needs the customer's own step answers `requires_action` with a
+  `next_action`. Solana's is `solana_sign_transactions`:
+  `signWalletAction(change.next_action, send)` signs and sends its
+  transactions and returns the signature; repeat `changeTier` with the same
+  key and `signature`. `cancelSubscription(id, { reason, signature? })` works
+  the same way: its answer is the subscription, unchanged and carrying
+  `next_action` until the signed cancel lands. The hooks run this when given
+  `sendTransaction`.
 
 ## Provider-neutral flows
 
@@ -171,13 +175,12 @@ provider:
   `CancelSubscriptionDialog`; `AccountBilling` stacks them.
 - `renderSubscriptionFooter={(s) => ...}` adds host content under a
   subscription row; `useBillingRefresh()` refetches after host-side changes.
-- Hooks: `useSubscriptions` (`cancel`, `cancelOnChain`, `resume`,
-  `setPaymentMethod`, `changeTier`, per-row `pending`), `usePaymentMethods`
-  (`add`, `remove`, `setDefault`), `usePayments` (offset pages), `useProducts`
-  (the catalog). Actions resolve to `null` or a `BillingError`; they never
-  throw. `changeTier` resolves to the `TierChange` instead of `null`. Cancel
-  and resume are queued by OpenRails (202); hooks re-read the subscription
-  until the change shows.
+- Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
+  `changeTier`, per-row `pending`), `usePaymentMethods` (`add`, `remove`,
+  `setDefault`), `usePayments` (offset pages), `useProducts` (the catalog).
+  Actions resolve to `null` or a `BillingError`; they never throw.
+  `changeTier` resolves to the `TierChange` instead of `null`. Cancel, resume
+  and the card change answer the subscription, which replaces the row.
 - Money is exact: `/me` amounts are int64 native-unit strings, scaled by the
   OpenRails currency registry (`currencies` option to extend it).
 - Messages: English is complete and the fallback; `messages` layers bundles,

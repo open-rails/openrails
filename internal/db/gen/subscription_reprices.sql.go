@@ -101,35 +101,6 @@ func (q *Queries) CancelSubscriptionReprice(ctx context.Context, arg CancelSubsc
 	return result.RowsAffected(), nil
 }
 
-const countPlanMigrationBatchRows = `-- name: CountPlanMigrationBatchRows :one
-SELECT
-    count(*) FILTER (WHERE status = 'blocked')  AS blocked,
-    count(*) FILTER (WHERE status <> 'blocked') AS scheduled
-FROM billing.subscription_reprices
-WHERE subscription_reprices.merchant_id = $1::uuid AND reprice_batch_id = $2::uuid
-`
-
-type CountPlanMigrationBatchRowsParams struct {
-	MerchantID uuid.UUID
-	BatchID    uuid.UUID
-}
-
-type CountPlanMigrationBatchRowsRow struct {
-	Blocked   int64
-	Scheduled int64
-}
-
-// #816: batch-header re-sync source of truth. Rows exist only for
-// scheduled/blocked cohort members (skips are header-only), and the header's
-// "scheduled" has always counted every auto-migratable row regardless of how
-// far it progressed — so non-blocked = scheduled|applied|canceled.
-func (q *Queries) CountPlanMigrationBatchRows(ctx context.Context, arg CountPlanMigrationBatchRowsParams) (CountPlanMigrationBatchRowsRow, error) {
-	row := q.db.QueryRow(ctx, countPlanMigrationBatchRows, arg.MerchantID, arg.BatchID)
-	var i CountPlanMigrationBatchRowsRow
-	err := row.Scan(&i.Blocked, &i.Scheduled)
-	return i, err
-}
-
 const createBlockedSubscriptionReprice = `-- name: CreateBlockedSubscriptionReprice :one
 INSERT INTO billing.subscription_reprices (
     merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, kind, status, blocked_reason
@@ -397,33 +368,83 @@ func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchan
 	return items, nil
 }
 
-const listSubscriptionReprices = `-- name: ListSubscriptionReprices :many
+const listScheduledBatchReprices = `-- name: ListScheduledBatchReprices :many
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
+WHERE merchant_id = $1::uuid AND reprice_batch_id = $2::uuid AND status = 'scheduled'
+ORDER BY id
+`
+
+type ListScheduledBatchRepricesParams struct {
+	MerchantID     uuid.UUID
+	RepriceBatchID uuid.UUID
+}
+
+// The batch's still-scheduled reprices, for a batch cancel.
+func (q *Queries) ListScheduledBatchReprices(ctx context.Context, arg ListScheduledBatchRepricesParams) ([]BillingSubscriptionReprice, error) {
+	rows, err := q.db.Query(ctx, listScheduledBatchReprices, arg.MerchantID, arg.RepriceBatchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscriptionReprice
+	for rows.Next() {
+		var i BillingSubscriptionReprice
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.SubscriptionID,
+			&i.FromPriceID,
+			&i.ToPriceID,
+			&i.EffectiveAt,
+			&i.Status,
+			&i.RepriceBatchID,
+			&i.CreatedAt,
+			&i.AppliedAt,
+			&i.CanceledAt,
+			&i.AcknowledgedShortNotice,
+			&i.Kind,
+			&i.BlockedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptionRepricesPage = `-- name: ListSubscriptionRepricesPage :many
 SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
   AND ($3::uuid IS NULL OR reprice_batch_id = $3::uuid)
   AND ($4::text IS NULL OR status = $4::text)
-ORDER BY created_at DESC
-LIMIT $6::int OFFSET $5::int
+  AND ($5::timestamptz IS NULL OR (created_at, id) < ($5::timestamptz, $6::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $7::int
 `
 
-type ListSubscriptionRepricesParams struct {
+type ListSubscriptionRepricesPageParams struct {
 	MerchantID     uuid.UUID
 	SubscriptionID *uuid.UUID
 	RepriceBatchID *uuid.UUID
 	Status         *string
-	PageOffset     int32
-	PageLimit      int32
+	AfterAt        *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
 }
 
-func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscriptionRepricesParams) ([]BillingSubscriptionReprice, error) {
-	rows, err := q.db.Query(ctx, listSubscriptionReprices,
+func (q *Queries) ListSubscriptionRepricesPage(ctx context.Context, arg ListSubscriptionRepricesPageParams) ([]BillingSubscriptionReprice, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionRepricesPage,
 		arg.MerchantID,
 		arg.SubscriptionID,
 		arg.RepriceBatchID,
 		arg.Status,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

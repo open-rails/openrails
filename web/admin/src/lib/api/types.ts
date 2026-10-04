@@ -15,7 +15,7 @@ export type SubscriptionStatus =
   | "past_due"
   | "awaiting_method"
   | "unverified"
-  | "cancelled"
+  | "canceled"
 export type Rail = "nmi" | "ccbill" | "solana" | "stripe" | string
 
 // --- Shared Client DTOs (subscription and profile endpoints) ---
@@ -36,22 +36,20 @@ export interface RawSubscription {
   current_period_ends_at: string | null
   rail: Rail
   rail_subscription_id: string
-  user_email?: string
   payment_method_id: string | null // pm_...
   retry_attempts: number | null
   next_retry_at: string | null
   grace_ends_at: string | null
   cancel_type: string | null
   cancel_feedback: string | null
-  cancelled_at: string | null
+  canceled_at: string | null
   price?: RawPrice
   created_at: string
   updated_at: string
 }
 
-// RawPrice mirrors openrails.SubscriptionPrice, the price embedded on
-// subscription responses. Money is unit_amount, an exact decimal string, as
-// on every price shape.
+// RawPrice is the catalog Price embedded on subscription and payment
+// responses. Money is unit_amount, an exact decimal string.
 export interface RawPrice {
   id: string
   product_id?: string
@@ -70,12 +68,12 @@ export interface RawEntitlement {
   id: string
   customer_id?: string
   entitlement: string
-  start_at: string
-  end_at?: string
-  source_id?: string
+  starts_at: string
+  ends_at: string | null
+  source_id: string
   source_type: string
-  revoked_at?: string
-  revoke_reason?: string
+  revoked_at: string | null
+  revoke_reason: string | null
   created_at: string
   updated_at: string
 }
@@ -194,45 +192,53 @@ export interface CheckoutRoutingDecision {
 
 // --- Price repricing / migration ---
 
-export type RepriceStatus = "scheduled" | "applied" | "canceled"
+export type RepriceStatus = "scheduled" | "applied" | "canceled" | "blocked"
+export type RepriceKind = "reprice" | "plan_change"
 
-// SubscriptionReprice mirrors internal/db/models.SubscriptionReprice.
-export interface SubscriptionReprice {
+// Reprice is one subscription's scheduled price change.
+export interface Reprice {
   id: string
   subscription_id: string
   from_price_id: string
   to_price_id: string
   effective_at: string
   status: RepriceStatus
-  reprice_batch_id?: string
+  kind: RepriceKind
+  blocked_reason: string | null
+  reprice_batch_id: string | null
+  acknowledged_short_notice: boolean
   created_at: string
-  applied_at?: string
-  canceled_at?: string
+  applied_at: string | null
+  canceled_at: string | null
 }
 
-// RepriceBatch mirrors internal/db/models.RepriceBatch — the header row for
-// one bulk reprice_all_prior_versions call. Counts are frozen at schedule
-// time (subscriptions_scheduled is the migration's denominator; query
-// SubscriptionReprice rows by reprice_batch_id + status for live progress).
+// RepriceBatch is one bulk reprice or plan migration. matched and skipped
+// are fixed at creation; scheduled/applied/canceled/blocked count its
+// reprices now.
 export interface RepriceBatch {
   id: string
-  price_key?: string
+  kind: RepriceKind
+  price_key: string | null
+  source_price_id: string | null
   to_price_id: string
   effective_at: string
-  subscriptions_matched: number
-  subscriptions_scheduled: number
-  subscriptions_skipped: number
+  fallback_policy: string | null
+  matched: number
+  skipped: number
+  scheduled: number
+  applied: number
+  canceled: number
+  blocked: number
   created_at: string
 }
 
-// RepriceOutcome is one subscription's result within a bulk reprice call.
 export interface RepriceOutcome {
   subscription_id: string
-  reprice_id?: string
-  reason?: string
+  reprice_id: string | null
+  reason: string | null
+  acknowledged_short_notice: boolean
 }
 
-// RepriceBatchResult is the response of POST .../reprice-all-prior-versions.
 export interface RepriceBatchResult {
   batch_id: string
   to_price_id: string
@@ -241,13 +247,18 @@ export interface RepriceBatchResult {
   skipped: RepriceOutcome[]
 }
 
-// RepricePreviewResult is the response of the #777 read-only GET
-// .../reprice-all-prior-versions/preview dry-run — the wizard's Step 2
-// affected-count preview, called BEFORE the price edit lands.
-export interface RepricePreviewResult {
+// RepriceBatchPreview is the wizard's affected-count dry run, called before
+// the price edit lands.
+export interface RepriceBatchPreview {
   price_key: string
   to_price_id: string
   matched: number
+}
+
+export interface RepriceBatchCancel {
+  canceled: number
+  rail_release_required: string[]
+  warning: string | null
 }
 
 // --- Ops: findings / repair alerts / worker health ---

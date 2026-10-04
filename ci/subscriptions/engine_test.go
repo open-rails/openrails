@@ -78,7 +78,7 @@ func enrollEvery(t *testing.T, w *world, rail string, tp topology, hours int) *e
 	sub := w.subscription(tp, e.sub)
 	require.Equal(t, "engine", sub.CollectionPolicy)
 	require.Empty(t, sub.RailSubscriptionID)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.Len(t, e.providerLedger(), before+1, "one initial charge")
 	require.True(t, e.c.entitled(e.ent))
 	return e
@@ -121,7 +121,7 @@ func TestEngineHappyRenewals(t *testing.T) {
 			w.runRenewals()
 			w.runRenewals() // a second pass in the same period admits nothing
 			sub := w.subscription(tp, e.sub)
-			require.Equal(t, "active", sub.Status)
+			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.After(end), "period extends")
 			require.True(t, end.Add(monthHours*time.Hour).Equal(*sub.CurrentPeriodEndsAt), "one period added: %s -> %s", end, sub.CurrentPeriodEndsAt)
 			require.True(t, e.c.entitled(e.ent))
@@ -239,7 +239,7 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 
 // Scenario 2: the documented decline policy (docs/operations.md, Dunning):
 // a soft decline (do-not-honor included, #1109) on a monthly cycle retries at
-// +2d, +5d, +9d and +13d from the first failure and terminates (cancelled,
+// +2d, +5d, +9d and +13d from the first failure and terminates (canceled,
 // access revoked) on the fifth failure; a card-fixable decline (a lost card
 // included) stops retrying and waits for a new method; a non-recoverable
 // decline terminates at once. Engine access is bounded by
@@ -252,12 +252,12 @@ func TestEngineDeclinePolicy(t *testing.T) {
 		retries           []time.Duration
 		final             string
 	}{
-		{"soft/armed", "insufficient_funds", "202", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "cancelled"},
+		{"soft/armed", "insufficient_funds", "202", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "canceled"},
 		{"soft/default_switch_off", "insufficient_funds", "202", false, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "past_due"},
-		{"do_not_honor_retries", "do_not_honor", "201", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "cancelled"},
+		{"do_not_honor_retries", "do_not_honor", "201", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "canceled"},
 		{"fix_payment_method", "expired_card", "223", true, nil, "awaiting_method"},
 		{"lost_card_waits_for_a_new_card", "lost_card", "251", true, nil, "awaiting_method"},
-		{"non_recoverable/armed", "stolen_card", "252", true, nil, "cancelled"},
+		{"non_recoverable/armed", "stolen_card", "252", true, nil, "canceled"},
 		{"non_recoverable/default_switch_off", "stolen_card", "252", false, nil, "past_due"},
 	}
 	for _, rail := range rails {
@@ -278,18 +278,18 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				for range 10 {
 					sub := w.subscription(e.tp, e.sub)
 					require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a decline never extends the period")
-					require.Equal(t, sub.Status != "cancelled", e.c.entitled(e.ent), "members keep access through dunning; only a confirmed outcome ends it (%s)", sub.Status)
+					require.Equal(t, sub.Status != "canceled", e.c.entitled(e.ent), "members keep access through dunning; only a confirmed outcome ends it (%s)", sub.Status)
 					if sub.NextRetryAt == nil {
 						break
 					}
-					require.Equal(t, "past_due", sub.Status)
+					require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 					offsets = append(offsets, sub.NextRetryAt.Sub(first).Round(time.Hour))
 					w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 					w.runRenewals()
 				}
 				require.Equal(t, tc.retries, offsets, "retry schedule")
 				sub := w.subscription(e.tp, e.sub)
-				require.Equal(t, tc.final, sub.Status)
+				require.Equal(t, tc.final, string(sub.Status))
 				if !tc.armed && tc.name != "fix_payment_method" {
 					status, body := w.staff(http.MethodGet, "/v1/merchant/findings")
 					require.Equal(t, http.StatusOK, status)
@@ -310,9 +310,9 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				require.Equal(t, attempts, e.providerAttempts(), "nothing retries after the policy's last attempt")
 
 				// The customer always has a way back with a working card: a
-				// cancelled membership re-enrolls, a stopped one takes a new card
+				// canceled membership re-enrolls, a stopped one takes a new card
 				// and recovers at the next due pass.
-				if tc.final == "cancelled" {
+				if tc.final == "canceled" {
 					fresh := e.c.saveCard(rail, mastercard)
 					again := e.c.subscribeAgain(e.tp, rail, e.price, e.ent, fresh)
 					require.NotEqual(t, e.sub, again)
@@ -320,7 +320,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 					e.replaceCard(mastercard)
 					w.runRenewals()
 					sub := w.subscription(e.tp, e.sub)
-					require.Equal(t, "active", sub.Status)
+					require.Equal(t, billing.SubscriptionActive, sub.Status)
 					require.True(t, sub.CurrentPeriodEndsAt.After(w.clock.Now()))
 					require.Len(t, e.providerLedger(), 2, "the recovery charge lands on the new card")
 					require.Equal(t, mastercard.Last4, e.lastChargedCard())
@@ -374,12 +374,12 @@ func TestEngineCardReplacement(t *testing.T) {
 			end := e.periodEnd()
 			e.toPeriodEnd()
 			w.runRenewals()
-			require.Equal(t, "past_due", w.subscription(tp, e.sub).Status)
+			require.Equal(t, billing.SubscriptionPastDue, w.subscription(tp, e.sub).Status)
 			w.advance(day)
 			e.replaceCard(mastercard)
 			w.runRenewals()
 			sub := w.subscription(tp, e.sub)
-			require.Equal(t, "active", sub.Status)
+			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.True(t, end.Add(monthHours*time.Hour).Equal(*sub.CurrentPeriodEndsAt), "recovery pays the period that was due, not a fresh one")
 			require.Equal(t, mastercard.Last4, e.lastChargedCard())
 			require.Len(t, e.providerLedger(), 2)
@@ -393,7 +393,7 @@ func TestEngineCardReplacement(t *testing.T) {
 			e.replaceCard(mastercard)
 			e.toPeriodEnd()
 			w.runRenewals()
-			require.Equal(t, "active", w.subscription(tp, e.sub).Status)
+			require.Equal(t, billing.SubscriptionActive, w.subscription(tp, e.sub).Status)
 			require.Equal(t, mastercard.Last4, e.lastChargedCard())
 			require.Len(t, e.providerLedger(), 2)
 		})
@@ -401,7 +401,7 @@ func TestEngineCardReplacement(t *testing.T) {
 }
 
 // Scenario 5: cancelling keeps access to the end of the paid period and
-// never renews; resuming before the end renews as if never cancelled.
+// never renews; resuming before the end renews as if never canceled.
 func TestEngineCancelAndResume(t *testing.T) {
 	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
@@ -410,30 +410,31 @@ func TestEngineCancelAndResume(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(5 * day)
-			e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"feedback": "done"})
+			e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "done"})
 			w.settle()
 			sub := w.subscription(tp, e.sub)
-			require.NotNil(t, sub.CancelledAt)
+			require.NotNil(t, sub.CanceledAt)
 			require.True(t, e.c.entitled(e.ent), "access continues to the paid period end")
 			e.toPeriodEnd()
 			w.runRenewals()
 			require.False(t, e.c.entitled(e.ent), "access ends at the paid period end, with no renewal allowance")
 			require.Len(t, e.providerLedger(), 1)
-			require.Equal(t, 1, e.providerAttempts(), "a cancelled membership is never charged")
+			require.Equal(t, 1, e.providerAttempts(), "a canceled membership is never charged")
 		})
 		t.Run("resume_before_end", func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(5 * day)
-			e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"feedback": "maybe"})
+			e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "maybe"})
 			w.settle()
 			require.True(t, w.subscription(tp, e.sub).Resumable)
-			require.NoError(t, w.client[tp].ResumeSubscription(t.Context(), e.sub))
+			_, err := w.client[tp].ResumeSubscription(t.Context(), e.sub)
+			require.NoError(t, err)
 			w.settle()
 			sub := w.subscription(tp, e.sub)
-			require.Nil(t, sub.CancelledAt)
-			require.Equal(t, "active", sub.Status)
+			require.Nil(t, sub.CanceledAt)
+			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			end := e.periodEnd()
 			e.toPeriodEnd()
 			require.True(t, e.c.entitled(e.ent), "a resumed membership is continuous across the boundary")
@@ -459,14 +460,15 @@ func TestEngineAccountDeletionCancels(t *testing.T) {
 					e.setDecline(visa.Last4, "insufficient_funds", "202")
 					e.toPeriodEnd()
 					w.runRenewals()
-					require.Equal(t, "past_due", w.subscription(tp, e.sub).Status)
+					require.Equal(t, billing.SubscriptionPastDue, w.subscription(tp, e.sub).Status)
 				}
 				attempts := e.providerAttempts()
-				request := billing.CancelSubscriptionRequest{Reason: "Account deletion evt_1", AccountDeletion: true}
-				require.NoError(t, w.client[tp].CancelSubscription(t.Context(), e.sub, request))
+				request := billing.CancelSubscriptionParams{Reason: "Account deletion evt_1", AccountDeletion: true}
+				_, err := w.client[tp].CancelSubscription(t.Context(), e.sub, request)
+				require.NoError(t, err)
 				sub := w.subscription(tp, e.sub)
-				require.Equal(t, "cancelled", sub.Status)
-				require.NotNil(t, sub.CancelledAt)
+				require.Equal(t, billing.SubscriptionCanceled, sub.Status)
+				require.NotNil(t, sub.CanceledAt)
 				w.advance(90 * day)
 				w.runRenewals()
 				require.Equal(t, attempts, e.providerAttempts(), "a deleted account is never charged again")
@@ -496,7 +498,7 @@ func TestEngineRepricing(t *testing.T) {
 		fresh := w.newCustomer()
 		method := fresh.saveCard(rail, mastercard)
 		newSub := fresh.subscribeAgain(tp, rail, bumped.ID.String(), old.ent, method)
-		require.Equal(t, bumped.ID.String(), w.subscription(tp, newSub).PriceID)
+		require.Equal(t, bumped.ID, w.subscription(tp, newSub).PriceID)
 
 		for range 2 {
 			old.toPeriodEnd()
@@ -511,8 +513,8 @@ func TestEngineRepricing(t *testing.T) {
 		require.Equal(t, []int64{9_990_000, 9_990_000, 9_990_000}, byCustomer(old.c), "the existing member keeps the accepted 9.99")
 		require.Equal(t, []int64{14_990_000, 14_990_000, 14_990_000}, byCustomer(fresh), "the new member buys and renews at 14.99")
 		require.Len(t, old.providerLedger(), 6, "provider charges match local payments")
-		require.Equal(t, price.ID.String(), w.subscription(tp, old.sub).PriceID)
-		require.Equal(t, bumped.ID.String(), w.subscription(tp, newSub).PriceID)
+		require.Equal(t, price.ID, w.subscription(tp, old.sub).PriceID)
+		require.Equal(t, bumped.ID, w.subscription(tp, newSub).PriceID)
 	})
 }
 
@@ -558,14 +560,14 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				require.Equal(t, !revoke, e.c.entitled(e.ent), "access follows the merchant's revoke_access choice")
 				sub := w.subscription(tp, e.sub)
 				if !revoke {
-					require.Equal(t, "active", sub.Status, "refunding money alone does not cancel the membership")
+					require.Equal(t, billing.SubscriptionActive, sub.Status, "refunding money alone does not cancel the membership")
 					e.toPeriodEnd()
 					w.runRenewals()
 					require.Len(t, e.providerLedger(), 3, "the membership renews after a refunded period")
 					require.True(t, e.c.entitled(e.ent))
 					return
 				}
-				require.Equal(t, "cancelled", sub.Status, "revoking a membership payment's access ends the membership")
+				require.Equal(t, billing.SubscriptionCanceled, sub.Status, "revoking a membership payment's access ends the membership")
 				e.toPeriodEnd()
 				w.runRenewals()
 				require.Len(t, e.providerLedger(), 2, "a revoked membership never renews")
@@ -613,9 +615,9 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			t.Logf("create: %v", err)
 			w.settle()
 			w.until(func() bool { return w.latestAttempt(c.id)["status"] == "failed" }, "the declined enrollment resolves as failed")
-			subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
+			subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 			require.NoError(t, err)
-			require.Empty(t, subs.Data)
+			require.Empty(t, subs.Items)
 			require.False(t, c.entitled("content:members"))
 			fresh := c.saveCard(rail, visa)
 			c.subscribeAgain(embedded, rail, price.ID.String(), "content:members", fresh)
@@ -661,7 +663,7 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	e.setDecline(visa.Last4, "auth", "")
 	e.toPeriodEnd()
 	w.runRenewals()
-	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
 	require.True(t, e.c.entitled(e.ent), "access holds while the member can still authenticate")
 	w.advance(25 * time.Hour)
 	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned renewal waits for a new card")
@@ -669,7 +671,7 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
 	e.replaceCard(mastercard)
 	w.runRenewals()
-	require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 	require.True(t, e.c.entitled(e.ent))
 }
 

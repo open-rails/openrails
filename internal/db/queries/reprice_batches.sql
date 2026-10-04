@@ -1,12 +1,13 @@
 -- billing.reprice_batches (#773): header row for one bulk reprice operation.
+-- Matched and skipped are facts of creation; the per-status counts are
+-- derived from the batch's reprices on read.
 
 -- name: CreateRepriceBatch :one
 INSERT INTO billing.reprice_batches (
-    merchant_id, price_key, to_price_id, effective_at,
-    subscriptions_matched, subscriptions_scheduled, subscriptions_skipped
+    merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_skipped
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.narg(price_key)::text, sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz,
-    sqlc.arg(subscriptions_matched)::int, sqlc.arg(subscriptions_scheduled)::int, sqlc.arg(subscriptions_skipped)::int
+    sqlc.arg(subscriptions_matched)::int, sqlc.arg(subscriptions_skipped)::int
 )
 RETURNING *;
 
@@ -14,29 +15,40 @@ RETURNING *;
 -- name: CreatePlanMigrationBatch :one
 INSERT INTO billing.reprice_batches (
     merchant_id, to_price_id, effective_at, kind, source_price_id, fallback_policy,
-    subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, subscriptions_blocked
+    subscriptions_matched, subscriptions_skipped
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz,
     'plan_change', sqlc.arg(source_price_id)::uuid, sqlc.arg(fallback_policy)::text,
-    sqlc.arg(subscriptions_matched)::int, sqlc.arg(subscriptions_scheduled)::int,
-    sqlc.arg(subscriptions_skipped)::int, sqlc.arg(subscriptions_blocked)::int
+    sqlc.arg(subscriptions_matched)::int, sqlc.arg(subscriptions_skipped)::int
 )
 RETURNING *;
 
--- name: GetRepriceBatchByID :one
-SELECT * FROM billing.reprice_batches WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+-- name: GetRepriceBatch :one
+SELECT sqlc.embed(b), c.scheduled, c.applied, c.canceled, c.blocked
+FROM billing.reprice_batches b
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE r.status = 'scheduled') AS scheduled,
+           count(*) FILTER (WHERE r.status = 'applied') AS applied,
+           count(*) FILTER (WHERE r.status = 'canceled') AS canceled,
+           count(*) FILTER (WHERE r.status = 'blocked') AS blocked
+    FROM billing.subscription_reprices r
+    WHERE r.merchant_id = b.merchant_id AND r.reprice_batch_id = b.id
+) c
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.id = sqlc.arg(id)::uuid;
 
--- name: ListRepriceBatchesByPriceKey :many
-SELECT * FROM billing.reprice_batches
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND price_key = sqlc.arg(price_key)::text
-ORDER BY created_at DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
-
--- #813: re-sync a plan-migration batch header after rail pushes degrade
--- scheduled rows to blocked — the header must always agree with its rows.
--- name: UpdatePlanMigrationBatchCounts :execrows
-UPDATE billing.reprice_batches SET
-    subscriptions_scheduled = sqlc.arg(subscriptions_scheduled)::int,
-    subscriptions_blocked = sqlc.arg(subscriptions_blocked)::int
-WHERE reprice_batches.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
+-- name: ListRepriceBatchesPage :many
+SELECT sqlc.embed(b), c.scheduled, c.applied, c.canceled, c.blocked
+FROM billing.reprice_batches b
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE r.status = 'scheduled') AS scheduled,
+           count(*) FILTER (WHERE r.status = 'applied') AS applied,
+           count(*) FILTER (WHERE r.status = 'canceled') AS canceled,
+           count(*) FILTER (WHERE r.status = 'blocked') AS blocked
+    FROM billing.subscription_reprices r
+    WHERE r.merchant_id = b.merchant_id AND r.reprice_batch_id = b.id
+) c
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(price_key)::text IS NULL OR b.price_key = sqlc.narg(price_key)::text)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (b.created_at, b.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY b.created_at DESC, b.id DESC
+LIMIT sqlc.arg(row_limit)::int;

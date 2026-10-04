@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
@@ -74,10 +75,10 @@ func TestCLIPullNMIDeclineEndsOnce(t *testing.T) {
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 	w.nmi.RunDue()
 	w.advance(20 * day)
-	require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "nothing told OpenRails yet")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "nothing told OpenRails yet")
 
 	w.cliPull("nmi", true)
-	w.until(func() bool { return w.subscription(embedded, l.sub).Status == "cancelled" }, "the verifier ends the parked membership")
+	w.until(func() bool { return w.subscription(embedded, l.sub).Status == "canceled" }, "the verifier ends the parked membership")
 	require.False(t, l.c.entitled(l.ent))
 	// The delete waits out its cooling-off window, then runs.
 	sub := w.subscription(embedded, l.sub)

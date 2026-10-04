@@ -26,7 +26,7 @@ export function BillingStatusBadge({
   className,
 }: BillingStatusBadgeProps) {
   const { t, messages } = useMessages()
-  const key = status === "canceled" ? "cancelled" : status
+  const key = status
   const text =
     label ??
     (key in messages.status

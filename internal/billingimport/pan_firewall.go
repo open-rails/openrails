@@ -20,7 +20,7 @@ var ErrInvalidDeclaredInput = apperr.New(http.StatusBadRequest, "invalid_param",
 // A declared book is host-authored free text that lands in the same columns
 // checkout writes and the merchant archive later exports: rail_method_ref,
 // initial_transaction_id, last_four, card_type, expiry_date, source_id,
-// user_email and the verbatim legacy `evidence` blob. Checkout scans those
+// customer email and the verbatim legacy `evidence` blob. Checkout scans those
 // names and the archive scans those columns, so this door — the only other way
 // into them — scans them too. A card number in a declared book would be stored
 // under SAQ A exactly as one pasted into checkout would.
@@ -70,7 +70,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	for i, sub := range book.Subscriptions {
 		where := fmt.Sprintf("subscriptions[%d]", i)
 		if err := scan(where,
-			sub.SourceID, sub.Rail, sub.RailSubscriptionID, sub.PSP.Key, sub.UserEmail,
+			sub.SourceID, sub.Rail, sub.RailSubscriptionID, sub.PSP.Key,
 			sub.Cancel.Kind,
 		); err != nil {
 			return err

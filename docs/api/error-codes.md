@@ -66,7 +66,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `csrf_origin_denied` | 403 | `authorization_error` | A cookie-authenticated request came from an origin that is not allowed. |
 | `currency_unsupported` | 400 | `invalid_request_error` | The currency is not in OpenRails' registry. |
 | `custodian_capture_unavailable` | 503 | `api_error` | The card custodian cannot capture cards right now. |
-| `customer_action_required` | 403 | `authorization_error` | Only the verified customer may perform this payment action. |
+| `customer_action_required` | 403 | `authorization_error` | Only the customer may take this action, through their own step. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
@@ -205,7 +205,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `service_credential_merchant_unresolved` | 403 | `authorization_error` | The service credential's issuer owns no merchant. |
 | `service_credential_resource_scope_denied` | 403 | `authorization_error` | The service credential is scoped to other resources. |
 | `service_unavailable` | 503 | `api_error` | A dependency is temporarily unavailable; retry. |
-| `solana_cancel_needs_wallet_signature` | 400 | `invalid_request_error` | Cancelling a Solana subscription needs the subscriber's wallet signature. |
 | `spend_delegation_not_found` | 404 | `invalid_request_error` | The spend delegation does not exist. |
 | `step_up_required` | 403 | `authorization_error` | The operation needs a recent sign-in; metadata carries the challenge. |
 | `step_up_unavailable` | 403 | `authorization_error` | The operation needs a recent sign-in and this credential cannot prove one. |

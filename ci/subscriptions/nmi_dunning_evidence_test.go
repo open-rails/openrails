@@ -32,7 +32,7 @@ func TestNMIStaleRosterDateInsidePaidPeriod(t *testing.T) {
 	w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.NextBilling = w.clock.Now().Add(-2 * day) })
 	w.pull()
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(end))
 	require.Nil(t, sub.NextRetryAt)
 	w.runRenewals()
@@ -57,7 +57,7 @@ func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	now := w.clock.Now()
 	require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).NextRetryAt != nil }, 30*time.Second, 50*time.Millisecond, "the park's read finds the decline")
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	require.NotNil(t, sub.GraceEndsAt)
 	require.WithinDuration(t, now.Add(48*time.Hour), *sub.GraceEndsAt, time.Second, "grace runs from discovery")
 	require.NotNil(t, sub.NextRetryAt)
@@ -66,7 +66,7 @@ func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 
 	w.runRenewals()
 	sub = w.subscription(embedded, l.sub)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)))
 	require.Equal(t, 1, len(w.nmi.Attempts()), "one recovery charge")
 }
@@ -86,7 +86,7 @@ func TestNMIRenewalThenDeclineDunsTheUnpaidPeriod(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "past_due", sub.Status, "the declined period is dunned")
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status, "the declined period is dunned")
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(paid), "one paid period granted (%s vs %s)", sub.CurrentPeriodEndsAt, paid)
 	require.NotNil(t, sub.NextRetryAt)
 	require.WithinDuration(t, paid.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "retries run from NMI's decline")
@@ -95,7 +95,7 @@ func TestNMIRenewalThenDeclineDunsTheUnpaidPeriod(t *testing.T) {
 }
 
 // A subscription that appears locally while the pull is reading NMI's roster
-// is absent from that roster without being gone: it is never cancelled.
+// is absent from that roster without being gone: it is never canceled.
 func TestNMIPullIgnoresRowsCreatedDuringTheFetch(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -130,6 +130,6 @@ func TestNMIPullIgnoresRowsCreatedDuringTheFetch(t *testing.T) {
 	w.nmi.unhold()
 
 	sub := w.subscription(embedded, late.sub)
-	require.Equal(t, "active", sub.Status, "a row the roster could not have listed is not cancelled")
+	require.Equal(t, billing.SubscriptionActive, sub.Status, "a row the roster could not have listed is not canceled")
 	require.Zero(t, w.nmi.ScheduleDeletes(late.railSub))
 }

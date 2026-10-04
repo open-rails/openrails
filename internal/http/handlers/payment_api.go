@@ -52,7 +52,7 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		out.SubscriptionID = &id
 	}
 	if p.Price != nil {
-		out.Price = priceSummary(p.Price)
+		out.Price = p.Price.PublicView()
 		if p.Price.Product != nil {
 			out.Product = p.Price.Product.Summary()
 		}
@@ -98,11 +98,6 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		out.Failure = &failure
 	}
 	return out
-}
-
-func priceSummary(p *models.Price) *billing.SubscriptionPrice {
-	return &billing.SubscriptionPrice{ID: billing.PriceID(p.ID).String(), Key: p.Key, ProductID: billing.ProductID(p.ProductID).String(), UnitAmount: p.Amount,
-		Currency: p.Currency, AutoRenew: p.AutoRenew, AccessDurationHours: p.AccessDurationHours, Archived: p.Archived}
 }
 
 func paymentKind(p *models.Payment) billing.PaymentKind {

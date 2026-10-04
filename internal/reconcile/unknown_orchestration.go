@@ -58,7 +58,7 @@ type UnknownReconcileResult struct {
 	Renewed       int
 	Adopted       int // remote period end adopted without a charge (#367 doctrine)
 	PastDue       int
-	Cancelled     int
+	Canceled      int
 	StillUnknown  int
 	Probed        int                 // per-subscription probe fallbacks attempted (#665)
 	Held          int                 // cancellations a pass-level guard withheld (#834)
@@ -286,7 +286,7 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 	case TransitionPastDue:
 		res.PastDue++
 	case TransitionCancel:
-		res.Cancelled++
+		res.Canceled++
 	default: // TransitionNone: no conclusive evidence — stays unknown
 		res.StillUnknown++
 	}

@@ -34,7 +34,7 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			requireCode(t, err, http.StatusConflict, billing.CodeProviderCancelHeld)
 			w.settle()
 			require.Empty(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), "nothing refunded")
-			require.Equal(t, "active", w.subscription(tp, l.sub).Status)
+			require.Equal(t, billing.SubscriptionActive, w.subscription(tp, l.sub).Status)
 			require.True(t, l.c.entitled(l.ent))
 			require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
 
@@ -43,7 +43,7 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			require.NoError(t, err)
 			w.settle()
 			require.Len(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), 1)
-			require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
+			require.Equal(t, billing.SubscriptionCanceled, w.subscription(tp, l.sub).Status)
 			w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 			require.False(t, l.c.entitled(l.ent))
 
@@ -55,7 +55,7 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			w.wake()
 			w.converge()
 			require.False(t, l.c.entitled(l.ent), "revoked access stays revoked")
-			require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
+			require.Equal(t, billing.SubscriptionCanceled, w.subscription(tp, l.sub).Status)
 			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
 			require.Zero(t, len(w.nmi.Attempts()))
 			require.Empty(t, w.nmi.Unexpected())
@@ -64,7 +64,7 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 }
 
 // Soak: an imported book grants access by itself — active, mid-dunning in
-// grace and cancelled-with-runway members are entitled right after
+// grace and canceled-with-runway members are entitled right after
 // ImportBilling returns, with no operator Converge.
 func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 	t.Parallel()
@@ -81,7 +81,7 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 				dunning: &billing.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
 			w.nmi.EditSchedule(pastDue.schedule, func(s *nmimock.Schedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
 			runway := b.add(&bookRow{source: "runway", tier: monthly, paid: now.Add(20 * day), declared: true,
-				cancel: billing.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
+				cancel: billing.CancelEvidence{Kind: "user_canceled", At: now.Add(-5 * day)}})
 			w.nmi.DeleteSchedule(runway.schedule)
 
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)
@@ -90,8 +90,8 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 			for _, row := range []*bookRow{active, pastDue, runway} {
 				require.True(t, row.c.entitled(monthly.ent), "%s is entitled right after import", row.source)
 			}
-			require.Equal(t, "past_due", pastDue.sub(w, tp).Status)
-			require.Equal(t, "cancelled", runway.sub(w, tp).Status)
+			require.Equal(t, billing.SubscriptionPastDue, pastDue.sub(w, tp).Status)
+			require.Equal(t, billing.SubscriptionCanceled, runway.sub(w, tp).Status)
 
 			// A replay changes nothing and stays entitled.
 			replay, err := w.client[tp].ImportBilling(t.Context(), b.book)
@@ -123,7 +123,7 @@ func TestLegacyNMIRefreshProviders(t *testing.T) {
 			require.Contains(t, []string{"queued", "already_running"}, res.Status)
 			require.Positive(t, res.JobID)
 			w.waitJob(res.JobID)
-			require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).Status == "cancelled" }, 20*time.Second, 250*time.Millisecond,
+			require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).Status == "canceled" }, 20*time.Second, 250*time.Millisecond,
 				"the NMI-side delete is mirrored by the requested refresh")
 			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "a schedule NMI ended is never deleted again")
 			require.Zero(t, len(w.nmi.Attempts()))

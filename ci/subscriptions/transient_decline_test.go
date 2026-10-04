@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +23,7 @@ func TestEngineTransientDeclineLadder(t *testing.T) {
 		at := w.clock.Now()
 		w.runRenewals()
 		sub := w.subscription(embedded, e.sub)
-		require.Equal(t, "past_due", sub.Status, "transient retry %d", i+1)
+		require.Equal(t, billing.SubscriptionPastDue, sub.Status, "transient retry %d", i+1)
 		require.NotNil(t, sub.NextRetryAt)
 		require.Equal(t, gap, sub.NextRetryAt.Sub(at).Round(time.Minute), "transient retry %d", i+1)
 		w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
@@ -30,13 +31,13 @@ func TestEngineTransientDeclineLadder(t *testing.T) {
 	first := w.clock.Now()
 	w.runRenewals()
 	sub := w.subscription(embedded, e.sub)
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	require.Equal(t, 48*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "after the ladder the monthly schedule applies")
 	require.Equal(t, 3, e.providerAttempts()-1, "three renewal attempts so far")
 
 	e.setDecline(visa.Last4, "", "")
 	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 	w.runRenewals()
-	require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 	require.Len(t, e.providerLedger(), 2, "one renewal charge")
 }

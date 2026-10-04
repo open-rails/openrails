@@ -194,7 +194,7 @@ export type CancelEvidence = {
   schedule_live?: boolean
 }
 
-export type CancelSubscriptionRequest = {
+export type CancelSubscriptionParams = {
   reason?: string
   revoke_access?: boolean
   account_deletion?: boolean
@@ -292,7 +292,7 @@ export type CatalogRevision = {
   writes_allowed: boolean
 }
 
-export type ChangeTierRequest = {
+export type ChangeTierParams = {
   price_id?: string
 }
 
@@ -316,12 +316,6 @@ export type CheckoutAttempt = {
   metadata: Record<string, string> | null
 }
 
-export type CheckoutAttemptNextAction = {
-  type: string
-  redirect_to_url?: CheckoutAttemptRedirectToURL
-  transactions?: string[]
-}
-
 export type CheckoutAttemptPaymentResponse = {
   rail: string
   reference?: string
@@ -329,10 +323,6 @@ export type CheckoutAttemptPaymentResponse = {
   solana_pay_url?: string
   redirect_url?: string
   transaction_id?: string
-}
-
-export type CheckoutAttemptRedirectToURL = {
-  url?: string
 }
 
 export type CheckoutConfig = {
@@ -542,10 +532,6 @@ export type ConfirmCheckoutAttemptRequest = {
   wallet?: string
 }
 
-export type ConfirmSolanaCancelRequest = {
-  signature?: string
-}
-
 export type CopilotAskResult = {
   answer: string
   evidence: Evidence[] | null
@@ -569,6 +555,12 @@ export type CreateCheckoutSessionRequest = {
   price_id?: string
   price_key?: string
   success_url?: string
+}
+
+export type CreateEntitlementParams = {
+  entitlement?: string
+  hours?: number | null
+  ends_at?: string | null
 }
 
 export type CreateInvoicePaymentParams = {
@@ -629,6 +621,11 @@ export type CreatePriceProduct = {
   description?: string
 }
 
+export type CreateProductAccessParams = {
+  product_id?: string
+  ends_at?: string | null
+}
+
 export type CreateProductParams = {
   catalog_id?: string
   key?: string
@@ -640,8 +637,8 @@ export type CreateProductParams = {
   archived?: boolean
 }
 
-export type CreateSubscriptionRepriceRequest = {
-  to_price?: string
+export type CreateRepriceBatchParams = {
+  price_key?: string
   effective_at?: string
   acknowledge_short_notice?: boolean
 }
@@ -746,6 +743,16 @@ export type CustomerBillingProfile = {
   product_access: ProductAccessGrant[] | null
 }
 
+export type CustomerCancelSubscriptionRequest = {
+  reason?: string
+  signature?: string
+}
+
+export type CustomerChangeTierRequest = {
+  price_id?: string
+  signature?: string
+}
+
 export type CustomerParams = {
   email?: string | null
 }
@@ -805,7 +812,6 @@ export type DeclaredSubscription = {
   rail?: string
   rail_subscription_id?: string
   psp?: PSPRef
-  user_email?: string
   started_at?: string
   paid_through?: string
   cancel?: CancelEvidence
@@ -887,44 +893,41 @@ export type DunningTier = {
 
 export type EffectiveTier = {
   group: string
-  entitlement: string
-  display_name: string
-  tier_rank: number
-  product_id: string
-  product_key: string
-}
-
-export type EffectiveTierBody = {
-  entitlement: string
-  display_name: string
-  tier_rank: number
-  product: EffectiveTierRef
-}
-
-export type EffectiveTierRef = {
-  id: string
-  key: string
-}
-
-export type EffectiveTierResponse = {
-  group: string
-  tier: EffectiveTierBody | null
+  tier: Tier | null
 }
 
 export type EnsureCatalogParams = {
   owner_subject?: string
 }
 
+export type EntitlementCheck = {
+  entitlements: Record<string, boolean> | null
+}
+
+export type EntitlementCheckParams = {
+  entitlements?: string[] | null
+  at?: string
+}
+
+export type EntitlementListParams = {
+  customer_ids?: string[] | null
+  at?: string
+}
+
+export type EntitlementLookup = {
+  customers: Record<string, EntitlementRecord[]> | null
+}
+
 export type EntitlementRecord = {
   id: string
-  customer_id?: string
+  customer_id: string
   entitlement: string
-  start_at: string
-  end_at?: string
-  source_id?: string
-  source_type: string
-  revoked_at?: string
-  revoke_reason?: string
+  starts_at: string
+  ends_at: string | null
+  source_type: "admin" | "grace" | "purchase" | "subscription"
+  source_id: string
+  revoked_at: string | null
+  revoke_reason: string | null
   created_at: string
   updated_at: string
 }
@@ -1009,26 +1012,11 @@ export type GenerateResult = {
   viz: string
 }
 
-export type GrantEntitlementRequest = {
-  entitlement?: string
-  hours?: number
-  end_at?: string
-}
-
-export type GrantProductAccessRequest = {
-  product_id?: string
-  ends_at?: string
-}
-
 export type Grid = {
   x: number
   y: number
   w: number
   h: number
-}
-
-export type HandlersCancelSubscriptionRequest = {
-  feedback?: string
 }
 
 export type HostEvent = {
@@ -1369,29 +1357,6 @@ export type PackagePrice = {
   free_units?: number
 }
 
-export type PageOfSubscription = {
-  object: string
-  data: Subscription[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
-export type PaginatedResponseOfRepriceBatchView = {
-  items: RepriceBatchView[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
-export type PaginatedResponseOfSubscriptionRepriceView = {
-  items: SubscriptionRepriceView[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
 export type PathPageOfNotification = {
   object: string
   data: Notification[] | null
@@ -1405,16 +1370,6 @@ export type PathPageOfNotification = {
 export type PathPageOfPlatformMerchantItem = {
   object: string
   data: PlatformMerchantItem[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
-}
-
-export type PathPageOfSubscription = {
-  object: string
-  data: Subscription[] | null
   total: number
   limit: number
   offset: number
@@ -1436,7 +1391,7 @@ export type Payment = {
   customer_id: string
   subscription_id: string | null
   price_id: string
-  price: SubscriptionPrice | null
+  price: Price | null
   product: ProductSummary | null
   channel: "admin" | "manual" | "rail"
   rail: string | null
@@ -1576,18 +1531,12 @@ export type PerUnitPrice = {
   matrix?: Matrix
 }
 
-export type PlanMigrationCancelResult = {
-  canceled: number
-  rail_release_required?: string[]
-  warning?: string
-}
-
 export type PlanMigrationOutcome = {
   subscription_id: string
-  reprice_id?: string
+  reprice_id: string | null
   rail: string
   disposition: string
-  reason?: string
+  reason: string | null
 }
 
 export type PlanMigrationRailCounts = {
@@ -1608,7 +1557,7 @@ export type PlanMigrationRequest = {
 }
 
 export type PlanMigrationResult = {
-  batch_id?: string
+  batch_id: string | null
   source_price_id: string
   target_price_id: string
   effective_at: string
@@ -1692,34 +1641,30 @@ export type Product = {
 }
 
 export type ProductAccessCheck = {
-  customer_id: string
-  product_id: string
-  product_key?: string
-  has_access: boolean
+  access: Record<string, boolean> | null
+}
+
+export type ProductAccessCheckParams = {
+  product_ids?: string[] | null
+  product_keys?: string[] | null
 }
 
 export type ProductAccessGrant = {
   id: string
   customer_id: string
   product_id: string
-  product_key?: string
-  product_name?: string
-  source_type: string
-  source_id?: string
-  payment_id?: string
+  product_key: string
+  product_name: string
+  source_type: "admin" | "grace" | "purchase" | "subscription"
+  source_id: string
+  payment_id: string | null
   status: string
   starts_at: string
-  ends_at?: string
-  revoked_at?: string
-  revoke_reason?: string
+  ends_at: string | null
+  revoked_at: string | null
+  revoke_reason: string | null
   created_at: string
   updated_at: string
-}
-
-export type ProductAccessList = {
-  data: ProductAccessGrant[] | null
-  has_more: boolean
-  next_cursor?: string
 }
 
 export type ProductArchive = {
@@ -1753,7 +1698,7 @@ export type ProductSummary = {
   key: string
   display_name: string
   description: string
-  tier_group?: string
+  tier_group: string | null
   tier_rank: number
   archived: boolean
 }
@@ -1963,10 +1908,53 @@ export type ReplacePaymentMethodCardParams = {
   billing_details?: BillingDetails
 }
 
-export type RepriceAllPriorVersionsRequest = {
+export type Reprice = {
+  id: string
+  subscription_id: string
+  from_price_id: string
+  to_price_id: string
+  effective_at: string
+  status: "applied" | "blocked" | "canceled" | "scheduled"
+  kind: "plan_change" | "reprice"
+  blocked_reason: string | null
+  reprice_batch_id: string | null
+  acknowledged_short_notice: boolean
+  created_at: string
+  applied_at: string | null
+  canceled_at: string | null
+}
+
+export type RepriceBatch = {
+  id: string
+  kind: "plan_change" | "reprice"
+  price_key: string | null
+  source_price_id: string | null
+  to_price_id: string
+  effective_at: string
+  fallback_policy: string | null
+  matched: number
+  skipped: number
+  scheduled: number
+  applied: number
+  canceled: number
+  blocked: number
+  created_at: string
+}
+
+export type RepriceBatchCancel = {
+  canceled: number
+  rail_release_required: string[] | null
+  warning: string | null
+}
+
+export type RepriceBatchPreview = {
+  price_key: string
+  to_price_id: string
+  matched: number
+}
+
+export type RepriceBatchPreviewParams = {
   price_key?: string
-  effective_at?: string
-  acknowledge_short_notice?: boolean
 }
 
 export type RepriceBatchResult = {
@@ -1977,22 +1965,6 @@ export type RepriceBatchResult = {
   skipped: RepriceOutcome[] | null
 }
 
-export type RepriceBatchView = {
-  id: string
-  merchant_id: string
-  price_key?: string
-  to_price_id: string
-  source_price_id?: string
-  effective_at: string
-  kind: "plan_change" | "reprice"
-  fallback_policy?: string
-  subscriptions_matched: number
-  subscriptions_scheduled: number
-  subscriptions_skipped: number
-  subscriptions_blocked: number
-  created_at: string
-}
-
 export type RepriceDraft = {
   price_key: string
   effective_at: string
@@ -2000,15 +1972,9 @@ export type RepriceDraft = {
 
 export type RepriceOutcome = {
   subscription_id: string
-  reprice_id?: string
-  reason?: string
-  acknowledged_short_notice?: boolean
-}
-
-export type RepricePreviewResult = {
-  price_key: string
-  to_price_id: string
-  matched: number
+  reprice_id: string | null
+  reason: string | null
+  acknowledged_short_notice: boolean
 }
 
 export type ResolveFindingRequest = {
@@ -2089,11 +2055,6 @@ export type SchemaMeasure = {
   money?: boolean
 }
 
-export type ServiceExternalSubjectEntitlementsRequest = {
-  subjects?: string[] | null
-  at?: string
-}
-
 export type SetMeterParams = {
   event_type?: string
   value_property?: string
@@ -2142,15 +2103,6 @@ export type SolanaPayPostRequest = {
 export type SolanaPayPostResponse = {
   transaction: string
   message?: string
-}
-
-export type SolanaTierChangeConfirmRequest = {
-  signature?: string
-  new_price_id?: string
-}
-
-export type SolanaTierChangeRequest = {
-  new_price_id?: string
 }
 
 export type SpendDelegation = {
@@ -2210,26 +2162,27 @@ export type Subscription = {
   psp_id: string
   rail: string
   rail_subscription_id: string
-  status: string
+  status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_price_id?: string
   payment_method_id: string | null
   started_at: string
   ended_at: string | null
   current_period_starts_at: string | null
   current_period_ends_at: string | null
-  cancelled_at: string | null
+  canceled_at: string | null
   cancel_type: string | null
   cancel_feedback: string | null
   resumable: boolean
   cancel_scheduled: boolean
   cancel_mode: string
-  price?: SubscriptionPrice
+  price?: Price
   product?: ProductSummary
-  scheduled_price?: SubscriptionPrice
+  scheduled_price?: Price
   scheduled_product?: ProductSummary
   card?: CardDetails
   cancel_portal_url?: string
   access?: SubscriptionAccess
+  next_action: NextAction | null
   created_at: string
   updated_at: string
 }
@@ -2245,34 +2198,6 @@ export type SubscriptionAccess = {
   end_at?: string
 }
 
-export type SubscriptionPrice = {
-  id: string
-  key: string
-  product_id: string
-  unit_amount: string
-  currency: string
-  auto_renew: boolean
-  access_duration_hours: number | null
-  archived: boolean
-}
-
-export type SubscriptionRepriceView = {
-  id: string
-  merchant_id: string
-  subscription_id: string
-  from_price_id: string
-  to_price_id: string
-  effective_at: string
-  status: "applied" | "blocked" | "canceled" | "scheduled"
-  kind: "plan_change" | "reprice"
-  blocked_reason?: string
-  reprice_batch_id?: string
-  acknowledged_short_notice: boolean
-  created_at: string
-  applied_at?: string
-  canceled_at?: string
-}
-
 export type SubscriptionRetryNowResult = {
   subscription: Subscription
   operation: PaymentOperation
@@ -2283,7 +2208,35 @@ export type SupportedTokensResponse = {
   tokens: TokenInfo[] | null
 }
 
-export type TierChangePreviewResponse = {
+export type Tier = {
+  entitlement: string
+  display_name: string
+  tier_rank: number
+  product_id: string
+  product_key: string
+}
+
+export type TierChange = {
+  object: string
+  status: string
+  mode: string
+  action?: string
+  effective?: string
+  price_id: string
+  url?: string
+  payment: CheckoutAttemptPaymentResponse
+  subscription_id?: string
+  next_action?: NextAction
+  message?: string
+  delayed_start?: string
+  currency?: string
+  amount_due_now: string
+  next_charge_amount: string
+  next_charge_date?: string
+  operation_id?: string
+}
+
+export type TierChangePreview = {
   object: string
   action: string
   price_id: string
@@ -2295,26 +2248,6 @@ export type TierChangePreviewResponse = {
   effective: string
   is_estimate: boolean
   message?: string
-}
-
-export type TierChangeResponse = {
-  object: string
-  status: string
-  mode: string
-  action?: string
-  effective?: string
-  price_id: string
-  url?: string
-  payment: CheckoutAttemptPaymentResponse
-  subscription_id?: string
-  next_action?: CheckoutAttemptNextAction
-  message?: string
-  delayed_start?: string
-  currency?: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  operation_id?: string
 }
 
 export type TieredPrice = {
@@ -2376,7 +2309,7 @@ export type UpdateProductParams = {
   archived?: boolean | null
 }
 
-export type UpdateSubscriptionPaymentMethodRequest = {
+export type UpdateSubscriptionPaymentMethodParams = {
   payment_method_id?: string
 }
 

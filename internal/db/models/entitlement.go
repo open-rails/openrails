@@ -6,12 +6,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// EntitlementSourceType describes where an entitlement came from
+// EntitlementSourceType is the source of the grant a window projects; the
+// grant ledger's vocabulary.
 type EntitlementSourceType string
 
 const (
+	EntitlementSourcePurchase     EntitlementSourceType = "purchase"
 	EntitlementSourceSubscription EntitlementSourceType = "subscription"
-	EntitlementSourceOneOff       EntitlementSourceType = "one_off"
 	EntitlementSourceAdmin        EntitlementSourceType = "admin"
 	EntitlementSourceGrace        EntitlementSourceType = "grace"
 )
@@ -41,6 +42,8 @@ type Entitlement struct {
 
 	CustomerID  uuid.UUID `json:"customer_id,omitempty"`
 	Entitlement string    `json:"entitlement"`
+	// GrantID is the grant this window projects.
+	GrantID uuid.UUID `json:"grant_id"`
 
 	StartAt time.Time  `json:"start_at"`
 	EndAt   *time.Time `json:"end_at,omitempty"`

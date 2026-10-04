@@ -382,7 +382,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 			if stopErr := r.RiverClient.StopAndCancel(context.Background()); stopErr != nil {
 				errs = append(errs, fmt.Errorf("cancel River workers: %w", stopErr))
 			}
-			// During shutdown, Stop can surface context cancellation if the passed ctx is cancelled.
+			// During shutdown, Stop can surface context cancellation if the passed ctx is canceled.
 			// Treat this as an expected shutdown condition.
 			if !errors.Is(err, context.Canceled) {
 				errs = append(errs, fmt.Errorf("failed to stop River client: %w", err))

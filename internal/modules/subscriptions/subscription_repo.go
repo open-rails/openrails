@@ -15,21 +15,18 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/query"
 )
 
 type SubscriptionFilters struct {
-	UserID          string
-	Status          string
-	PriceID         uuid.UUID
-	Rail            string
-	CreatedAfter    *time.Time
-	CreatedBefore   *time.Time
-	CancelledAfter  *time.Time
-	CancelledBefore *time.Time
-	ExpiresBefore   *time.Time
-	SortBy          string // created_at (default), expires_at, cancelled_at
-	SortOrder       string // asc, desc (default)
+	UserID         string
+	Status         string
+	PriceID        uuid.UUID
+	Rail           string
+	CreatedAfter   *time.Time
+	CreatedBefore  *time.Time
+	CanceledAfter  *time.Time
+	CanceledBefore *time.Time
+	ExpiresBefore  *time.Time
 }
 
 type SubscriptionRepo struct {
@@ -68,7 +65,6 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		Rail:                     string(s.Rail),
 		RailSubscriptionID:       s.RailSubscriptionID,
 		CollectionPolicy:         string(s.CollectionPolicy),
-		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
 		RetryAttempts:            models.IntPtrTo32(s.RetryAttempts),
@@ -76,7 +72,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		GraceEndsAt:              s.GraceEndsAt,
 		CancelFeedback:           s.CancelFeedback,
 		CancelType:               cancelType,
-		CancelledAt:              s.CancelledAt,
+		CanceledAt:               s.CanceledAt,
 		DeletionScheduledAt:      s.DeletionScheduledAt,
 		GatewayResponse:          s.Metadata,
 		CreatedAt:                s.CreatedAt,
@@ -119,7 +115,7 @@ func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) e
 }
 
 // ReplaceForTierChange atomically persists a tier change: it writes oldSub
-// (pre-mutated by the caller to its cancelled state) and inserts newSub in ONE
+// (pre-mutated by the caller to its canceled state) and inserts newSub in ONE
 // transaction. The partial unique index
 // uq_subscriptions_customer_tier_group_active allows only one live
 // subscription per (tenant_subject, tier_group), so the old row's cancel and
@@ -139,7 +135,7 @@ func (r *SubscriptionRepo) ReplaceForTierChange(ctx context.Context, oldSub, new
 
 func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
 	// All columns are written explicitly so nil values CLEAR fields
-	// (CancelledAt, EndedAt, ...) when reactivating subscriptions. Because this
+	// (CanceledAt, EndedAt, ...) when reactivating subscriptions. Because this
 	// is a full-row write from an in-memory image, webhook-apply
 	// read-modify-writes must read via GetByPSPSubscriptionIDForUpdate inside
 	// one tx or a concurrent writer's committed changes get reverted (#675).
@@ -178,7 +174,6 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
 		Rail:                     string(s.Rail),
 		RailSubscriptionID:       s.RailSubscriptionID,
-		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
 		RetryAttempts:            models.IntPtrTo32(s.RetryAttempts),
@@ -187,7 +182,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		GraceEndsAt:              s.GraceEndsAt,
 		CancelFeedback:           s.CancelFeedback,
 		CancelType:               cancelType,
-		CancelledAt:              s.CancelledAt,
+		CanceledAt:               s.CanceledAt,
 		DeletionScheduledAt:      s.DeletionScheduledAt,
 		GatewayResponse:          s.Metadata,
 		ScheduledPriceID:         s.ScheduledPriceID,
@@ -633,81 +628,65 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 	return derefSubs(subs), int(total), nil
 }
 
-func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.QueryOptions[SubscriptionFilters]) ([]*models.Subscription, int64, error) {
-	f := params.Filters
-	tsidResolved, err := db.ResolveCustomerID(f.UserID)
-	if err != nil {
-		return nil, 0, err
-	}
-	var tsid *uuid.UUID
+// filterArgs are a list's filters as query arguments.
+func (r *SubscriptionRepo) filterArgs(f SubscriptionFilters) (customer *uuid.UUID, status, rail *string, price *uuid.UUID, err error) {
 	if f.UserID != "" {
-		tsid = &tsidResolved
+		id, err := db.ResolveCustomerID(f.UserID)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		customer = &id
 	}
-	var status, rail *string
 	if f.Status != "" {
 		status = &f.Status
 	}
 	if f.Rail != "" {
 		rail = &f.Rail
 	}
-	var priceID *uuid.UUID
 	if f.PriceID != uuid.Nil {
-		priceID = &f.PriceID
+		price = &f.PriceID
 	}
+	return customer, status, rail, price, nil
+}
 
-	q := r.db.Gen(ctx)
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, 0, scopeErr
+// ListPage is one page of the merchant's subscriptions matching f, newest
+// first, with their details: up to fetch rows after (afterAt, afterID).
+func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, fetch int32, afterAt *time.Time, afterID *uuid.UUID) ([]*models.Subscription, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
 	}
-	total, err := q.CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
-		MerchantID:      scopeMerchantID.UUID(),
-		CustomerID:      tsid,
-		Status:          status,
-		PriceID:         priceID,
-		Rail:            rail,
-		CreatedAfter:    f.CreatedAfter,
-		CreatedBefore:   f.CreatedBefore,
-		CancelledAfter:  f.CancelledAfter,
-		CancelledBefore: f.CancelledBefore,
-		ExpiresBefore:   f.ExpiresBefore,
+	customer, status, rail, price, err := r.filterArgs(f)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
+		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
+		AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
+	return r.manyWithDetails(ctx, rows)
+}
 
-	sortBy := f.SortBy
-	switch sortBy {
-	case "expires_at", "cancelled_at":
-	default:
-		sortBy = "created_at"
+// Count is how many of the merchant's subscriptions match f.
+func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
 	}
-	paramsLimit32, _ := safecast.Convert[int32](params.Limit)
-	paramsOffset32, _ := safecast.Convert[int32](params.Offset)
-	rows, err := q.ListSubscriptionsFiltered(ctx, gen.ListSubscriptionsFilteredParams{
-		MerchantID:      scopeMerchantID.UUID(),
-		CustomerID:      tsid,
-		Status:          status,
-		PriceID:         priceID,
-		Rail:            rail,
-		CreatedAfter:    f.CreatedAfter,
-		CreatedBefore:   f.CreatedBefore,
-		CancelledAfter:  f.CancelledAfter,
-		CancelledBefore: f.CancelledBefore,
-		ExpiresBefore:   f.ExpiresBefore,
-		SortBy:          sortBy,
-		SortDesc:        f.SortOrder != "asc",
-		PageLimit:       paramsLimit32,
-		PageOffset:      paramsOffset32,
+	customer, status, rail, price, err := r.filterArgs(f)
+	if err != nil {
+		return 0, err
+	}
+	return r.db.Gen(ctx).CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
+		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
 	})
-	if err != nil {
-		return nil, 0, err
-	}
-	subs, err := r.manyWithDetails(ctx, rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return subs, total, nil
 }
 
 // GetActiveOrPendingByUserIDAndTierGroup finds a lifecycle-owning subscription for a user
@@ -839,15 +818,15 @@ func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, engineCutoff,
 	return r.manyWithDetails(ctx, rows)
 }
 
-// GetLatestResumableCancelled returns the payer's most recent cancelled
+// GetLatestResumableCanceled returns the payer's most recent canceled
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.
-func (r *SubscriptionRepo) GetLatestResumableCancelled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {
+func (r *SubscriptionRepo) GetLatestResumableCanceled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
-	row, err := r.db.Gen(ctx).GetLatestResumableCancelledSubscription(ctx, gen.GetLatestResumableCancelledSubscriptionParams{
+	row, err := r.db.Gen(ctx).GetLatestResumableCanceledSubscription(ctx, gen.GetLatestResumableCanceledSubscriptionParams{
 		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tenantSubjectID,
 		Now:        now,
@@ -862,9 +841,9 @@ func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscr
 	return gen.UpdateSubscriptionDecidedParams{
 		ID: p.ID, PriceID: p.PriceID, ProductID: p.ProductID, EntitlementsSpecSnapshot: p.EntitlementsSpecSnapshot, Status: p.Status,
 		StartedAt: p.StartedAt, EndedAt: p.EndedAt, CurrentPeriodStartsAt: p.CurrentPeriodStartsAt, CurrentPeriodEndsAt: p.CurrentPeriodEndsAt,
-		Rail: p.Rail, RailSubscriptionID: p.RailSubscriptionID, UserEmail: p.UserEmail, PaymentMethodID: p.PaymentMethodID,
+		Rail: p.Rail, RailSubscriptionID: p.RailSubscriptionID, PaymentMethodID: p.PaymentMethodID,
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
-		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CancelledAt: p.CancelledAt,
+		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CanceledAt: p.CanceledAt,
 		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, ScheduledPriceID: p.ScheduledPriceID,
 		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion, DunningPolicy: p.DunningPolicy,
 	}

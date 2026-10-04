@@ -166,7 +166,7 @@ var errorCodes = []ErrorCode{
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
-	{"customer_action_required", 403, authz, "Only the verified customer may perform this payment action."},
+	{"customer_action_required", 403, authz, "Only the customer may take this action, through their own step."},
 	{"customer_session_required", 403, authz, "The operation needs the customer's interactive session."},
 	{"permanent_grant_forbidden", 403, authz, "A grant with no end needs merchant:access:grant-permanent."},
 
@@ -211,7 +211,6 @@ var errorCodes = []ErrorCode{
 	{"subscription_not_found", 404, invalid, "The subscription does not exist."},
 	{"subscription_not_active", 409, invalid, "The subscription is not active."},
 	{"cancel_unsupported_on_rail", 400, invalid, "This rail has no cancel operation."},
-	{"solana_cancel_needs_wallet_signature", 400, invalid, "Cancelling a Solana subscription needs the subscriber's wallet signature."},
 	{CodeProviderCancelHeld, 409, invalid, "Cancelling needs a destructive provider action that is not armed for this merchant."},
 	{"rebill_terms_committed", 409, invalid, "An accepted recurring payment owns the pending price terms."},
 	{CodeTierChangeInFlight, 409, invalid, "Another unresolved tier change owns the subscription; metadata.operation_id names it."},

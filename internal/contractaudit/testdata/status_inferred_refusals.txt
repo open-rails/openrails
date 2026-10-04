@@ -1,12 +1,12 @@
 # Refusals that answer a status generic code (ErrorJSON/AbortJSON), per file.
 # A count only goes down: new refusals name a registered code.
-internal/http/handlers/admin_change_tier.go 11
+internal/http/handlers/admin_change_tier.go 10
 internal/http/handlers/admin_findings.go 14
 internal/http/handlers/admin_operations.go 4
 internal/http/handlers/admin_payments.go 4
-internal/http/handlers/admin_plan_migration.go 10
-internal/http/handlers/admin_reprice.go 18
-internal/http/handlers/admin_users.go 14
+internal/http/handlers/admin_plan_migration.go 6
+internal/http/handlers/admin_reprice.go 1
+internal/http/handlers/admin_users.go 4
 internal/http/handlers/admin_worker_health.go 1
 internal/http/handlers/billing_import.go 2
 internal/http/handlers/card_attempts.go 1
@@ -16,8 +16,8 @@ internal/http/handlers/checkout_attempt.go 6
 internal/http/handlers/checkout_config.go 5
 internal/http/handlers/checkout_session.go 1
 internal/http/handlers/customer_payment.go 2
-internal/http/handlers/entitlement_features.go 8
-internal/http/handlers/entitlements.go 31
+internal/http/handlers/entitlement_features.go 4
+internal/http/handlers/entitlements.go 7
 internal/http/handlers/merchant_alerts.go 7
 internal/http/handlers/merchant_api_host.go 2
 internal/http/handlers/merchant_catalog_copilot.go 6
@@ -29,21 +29,22 @@ internal/http/handlers/notifications.go 4
 internal/http/handlers/payment_attempts.go 1
 internal/http/handlers/platform_merchants.go 15
 internal/http/handlers/portal.go 3
-internal/http/handlers/product_access.go 38
+internal/http/handlers/product_access.go 5
 internal/http/handlers/product_archive.go 9
 internal/http/handlers/provider_refresh.go 3
 internal/http/handlers/self_account.go 2
 internal/http/handlers/service_admission.go 4
-internal/http/handlers/service_commerce.go 5
+internal/http/handlers/service_commerce.go 4
 internal/http/handlers/service_host_events.go 5
 internal/http/handlers/solana_pay.go 13
-internal/http/handlers/solana_recurring.go 25
+internal/http/handlers/solana_recurring.go 4
 internal/http/handlers/solana_supported_tokens.go 2
 internal/http/handlers/stripe_engine_authentication.go 5
 internal/http/handlers/stripe_method_setup.go 3
-internal/http/handlers/subscription_lifecycle.go 20
+internal/http/handlers/subscription_lifecycle.go 11
 internal/http/handlers/update_subscription_payment_method.go 19
-internal/http/handlers/user_subscriptions.go 7
+internal/http/handlers/user_subscriptions.go 1
+internal/http/handlers/webhook_basistheory.go 7
 internal/http/handlers/webhook.go 48
 internal/http/handlers/webhook_basistheory.go 7
 internal/http/middleware/admin_ratelimit.go 1

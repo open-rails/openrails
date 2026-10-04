@@ -18,15 +18,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// grantSourceType bridges the entitlement source vocabulary
-// (subscription/one_off/admin/grace) to the grant ledger's vocabulary
-// (purchase/subscription/admin/grace): an `one_off` entitlement is a `purchase`
-// grant; the others pass through. (MaterializeGrant maps it back.)
+// grantSourceType is a window's source in the grant ledger: the same
+// vocabulary.
 func grantSourceType(s models.EntitlementSourceType) grants.SourceType {
-	if string(s) == "one_off" {
-		return grants.Purchase
-	}
-	return grants.SourceType(string(s))
+	return grants.SourceType(s)
 }
 
 type EntitlementService struct {
@@ -136,44 +131,6 @@ func (s *EntitlementService) Coverage(ctx context.Context, userID string, keys [
 	return row.Indefinite, &row.LatestEndAt, nil
 }
 
-// Insert persists a fully-populated entitlement window directly (test/seed
-// surface; the production write path is PushNewEntitlement via the grant ledger).
-func (s *EntitlementService) Insert(ctx context.Context, entitlement *models.Entitlement) error {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	if entitlement.MerchantID != uuid.Nil && entitlement.MerchantID != tid.UUID() {
-		return errors.New("entitlement merchant does not match context")
-	}
-	// Validate that end_at > start_at if end_at is provided (non-indefinite entitlement)
-	if entitlement.EndAt != nil && !entitlement.EndAt.After(entitlement.StartAt) {
-		return fmt.Errorf("invalid entitlement: end_at (%v) must be after start_at (%v)", entitlement.EndAt, entitlement.StartAt)
-	}
-
-	entitlement.MerchantID = tid.UUID()
-
-	id, err := s.db.Gen(ctx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
-		ID:           entitlement.ID,
-		MerchantID:   entitlement.MerchantID,
-		CustomerID:   entitlement.CustomerID,
-		Entitlement:  entitlement.Entitlement,
-		StartAt:      entitlement.StartAt,
-		EndAt:        entitlement.EndAt,
-		SourceID:     entitlement.SourceID,
-		SourceType:   string(entitlement.SourceType),
-		RevokedAt:    entitlement.RevokedAt,
-		RevokeReason: models.RevokeReasonPtr(entitlement.RevokeReason),
-		CreatedAt:    entitlement.CreatedAt,
-		UpdatedAt:    entitlement.UpdatedAt,
-	})
-	if err != nil {
-		return err
-	}
-	entitlement.ID = id
-	return nil
-}
-
 func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
@@ -214,67 +171,68 @@ func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, te
 	return models.EntitlementsFromGen(rows), nil
 }
 
-// ListActiveRecordsByExternalSubjects (#354/#539/#555): one query, grouped by the
-// caller-supplied subject; subjects with no active rows are absent from the map.
-// Customer identity is (merchant, stable host/AuthKit subject) — the merchant is
-// pinned from the request credential, so no issuer is needed.
-func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
+// ListActiveRecordsByCustomers is the active windows of many customers in
+// one query, grouped by customer; a customer with none is absent.
+func (s *EntitlementService) ListActiveRecordsByCustomers(ctx context.Context, customerIDs []uuid.UUID, at time.Time) (map[uuid.UUID][]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	merchantID := tid.UUID()
-	subjectByCustomerID := make(map[uuid.UUID][]string, len(subjects))
-	customerIDs := make([]uuid.UUID, 0, len(subjects))
-	for _, subject := range subjects {
-		id, err := db.ResolveCustomerID(subject)
-		if err != nil {
-			return nil, err
-		}
-		if id != uuid.Nil {
-			if len(subjectByCustomerID[id]) == 0 {
-				customerIDs = append(customerIDs, id)
-			}
-			subjectByCustomerID[id] = append(subjectByCustomerID[id], subject)
-		}
-	}
+	out := make(map[uuid.UUID][]models.Entitlement, len(customerIDs))
 	if len(customerIDs) == 0 {
-		return map[string][]models.Entitlement{}, nil
+		return out, nil
 	}
 	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecordsByCustomerIDs(ctx, gen.ListActiveEntitlementRecordsByCustomerIDsParams{
-		MerchantID:  merchantID,
+		MerchantID:  tid.UUID(),
 		CustomerIds: customerIDs,
 		At:          at,
 	})
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string][]models.Entitlement, len(rows))
 	for _, row := range rows {
-		sourceID := row.SourceID
-		m := models.Entitlement{
-			ID:          row.ID,
-			MerchantID:  row.MerchantID,
-			CustomerID:  row.CustomerID,
-			Entitlement: row.Entitlement,
-			StartAt:     row.StartAt,
-			EndAt:       row.EndAt,
-			SourceID:    &sourceID,
-			SourceType:  models.EntitlementSourceType(row.SourceType),
-			RevokedAt:   row.RevokedAt,
-			CreatedAt:   row.CreatedAt,
-			UpdatedAt:   row.UpdatedAt,
-			DeletedAt:   row.DeletedAt,
-		}
-		if row.RevokeReason != nil {
-			rr := models.EntitlementRevokeReason(*row.RevokeReason)
-			m.RevokeReason = &rr
-		}
-		for _, subject := range subjectByCustomerID[row.CustomerID] {
-			out[subject] = append(out[subject], m)
-		}
+		out[row.CustomerID] = append(out[row.CustomerID], *models.EntitlementFromGen(row))
 	}
 	return out, nil
+}
+
+// Revoke ends one window now. The merchant's own grant is revoked in the
+// grant ledger and its projection follows, so a future window of it does not
+// come back; a purchase or subscription window is revoked on its own (its
+// grant may carry other entitlements).
+func (s *EntitlementService) Revoke(ctx context.Context, ent *models.Entitlement, reason models.EntitlementRevokeReason) error {
+	if ent.SourceType != models.EntitlementSourceAdmin {
+		id := ent.ID
+		return s.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{EntitlementID: &id, Reason: reason})
+	}
+	mID, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := LockEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement); err != nil {
+			return err
+		}
+		q := gen.New(tx)
+		g, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mID.UUID(), ID: ent.GrantID})
+		if err != nil {
+			return err
+		}
+		terminated, err := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: mID.UUID(), GrantID: g.ID})
+		if err != nil {
+			return err
+		}
+		gl := grants.New(q, mID.UUID())
+		gl.SetClock(func() time.Time { return s.now().UTC() })
+		if !terminated {
+			if _, err := gl.Revoke(ctx, g.ID, string(reason)); err != nil {
+				return err
+			}
+		}
+		// The terminated grant's projection revokes every window of it,
+		// including one not started yet.
+		return gl.MaterializeGrant(ctx, g)
+	})
 }
 
 func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
@@ -474,7 +432,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			}
 			err = pgx.ErrNoRows
 		}
-		// A revoked grace allowance (a cancelled engine renewal that was then
+		// A revoked grace allowance (a canceled engine renewal that was then
 		// resumed) is re-granted, never replayed as its revoked self.
 		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceGrace {
 			err = pgx.ErrNoRows
@@ -607,7 +565,7 @@ func (s *EntitlementService) appendCoveredPeriodGrant(ctx context.Context, tx pg
 
 // BoundSubscriptionAccess writes the PROVEN closure for a subscription's access
 // (#691): live subscription-sourced windows get end_at = endAt — advance-written
-// on disk, so a dead system cannot extend a cancelled sub — and scheduled
+// on disk, so a dead system cannot extend a canceled sub — and scheduled
 // windows starting at/after the closure are removed. Idempotent.
 func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
 	if s == nil || s.db == nil {
@@ -821,7 +779,7 @@ func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Contex
 	// matching live entitlement grants too, so the grant ledger (the source of
 	// truth) reflects the retraction rather than drifting (a live grant whose
 	// effect is revoked). This keeps the DERIVE grant-tier checks precise — a
-	// properly-cancelled subscription leaves no "live grant, dead effect" residue.
+	// properly-canceled subscription leaves no "live grant, dead effect" residue.
 	if err := s.revokeGrantsForSubscriptionSources(ctx, userID, subscriptionID, at, sourceTypes); err != nil {
 		return fmt.Errorf("revoke grants for subscription sources: %w", err)
 	}

@@ -115,7 +115,7 @@ func DecodeSubscriptionCollectionPayload(in gen.BillingRailIntent) (Subscription
 // EngineCollectionDue checks current scheduling eligibility for a fresh attempt.
 // Customer retries bypass a future backoff, never the absence of a retry schedule.
 func EngineCollectionDue(sub *models.Subscription, at time.Time, customer bool) bool {
-	if sub == nil || sub.CancelledAt != nil || sub.DeletionScheduledAt != nil || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(at) {
+	if sub == nil || sub.CanceledAt != nil || sub.DeletionScheduledAt != nil || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(at) {
 		return false
 	}
 	if customer {

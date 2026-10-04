@@ -27,7 +27,7 @@ import (
 // book classifies identically no matter when the import runs.
 //
 // Two lanes per fact:
-//   - explicit cancel evidence (user_cancelled / chargeback / provider_terminated)
+//   - explicit cancel evidence (user_canceled / chargeback / provider_terminated)
 //     is settled history — written directly with faithful cancel_type and dates;
 //     no doctrine is needed to "decide" a fact.
 //   - no cancel evidence — seeded as `unknown` (the park state) and resolved by
@@ -40,7 +40,7 @@ type DeclaredCancelKind string
 
 const (
 	DeclaredCancelNone               DeclaredCancelKind = ""
-	DeclaredCancelUser               DeclaredCancelKind = "user_cancelled"
+	DeclaredCancelUser               DeclaredCancelKind = "user_canceled"
 	DeclaredCancelChargeback         DeclaredCancelKind = "chargeback"
 	DeclaredCancelProviderTerminated DeclaredCancelKind = "provider_terminated"
 )
@@ -57,7 +57,6 @@ type DeclaredSubscriptionFact struct {
 	// import must state which of the merchant's accounts the legacy book came
 	// from — there is no unbound lane left to fall into.
 	PspID              uuid.UUID
-	UserEmail          *string
 	StartedAt          time.Time
 	PaidThrough        *time.Time // last paid-through evidence (legacy expiration)
 	CancelKind         DeclaredCancelKind
@@ -96,7 +95,7 @@ const declaredImportLookback = 200 * 365 * 24 * time.Hour
 //
 // SubscriptionsExhaustive says "this call is the merchant's ENTIRE book", and
 // that is an absence proof: every local subscription NOT in the batch is
-// cancelled. An importer that batches its book and forgets to clear the flag
+// canceled. An importer that batches its book and forgets to clear the flag
 // therefore cancels everything it did not happen to send. A boolean cannot tell
 // the two apart — a count can, so the caller must also state how many
 // subscriptions the exhaustive book contains, and it must match what arrived.
@@ -187,7 +186,7 @@ func ImportDeclaredSubscriptions(
 		case DeclaredCancelProviderTerminated:
 			entry.Status = SubscriptionStatusExpired
 		default:
-			entry.Status = SubscriptionStatusCancelled
+			entry.Status = SubscriptionStatusCanceled
 		}
 		snap.Subscriptions = append(snap.Subscriptions, entry)
 	}
@@ -285,7 +284,7 @@ func ImportDeclaredSubscriptions(
 			subID = existing.ID
 		} else {
 			if f.CancelKind != DeclaredCancelNone {
-				subID, err = insertDeclaredCancelled(ctx, q, merchantID, f, price, productCache, periodStart, periodEnd)
+				subID, err = insertDeclaredCanceled(ctx, q, merchantID, f, price, productCache, periodStart, periodEnd)
 			} else {
 				subID, err = materializeDeclaredUnknown(ctx, q, merchantID, f, periodStart, periodEnd)
 			}
@@ -327,7 +326,7 @@ func ImportDeclaredSubscriptions(
 			if _, err := backfillSubscriptionPayments(ctx, q, sub, subscriptionTxns(txns, f.RailSubscriptionID), asOf, declaredImportLookback); err != nil {
 				return out, fmt.Errorf("declared import: backfill %s: %w", f.SourceID, err)
 			}
-			// Declared cancelled but the provider-side schedule was not confirmed
+			// Declared canceled but the provider-side schedule was not confirmed
 			// dead at AsOf: record the owed remote delete exactly like the runtime
 			// producers — DeletionScheduledAt marker + nmi_delete intent in ONE
 			// transaction (no crash window, no out-of-band healing needed).
@@ -347,7 +346,7 @@ func ImportDeclaredSubscriptions(
 		} else {
 			// Fresh ambiguous rows AND every pre-existing row (incremental
 			// re-import): converge against the declared snapshot at AsOf. A row
-			// cancelled between dumps carries a roster-dead entry, so the decider
+			// canceled between dumps carries a roster-dead entry, so the decider
 			// lands the terminal transition (cancel_type 'expired' at AsOf —
 			// faithful user/chargeback fidelity applies to first import only);
 			// already-terminal rows take no transition but still backfill charges.
@@ -381,10 +380,10 @@ func ImportDeclaredSubscriptions(
 	return out, nil
 }
 
-// insertDeclaredCancelled writes an explicitly-cancelled fact directly: settled
-// history keeps its faithful cancel_type and dates (the decider's ResolveCancelled
+// insertDeclaredCanceled writes an explicitly-canceled fact directly: settled
+// history keeps its faithful cancel_type and dates (the decider's ResolveCanceled
 // would stamp 'expired' at AsOf, losing user/chargeback semantics).
-func insertDeclaredCancelled(
+func insertDeclaredCanceled(
 	ctx context.Context,
 	q *gen.Queries,
 	merchantID uuid.UUID,
@@ -419,10 +418,10 @@ func insertDeclaredCancelled(
 		return uuid.Nil, fmt.Errorf("unsupported cancel kind %q", f.CancelKind)
 	}
 
-	cancelledAt := f.CancelAt.UTC()
+	canceledAt := f.CancelAt.UTC()
 	// Cancel-with-runway keeps the paid-through end; otherwise access ended at the cancel.
-	endedAt := cancelledAt
-	if f.PaidThrough != nil && f.PaidThrough.After(cancelledAt) {
+	endedAt := canceledAt
+	if f.PaidThrough != nil && f.PaidThrough.After(canceledAt) {
 		endedAt = f.PaidThrough.UTC()
 	}
 	feedback := "imported: declared " + string(f.CancelKind)
@@ -437,24 +436,23 @@ func insertDeclaredCancelled(
 		ProductID:                price.ProductID,
 		PriceID:                  &priceID,
 		EntitlementsSpecSnapshot: product.EntitlementsSpec,
-		Status:                   string(models.StatusCancelled),
+		Status:                   string(models.StatusCanceled),
 		StartedAt:                f.StartedAt.UTC(),
 		EndedAt:                  &endedAt,
 		CurrentPeriodStartsAt:    periodStart,
 		CurrentPeriodEndsAt:      periodEnd,
 		Rail:                     f.Rail,
 		RailSubscriptionID:       f.RailSubscriptionID,
-		UserEmail:                f.UserEmail,
 		CancelFeedback:           &feedback,
 		CancelType:               &cancelType,
-		CancelledAt:              &cancelledAt,
+		CanceledAt:               &canceledAt,
 		CreatedAt:                f.StartedAt.UTC(),
-		UpdatedAt:                cancelledAt,
+		UpdatedAt:                canceledAt,
 		PspID:                    f.PspID,
 	}); err != nil {
 		// A race with a concurrent writer trips the (merchant, rail, sub-id)
 		// unique index — a loud blocked row, never silent corruption.
-		return uuid.Nil, fmt.Errorf("insert cancelled subscription: %w", err)
+		return uuid.Nil, fmt.Errorf("insert canceled subscription: %w", err)
 	}
 	return id, nil
 }
@@ -476,7 +474,6 @@ func materializeDeclaredUnknown(
 		Status:             string(models.StatusUnverified),
 		Rail:               f.Rail,
 		RailSubscriptionID: f.RailSubscriptionID,
-		UserEmail:          f.UserEmail,
 		PeriodStartsAt:     periodStart,
 		PeriodEndsAt:       periodEnd,
 		StartedAt:          &started,

@@ -71,7 +71,7 @@ type ListPaymentAttemptsParams struct {
 
 // RebillCycle is one paid period that came due (#1111) and what its attempts
 // decided. Outcome is collected, lost (closed without a collection) or open;
-// a cycle closes when collected, when its subscription is cancelled, or 15
+// a cycle closes when collected, when its subscription is canceled, or 15
 // days past due.
 type RebillCycle struct {
 	ID             RebillCycleID  `json:"id"`

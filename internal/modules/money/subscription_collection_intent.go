@@ -241,7 +241,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) || sub.CancelledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) || sub.CanceledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
 			return errEngineObligationChanged
 		}
 		if p.Instrument.CustodianID != nil {
@@ -407,11 +407,11 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		current := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && sub.PriceID == p.Renewal.FromPriceID && sub.ProductID == p.Renewal.FromProductID
 		replay := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodEnd) && sub.PriceID == p.Renewal.PriceID && sub.ProductID == p.Renewal.ProductID
 		if reversal := retained.ReversalKind(); reversal != "" {
-			params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge on a cancelled subscription"}
+			params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge on a canceled subscription"}
 			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
 				return err
 			}
-			if sub.Status != models.StatusCancelled {
+			if sub.Status != models.StatusCanceled {
 				kind := models.CancelTypeMerchant
 				if reversal == "dispute" {
 					kind = models.CancelTypeChargeback
@@ -421,7 +421,7 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 			}
 			return nil
 		}
-		if sub.Status == models.StatusCancelled || (!current && !replay) {
+		if sub.Status == models.StatusCanceled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
 			return h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params)
 		}

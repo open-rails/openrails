@@ -41,14 +41,13 @@ Updates are merge patches (`catalog.Field`): omitted fields keep their values,
 
 ## Access and checkout
 
-Check only the products already selected for a host page. `CheckMany` returns a
-map for that bounded input; it does not load the customer's complete purchase
-history. Use `ProductAccess.List` with its cursor only when displaying purchase
-history itself.
+Check only the products already selected for a host page. `CheckProductAccess`
+returns a map for that bounded input; it does not load the customer's complete
+purchase history. Use `ListProductAccess` with its cursor only when displaying
+purchase history itself.
 
 ```go
-access, err := client.ProductAccess.CheckMany(ctx, &billing.ProductAccessCheckManyParams{
-    CustomerID: customerID,
+access, err := client.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{
     ProductIDs: pageProductIDs,
 })
 if err != nil { return err }

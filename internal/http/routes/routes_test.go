@@ -94,7 +94,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/import/billing":                                                           billing.MerchantBillingImport,
 		"GET /v1/merchant/host-events":                                                      billing.MerchantHostEventsRead,
 		"POST /v1/merchant/host-events/{id}/acknowledge":                                    billing.MerchantHostEventsAcknowledge,
-		"POST /v1/merchant/customers/entitlements:batch":                                    p,
+		"POST /v1/merchant/entitlements/lookup":                                             p,
 		"PUT /v1/merchant/customers/{customer_id}":                                          w,
 		"GET /v1/merchant/customers/{customer_id}":                                          p,
 		"GET /v1/merchant/customers/{customer_id}/delinquency":                              p,
@@ -128,7 +128,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/merchant/subscriptions":                                                    billing.MerchantSubscriptionsRead,
 		"POST /v1/merchant/subscriptions/{id}/cancel":                                       billing.MerchantSubscriptionsUpdate,
 		"POST /v1/merchant/subscriptions/{id}/change-tier":                                  billing.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/catalog/reprice-all-prior-versions":                              billing.MerchantSubscriptionsUpdate,
+		"POST /v1/merchant/reprice-batches":                                                 billing.MerchantSubscriptionsUpdate,
 		"GET /v1/merchant/invoices":                                                         billing.MerchantInvoicesRead,
 		"POST /v1/merchant/invoices/{id}/void":                                              billing.MerchantInvoicesUpdate,
 		"POST /v1/merchant/invoices/{id}/payments":                                          billing.MerchantInvoicesUpdate,
@@ -215,8 +215,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 		var keys []string
 		for _, key := range all {
 			_, path, _ := strings.Cut(key, " ")
-			// Repricing changes agreements, not definitions.
-			if (strings.HasPrefix(path, "/merchant/catalog") || strings.HasPrefix(path, "/catalog")) && !strings.HasPrefix(path, "/merchant/catalog/reprice-") {
+			if strings.HasPrefix(path, "/merchant/catalog") || strings.HasPrefix(path, "/catalog") {
 				keys = append(keys, key)
 			}
 		}

@@ -29,7 +29,7 @@ func TestNMIRecoveryDuplicateRefusalIsNotResent(t *testing.T) {
 	w.advance(end.Sub(w.clock.Now()) + time.Hour)
 	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	require.NotNil(t, sub.NextRetryAt)
 	w.cfg = nil
 	w.restart()

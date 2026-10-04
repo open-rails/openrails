@@ -241,11 +241,11 @@ func (e *Engine) rosterBreaker() RosterBreaker {
 // providerTraits captures per-provider diff semantics that the capability
 // flags alone cannot express.
 type providerTraits struct {
-	// absenceMeansCancelled: the provider's subscription listing only contains
+	// absenceMeansCanceled: the provider's subscription listing only contains
 	// LIVE subscriptions, so a local-live subscription that is absent remotely
 	// is dead at the rail (NMI recurring report). Guarded by the circuit
 	// breaker.
-	absenceMeansCancelled bool
+	absenceMeansCanceled bool
 	// paymentMethodsExhaustive: the vault listing is the complete roster, so a local
 	// payment method missing from it no longer exists at the rail.
 	paymentMethodsExhaustive bool
@@ -254,7 +254,7 @@ type providerTraits struct {
 func traitsFor(p Provider) providerTraits {
 	switch p {
 	case ProviderNMI:
-		return providerTraits{absenceMeansCancelled: true, paymentMethodsExhaustive: true}
+		return providerTraits{absenceMeansCanceled: true, paymentMethodsExhaustive: true}
 	default:
 		// CCBill: absence from ACTIVEMEMBERS is inactive-or-out-of-window, NOT
 		// proof of termination — only CANCELLATION/EXPIRE rows assert death.
@@ -415,7 +415,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	snap.PspID = binding.ID.String()
 	// #841: strip the absence proof when the pass did not read every active PSP
 	// on the rail. A merchant running mobius + paykings on NMI would otherwise
-	// have the non-armed PSP's entire book cancelled as "absent from an
+	// have the non-armed PSP's entire book canceled as "absent from an
 	// exhaustive roster".
 	if cov, ok := params.PSPCoverage[provider]; ok && !cov.Complete() && snap.Coverage.SubscriptionsExhaustive {
 		snap.Coverage.SubscriptionsExhaustive = false
@@ -445,7 +445,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// to be an absence proof (#842) — a non-exhaustive roster proves nothing and
 	// produces no absence findings to guard.
 	traits := traitsFor(provider)
-	if traits.absenceMeansCancelled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
+	if traits.absenceMeansCanceled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
 		tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive)
 		// or#837: the ratio is emitted on EVERY absence-capable pass, not only
 		// when it trips. A breaker whose only trace is the moment it fires
@@ -554,7 +554,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		// or#859 tier 1: a pass that OVERWRITES subscription state opens a
 		// destructive run BEFORE it writes anything, carrying the coverage proof
 		// that authorised it and the row count it predicted. The empty-roster
-		// incident cancelled 40/40 subscriptions with no record of what the rows
+		// incident canceled 40/40 subscriptions with no record of what the rows
 		// looked like beforehand and no handle to undo it by; a run id plus a
 		// before-image per row is precisely that missing pair.
 		destRunID, runErr := e.openDestructiveRun(ctx, provider, binding, snap, countStateOverwrites(applyByID))

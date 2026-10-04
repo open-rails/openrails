@@ -183,17 +183,6 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 // MaterializeGrant projects a single grant event (derive-2): entitlement windows
 // for entitlement grants and a deposit for credit grants. Ownership grants
 // are read directly. Terminated grants have their projection retracted.
-// entitlementSourceType bridges the grant source vocabulary (purchase/
-// subscription/admin/grace) to the entitlements table's vocabulary
-// (subscription/one_off/admin/grace): a `purchase`-sourced grant projects an
-// `one_off` entitlement; the others pass through unchanged.
-func entitlementSourceType(grantSource string) string {
-	if grantSource == "purchase" {
-		return "one_off"
-	}
-	return grantSource
-}
-
 func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error {
 	if g.Event != "grant" {
 		return fmt.Errorf("grants: MaterializeGrant needs a grant event, got %q", g.Event)
@@ -262,22 +251,18 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 				endAt = nil
 			}
 			gid := g.ID
-			// #511: the entitlement keeps its SEMANTIC source (so source-keyed
-			// readers — revoke-by-subscription, grace, one-off, the CON checks —
-			// work unchanged) and links to its grant via grant_id (DERIVE's
-			// authoritative link). Two vocabulary bridges: grants say 'purchase',
-			// entitlements say 'one_off'; and grant.source_id is free text while
-			// entitlements.source_id is a uuid, so parse it (a real subscription/
-			// payment source is a uuid → revoke-by-source resolves; a non-uuid
-			// source falls back to the grant id).
+			// The window keeps its grant's source, so source-keyed readers
+			// (revoke by subscription, grace, purchase) work, and links to its
+			// grant by grant_id. A grant's source_id is free text; a window's is
+			// the source's uuid, else the grant's own id.
 			entSourceID := gid
 			if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
 				entSourceID = parsed
 			}
 			if err := l.q.MaterializeEntitlement(ctx, gen.MaterializeEntitlementParams{
-				Entitlement: f, StartAt: g.StartsAt, SourceType: entitlementSourceType(g.SourceType),
+				Entitlement: f, StartAt: g.StartsAt, SourceType: g.SourceType,
 				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: endAt,
-				SourceID: &entSourceID, GrantID: &gid,
+				SourceID: &entSourceID, GrantID: gid,
 			}); err != nil {
 				return fmt.Errorf("grants: materialize entitlement %q: %w", f, err)
 			}
@@ -449,7 +434,7 @@ func specFeatures(raw []byte) ([]string, error) {
 // are source-keyed (source_type+source_id), so they are a NO-OP for live data
 // (which already carries its grant) and only fire on the migrated cohort.
 
-// UngrantedSubscriptions returns active/cancelled/unknown subscriptions for a
+// UngrantedSubscriptions returns active/canceled/unknown subscriptions for a
 // grantable product with no subscription-sourced grant yet — the detection behind
 // `derive.subscription.missing` (#631). #716 fail-open: `unknown` sources too, so
 // the standing-access lane can engage for imported unknowns. #717: chargeback
@@ -484,10 +469,17 @@ func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngran
 	return err
 }
 
+// GrantSubscriptionWindow records a subscription's entitlement grants for
+// one window and projects them, skipping a window already on the ledger. It
+// returns how many windows it materialized.
+func (l *Ledger) GrantSubscriptionWindow(ctx context.Context, customer, subscription uuid.UUID, feats []string, start time.Time, end *time.Time) (int, error) {
+	return l.deriveEntitlementWindows(ctx, customerWindow{Customer: customer, Source: Subscription, SourceID: subscription.String(), Feats: feats, Start: start.UTC(), End: end})
+}
+
 // DeriveWalletGrant creates the entitlement grant(s) — and, when no live window
 // overlaps, the window — for a solana wallet payment that has none (derive-1).
-// Window = [purchased_at, expiration_rfc3339); grant source is `purchase` (→
-// `one_off` entitlement), payment-linked so the refund check sees it.
+// Window = [purchased_at, expiration_rfc3339); grant source is `purchase`,
+// payment-linked so the refund check sees it.
 func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWalletPaymentsRow) error {
 	if !pay.ExpiresAt.After(pay.PurchasedAt) {
 		return nil

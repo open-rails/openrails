@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,9 +22,9 @@ func TestSecurityForwardedForReadsEveryLine(t *testing.T) {
 
 	status, body := w.postCCBillVia("Cancellation", []string{ccbillSourceIP, "203.0.113.9"}, cancel)
 	require.Equal(t, http.StatusForbidden, status, "the client wrote the CCBill line: %v", body)
-	require.Equal(t, "active", w.subscription(embedded, m.sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, m.sub).Status)
 
 	status, body = w.postCCBillVia("Cancellation", []string{"203.0.113.9", ccbillSourceIP}, cancel)
 	require.Equal(t, http.StatusOK, status, "the proxy's line names CCBill: %v", body)
-	require.Equal(t, "cancelled", w.subscription(embedded, m.sub).Status)
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, m.sub).Status)
 }

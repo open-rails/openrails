@@ -87,12 +87,12 @@ func TestDeclineMetrics(t *testing.T) {
 	require.NoError(t, err)
 	w.settle()
 
-	subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: h.c.id})
+	subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: h.c.customerID()})
 	require.NoError(t, err)
-	require.Len(t, subs.Data, 1, "%v", session.Status)
-	sub := subs.Data[0].ID
+	require.Len(t, subs.Items, 1, "%v", session.Status)
+	sub := subs.Items[0].ID
 	w.nmi.SetDecline(visa.Last4, "202")
-	w.advance(subs.Data[0].CurrentPeriodEndsAt.Sub(w.clock.Now()) + time.Second)
+	w.advance(subs.Items[0].CurrentPeriodEndsAt.Sub(w.clock.Now()) + time.Second)
 	w.runRenewals()
 	for i := range 2 {
 		if i == 1 {
@@ -103,7 +103,7 @@ func TestDeclineMetrics(t *testing.T) {
 		w.advance(s.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 		w.runRenewals()
 	}
-	require.Equal(t, "active", w.subscription(embedded, sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, sub).Status)
 	w.advance(time.Hour)
 
 	newCard := map[string][]string{"kind": {"verify", "initial"}, "card_entry": {"new"}}

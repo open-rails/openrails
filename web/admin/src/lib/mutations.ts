@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/copilot"
 import {
   cancelReprice,
+  cancelRepriceBatch,
   cancelSubscription,
   changeTeamRole,
   changeSubscriptionPaymentMethod,
@@ -39,13 +40,13 @@ import {
   putCustomerUsageRateOverride,
   putPaymentProvider,
   putUsageMeter,
-  previewRepriceAllPriorVersions,
+  previewRepriceBatch,
   previewSubscriptionTierChange,
   applyCatalog,
   refreshCatalogDrift,
   refundPayment,
   removeTeamMember,
-  repriceAllPriorVersions,
+  createRepriceBatch,
   resolveFinding,
   resumeSubscription,
   revokeApiKey,
@@ -85,37 +86,18 @@ import { merchantQueryKeys } from "@/lib/queries"
 
 const EXPORT_PAGE = 200
 
-const collectAllPages = async <T>(
-  listPage: (
-    limit: number,
-    offset: number
-  ) => Promise<{
-    data: T[]
-    total: number
-  }>
-) => {
-  const rows: T[] = []
-  let offset = 0
-
-  for (;;) {
-    const page = await listPage(EXPORT_PAGE, offset)
-    rows.push(...page.data)
-    if (rows.length >= page.total || page.data.length === 0) return rows
-    offset += EXPORT_PAGE
-  }
-}
-
 const collectAllCursorPages = async <T>(
   listPage: (
     limit: number,
-    cursor: string
+    cursor?: string
   ) => Promise<{ data: T[]; next_cursor: string | null }>
 ) => {
   const rows: T[] = []
-  for (let cursor = ""; ;) {
+  let cursor: string | undefined
+  for (;;) {
     const page = await listPage(EXPORT_PAGE, cursor)
     rows.push(...page.data)
-    if (!page.next_cursor) return rows
+    if (!page.next_cursor || page.data.length === 0) return rows
     cursor = page.next_cursor
   }
 }
@@ -253,7 +235,7 @@ export const adminMutations = {
       mutationKey: [...customersKey, "export"],
       mutationFn: (q: string) =>
         collectAllCursorPages<Customer>((limit, cursor) =>
-          listCustomers(q, limit, cursor)
+          listCustomers(q, limit, cursor ?? "")
         ),
     })
   },
@@ -263,8 +245,8 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...subscriptionsKey, "export"],
       mutationFn: (filters: SubscriptionFilters) =>
-        collectAllPages<AdminSubscription>((limit, offset) =>
-          listSubscriptions(filters, limit, offset)
+        collectAllCursorPages<AdminSubscription>((limit, cursor) =>
+          listSubscriptions(filters, limit, cursor)
         ),
     })
   },
@@ -743,8 +725,7 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "prices", "preview-change"],
-      mutationFn: (priceKey: string) =>
-        previewRepriceAllPriorVersions(priceKey),
+      mutationFn: (priceKey: string) => previewRepriceBatch(priceKey),
     })
   },
   changePrice: (queryClient: QueryClient) => {
@@ -762,10 +743,7 @@ export const adminMutations = {
       }) => {
         const created = await createPrice(price)
         if (migration) {
-          await repriceAllPriorVersions(
-            migration.priceKey,
-            migration.effectiveAt
-          )
+          await createRepriceBatch(migration.priceKey, migration.effectiveAt)
         }
         if (copilotDraftId) {
           void confirmCopilotDraft(
@@ -781,14 +759,12 @@ export const adminMutations = {
       onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
-  cancelReprices: (queryClient: QueryClient) => {
+  cancelRepriceBatch: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
-      mutationKey: [...keys.catalog(), "reprices", "cancel"],
-      mutationFn: (repriceIds: string[]) =>
-        Promise.all(repriceIds.map((id) => cancelReprice(id))),
-      // A batch can be partially canceled before one request fails.
-      onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      mutationKey: [...keys.catalog(), "reprice-batches", "cancel"],
+      mutationFn: (batchId: string) => cancelRepriceBatch(batchId),
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
   updateMerchantSettings: (queryClient: QueryClient) => {

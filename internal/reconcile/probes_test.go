@@ -201,7 +201,7 @@ func TestCCBillSubscriptionProber(t *testing.T) {
 		gone     bool
 	}{
 		{name: "recurring active adopts the provider clock", body: statusXML("2", future), remote: SubscriptionStatusActive, want: TransitionAdoptPeriodEnd},
-		{name: "active non-recurring is cancelled", body: statusXML("1", future), remote: SubscriptionStatusCancelled, want: TransitionCancel, gone: true},
+		{name: "active non-recurring is canceled", body: statusXML("1", future), remote: SubscriptionStatusCanceled, want: TransitionCancel, gone: true},
 		{name: "inactive is expired without a fabricated boundary", body: statusXML("0", ""), remote: SubscriptionStatusExpired, noExpiry: true, want: TransitionCancel, gone: true},
 		{name: "an unrecognized status is never guessed", body: statusXML("7", ""), remote: SubscriptionStatusUnknown, noExpiry: true, want: TransitionNone},
 		{name: "a provider error propagates", status: http.StatusInternalServerError, wantErr: true},

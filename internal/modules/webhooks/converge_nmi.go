@@ -175,14 +175,14 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
 
 	if s.DB != nil {
-		removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, sub.CustomerID.String(), sub.ProductID, sub.ID)
+		removed, err := subscriptions.RemoveCanceledSubscriptionsForActivation(ctx, s.DB, sub.CustomerID.String(), sub.ProductID, sub.ID)
 		if err != nil {
-			return fmt.Errorf("nmi converge: cleanup cancelled subscriptions before activation: %w", err)
+			return fmt.Errorf("nmi converge: cleanup canceled subscriptions before activation: %w", err)
 		}
 		if removed > 0 {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"user_id": sub.CustomerID.String(), "removed": removed,
-			}).Info("nmi converge: removed cancelled subscriptions before activation")
+			}).Info("nmi converge: removed canceled subscriptions before activation")
 		}
 	}
 
@@ -196,7 +196,6 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		UserID:             sub.CustomerID.String(),
 		Rail:               models.Rail(rail),
 		RailSubscriptionID: &sub.RailSubscriptionID,
-		UserEmail:          sub.UserEmail,
 		TransactionID:      probe.SuccessTransactionID,
 		Amount:             amountMicros,
 		AmountProvided:     true,

@@ -36,7 +36,7 @@ type checkoutSubscriptionAccess interface {
 // never hold two of these concurrently in the same product/tier-group — that is
 // double-billing; the correct operation is change-tier, not a second subscribe.
 //
-// Terminal statuses (cancelled — which the model also uses for expired/failed/
+// Terminal statuses (canceled — which the model also uses for expired/failed/
 // max-retries per its own docs) are excluded: a user with only a terminal
 // subscription is free to subscribe again.
 var nonTerminalSubscriptionStatuses = []models.SubscriptionStatus{
@@ -687,7 +687,7 @@ func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, 
 			endAt = &end
 		}
 
-		sourceType := models.EntitlementSourceOneOff
+		sourceType := models.EntitlementSourcePurchase
 		if subscription {
 			sourceType = models.EntitlementSourceSubscription
 		}

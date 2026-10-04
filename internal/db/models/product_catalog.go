@@ -323,7 +323,7 @@ func (p *Product) Summary() *billing.ProductSummary {
 	if p == nil {
 		return nil
 	}
-	return &billing.ProductSummary{ID: billing.ProductID(p.ID).String(), Key: p.Key, DisplayName: p.DisplayName, Description: p.Description, TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived}
+	return &billing.ProductSummary{ID: billing.ProductID(p.ID), Key: p.Key, DisplayName: p.DisplayName, Description: p.Description, TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived}
 }
 
 // View is the product as the API shows it, without its prices.
@@ -334,6 +334,27 @@ func (p *Product) View() billing.Product {
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
+}
+
+// PublicView is the price as a buyer sees it: which PSPs sell it, without
+// their identifiers or the operator's pending work.
+func (p *Price) PublicView() *billing.Price {
+	if p == nil {
+		return nil
+	}
+	v := PublicPrice(p.View())
+	return &v
+}
+
+// PublicPrice strips a price to what a buyer sees.
+func PublicPrice(p billing.Price) billing.Price {
+	psps := make(map[string]billing.PSPLinkState, len(p.PSPs))
+	for key, state := range p.PSPs {
+		psps[key] = billing.PSPLinkState{Status: state.Status, SyncStatus: billing.SyncStatusUnknown}
+	}
+	p.PSPs = psps
+	p.PendingManualActions = []billing.PendingAction{}
+	return p
 }
 
 // View is the price as the API shows it, linked to every PSP in its links.

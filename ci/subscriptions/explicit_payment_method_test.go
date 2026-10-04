@@ -75,7 +75,7 @@ func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 	w.runRenewals()
 	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the collection card")
 	sub := w.subscription(embedded, e.sub)
-	require.Equal(t, "awaiting_method", sub.Status)
+	require.Equal(t, billing.SubscriptionAwaitingMethod, sub.Status)
 	window, err := collection.Window(monthHours)
 	require.NoError(t, err)
 	require.NotNil(t, sub.GraceEndsAt)
@@ -91,7 +91,7 @@ func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 
 	w.advance(2 * time.Hour)
 	w.runRenewals()
-	require.Equal(t, "cancelled", w.subscription(embedded, e.sub).Status, "the wait ends at dunning exhaustion")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, e.sub).Status, "the wait ends at dunning exhaustion")
 	require.False(t, e.c.entitled(e.ent))
 	require.Len(t, e.providerLedger(), charges)
 }

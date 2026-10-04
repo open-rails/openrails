@@ -40,7 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { SubscriptionReprice } from "@/lib/api/types"
+import type { Reprice } from "@/lib/api/types"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
   formatCard,
@@ -64,7 +64,7 @@ export function SubscriptionDetailPage() {
   const { data: scheduledReprices } = useQuery(
     adminQueries.subscriptionReprices(id)
   )
-  const pendingReprice = scheduledReprices?.items?.[0]
+  const pendingReprice = scheduledReprices?.data?.[0]
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!sub)
     return (
@@ -76,7 +76,7 @@ export function SubscriptionDetailPage() {
     sub.status === "past_due" ||
     sub.status === "awaiting_method" ||
     sub.status === "unverified"
-  const resumable = sub.status === "cancelled" || sub.status === "past_due"
+  const resumable = sub.status === "canceled" || sub.status === "past_due"
 
   return (
     <div className="flex flex-col gap-4">
@@ -136,7 +136,6 @@ export function SubscriptionDetailPage() {
             "—"
           )}
         </Fact>
-        <Fact label="Email">{sub.user_email ?? "—"}</Fact>
         <Fact label="Started">{formatDate(sub.started_at)}</Fact>
         <Fact label="Current period">
           {formatDate(sub.current_period_starts_at)} →{" "}
@@ -189,9 +188,9 @@ export function SubscriptionDetailPage() {
         <Fact label="Retries">
           {sub.retry_attempts ?? 0} · next {formatDate(sub.next_retry_at)}
         </Fact>
-        <Fact label="Cancelled">
-          {sub.cancelled_at
-            ? `${formatDate(sub.cancelled_at)} (${sub.cancel_type ?? "?"})`
+        <Fact label="Canceled">
+          {sub.canceled_at
+            ? `${formatDate(sub.canceled_at)} (${sub.cancel_type ?? "?"})`
             : "—"}
         </Fact>
       </div>
@@ -287,7 +286,7 @@ function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
         onConfirm={async () => {
           try {
             await cancel.mutateAsync(form.state.values)
-            toast.success("Subscription cancelled")
+            toast.success("Subscription canceled")
           } catch (err) {
             toastApiError(err, "Cancel subscription")
             throw err
@@ -304,7 +303,7 @@ function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(event) => field.handleChange(event.target.value)}
-                  placeholder="why is this being cancelled?"
+                  placeholder="why is this being canceled?"
                 />
               </div>
             )}
@@ -505,7 +504,7 @@ function PendingRepriceBadge({
   reprice,
 }: {
   subscriptionId: string
-  reprice: SubscriptionReprice
+  reprice: Reprice
 }) {
   const queryClient = useQueryClient()
   const { data: toPrice } = useQuery(adminQueries.price(reprice.to_price_id))

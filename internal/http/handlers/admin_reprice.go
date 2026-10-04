@@ -3,116 +3,66 @@ package handlers
 import (
 	"net/http"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// #773 reprice HTTP surface: schedule/list/cancel a subscription price move,
-// plus the bulk reprice_all_prior_versions(key, effective_date) operation.
-// Mounted under /v1/merchant/* (session + service-token authz per the
-// existing route patterns — see routes.go registerMerchantSupportRoutes).
+// Reprices and reprice batches: a reprice moves one subscription to another
+// price at its first renewal on or after effective_at; a batch is one bulk
+// move (every subscriber on a price key's prior versions, or a plan
+// migration).
 
 func writeRepriceError(r *httprequest.Request, err error) {
 	writeRefusal(r, err, "reprice operation failed")
 }
 
-type CreateSubscriptionRepriceRequest struct {
-	// ToPrice accepts either a price UUID/opaque id or a #774 price_key.
-	ToPrice     string    `json:"to_price"`
-	EffectiveAt time.Time `json:"effective_at"`
-	// AcknowledgeShortNotice (#781) explicitly bypasses the merchant's
-	// notice-window constraint on an INCREASE — the support/emergency
-	// escape hatch. Recorded on the row and logged; never silent.
-	AcknowledgeShortNotice bool `json:"acknowledge_short_notice,omitempty"`
-}
-
-// CreateSubscriptionReprice schedules subscription.PriceID -> to_price,
-// effective at the subscription's first renewal on/after effective_at.
-func CreateSubscriptionReprice(r *httprequest.Request) {
-	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid subscription id")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-	var req CreateSubscriptionRepriceRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	if strings.TrimSpace(req.ToPrice) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "to_price required")
-		return
-	}
-	if req.EffectiveAt.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "effective_at required")
-		return
-	}
-	if r.State.RepriceService == nil || r.State.PriceService == nil {
+func repriceServiceReady(r *httprequest.Request) bool {
+	if r.State.RepriceService == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
-		return
+		return false
 	}
-	ctx := r.Request.Context()
-	toPrice, err := catalog.ResolveReference(ctx, r.State.PriceService, req.ToPrice)
-	if err != nil {
-		if db.IsNotFound(err) {
-			err = subscriptions.ErrRepriceTargetPriceNotFound
-		}
-		writeRefusal(r, err, "failed to resolve to_price")
-		return
-	}
-	out, err := r.State.RepriceService.Reprice(ctx, subscriptions.RepriceRequest{
-		SubscriptionID:         subscriptionID,
-		ToPriceID:              toPrice.ID,
-		EffectiveAt:            req.EffectiveAt,
-		AcknowledgeShortNotice: req.AcknowledgeShortNotice,
-	})
-	if err != nil {
-		writeRepriceError(r, err)
-		return
-	}
-	r.JSON(http.StatusCreated, subscriptions.SubscriptionRepriceViewOf(out))
+	return true
 }
 
-type RepriceAllPriorVersionsRequest struct {
-	PriceKey    string    `json:"price_key"`
-	EffectiveAt time.Time `json:"effective_at"`
-	// AcknowledgeShortNotice (#781): see createSubscriptionRepriceRequest.
-	// Applies uniformly to every subscription in the batch.
-	AcknowledgeShortNotice bool `json:"acknowledge_short_notice,omitempty"`
+func repriceIDParam(r *httprequest.Request) (billing.RepriceID, bool) {
+	id, err := billing.ParseRepriceID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid reprice ID").WithParam("id"))
+		return id, false
+	}
+	return id, true
 }
 
-// RepriceAllPriorVersions bulk-schedules every active subscription pinned to
-// a prior version of price_key to move to its current price.
-func RepriceAllPriorVersions(r *httprequest.Request) {
-	var req RepriceAllPriorVersionsRequest
+func repriceBatchIDParam(r *httprequest.Request) (billing.RepriceBatchID, bool) {
+	id, err := billing.ParseRepriceBatchID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid reprice batch ID").WithParam("id"))
+		return id, false
+	}
+	return id, true
+}
+
+// CreateRepriceBatch schedules every active subscription on a prior version
+// of price_key to move to the key's current price.
+func CreateRepriceBatch(r *httprequest.Request) {
+	var req billing.CreateRepriceBatchParams
 	if !r.BindJSON(&req) {
 		return
 	}
 	if strings.TrimSpace(req.PriceKey) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "price_key required")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "price_key required").WithParam("price_key"))
 		return
 	}
 	if req.EffectiveAt.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "effective_at required")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "effective_at required").WithParam("effective_at"))
 		return
 	}
-	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
+	if !repriceServiceReady(r) {
 		return
 	}
-	out, err := r.State.RepriceService.RepriceAllPriorVersions(r.Request.Context(), subscriptions.RepriceAllPriorVersionsRequest{
-		PriceKey:               req.PriceKey,
-		EffectiveAt:            req.EffectiveAt,
-		AcknowledgeShortNotice: req.AcknowledgeShortNotice,
-	})
+	out, err := r.State.RepriceService.CreateBatch(r.Request.Context(), req)
 	if err != nil {
 		writeRepriceError(r, err)
 		return
@@ -120,22 +70,21 @@ func RepriceAllPriorVersions(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
-// PreviewRepriceAllPriorVersions is #777's read-only dry-run counterpart to
-// RepriceAllPriorVersions: returns the affected-count WITHOUT scheduling
-// anything — the console wizard's Step 2 preview, called before the price
-// edit that would create the new version. Not part of #773's original
-// surface (which only exposed the mutating bulk call).
-func PreviewRepriceAllPriorVersions(r *httprequest.Request) {
-	key := strings.TrimSpace(r.Query("price_key"))
-	if key == "" {
-		r.ErrorJSON(http.StatusBadRequest, "price_key required")
+// PreviewRepriceBatch counts the subscribers a batch for price_key would
+// move, without writing anything.
+func PreviewRepriceBatch(r *httprequest.Request) {
+	var req billing.RepriceBatchPreviewParams
+	if !r.BindJSON(&req) {
 		return
 	}
-	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
+	if strings.TrimSpace(req.PriceKey) == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "price_key required").WithParam("price_key"))
 		return
 	}
-	out, err := r.State.RepriceService.PreviewAllPriorVersions(r.Request.Context(), key)
+	if !repriceServiceReady(r) {
+		return
+	}
+	out, err := r.State.RepriceService.PreviewBatch(r.Request.Context(), req.PriceKey)
 	if err != nil {
 		writeRepriceError(r, err)
 		return
@@ -143,116 +92,115 @@ func PreviewRepriceAllPriorVersions(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ListRepriceBatchesByKey lists a price key's bulk reprice operations, most
-// recent first — the #777 console price page's "is there a pending
-// migration for this key" surface (without already knowing a batch id).
-func ListRepriceBatchesByKey(r *httprequest.Request) {
-	key := strings.TrimSpace(r.Query("price_key"))
-	if key == "" {
-		r.ErrorJSON(http.StatusBadRequest, "price_key required")
+// RepriceBatchQuery filters GET /reprice-batches.
+type RepriceBatchQuery struct {
+	PriceKey string `form:"price_key"`
+}
+
+// ListRepriceBatches is one page of the merchant's batches, newest first.
+func ListRepriceBatches(r *httprequest.Request) {
+	var query RepriceBatchQuery
+	if !r.BindQuery(&query) {
 		return
 	}
-	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
+	page, ok := r.Page()
+	if !ok || !repriceServiceReady(r) {
 		return
 	}
-	limit := parseIntDefault(r.Query("limit"), 20)
-	offset := parseIntDefault(r.Query("offset"), 0)
-	items, err := r.State.RepriceService.ListBatchesForKey(r.Request.Context(), key, limit, offset)
+	out, err := r.State.RepriceService.ListBatches(r.Request.Context(), billing.RepriceBatchListParams{PageRequest: page, PriceKey: query.PriceKey})
 	if err != nil {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, PaginatedResponse[subscriptions.RepriceBatchView]{
-		Items:  subscriptions.RepriceBatchViews(items),
-		Total:  int64(len(items)),
-		Limit:  limit,
-		Offset: offset,
+	r.SuccessJSON(out)
+}
+
+// GetRepriceBatch reads one batch with its reprices counted by status.
+func GetRepriceBatch(r *httprequest.Request) {
+	id, ok := repriceBatchIDParam(r)
+	if !ok || !repriceServiceReady(r) {
+		return
+	}
+	out, err := r.State.RepriceService.GetBatch(r.Request.Context(), id)
+	if err != nil {
+		writeRepriceError(r, err)
+		return
+	}
+	r.SuccessJSON(out)
+}
+
+// CancelRepriceBatch cancels the batch's still-scheduled reprices.
+func CancelRepriceBatch(r *httprequest.Request) {
+	id, ok := repriceBatchIDParam(r)
+	if !ok || !repriceServiceReady(r) {
+		return
+	}
+	out, err := r.State.RepriceService.CancelBatch(r.Request.Context(), id)
+	if err != nil {
+		writeRepriceError(r, err)
+		return
+	}
+	r.SuccessJSON(out)
+}
+
+// RepriceQuery filters GET /reprices.
+type RepriceQuery struct {
+	SubscriptionID billing.SubscriptionID `form:"subscription_id"`
+	RepriceBatchID billing.RepriceBatchID `form:"reprice_batch_id"`
+	Status         string                 `form:"status"`
+}
+
+// ListReprices is one page of the merchant's reprices, newest first.
+func ListReprices(r *httprequest.Request) {
+	var query RepriceQuery
+	if !r.BindQuery(&query) {
+		return
+	}
+	status := billing.RepriceStatus(query.Status)
+	switch status {
+	case "", billing.RepriceScheduled, billing.RepriceApplied, billing.RepriceCanceled, billing.RepriceBlocked:
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "status must be scheduled, applied, canceled or blocked").WithParam("status"))
+		return
+	}
+	page, ok := r.Page()
+	if !ok || !repriceServiceReady(r) {
+		return
+	}
+	out, err := r.State.RepriceService.ListReprices(r.Request.Context(), billing.RepriceListParams{
+		PageRequest: page, SubscriptionID: query.SubscriptionID, RepriceBatchID: query.RepriceBatchID, Status: status,
 	})
-}
-
-// ListSubscriptionReprices lists scheduled/applied/canceled reprices, filtered
-// by subscription_id / reprice_batch_id / status — the inspect-before-effect
-// surface the #777 console wizard needs.
-func ListSubscriptionReprices(r *httprequest.Request) {
-	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
-		return
-	}
-	var filter subscriptions.SubscriptionRepriceFilter
-	if raw := strings.TrimSpace(r.Query("subscription_id")); raw != "" {
-		id, err := billing.ParseSubscriptionID(raw)
-		if err != nil || id.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid subscription_id")
-			return
-		}
-		subscriptionID := id.UUID()
-		filter.SubscriptionID = &subscriptionID
-	}
-	if raw := strings.TrimSpace(r.Query("reprice_batch_id")); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid reprice_batch_id")
-			return
-		}
-		filter.RepriceBatchID = &id
-	}
-	if raw := strings.TrimSpace(r.Query("status")); raw != "" {
-		status := models.RepriceStatus(raw)
-		filter.Status = &status
-	}
-	limit := parseIntDefault(r.Query("limit"), 100)
-	offset := parseIntDefault(r.Query("offset"), 0)
-	items, err := r.State.RepriceService.List(r.Request.Context(), filter, limit, offset)
 	if err != nil {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, PaginatedResponse[subscriptions.SubscriptionRepriceView]{
-		Items:  subscriptions.SubscriptionRepriceViews(items),
-		Total:  int64(len(items)),
-		Limit:  limit,
-		Offset: offset,
-	})
+	r.SuccessJSON(out)
 }
 
-// GetSubscriptionReprice returns a single reprice row (scheduled, applied, or
-// canceled).
-func GetSubscriptionReprice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid reprice id")
+// GetReprice reads one reprice.
+func GetReprice(r *httprequest.Request) {
+	id, ok := repriceIDParam(r)
+	if !ok || !repriceServiceReady(r) {
 		return
 	}
-	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
-		return
-	}
-	out, err := r.State.RepriceService.GetByID(r.Request.Context(), id)
+	out, err := r.State.RepriceService.GetReprice(r.Request.Context(), id)
 	if err != nil {
-		writeRefusal(r, err, "failed to load reprice")
-		return
-	}
-	r.JSON(http.StatusOK, subscriptions.SubscriptionRepriceViewOf(out))
-}
-
-// CancelSubscriptionReprice cancels a SCHEDULED reprice before it takes
-// effect. Refuses (409) if it already applied or was already canceled —
-// cancel-before-effective is enforced at the DB layer, so an already-flipped
-// subscription is never touched by a late cancel.
-func CancelSubscriptionReprice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid reprice id")
-		return
-	}
-	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
-		return
-	}
-	if err := r.State.RepriceService.Cancel(r.Request.Context(), id); err != nil {
 		writeRepriceError(r, err)
 		return
 	}
-	r.SuccessJSONMessage("reprice canceled")
+	r.SuccessJSON(out)
+}
+
+// CancelReprice cancels a scheduled reprice and answers it.
+func CancelReprice(r *httprequest.Request) {
+	id, ok := repriceIDParam(r)
+	if !ok || !repriceServiceReady(r) {
+		return
+	}
+	out, err := r.State.RepriceService.CancelReprice(r.Request.Context(), id)
+	if err != nil {
+		writeRepriceError(r, err)
+		return
+	}
+	r.SuccessJSON(out)
 }

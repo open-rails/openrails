@@ -21,7 +21,7 @@ package collection
 // subscription lifecycle's FailMembership chokepoint.
 const (
 	// CertaintyProviderConfirmedDead: the provider itself says the schedule is
-	// gone (roster cancelled/expired, or absent from a PROVEN-exhaustive
+	// gone (roster canceled/expired, or absent from a PROVEN-exhaustive
 	// roster). Mirroring provider truth, not our inference.
 	CertaintyProviderConfirmedDead = "provider_confirmed_dead"
 	// CertaintyNonRetryableDecline: a recorded decline whose rail code means

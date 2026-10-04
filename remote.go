@@ -26,7 +26,6 @@ import (
 type Client struct {
 	// engine is the in-process engine behind New; nil for NewRemote.
 	engine                *engine.Engine
-	ProductAccess         *ProductAccessClient
 	PaymentProviders      *PaymentProviderClient
 	MerchantConfiguration *MerchantConfigurationClient
 	baseURL               string
@@ -269,85 +268,68 @@ func (c *Client) SetMerchantSettings(ctx context.Context, settings billing.Merch
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil, requestOptions...)
 }
 
-// ListActiveEntitlements returns active records for up to 500 subjects, keyed
-// by every requested subject after trim and dedupe; unknown subjects map to an
-// empty slice. A zero at means now.
-func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time, requestOptions ...RequestOption) (map[string][]billing.EntitlementRecord, error) {
-	body := map[string]any{
-		"subjects": subjects,
+// ListEntitlements returns the active entitlements of up to
+// billing.MaxEntitlementLookupCustomers customers at params.At (zero: now).
+// Every requested customer is present; one with none maps to an empty list.
+func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.EntitlementLookup, error) {
+	if len(params.CustomerIDs) == 0 {
+		return nil, invalidErr("customer_ids is required")
 	}
-	if !at.IsZero() {
-		body["at"] = at.UTC().Format(time.RFC3339Nano)
-	}
-	var out map[string][]billing.EntitlementRecord
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out, requestOptions...); err != nil {
+	var out billing.EntitlementLookup
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/entitlements/lookup", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	if out == nil {
-		out = map[string][]billing.EntitlementRecord{}
-	}
-	return out, nil
+	return &out, nil
 }
 
-// ListEntitlements is ListActiveEntitlements for one subject.
-func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time, requestOptions ...RequestOption) ([]billing.EntitlementRecord, error) {
-	if strings.TrimSpace(subject) == "" {
-		return nil, invalidErr("subject is required")
-	}
-	out, err := c.ListActiveEntitlements(ctx, []string{subject}, at, requestOptions...)
+// HasEntitlement reports whether the customer holds entitlement at at (zero:
+// now). It reads that one key.
+func (c *Client) HasEntitlement(ctx context.Context, customerID billing.CustomerID, entitlement string, at time.Time, requestOptions ...RequestOption) (bool, error) {
+	path, err := customerIDPath(customerID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	return out[subject], nil
-}
-
-// HasEntitlement performs one exact resource-key lookup, without enumerating
-// the customer's other grants.
-func (c *Client) HasEntitlement(ctx context.Context, subject string, entitlement string, at time.Time, requestOptions ...RequestOption) (bool, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return false, invalidErr("entitlement is required")
 	}
-	access, err := c.CheckEntitlements(ctx, subject, []string{entitlement}, at, requestOptions...)
-	if err != nil {
+	var out billing.EntitlementCheck
+	if err := c.do(ctx, http.MethodPost, path+"/entitlements/check", billing.EntitlementCheckParams{Entitlements: []string{entitlement}, At: at}, &out, requestOptions...); err != nil {
 		return false, err
 	}
-	return access[entitlement], nil
+	return out.Entitlements[entitlement], nil
 }
 
-// ListCustomersWithEntitlement returns every customer holding entitlement at
-// the given time (zero means now). It reads all pages.
-func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, requestOptions ...RequestOption) ([]string, error) {
+// ListEntitlementCustomers returns one page of the customers holding
+// entitlement at params.At (zero: now), ordered by customer id.
+func (c *Client) ListEntitlementCustomers(ctx context.Context, entitlement string, params billing.EntitlementCustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerID], error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return nil, invalidErr("entitlement is required")
 	}
-	base := "/v1/merchant/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
-	if !at.IsZero() {
-		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339Nano))
+	query := pageValues(nil, params.PageRequest)
+	if !params.At.IsZero() {
+		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
 	}
-	var all []string
-	cursor := ""
-	for {
-		path := base
-		if cursor != "" {
-			path += "&cursor=" + url.QueryEscape(cursor)
-		}
-		var out struct {
-			Customers  []string `json:"customers"`
-			NextCursor string   `json:"next_cursor"`
-			HasMore    bool     `json:"has_more"`
-		}
-		if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
-			return nil, err
-		}
-		all = append(all, out.Customers...)
-		if !out.HasMore || strings.TrimSpace(out.NextCursor) == "" {
-			break
-		}
-		cursor = out.NextCursor
+	var out billing.ListPage[billing.CustomerID]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/entitlements/"+url.PathEscape(entitlement)+"/customers?"+query.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
 	}
-	return all, nil
+	return &out, nil
+}
+
+// GetEffectiveTier returns the tier the customer holds in a tier group; its
+// Tier is nil when they hold none.
+func (c *Client) GetEffectiveTier(ctx context.Context, customerID billing.CustomerID, group string, requestOptions ...RequestOption) (*billing.EffectiveTier, error) {
+	path, err := customerIDPath(customerID)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.EffectiveTier
+	if err := c.do(ctx, http.MethodGet, path+"/tier?"+url.Values{"group": {group}}.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // normalizeCurrency preserves non-empty currency/unit codes and lets the service

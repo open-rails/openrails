@@ -15,7 +15,7 @@ import (
 // On-chain code reference (subscriptions program unless noted):
 //
 //	400 AmountExceedsPeriodLimit — per-period cap reached (already paid).
-//	508 SubscriptionCancelled    — pull after expires_at_ts (cancel at period end).
+//	508 SubscriptionCanceled    — pull after expires_at_ts (cancel at period end).
 //	519 PlanTermsMismatch        — ghost/changed plan; pulling is hopeless.
 //	SPL token 1 InsufficientFunds — subscriber balance below the pull amount.
 //	SPL token 4 OwnerMismatch     — subscriber revoked the token delegate.
@@ -31,13 +31,13 @@ const (
 	// no longer move funds -> terminal (cancel + stop). cancel_subscription alone
 	// does NOT produce an error (it does not block pulls; #263).
 	onchainTokenOwnerMismatch = 4
-	// onchainSubscriptionCancelled — subscriptions program SubscriptionCancelled:
-	// the subscription was cancelled (cancel_subscription set expires_at_ts to the
+	// onchainSubscriptionCanceled — subscriptions program SubscriptionCanceled:
+	// the subscription was canceled (cancel_subscription set expires_at_ts to the
 	// end of the current period) and the period has now elapsed, so the pull lands
 	// AFTER expires_at_ts. transfer_subscription rejects this -> terminal: the
-	// cranker must stop and mark the membership cancelled, never dun. Together with
+	// cranker must stop and mark the membership canceled, never dun. Together with
 	// the cancel mirror this completes "cancel at period end".
-	onchainSubscriptionCancelled = 508
+	onchainSubscriptionCanceled = 508
 	// onchainPlanTermsMismatch — subscriptions program PlanTermsMismatch: the plan
 	// the subscription points at no longer matches its recorded terms (a ghost or
 	// changed plan). On a PULL this is hopeless — re-pulling will keep failing the
@@ -78,10 +78,10 @@ func ClassifyCrankError(err error) CrankFailure {
 		return CrankFailure{Code: DuplicateTransaction, Category: AlreadyPaid, OnChainCode: code, Raw: raw}
 	case onchainTokenOwnerMismatch:
 		return CrankFailure{Code: DeclinedStopRecurring, Category: Terminal, OnChainCode: code, Raw: raw}
-	case onchainSubscriptionCancelled, onchainPlanTermsMismatch:
-		// Cancelled-at-period-end pull (508) or ghost/changed plan (519): the
+	case onchainSubscriptionCanceled, onchainPlanTermsMismatch:
+		// Canceled-at-period-end pull (508) or ghost/changed plan (519): the
 		// subscription will never pull successfully again -> stop and mark the
-		// membership cancelled. Never dun.
+		// membership canceled. Never dun.
 		return CrankFailure{Code: DeclinedStopRecurring, Category: Terminal, OnChainCode: code, Raw: raw}
 	case onchainTokenInsufficientFunds:
 		return CrankFailure{Code: InsufficientFunds, Category: Recoverable, OnChainCode: code, Raw: raw}

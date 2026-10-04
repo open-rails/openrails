@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
@@ -37,7 +38,7 @@ func ListPublicProducts(r *httprequest.Request) {
 	}
 	for i := range out.Items {
 		for j := range out.Items[i].Prices {
-			out.Items[i].Prices[j] = PublicPrice(out.Items[i].Prices[j])
+			out.Items[i].Prices[j] = models.PublicPrice(out.Items[i].Prices[j])
 		}
 	}
 	r.JSON(http.StatusOK, out)
@@ -64,19 +65,7 @@ func ListPublicPrices(r *httprequest.Request) {
 		return
 	}
 	for i := range out.Items {
-		out.Items[i] = PublicPrice(out.Items[i])
+		out.Items[i] = models.PublicPrice(out.Items[i])
 	}
 	r.JSON(http.StatusOK, out)
-}
-
-// PublicPrice is a price as a buyer sees it: which PSPs sell it, without the
-// PSPs' own identifiers or the operator's pending work.
-func PublicPrice(p billing.Price) billing.Price {
-	psps := make(map[string]billing.PSPLinkState, len(p.PSPs))
-	for key, state := range p.PSPs {
-		psps[key] = billing.PSPLinkState{Status: state.Status, SyncStatus: billing.SyncStatusUnknown}
-	}
-	p.PSPs = psps
-	p.PendingManualActions = []billing.PendingAction{}
-	return p
 }

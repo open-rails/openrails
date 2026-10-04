@@ -1020,8 +1020,8 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	}
 	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil && s.DB != nil {
 		feedback := func(sub *models.Subscription) string {
-			// A membership already cancelled is not this dispute's cancellation to undo.
-			if sub.Status == models.StatusCancelled {
+			// A membership already canceled is not this dispute's cancellation to undo.
+			if sub.Status == models.StatusCanceled {
 				return fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 			}
 			return fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
@@ -1151,7 +1151,7 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		return nil
 	}
-	if sub.Status != models.StatusCancelled {
+	if sub.Status != models.StatusCanceled {
 		return nil
 	}
 	// SEC-33: only the cancellation this dispute caused is undone; a user,
@@ -1159,7 +1159,7 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	if sub.CancelType == nil || *sub.CancelType != models.CancelTypeChargeback || sub.CancelFeedback == nil ||
 		!strings.HasPrefix(*sub.CancelFeedback, "STRIPE DISPUTE "+disputeID+":") {
 		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "dispute_id": disputeID}).
-			Info("Stripe dispute won; subscription was not cancelled by this dispute and stays cancelled")
+			Info("Stripe dispute won; subscription was not canceled by this dispute and stays canceled")
 		return nil
 	}
 	now := s.now().UTC()

@@ -5,8 +5,8 @@ Branch: `feat/657-current-cutover-20260920`. Base: `7ef2ed1d2`.
 This port depends on the shared payment receipt/account identity correction.
 
 One subscriber supplies a replacement payment method already vaulted on the
-target account. The merchant or the authenticated owner submits
-`POST /v1/merchant/subscriptions/{id}/provider-cutover` (or `/v1/me/...`), with
+target account. The merchant submits
+`POST /v1/merchant/subscriptions/{id}/provider-cutover`, with
 `Idempotency-Key` and `target_payment_method_id` (the existing `pm_` ID), `expected_source_psp_id`, and
 `expected_target_psp_id`. The latter two are assertions, never routing overrides.
 A `/preview` POST validates the same request without creating an operation.

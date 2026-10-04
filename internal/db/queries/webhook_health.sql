@@ -78,7 +78,7 @@ JOIN billing.prices pr ON pr.id = s.price_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.auto_renew
   AND s.deleted_at IS NULL
   AND s.status IN ('pending','active','past_due','awaiting_method','unverified')
-  AND s.cancelled_at IS NULL
+  AND s.canceled_at IS NULL
   AND s.deletion_scheduled_at IS NULL
   AND EXISTS (
       SELECT 1 FROM billing.psps rma

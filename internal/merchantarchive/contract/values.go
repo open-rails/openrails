@@ -4,6 +4,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
@@ -13,9 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func ValidateValues(p Profile, values []*string) error {

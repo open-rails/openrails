@@ -44,11 +44,11 @@ const (
 type SubscriptionStatus string
 
 const (
-	SubscriptionStatusActive    SubscriptionStatus = "active"
-	SubscriptionStatusCancelled SubscriptionStatus = "cancelled"
-	SubscriptionStatusExpired   SubscriptionStatus = "expired"
-	SubscriptionStatusPastDue   SubscriptionStatus = "past_due"
-	SubscriptionStatusUnknown   SubscriptionStatus = "unknown"
+	SubscriptionStatusActive   SubscriptionStatus = "active"
+	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
+	SubscriptionStatusExpired  SubscriptionStatus = "expired"
+	SubscriptionStatusPastDue  SubscriptionStatus = "past_due"
+	SubscriptionStatusUnknown  SubscriptionStatus = "unknown"
 )
 
 // LocalMaterializeStatus maps a REMOTE roster status onto the canonical LOCAL
@@ -57,7 +57,7 @@ const (
 // paid-through date passed — a clock reading, not a local lifecycle state, and
 // there is no longer a local status that says it. When a pull PROVES the remote
 // subscription is dead, the #665 decider converges the existing local row to
-// cancelled (cancel_type=expired); it never mints one.
+// canceled (cancel_type=expired); it never mints one.
 func LocalMaterializeStatus(remote SubscriptionStatus) (models.SubscriptionStatus, bool) {
 	switch remote {
 	case SubscriptionStatusActive:

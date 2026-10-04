@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -36,15 +37,15 @@ func TestLegacyNMIDrift(t *testing.T) {
 
 	w.pull()
 	require.Empty(t, w.openFindings("pull.subscription.drift"), "a disarmed merchant's pull is gated")
-	require.Equal(t, "active", w.subscription(remote, deleted.sub).Status, "nothing changes without the switch")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(remote, deleted.sub).Status, "nothing changes without the switch")
 
 	w.armDestructive()
 	w.pull()
 	require.ElementsMatch(t, []string{amount.sub.UUID().String(), plan.sub.UUID().String(), paused.sub.UUID().String()}, w.openFindings("pull.subscription.drift"))
 	require.Contains(t, w.openFindings("pull.payment_method.mismatch"), vaultGone.railCust, "the removed vault card is reported")
-	require.Equal(t, "cancelled", w.subscription(remote, deleted.sub).Status, "a schedule NMI deleted is mirrored")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, deleted.sub).Status, "a schedule NMI deleted is mirrored")
 	for _, l := range []*legacy{amount, plan, paused, vaultGone, clean} {
-		require.Equal(t, "active", w.subscription(remote, l.sub).Status, "drift is reported, never acted on")
+		require.Equal(t, billing.SubscriptionActive, w.subscription(remote, l.sub).Status, "drift is reported, never acted on")
 		require.True(t, l.c.entitled(l.ent))
 	}
 	require.Equal(t, "14.99", w.nmi.Schedule(amount.railSub).Amount, "the schedule is left as NMI holds it")

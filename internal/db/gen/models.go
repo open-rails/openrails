@@ -350,7 +350,7 @@ type BillingEntitlement struct {
 	MerchantID   uuid.UUID
 	// The customer this entitlement window belongs to.
 	CustomerID          uuid.UUID
-	GrantID             *uuid.UUID
+	GrantID             uuid.UUID
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
 }
@@ -1257,23 +1257,21 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
-// Header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.
+// Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id.
 type BillingRepriceBatch struct {
-	ID                     uuid.UUID
-	MerchantID             uuid.UUID
-	PriceKey               *string
-	ToPriceID              uuid.UUID
-	EffectiveAt            time.Time
-	SubscriptionsMatched   int32
-	SubscriptionsScheduled int32
-	SubscriptionsSkipped   int32
-	CreatedAt              time.Time
-	Kind                   string
+	ID                   uuid.UUID
+	MerchantID           uuid.UUID
+	PriceKey             *string
+	ToPriceID            uuid.UUID
+	EffectiveAt          time.Time
+	SubscriptionsMatched int32
+	SubscriptionsSkipped int32
+	CreatedAt            time.Time
+	Kind                 string
 	// The retired plan's price for a plan_change batch (the cohort selector); NULL for price-key batches.
 	SourcePriceID *uuid.UUID
 	// Operator's choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.
-	FallbackPolicy       string
-	SubscriptionsBlocked int32
+	FallbackPolicy string
 }
 
 // Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive.
@@ -1342,12 +1340,11 @@ type BillingSubscription struct {
 	PriceID *uuid.UUID
 	// Denormalized product ID for efficient user+product lookups without joining prices
 	ProductID uuid.UUID
-	// Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; cancelled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.
+	// Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; canceled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.
 	Status                string
 	Rail                  string
 	CollectionPolicy      string
 	RailSubscriptionID    string
-	UserEmail             *string
 	PaymentMethodID       *uuid.UUID
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
@@ -1359,7 +1356,7 @@ type BillingSubscription struct {
 	LastRetryAt              *time.Time
 	RetryAttempts            *int32
 	NextRetryAt              *time.Time
-	CancelledAt              *time.Time
+	CanceledAt               *time.Time
 	CancelType               *string
 	CancelFeedback           *string
 	EntitlementsSpecSnapshot []byte
@@ -1411,7 +1408,7 @@ type BillingSubscriptionStatusTransition struct {
 	SubscriptionID uuid.UUID
 	FromStatus     *string
 	ToStatus       string
-	// The subscription's cancel_type at transition time (meaningful for to_status=cancelled).
+	// The subscription's cancel_type at transition time (meaningful for to_status=canceled).
 	CancelType      *string
 	OccurredAt      time.Time
 	Decision        *string

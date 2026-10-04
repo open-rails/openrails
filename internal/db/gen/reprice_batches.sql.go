@@ -15,26 +15,23 @@ import (
 const createPlanMigrationBatch = `-- name: CreatePlanMigrationBatch :one
 INSERT INTO billing.reprice_batches (
     merchant_id, to_price_id, effective_at, kind, source_price_id, fallback_policy,
-    subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, subscriptions_blocked
+    subscriptions_matched, subscriptions_skipped
 ) VALUES (
     $1::uuid, $2::uuid, $3::timestamptz,
     'plan_change', $4::uuid, $5::text,
-    $6::int, $7::int,
-    $8::int, $9::int
+    $6::int, $7::int
 )
-RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked
+RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy
 `
 
 type CreatePlanMigrationBatchParams struct {
-	MerchantID             uuid.UUID
-	ToPriceID              uuid.UUID
-	EffectiveAt            time.Time
-	SourcePriceID          uuid.UUID
-	FallbackPolicy         string
-	SubscriptionsMatched   int32
-	SubscriptionsScheduled int32
-	SubscriptionsSkipped   int32
-	SubscriptionsBlocked   int32
+	MerchantID           uuid.UUID
+	ToPriceID            uuid.UUID
+	EffectiveAt          time.Time
+	SourcePriceID        uuid.UUID
+	FallbackPolicy       string
+	SubscriptionsMatched int32
+	SubscriptionsSkipped int32
 }
 
 // #813: header row for one plan-migration operation (kind=plan_change).
@@ -46,9 +43,7 @@ func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMi
 		arg.SourcePriceID,
 		arg.FallbackPolicy,
 		arg.SubscriptionsMatched,
-		arg.SubscriptionsScheduled,
 		arg.SubscriptionsSkipped,
-		arg.SubscriptionsBlocked,
 	)
 	var i BillingRepriceBatch
 	err := row.Scan(
@@ -58,13 +53,11 @@ func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMi
 		&i.ToPriceID,
 		&i.EffectiveAt,
 		&i.SubscriptionsMatched,
-		&i.SubscriptionsScheduled,
 		&i.SubscriptionsSkipped,
 		&i.CreatedAt,
 		&i.Kind,
 		&i.SourcePriceID,
 		&i.FallbackPolicy,
-		&i.SubscriptionsBlocked,
 	)
 	return i, err
 }
@@ -72,26 +65,26 @@ func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMi
 const createRepriceBatch = `-- name: CreateRepriceBatch :one
 
 INSERT INTO billing.reprice_batches (
-    merchant_id, price_key, to_price_id, effective_at,
-    subscriptions_matched, subscriptions_scheduled, subscriptions_skipped
+    merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_skipped
 ) VALUES (
     $1::uuid, $2::text, $3::uuid, $4::timestamptz,
-    $5::int, $6::int, $7::int
+    $5::int, $6::int
 )
-RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked
+RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy
 `
 
 type CreateRepriceBatchParams struct {
-	MerchantID             uuid.UUID
-	PriceKey               *string
-	ToPriceID              uuid.UUID
-	EffectiveAt            time.Time
-	SubscriptionsMatched   int32
-	SubscriptionsScheduled int32
-	SubscriptionsSkipped   int32
+	MerchantID           uuid.UUID
+	PriceKey             *string
+	ToPriceID            uuid.UUID
+	EffectiveAt          time.Time
+	SubscriptionsMatched int32
+	SubscriptionsSkipped int32
 }
 
 // billing.reprice_batches (#773): header row for one bulk reprice operation.
+// Matched and skipped are facts of creation; the per-status counts are
+// derived from the batch's reprices on read.
 func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatchParams) (BillingRepriceBatch, error) {
 	row := q.db.QueryRow(ctx, createRepriceBatch,
 		arg.MerchantID,
@@ -99,7 +92,6 @@ func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatch
 		arg.ToPriceID,
 		arg.EffectiveAt,
 		arg.SubscriptionsMatched,
-		arg.SubscriptionsScheduled,
 		arg.SubscriptionsSkipped,
 	)
 	var i BillingRepriceBatch
@@ -110,90 +102,130 @@ func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatch
 		&i.ToPriceID,
 		&i.EffectiveAt,
 		&i.SubscriptionsMatched,
-		&i.SubscriptionsScheduled,
 		&i.SubscriptionsSkipped,
 		&i.CreatedAt,
 		&i.Kind,
 		&i.SourcePriceID,
 		&i.FallbackPolicy,
-		&i.SubscriptionsBlocked,
 	)
 	return i, err
 }
 
-const getRepriceBatchByID = `-- name: GetRepriceBatchByID :one
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM billing.reprice_batches WHERE merchant_id = $1::uuid AND id = $2::uuid
+const getRepriceBatch = `-- name: GetRepriceBatch :one
+SELECT b.id, b.merchant_id, b.price_key, b.to_price_id, b.effective_at, b.subscriptions_matched, b.subscriptions_skipped, b.created_at, b.kind, b.source_price_id, b.fallback_policy, c.scheduled, c.applied, c.canceled, c.blocked
+FROM billing.reprice_batches b
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE r.status = 'scheduled') AS scheduled,
+           count(*) FILTER (WHERE r.status = 'applied') AS applied,
+           count(*) FILTER (WHERE r.status = 'canceled') AS canceled,
+           count(*) FILTER (WHERE r.status = 'blocked') AS blocked
+    FROM billing.subscription_reprices r
+    WHERE r.merchant_id = b.merchant_id AND r.reprice_batch_id = b.id
+) c
+WHERE b.merchant_id = $1::uuid AND b.id = $2::uuid
 `
 
-type GetRepriceBatchByIDParams struct {
+type GetRepriceBatchParams struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetRepriceBatchByID(ctx context.Context, arg GetRepriceBatchByIDParams) (BillingRepriceBatch, error) {
-	row := q.db.QueryRow(ctx, getRepriceBatchByID, arg.MerchantID, arg.ID)
-	var i BillingRepriceBatch
+type GetRepriceBatchRow struct {
+	BillingRepriceBatch BillingRepriceBatch
+	Scheduled           int64
+	Applied             int64
+	Canceled            int64
+	Blocked             int64
+}
+
+func (q *Queries) GetRepriceBatch(ctx context.Context, arg GetRepriceBatchParams) (GetRepriceBatchRow, error) {
+	row := q.db.QueryRow(ctx, getRepriceBatch, arg.MerchantID, arg.ID)
+	var i GetRepriceBatchRow
 	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.PriceKey,
-		&i.ToPriceID,
-		&i.EffectiveAt,
-		&i.SubscriptionsMatched,
-		&i.SubscriptionsScheduled,
-		&i.SubscriptionsSkipped,
-		&i.CreatedAt,
-		&i.Kind,
-		&i.SourcePriceID,
-		&i.FallbackPolicy,
-		&i.SubscriptionsBlocked,
+		&i.BillingRepriceBatch.ID,
+		&i.BillingRepriceBatch.MerchantID,
+		&i.BillingRepriceBatch.PriceKey,
+		&i.BillingRepriceBatch.ToPriceID,
+		&i.BillingRepriceBatch.EffectiveAt,
+		&i.BillingRepriceBatch.SubscriptionsMatched,
+		&i.BillingRepriceBatch.SubscriptionsSkipped,
+		&i.BillingRepriceBatch.CreatedAt,
+		&i.BillingRepriceBatch.Kind,
+		&i.BillingRepriceBatch.SourcePriceID,
+		&i.BillingRepriceBatch.FallbackPolicy,
+		&i.Scheduled,
+		&i.Applied,
+		&i.Canceled,
+		&i.Blocked,
 	)
 	return i, err
 }
 
-const listRepriceBatchesByPriceKey = `-- name: ListRepriceBatchesByPriceKey :many
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM billing.reprice_batches
-WHERE merchant_id = $1::uuid
-  AND price_key = $2::text
-ORDER BY created_at DESC
-LIMIT $4::int OFFSET $3::int
+const listRepriceBatchesPage = `-- name: ListRepriceBatchesPage :many
+SELECT b.id, b.merchant_id, b.price_key, b.to_price_id, b.effective_at, b.subscriptions_matched, b.subscriptions_skipped, b.created_at, b.kind, b.source_price_id, b.fallback_policy, c.scheduled, c.applied, c.canceled, c.blocked
+FROM billing.reprice_batches b
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE r.status = 'scheduled') AS scheduled,
+           count(*) FILTER (WHERE r.status = 'applied') AS applied,
+           count(*) FILTER (WHERE r.status = 'canceled') AS canceled,
+           count(*) FILTER (WHERE r.status = 'blocked') AS blocked
+    FROM billing.subscription_reprices r
+    WHERE r.merchant_id = b.merchant_id AND r.reprice_batch_id = b.id
+) c
+WHERE b.merchant_id = $1::uuid
+  AND ($2::text IS NULL OR b.price_key = $2::text)
+  AND ($3::timestamptz IS NULL OR (b.created_at, b.id) < ($3::timestamptz, $4::uuid))
+ORDER BY b.created_at DESC, b.id DESC
+LIMIT $5::int
 `
 
-type ListRepriceBatchesByPriceKeyParams struct {
+type ListRepriceBatchesPageParams struct {
 	MerchantID uuid.UUID
-	PriceKey   string
-	PageOffset int32
-	PageLimit  int32
+	PriceKey   *string
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
 }
 
-func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepriceBatchesByPriceKeyParams) ([]BillingRepriceBatch, error) {
-	rows, err := q.db.Query(ctx, listRepriceBatchesByPriceKey,
+type ListRepriceBatchesPageRow struct {
+	BillingRepriceBatch BillingRepriceBatch
+	Scheduled           int64
+	Applied             int64
+	Canceled            int64
+	Blocked             int64
+}
+
+func (q *Queries) ListRepriceBatchesPage(ctx context.Context, arg ListRepriceBatchesPageParams) ([]ListRepriceBatchesPageRow, error) {
+	rows, err := q.db.Query(ctx, listRepriceBatchesPage,
 		arg.MerchantID,
 		arg.PriceKey,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingRepriceBatch
+	var items []ListRepriceBatchesPageRow
 	for rows.Next() {
-		var i BillingRepriceBatch
+		var i ListRepriceBatchesPageRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.PriceKey,
-			&i.ToPriceID,
-			&i.EffectiveAt,
-			&i.SubscriptionsMatched,
-			&i.SubscriptionsScheduled,
-			&i.SubscriptionsSkipped,
-			&i.CreatedAt,
-			&i.Kind,
-			&i.SourcePriceID,
-			&i.FallbackPolicy,
-			&i.SubscriptionsBlocked,
+			&i.BillingRepriceBatch.ID,
+			&i.BillingRepriceBatch.MerchantID,
+			&i.BillingRepriceBatch.PriceKey,
+			&i.BillingRepriceBatch.ToPriceID,
+			&i.BillingRepriceBatch.EffectiveAt,
+			&i.BillingRepriceBatch.SubscriptionsMatched,
+			&i.BillingRepriceBatch.SubscriptionsSkipped,
+			&i.BillingRepriceBatch.CreatedAt,
+			&i.BillingRepriceBatch.Kind,
+			&i.BillingRepriceBatch.SourcePriceID,
+			&i.BillingRepriceBatch.FallbackPolicy,
+			&i.Scheduled,
+			&i.Applied,
+			&i.Canceled,
+			&i.Blocked,
 		); err != nil {
 			return nil, err
 		}
@@ -203,33 +235,4 @@ func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepr
 		return nil, err
 	}
 	return items, nil
-}
-
-const updatePlanMigrationBatchCounts = `-- name: UpdatePlanMigrationBatchCounts :execrows
-UPDATE billing.reprice_batches SET
-    subscriptions_scheduled = $1::int,
-    subscriptions_blocked = $2::int
-WHERE reprice_batches.merchant_id = $3::uuid AND id = $4
-`
-
-type UpdatePlanMigrationBatchCountsParams struct {
-	SubscriptionsScheduled int32
-	SubscriptionsBlocked   int32
-	MerchantID             uuid.UUID
-	ID                     uuid.UUID
-}
-
-// #813: re-sync a plan-migration batch header after rail pushes degrade
-// scheduled rows to blocked — the header must always agree with its rows.
-func (q *Queries) UpdatePlanMigrationBatchCounts(ctx context.Context, arg UpdatePlanMigrationBatchCountsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updatePlanMigrationBatchCounts,
-		arg.SubscriptionsScheduled,
-		arg.SubscriptionsBlocked,
-		arg.MerchantID,
-		arg.ID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }

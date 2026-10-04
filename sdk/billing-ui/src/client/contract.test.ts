@@ -15,27 +15,18 @@ it("calls only routes OpenRails mounts for customers", async () => {
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0]
     called.add(`${init?.method ?? "GET"} ${path}`)
-    return path.endsWith("/solana-cancel-tx")
-      ? Response.json({ transaction: "dHg=" })
-      : new Response(null, { status: 204 })
+    return new Response(null, { status: 204 })
   })
   const client = createBillingClient({ fetch })
   const calls: (() => Promise<unknown>)[] = [
     () => client.listSubscriptions(),
     () => client.getSubscription("sub_1"),
-    () => client.cancelSubscription("sub_1", { feedback: "why not" }),
+    () => client.cancelSubscription("sub_1", { reason: "why not" }),
     () => client.resumeSubscription("sub_1"),
     () => client.setSubscriptionPaymentMethod("sub_1", "pm_1"),
     () => client.previewTierChange("sub_1", "price_1"),
     () =>
       client.changeTier("sub_1", { priceId: "price_1", idempotencyKey: "k" }),
-    () => client.prepareSolanaTierChange("sub_1", "price_1"),
-    () =>
-      client.confirmSolanaTierChange("sub_1", {
-        signature: "sig",
-        newPriceId: "price_1",
-      }),
-    () => client.cancelSubscriptionOnChain("sub_1", async () => "sig"),
     () => client.listPaymentMethods(),
     () => client.addPaymentMethod({ psp_id: "psp_1", payment_token: "tok" }),
     () => client.createCardSetup({ pspId: "psp_1", idempotencyKey: "k" }),
@@ -61,5 +52,5 @@ it("calls only routes OpenRails mounts for customers", async () => {
     return !routes.some((r) => r.method === method && r.pattern.test(path))
   })
   expect(missing).toEqual([])
-  expect(called.size).toBe(24)
+  expect(called.size).toBe(20)
 })

@@ -46,7 +46,7 @@ func buildLocalIndex(local *LocalState) *localIndex {
 				idx.byPSID[s.RailSubscriptionID] = s
 			}
 		}
-		if email := strings.ToLower(strings.TrimSpace(s.UserEmail)); email != "" {
+		if email := strings.ToLower(strings.TrimSpace(s.CustomerEmail)); email != "" {
 			idx.byEmail[email] = append(idx.byEmail[email], s)
 		}
 	}
@@ -312,8 +312,8 @@ func localSubEvidence(s *LocalSubscription) map[string]any {
 		"rail":                 s.Rail,
 		"rail_subscription_id": s.RailSubscriptionID,
 	}
-	if s.UserEmail != "" {
-		ev["user_email"] = s.UserEmail
+	if s.CustomerEmail != "" {
+		ev["customer_email"] = s.CustomerEmail
 	}
 	if s.CurrentPeriodEndsAt != nil {
 		ev["current_period_ends_at"] = s.CurrentPeriodEndsAt.Format(time.RFC3339)
@@ -504,9 +504,9 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 	//
 	// #842: absence is only proof when the roster PROVES it covered everything.
 	// This used to force SubscriptionsExhaustive=true regardless of what the
-	// fetcher declared, so an empty or silently-truncated pull cancelled the
+	// fetcher declared, so an empty or silently-truncated pull canceled the
 	// merchant's whole book. The snapshot's own coverage decides now.
-	if traits.absenceMeansCancelled && snap.Coverage.SubscriptionsExhaustive {
+	if traits.absenceMeansCanceled && snap.Coverage.SubscriptionsExhaustive {
 		for _, s := range idx.byPSID {
 			if !s.IsLive() {
 				continue
@@ -526,7 +526,7 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 					"rail_subscription_id":         s.RailSubscriptionID,
 				},
 				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements (decider: provider-confirmed dead)",
-				// absenceMeansCancelled: the provider's live-only roster IS
+				// absenceMeansCanceled: the provider's live-only roster IS
 				// exhaustive for this subject — coverage-absence proof (#665).
 				Apply: decideApply(s, snap, now, opts),
 			}
@@ -622,7 +622,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		ProductID:          link.price.ProductID,
 		Status:             localStatus,
 		PeriodEndsAt:       r.NextBillingAt,
-		UserEmail:          strings.TrimSpace(r.Email),
+		CustomerEmail:      strings.TrimSpace(r.Email),
 		IdentityVia:        identityVia,
 	}
 	if r.LastBilledAt != nil {
@@ -742,7 +742,7 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 // evidence slice (roster entry + linked charge events + coverage), the shape
 // the decider consumes. forceExhaustive stamps SubscriptionsExhaustive for
 // providers whose live-only roster is exhaustive by construction
-// (traits.absenceMeansCancelled) even when a fixture omitted the coverage flag.
+// (traits.absenceMeansCanceled) even when a fixture omitted the coverage flag.
 func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot {
 	out := &RemoteSnapshot{
 		Provider:     snap.Provider,
@@ -794,7 +794,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 	}
 
 	localLive := s.IsLive()
-	remoteDead := r.Status == SubscriptionStatusCancelled || r.Status == SubscriptionStatusExpired
+	remoteDead := r.Status == SubscriptionStatusCanceled || r.Status == SubscriptionStatusExpired
 
 	switch {
 	case localLive && remoteDead:

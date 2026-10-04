@@ -12,9 +12,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// RemoveCancelledSubscriptionsForActivation preserves cancelled subscriptions for later
+// RemoveCanceledSubscriptionsForActivation preserves canceled subscriptions for later
 // refund/chargeback correlation while marking them as superseded by the new activation.
-func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, userID string, productID uuid.UUID, excludeID uuid.UUID) (int, error) {
+func RemoveCanceledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, userID string, productID uuid.UUID, excludeID uuid.UUID) (int, error) {
 	if dbb == nil {
 		return 0, fmt.Errorf("database handle is required")
 	}
@@ -42,7 +42,7 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 	if scopeErr != nil {
 		return 0, scopeErr
 	}
-	rows, err := dbb.Gen(ctx).MarkCancelledSubscriptionsSuperseded(ctx, gen.MarkCancelledSubscriptionsSupersededParams{
+	rows, err := dbb.Gen(ctx).MarkCanceledSubscriptionsSuperseded(ctx, gen.MarkCanceledSubscriptionsSupersededParams{
 		MerchantID:   scopeMerchantID.UUID(),
 		CustomerID:   tsid,
 		ProductID:    productID,
@@ -50,7 +50,7 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		ExcludeID:    exclude,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("mark cancelled subscriptions superseded: %w", err)
+		return 0, fmt.Errorf("mark canceled subscriptions superseded: %w", err)
 	}
 	return int(rows), nil
 }

@@ -119,7 +119,7 @@ export function SubscriptionsPanel({
           const interval = intervalLabel(s.price, m)
           const periodEnd = formatDate(s.current_period_ends_at, locale)
           const endedAt = formatDate(
-            s.ended_at ?? s.cancelled_at ?? s.current_period_ends_at,
+            s.ended_at ?? s.canceled_at ?? s.current_period_ends_at,
             locale
           )
           const scheduled = isEnding(s)
@@ -331,12 +331,13 @@ export function SubscriptionsPanel({
         onChain={onChain}
         appearance={appearance}
         pending={cancelling ? state.pending[cancelling.id] : undefined}
-        onConfirm={async (feedback) => {
+        onConfirm={async (reason) => {
           if (!cancelling) return null
-          const error =
-            onChain && sendSolanaTransaction
-              ? await state.cancelOnChain(cancelling.id, sendSolanaTransaction)
-              : await state.cancel(cancelling.id, feedback)
+          const error = await state.cancel(
+            cancelling.id,
+            reason,
+            sendSolanaTransaction
+          )
           if (!error) announce(t("cancel.done"))
           return error
         }}

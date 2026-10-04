@@ -28,9 +28,6 @@ import {
   paymentSchema,
   priceSchema,
   productSchema,
-  solanaCancelTxSchema,
-  solanaTierChangeSchema,
-  solanaTierChangeTxSchema,
   solanaTokensSchema,
   subscriptionSchema,
   tierChangePreviewSchema,
@@ -44,13 +41,12 @@ import {
   type Invoice,
   type ListPage,
   type NewCard,
+  type NextAction,
   type Page,
   type Payment,
   type PaymentMethod,
   type Price,
   type Product,
-  type SolanaTierChange,
-  type SolanaTierChangeTx,
   type SolanaToken,
   type Subscription,
   type TierChange,
@@ -92,8 +88,6 @@ export interface CursorOptions {
   signal?: AbortSignal
 }
 
-export type SolanaCancelStage = "preparing" | "signing" | "confirming"
-
 /**
  * Signs and submits a base64 transaction with the customer's wallet and
  * returns its signature. Throw `WalletRejectedError` when the user declines.
@@ -109,8 +103,41 @@ export class WalletRejectedError extends Error {
   }
 }
 
-export const CANCEL_FEEDBACK_MIN = 4
-export const CANCEL_FEEDBACK_MAX = 500
+export const CANCEL_REASON_MIN = 4
+export const CANCEL_REASON_MAX = 500
+
+/** A next action the customer's wallet completes. */
+export const isWalletAction = (next: NextAction | null | undefined): boolean =>
+  next?.type === "solana_sign_transactions" && !!next.transactions?.length
+
+/**
+ * Signs and sends a `solana_sign_transactions` next action's transactions in
+ * order and returns the last signature, the value the action is repeated
+ * with. A declined prompt is a local `wallet_rejected` error.
+ */
+export async function signWalletAction(
+  next: NextAction,
+  sendTransaction: SendSolanaTransaction
+): Promise<string> {
+  let signature = ""
+  for (const transaction of next.transactions ?? []) {
+    try {
+      signature = await sendTransaction(transaction)
+    } catch (err) {
+      if (isWalletRejection(err))
+        throw localError("wallet_rejected", "The wallet request was declined.")
+      throw err
+    }
+    if (!signature)
+      throw localError(
+        "wallet_no_signature",
+        "The wallet returned no signature."
+      )
+  }
+  if (!signature)
+    throw localError("wallet_no_signature", "The wallet returned no signature.")
+  return signature
+}
 
 type Query = Record<string, string | number | boolean | undefined>
 
@@ -255,7 +282,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   }
 
   const id = (value: string) => encodeURIComponent(value)
-  const subscriptionPage = pageSchema(subscriptionSchema)
+  const subscriptionPage = listPageSchema(subscriptionSchema)
   const methodPage = listPageSchema(paymentMethodSchema)
   const paymentPage = listPageSchema(paymentSchema)
   const invoicePage = listPageSchema(invoiceSchema)
@@ -269,15 +296,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   return {
     baseUrl: base,
 
+    /** One page of the customer's subscriptions, newest first. */
     listSubscriptions(
-      opts: ListOptions & { status?: string } = {}
-    ): Promise<Page<Subscription>> {
+      opts: CursorOptions & { status?: string } = {}
+    ): Promise<ListPage<Subscription>> {
       return json(subscriptionPage, "/me/subscriptions", {
-        query: {
-          status: opts.status ?? "all",
-          limit: opts.limit ?? 100,
-          offset: opts.offset,
-        },
+        query: { status: opts.status ?? "all", ...cursorQuery(opts, 100) },
         signal: opts.signal,
       })
     },
@@ -297,39 +321,51 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Queues the cancellation (202). Access and resumability follow the
-     * rail's cancel mode; re-read the subscription to observe the result.
+     * Cancels at period end and answers the subscription. When the rail needs
+     * the customer's step (`next_action`, a Solana wallet signature), the
+     * subscription is unchanged: complete it with `signWalletAction` and
+     * repeat with `signature`.
      */
-    async cancelSubscription(
+    cancelSubscription(
       subscriptionId: string,
-      input: { feedback: string }
-    ): Promise<void> {
-      await send(`/me/subscriptions/${id(subscriptionId)}/cancel`, {
-        method: "POST",
-        body: {
-          feedback: input.feedback.trim(),
-        } satisfies wire.CancelSubscriptionRequest,
-      })
+      input: { reason: string; signature?: string }
+    ): Promise<Subscription> {
+      return json(
+        subscriptionSchema,
+        `/me/subscriptions/${id(subscriptionId)}/cancel`,
+        {
+          method: "POST",
+          body: {
+            reason: input.reason.trim(),
+            signature: input.signature,
+          } satisfies wire.CustomerCancelSubscriptionRequest,
+        }
+      )
     },
 
-    /** Queues the resumption (202). */
-    async resumeSubscription(subscriptionId: string): Promise<void> {
-      await send(`/me/subscriptions/${id(subscriptionId)}/resume`, {
-        method: "POST",
-        body: {},
-      })
+    /** Undoes a scheduled cancel before the period ends. */
+    resumeSubscription(subscriptionId: string): Promise<Subscription> {
+      return json(
+        subscriptionSchema,
+        `/me/subscriptions/${id(subscriptionId)}/resume`,
+        { method: "POST", body: {} }
+      )
     },
 
-    async setSubscriptionPaymentMethod(
+    setSubscriptionPaymentMethod(
       subscriptionId: string,
       paymentMethodId: string
-    ): Promise<void> {
-      await send(`/me/subscriptions/${id(subscriptionId)}/payment-method`, {
-        method: "PUT",
-        body: {
-          payment_method_id: paymentMethodId,
-        } satisfies wire.UpdateSubscriptionPaymentMethodRequest,
-      })
+    ): Promise<Subscription> {
+      return json(
+        subscriptionSchema,
+        `/me/subscriptions/${id(subscriptionId)}/payment-method`,
+        {
+          method: "PUT",
+          body: {
+            payment_method_id: paymentMethodId,
+          } satisfies wire.UpdateSubscriptionPaymentMethodParams,
+        }
+      )
     },
 
     /** What `changeTier` would charge now and at the next renewal. */
@@ -343,7 +379,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         `/me/subscriptions/${id(subscriptionId)}/change-tier/preview`,
         {
           method: "POST",
-          body: { price_id: priceId } satisfies wire.ChangeTierRequest,
+          body: { price_id: priceId } satisfies wire.ChangeTierParams,
           signal,
         }
       )
@@ -354,102 +390,26 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * charges the saved card now, a downgrade applies at period end.
      * `idempotencyKey` identifies this attempt; reuse it until the change
      * resolves (`processing`, a `tier_change_in_flight` refusal or a lost
-     * response) so the stored result replays instead of charging twice.
+     * response) so the stored result replays instead of charging twice. A
+     * wallet next action (Solana) is completed with `signWalletAction` and
+     * the change repeated with `signature`.
      */
     changeTier(
       subscriptionId: string,
-      input: { priceId: string; idempotencyKey: string }
+      input: { priceId: string; idempotencyKey: string; signature?: string }
     ): Promise<TierChange> {
       return json(
         tierChangeSchema,
         `/me/subscriptions/${id(subscriptionId)}/change-tier`,
         {
           method: "POST",
-          body: { price_id: input.priceId } satisfies wire.ChangeTierRequest,
+          body: {
+            price_id: input.priceId,
+            signature: input.signature,
+          } satisfies wire.CustomerChangeTierRequest,
           headers: { "Idempotency-Key": input.idempotencyKey },
         }
       )
-    },
-
-    /**
-     * Solana rail: the tier-change transaction for the wallet to sign and
-     * send. Pass the resulting signature to `confirmSolanaTierChange`.
-     */
-    prepareSolanaTierChange(
-      subscriptionId: string,
-      newPriceId: string
-    ): Promise<SolanaTierChangeTx> {
-      return json(
-        solanaTierChangeTxSchema,
-        `/me/subscriptions/${id(subscriptionId)}/solana-tier-change`,
-        {
-          method: "POST",
-          body: {
-            new_price_id: newPriceId,
-          } satisfies wire.SolanaTierChangeRequest,
-        }
-      )
-    },
-
-    /**
-     * Records the landed transaction. Keep the signature until this succeeds:
-     * confirming it again replays the result (`already_confirmed`).
-     */
-    confirmSolanaTierChange(
-      subscriptionId: string,
-      input: { signature: string; newPriceId: string }
-    ): Promise<SolanaTierChange> {
-      return json(
-        solanaTierChangeSchema,
-        `/me/subscriptions/${id(subscriptionId)}/solana-tier-change/confirm`,
-        {
-          method: "POST",
-          body: {
-            signature: input.signature,
-            new_price_id: input.newPriceId,
-          } satisfies wire.SolanaTierChangeConfirmRequest,
-        }
-      )
-    },
-
-    /**
-     * On-chain cancellation for the solana rail: the server prepares an
-     * unsigned transaction, the wallet signs and submits it, the server
-     * verifies the signature and records the cancel.
-     */
-    async cancelSubscriptionOnChain(
-      subscriptionId: string,
-      sendTransaction: SendSolanaTransaction,
-      onStage?: (stage: SolanaCancelStage) => void
-    ): Promise<void> {
-      onStage?.("preparing")
-      const { transaction } = await json(
-        solanaCancelTxSchema,
-        `/me/subscriptions/${id(subscriptionId)}/solana-cancel-tx`,
-        { method: "POST", body: {} }
-      )
-      onStage?.("signing")
-      let signature: string
-      try {
-        signature = await sendTransaction(transaction)
-      } catch (err) {
-        if (isWalletRejection(err))
-          throw localError(
-            "wallet_rejected",
-            "The wallet request was declined."
-          )
-        throw err
-      }
-      if (!signature)
-        throw localError(
-          "wallet_no_signature",
-          "The wallet returned no signature."
-        )
-      onStage?.("confirming")
-      await send(`/me/subscriptions/${id(subscriptionId)}/solana-cancel`, {
-        method: "POST",
-        body: { signature } satisfies wire.ConfirmSolanaCancelRequest,
-      })
     },
 
     listPaymentMethods(

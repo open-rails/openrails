@@ -369,9 +369,9 @@ func TestStripeEngineNotificationBinding(t *testing.T) {
 	}
 }
 
-// A declined PI is cancelled (same PI, own idempotency key) before the decline
+// A declined PI is canceled (same PI, own idempotency key) before the decline
 // is terminal, so a leaked client secret cannot pay later. A lost cancel
-// response is recovered by readback; authentication states are never cancelled.
+// response is recovered by readback; authentication states are never canceled.
 func TestStripeEngineDeclineFinalization(t *testing.T) {
 	s, p := engineFixture()
 	pi := enginePI(p)

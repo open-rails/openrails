@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -25,40 +27,61 @@ type RepriceRepo struct {
 
 func NewRepriceRepo(d *db.DB) *RepriceRepo { return &RepriceRepo{db: d} }
 
-// CreateBatch records a bulk (or single ad-hoc) reprice operation's header.
-func (r *RepriceRepo) CreateBatch(ctx context.Context, priceKey *string, toPriceID uuid.UUID, effectiveAt time.Time, matched, scheduled, skipped int) (*models.RepriceBatch, error) {
+// CreateBatch records a reprice batch's header and returns its id.
+func (r *RepriceRepo) CreateBatch(ctx context.Context, priceKey *string, toPriceID uuid.UUID, effectiveAt time.Time, matched, skipped int) (uuid.UUID, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	matched32, _ := safecast.Convert[int32](matched)
+	skipped32, _ := safecast.Convert[int32](skipped)
+	row, err := r.db.Gen(ctx).CreateRepriceBatch(ctx, gen.CreateRepriceBatchParams{
+		MerchantID:           tid.UUID(),
+		PriceKey:             priceKey,
+		ToPriceID:            toPriceID,
+		EffectiveAt:          effectiveAt,
+		SubscriptionsMatched: matched32,
+		SubscriptionsSkipped: skipped32,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return row.ID, nil
+}
+
+// GetBatch reads a batch with its reprices counted by status.
+func (r *RepriceRepo) GetBatch(ctx context.Context, id uuid.UUID) (billing.RepriceBatch, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return billing.RepriceBatch{}, err
+	}
+	row, err := r.db.Gen(ctx).GetRepriceBatch(ctx, gen.GetRepriceBatchParams{MerchantID: tid.UUID(), ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return billing.RepriceBatch{}, ErrRepriceBatchNotFound
+	}
+	if err != nil {
+		return billing.RepriceBatch{}, err
+	}
+	return repriceBatch(row.BillingRepriceBatch, row.Scheduled, row.Applied, row.Canceled, row.Blocked), nil
+}
+
+// ListBatches is one page of the merchant's batches, newest first.
+func (r *RepriceRepo) ListBatches(ctx context.Context, priceKey *string, fetch int32, afterAt *time.Time, afterID *uuid.UUID) ([]billing.RepriceBatch, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	matched32, _ := safecast.Convert[int32](matched)
-	scheduled32, _ := safecast.Convert[int32](scheduled)
-	skipped32, _ := safecast.Convert[int32](skipped)
-	row, err := r.db.Gen(ctx).CreateRepriceBatch(ctx, gen.CreateRepriceBatchParams{
-		MerchantID:             tid.UUID(),
-		PriceKey:               priceKey,
-		ToPriceID:              toPriceID,
-		EffectiveAt:            effectiveAt,
-		SubscriptionsMatched:   matched32,
-		SubscriptionsScheduled: scheduled32,
-		SubscriptionsSkipped:   skipped32,
+	rows, err := r.db.Gen(ctx).ListRepriceBatchesPage(ctx, gen.ListRepriceBatchesPageParams{
+		MerchantID: tid.UUID(), PriceKey: priceKey, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return models.RepriceBatchFromGen(row), nil
-}
-
-func (r *RepriceRepo) GetBatchByID(ctx context.Context, id uuid.UUID) (*models.RepriceBatch, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
+	out := make([]billing.RepriceBatch, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, repriceBatch(row.BillingRepriceBatch, row.Scheduled, row.Applied, row.Canceled, row.Blocked))
 	}
-	row, err := r.db.Gen(ctx).GetRepriceBatchByID(ctx, gen.GetRepriceBatchByIDParams{MerchantID: tid.UUID(), ID: id})
-	if err != nil {
-		return nil, err
-	}
-	return models.RepriceBatchFromGen(row), nil
+	return out, nil
 }
 
 // CreateSubscriptionReprice schedules one subscription's price move.
@@ -143,50 +166,28 @@ func (r *RepriceRepo) BlockScheduledReprice(ctx context.Context, id uuid.UUID, r
 	})
 }
 
-// CreatePlanMigrationBatch (#813) records a plan-migration operation's header.
-func (r *RepriceRepo) CreatePlanMigrationBatch(ctx context.Context, sourcePriceID, toPriceID uuid.UUID, effectiveAt time.Time, fallbackPolicy string, matched, scheduled, skipped, blocked int) (*models.RepriceBatch, error) {
+// CreatePlanMigrationBatch (#813) records a plan migration's header and
+// returns its id.
+func (r *RepriceRepo) CreatePlanMigrationBatch(ctx context.Context, sourcePriceID, toPriceID uuid.UUID, effectiveAt time.Time, fallbackPolicy string, matched, skipped int) (uuid.UUID, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
 	matched32, _ := safecast.Convert[int32](matched)
-	scheduled32, _ := safecast.Convert[int32](scheduled)
 	skipped32, _ := safecast.Convert[int32](skipped)
-	blocked32, _ := safecast.Convert[int32](blocked)
 	row, err := r.db.Gen(ctx).CreatePlanMigrationBatch(ctx, gen.CreatePlanMigrationBatchParams{
-		MerchantID:             tid.UUID(),
-		ToPriceID:              toPriceID,
-		EffectiveAt:            effectiveAt,
-		SourcePriceID:          sourcePriceID,
-		FallbackPolicy:         fallbackPolicy,
-		SubscriptionsMatched:   matched32,
-		SubscriptionsScheduled: scheduled32,
-		SubscriptionsSkipped:   skipped32,
-		SubscriptionsBlocked:   blocked32,
+		MerchantID:           tid.UUID(),
+		ToPriceID:            toPriceID,
+		EffectiveAt:          effectiveAt,
+		SourcePriceID:        sourcePriceID,
+		FallbackPolicy:       fallbackPolicy,
+		SubscriptionsMatched: matched32,
+		SubscriptionsSkipped: skipped32,
 	})
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
-	return models.RepriceBatchFromGen(row), nil
-}
-
-// UpdatePlanMigrationBatchCounts (#813) re-syncs a batch header's
-// scheduled/blocked counts after rail pushes degrade rows — the header must
-// always agree with its per-subscription rows.
-func (r *RepriceRepo) UpdatePlanMigrationBatchCounts(ctx context.Context, id uuid.UUID, scheduled, blocked int) error {
-	scheduled32, _ := safecast.Convert[int32](scheduled)
-	blocked32, _ := safecast.Convert[int32](blocked)
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return scopeErr
-	}
-	_, err := r.db.Gen(ctx).UpdatePlanMigrationBatchCounts(ctx, gen.UpdatePlanMigrationBatchCountsParams{
-		MerchantID:             scopeMerchantID.UUID(),
-		ID:                     id,
-		SubscriptionsScheduled: scheduled32,
-		SubscriptionsBlocked:   blocked32,
-	})
-	return err
+	return row.ID, nil
 }
 
 // ListMigratableSubscriptionsByPriceID (#813) returns the plan-migration
@@ -267,21 +268,6 @@ func (r *RepriceRepo) Unblock(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
-// CountBatchRows (#816) recomputes a plan-migration batch header's
-// scheduled/blocked counts from its actual rows — the re-sync source of
-// truth after re-drives move rows between the classes.
-func (r *RepriceRepo) CountBatchRows(ctx context.Context, batchID uuid.UUID) (scheduled, blocked int, err error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return 0, 0, scopeErr
-	}
-	row, err := r.db.Gen(ctx).CountPlanMigrationBatchRows(ctx, gen.CountPlanMigrationBatchRowsParams{MerchantID: scopeMerchantID.UUID(), BatchID: batchID})
-	if err != nil {
-		return 0, 0, err
-	}
-	return int(row.Scheduled), int(row.Blocked), nil
-}
-
 func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -309,32 +295,41 @@ func (r *RepriceRepo) GetScheduledForSubscription(ctx context.Context, subscript
 	return models.SubscriptionRepriceFromGen(row), nil
 }
 
-type SubscriptionRepriceFilter struct {
+// RepriceFilter narrows a reprice list; zero fields match everything.
+type RepriceFilter struct {
 	SubscriptionID *uuid.UUID
 	RepriceBatchID *uuid.UUID
 	Status         *models.RepriceStatus
 }
 
-func (r *RepriceRepo) List(ctx context.Context, filter SubscriptionRepriceFilter, limit, offset int) ([]*models.SubscriptionReprice, error) {
+// ListPage is one page of the merchant's reprices matching f, newest first.
+func (r *RepriceRepo) ListPage(ctx context.Context, f RepriceFilter, fetch int32, afterAt *time.Time, afterID *uuid.UUID) ([]*models.SubscriptionReprice, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var status *string
-	if filter.Status != nil {
-		s := string(*filter.Status)
+	if f.Status != nil {
+		s := string(*f.Status)
 		status = &s
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := r.db.Gen(ctx).ListSubscriptionReprices(ctx, gen.ListSubscriptionRepricesParams{
-		MerchantID:     tid.UUID(),
-		SubscriptionID: filter.SubscriptionID,
-		RepriceBatchID: filter.RepriceBatchID,
-		Status:         status,
-		PageLimit:      limit32,
-		PageOffset:     offset32,
+	rows, err := r.db.Gen(ctx).ListSubscriptionRepricesPage(ctx, gen.ListSubscriptionRepricesPageParams{
+		MerchantID: tid.UUID(), SubscriptionID: f.SubscriptionID, RepriceBatchID: f.RepriceBatchID, Status: status,
+		AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepricesFromGen(rows), nil
+}
+
+// ListScheduledInBatch is every still-scheduled reprice of a batch.
+func (r *RepriceRepo) ListScheduledInBatch(ctx context.Context, batchID uuid.UUID) ([]*models.SubscriptionReprice, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListScheduledBatchReprices(ctx, gen.ListScheduledBatchRepricesParams{MerchantID: tid.UUID(), RepriceBatchID: batchID})
 	if err != nil {
 		return nil, err
 	}
@@ -422,32 +417,6 @@ func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
 		}
 		return nil
 	})
-}
-
-// ListBatchesByPriceKey lists a key's bulk reprice operations, most recent
-// first (#777: the console's price page needs "is there a pending migration
-// for this price key" without already knowing a batch id).
-func (r *RepriceRepo) ListBatchesByPriceKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := r.db.Gen(ctx).ListRepriceBatchesByPriceKey(ctx, gen.ListRepriceBatchesByPriceKeyParams{
-		MerchantID: tid.UUID(),
-		PriceKey:   priceKey,
-		PageLimit:  limit32,
-		PageOffset: offset32,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*models.RepriceBatch, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, models.RepriceBatchFromGen(row))
-	}
-	return out, nil
 }
 
 // ListActiveSubscriptionsByPriceIDs returns every ACTIVE subscription pinned

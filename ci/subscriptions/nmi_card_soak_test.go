@@ -63,7 +63,8 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 
 			id, err := billing.ParsePaymentMethodID(method)
 			require.NoError(t, err)
-			require.NoError(t, w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), e.sub, billing.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id}))
+			_, err = w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), e.sub, billing.UpdateSubscriptionPaymentMethodParams{PaymentMethodID: id})
+			require.NoError(t, err)
 			sales := len(w.nmi.ledger(""))
 			end := e.periodEnd()
 			e.toPeriodEnd()
@@ -146,7 +147,7 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 	product := w.subscription(embedded, e.sub).ProductID
 	for i, tp := range []topology{embedded, remote} {
 		group, rank := fmt.Sprintf("g%d-%s", i, uuid.NewString()[:6]), i+1
-		updated, err := w.client[tp].UpdateProduct(t.Context(), typedProductID(t, product), billing.UpdateProductParams{TierGroup: catalog.Value(group), TierRank: catalog.Value(rank)})
+		updated, err := w.client[tp].UpdateProduct(t.Context(), product, billing.UpdateProductParams{TierGroup: catalog.Value(group), TierRank: catalog.Value(rank)})
 		require.NoError(t, err, "a live product takes a tier group")
 		require.NotNil(t, updated.TierGroup)
 		require.Equal(t, group, *updated.TierGroup)
@@ -158,7 +159,7 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 	other := w.membership("content:other", 4_990_000)
 	e.c.subscribeAgain(embedded, "nmi", other.ID.String(), "content:other", e.method)
 	group := "joined-" + uuid.NewString()[:6]
-	_, err := w.client[remote].UpdateProduct(t.Context(), typedProductID(t, product), billing.UpdateProductParams{TierGroup: catalog.Value(group)})
+	_, err := w.client[remote].UpdateProduct(t.Context(), product, billing.UpdateProductParams{TierGroup: catalog.Value(group)})
 	require.NoError(t, err)
 	_, err = w.client[remote].UpdateProduct(t.Context(), other.ProductID, billing.UpdateProductParams{TierGroup: catalog.Value(group)})
 	requireCode(t, err, http.StatusConflict, "product_tier_group_conflict")

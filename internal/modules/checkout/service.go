@@ -46,14 +46,14 @@ import (
 )
 
 // TierChangeResponse represents the response from a tier change operation.
-// This reuses the CheckoutAttemptResponse envelope pattern for API consistency.
-type TierChangeResponse = billing.TierChangeResponse
+// This reuses the CheckoutSessionResponse envelope pattern for API consistency.
+type TierChangeResponse = billing.TierChange
 
 // TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
 // reports what a confirm WOULD charge now and at the next renewal, without
 // touching Stripe or the local subscription. The frontend renders it as a
 // "Right now: $X / On <date>: $Y" confirmation before calling change-tier.
-type TierChangePreviewResponse = billing.TierChangePreviewResponse
+type TierChangePreviewResponse = billing.TierChangePreview
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
@@ -1743,39 +1743,14 @@ func (s *CheckoutService) processTierChangeSolana(
 		}
 	}
 
-	subID := existingSub.ID
-	subIDStr := billing.SubscriptionID(subID)
-
-	// Solana tier changes are a single ATOMIC on-chain transaction the subscriber
-	// signs (cancel-old + subscribe-new [+ prorated transfer for an upgrade]), so
-	// they cannot be driven from this server-side card path — they go through the
-	// dedicated prepare/confirm endpoints (#272), which build the co-signed tx and
-	// mirror the confirmed switch into the DB. Direct the client there for BOTH an
-	// upgrade (prorated first pull, charged atomically) and a downgrade (deferred
-	// to the old period end, no immediate charge).
-	endpoint := fmt.Sprintf("POST /v1/me/subscriptions/%s/solana-tier-change", subIDStr)
-	var msg string
-	if action == "downgrade" {
-		msg = fmt.Sprintf(
-			"To downgrade to %s, call %s with new_price_id=%s, sign the returned transaction in your wallet, then confirm it. There is no immediate charge — your current plan keeps billing until the period ends, then rebills at the lower tier.",
-			newProduct.DisplayName, endpoint, req.PriceID,
-		)
-	} else {
-		msg = fmt.Sprintf(
-			"To upgrade to %s, call %s with new_price_id=%s, sign the returned (co-signed) transaction in your wallet, then confirm it. You'll be charged the prorated difference atomically on the switch; your old plan is cancelled in the same transaction.",
-			newProduct.DisplayName, endpoint, req.PriceID,
-		)
+	// A Solana tier change is one atomic on-chain transaction the customer's
+	// wallet signs: POST /v1/me/subscriptions/{id}/change-tier answers it as
+	// next_action. Nothing server-side can make it.
+	return nil, &TierChangeError{
+		HTTPStatus: http.StatusForbidden,
+		Code:       billing.CodeCustomerActionRequired,
+		Message:    "a Solana tier change is signed by the customer's wallet",
 	}
-	return &TierChangeResponse{
-		Object:         "tier_change",
-		Status:         "requires_action",
-		Mode:           "tier_change",
-		Action:         action,
-		PriceID:        (billing.PriceID(newPrice.ID)).String(),
-		Payment:        CheckoutAttemptPaymentResponse{Rail: "solana"},
-		SubscriptionID: &subIDStr,
-		Message:        msg,
-	}, nil
 }
 
 // processTierChangeCCBill handles CCBill subscription tier changes.
@@ -1828,12 +1803,8 @@ func (s *CheckoutService) processTierChangeCCBill(
 
 	// Build NextAction for redirect
 	if checkoutResp.RedirectURL != "" {
-		resp.NextAction = &CheckoutAttemptNextAction{
-			Type: "redirect_to_url",
-			RedirectToURL: &CheckoutAttemptRedirectToURL{
-				URL: checkoutResp.RedirectURL,
-			},
-		}
+		redirect := checkoutResp.RedirectURL
+		resp.NextAction = &billing.NextAction{Type: "redirect_to_url", URL: &redirect}
 	}
 
 	return resp, nil

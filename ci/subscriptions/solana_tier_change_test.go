@@ -21,10 +21,10 @@ import (
 // for the rest of the paid period with no payment. So it stays inside the
 // subscription's tier group, and its direction comes from what the plans
 // cost per hour, never from rank alone. A product with no tier group, priced
-// ten times the current plan, is refused on the direct route and as a
-// checkout; a pricier plan of lower rank is an upgrade whose transaction
-// pulls the difference, and a cheaper plan of higher rank is a downgrade
-// that pulls nothing.
+// ten times the current plan, is refused on change-tier and as a checkout; a
+// pricier plan of lower rank is an upgrade whose transaction pulls the
+// difference, and a cheaper plan of higher rank is a downgrade that pulls
+// nothing. The wallet's transaction is change-tier's next action.
 func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
@@ -90,10 +90,10 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	require.True(t, b.entitled("basic-"+sfx))
 
 	// The ungrouped product is refused on every route, and grants nothing.
-	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/solana-tier-change", "", map[string]any{"new_price_id": price("vip")})
+	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/change-tier", "tc-"+uuid.NewString(), map[string]any{"price_id": price("vip")})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	require.Contains(t, fmt.Sprint(out), "tier group")
-	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/solana-tier-change/confirm", "", map[string]any{"new_price_id": price("vip"), "signature": solanago.Signature{}.String()})
+	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/change-tier", "tc-"+uuid.NewString(), map[string]any{"price_id": price("vip"), "signature": solanago.Signature{}.String()})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	require.False(t, b.entitled("vip-"+sfx))
 	require.True(t, b.entitled("basic-"+sfx))
@@ -105,9 +105,12 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		{"plus", "upgrade", 1},
 		{"lite", "downgrade", 0},
 	} {
-		prep := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/solana-tier-change", "", map[string]any{"new_price_id": price(tc.target)}))
-		require.Equal(t, tc.kind, prep["kind"], "%s: direction comes from the price per hour", tc.target)
-		tx, err := solanago.TransactionFromBase64(prep["transaction"].(string))
+		prep := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/change-tier", "tc-"+uuid.NewString(), map[string]any{"price_id": price(tc.target)}))
+		require.Equal(t, tc.kind, prep["action"], "%s: direction comes from the price per hour", tc.target)
+		require.Equal(t, "requires_action", prep["status"])
+		next := prep["next_action"].(map[string]any)
+		require.Equal(t, "solana_sign_transactions", next["type"])
+		tx, err := solanago.TransactionFromBase64(next["transactions"].([]any)[0].(string))
 		require.NoError(t, err)
 		pulls := 0
 		for _, ix := range instructions(t, tx) {

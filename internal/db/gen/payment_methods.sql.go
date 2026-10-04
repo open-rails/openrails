@@ -1361,7 +1361,7 @@ type ParkPaymentMethodByMethodRefRow struct {
 
 // #795 cancellation-last-resort: a custody-side instrument problem (token
 // deleted/expired, closed account) PARKS the instrument — charges fail loudly,
-// the operator is notified, and nothing is terminally cancelled. Idempotent:
+// the operator is notified, and nothing is terminally canceled. Idempotent:
 // an already-parked instrument keeps its first park. Keyed on the custodian
 // that reported the problem (or#879), since the method ref is its token id.
 func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaymentMethodByMethodRefParams) ([]ParkPaymentMethodByMethodRefRow, error) {

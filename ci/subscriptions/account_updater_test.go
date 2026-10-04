@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -75,8 +76,8 @@ func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 	w.settle()
 	e.toPeriodEnd()
 	w.runRenewals()
-	require.Equal(t, "awaiting_method", w.subscription(embedded, l.sub).Status)
-	require.Equal(t, "awaiting_method", w.subscription(embedded, e.sub).Status)
+	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, l.sub).Status)
+	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, e.sub).Status)
 
 	for _, vault := range []string{l.railCust, w.vaultOf(e.method)} {
 		w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Card.Decline, v.Card.Last4 = "", "1881" })
@@ -84,8 +85,8 @@ func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 		require.Equal(t, []string{"nmi_acu/updated"}, w.cardUpdates(vault))
 	}
 	w.runRenewals()
-	require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "the NMI-owned membership collects")
-	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the engine membership collects")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "the NMI-owned membership collects")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "the engine membership collects")
 	require.Equal(t, "1881", w.methodRow(e.method, "card_last4"), "the stored card takes the details NMI now holds")
 }
 
@@ -103,7 +104,7 @@ func TestNMIAccountUpdaterContactCustomer(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.deliver("nmi", acuNotice("contactcustomer", vault)), "NMI says it again")
 	require.Equal(t, 1, e.c.notificationCount("payment_method_update_required"))
 	require.Equal(t, []string{"nmi_acu/contact_customer", "nmi_acu/contact_customer"}, w.cardUpdates(vault), "one per notice")
-	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the card is not parked: it may still work")
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "the card is not parked: it may still work")
 
 	require.Equal(t, http.StatusOK, w.deliver("nmi", acuNotice("closedaccount", vault)))
 	require.Equal(t, "nmi_acu_closed_account", w.methodRow(e.method, "park_reason"), "a closed account is never charged again")

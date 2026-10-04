@@ -309,7 +309,7 @@ func stripeRemoteStatus(status string, retryExhausted bool) SubscriptionStatus {
 	case "active", "trialing":
 		return SubscriptionStatusActive
 	case "canceled":
-		return SubscriptionStatusCancelled
+		return SubscriptionStatusCanceled
 	case "incomplete_expired", "unpaid", "paused":
 		return SubscriptionStatusExpired
 	case "past_due":

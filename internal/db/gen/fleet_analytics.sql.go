@@ -241,35 +241,35 @@ func (q *Queries) FleetWeeklyActiveMerchants(ctx context.Context, arg FleetWeekl
 	return items, nil
 }
 
-const fleetWeeklyCancelledSubscriptions = `-- name: FleetWeeklyCancelledSubscriptions :many
-SELECT date_trunc('week', s.cancelled_at)::timestamptz AS week_start, count(*)::bigint AS cancellations
+const fleetWeeklyCanceledSubscriptions = `-- name: FleetWeeklyCanceledSubscriptions :many
+SELECT date_trunc('week', s.canceled_at)::timestamptz AS week_start, count(*)::bigint AS cancellations
 FROM billing.subscriptions s
-WHERE s.cancelled_at IS NOT NULL AND s.deleted_at IS NULL
-  AND s.cancelled_at >= date_trunc('week', $1::timestamptz)
+WHERE s.canceled_at IS NOT NULL AND s.deleted_at IS NULL
+  AND s.canceled_at >= date_trunc('week', $1::timestamptz)
   AND ($2::uuid IS NULL OR s.merchant_id <> $2::uuid)
 GROUP BY 1
 `
 
-type FleetWeeklyCancelledSubscriptionsParams struct {
+type FleetWeeklyCanceledSubscriptionsParams struct {
 	Since             time.Time
 	ExcludeMerchantID *uuid.UUID
 }
 
-type FleetWeeklyCancelledSubscriptionsRow struct {
+type FleetWeeklyCanceledSubscriptionsRow struct {
 	WeekStart     time.Time
 	Cancellations int64
 }
 
 // Weekly subscription cancellations: the churn proxy on the fleet trend chart.
-func (q *Queries) FleetWeeklyCancelledSubscriptions(ctx context.Context, arg FleetWeeklyCancelledSubscriptionsParams) ([]FleetWeeklyCancelledSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, fleetWeeklyCancelledSubscriptions, arg.Since, arg.ExcludeMerchantID)
+func (q *Queries) FleetWeeklyCanceledSubscriptions(ctx context.Context, arg FleetWeeklyCanceledSubscriptionsParams) ([]FleetWeeklyCanceledSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, fleetWeeklyCanceledSubscriptions, arg.Since, arg.ExcludeMerchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []FleetWeeklyCancelledSubscriptionsRow
+	var items []FleetWeeklyCanceledSubscriptionsRow
 	for rows.Next() {
-		var i FleetWeeklyCancelledSubscriptionsRow
+		var i FleetWeeklyCanceledSubscriptionsRow
 		if err := rows.Scan(&i.WeekStart, &i.Cancellations); err != nil {
 			return nil, err
 		}

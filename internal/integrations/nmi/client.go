@@ -75,8 +75,8 @@ type NMIClient struct {
 //     cost 10s*N rather than 25s*N.
 //
 // These bound one round-trip. The CALLER's context still wins when it is
-// shorter or already cancelled — that is the point of the ctx plumbing: a
-// cancelled job aborts an in-flight call instead of burning the full bound.
+// shorter or already canceled — that is the point of the ctx plumbing: a
+// canceled job aborts an in-flight call instead of burning the full bound.
 const (
 	nmiMutationTimeout = 25 * time.Second
 	nmiReadTimeout     = 10 * time.Second

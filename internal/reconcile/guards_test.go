@@ -107,7 +107,7 @@ func TestCCBillPlanIndexUsesRecurringBillingOption(t *testing.T) {
 func TestRemoteStatesWithoutALocalStateNeverMaterialize(t *testing.T) {
 	for remote, local := range map[SubscriptionStatus]models.SubscriptionStatus{
 		SubscriptionStatusActive: models.StatusActive, SubscriptionStatusPastDue: models.StatusPastDue,
-		SubscriptionStatusExpired: "", SubscriptionStatusCancelled: "", SubscriptionStatusUnknown: "", "something-new": "",
+		SubscriptionStatusExpired: "", SubscriptionStatusCanceled: "", SubscriptionStatusUnknown: "", "something-new": "",
 	} {
 		got, ok := LocalMaterializeStatus(remote)
 		require.Equal(t, local != "", ok, remote)

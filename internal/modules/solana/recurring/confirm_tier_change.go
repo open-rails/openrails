@@ -32,7 +32,7 @@ type tierChangeTransactor interface {
 
 // tierChangeStore is the on-chain state store the mirror reads + writes
 // (satisfied by *solanasubs.SolanaSubscriptionRepo). GetBySubscriptionPDA powers the
-// idempotency/resumability check; SetStatus flips the old row cancelled; Upsert
+// idempotency/resumability check; SetStatus flips the old row canceled; Upsert
 // writes the new active row.
 type tierChangeStore interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
@@ -60,9 +60,9 @@ type ConfirmTierChangeInput struct {
 	OldSubscriptionID uuid.UUID
 
 	// Acting user + new-plan identity (for the new membership).
-	UserID     string
-	UserEmail  string
-	NewPriceID uuid.UUID
+	UserID        string
+	CustomerEmail string
+	NewPriceID    uuid.UUID
 
 	// New on-chain subscription account the atomic tx created (from the prepare
 	// step's result). This is the rail_subscription_id of the new membership +
@@ -181,7 +181,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	// Idempotency/resumability: if the NEW row already exists, a prior confirm
 	// already mirrored this tier change. Return the existing new subscription
 	// without re-running the transactional mirror. We look up by the NEW
-	// subscription PDA because the OLD row gets cancelled in-place.
+	// subscription PDA because the OLD row gets canceled in-place.
 	if existing, err := s.store.GetBySubscriptionPDA(ctx, in.NewSubscriptionPDA); err == nil && existing != nil && existing.SubscriptionID != uuid.Nil {
 		return &ConfirmTierChangeResult{
 			NewSubscription:  &models.Subscription{ID: existing.SubscriptionID},
@@ -231,10 +231,6 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 
 	newPDA := in.NewSubscriptionPDA
-	var emailPtr *string
-	if in.UserEmail != "" {
-		emailPtr = &in.UserEmail
-	}
 
 	// Recorded first charge: the prorated amount actually pulled on-chain for an
 	// upgrade; nothing for a downgrade (deferred, no charge).
@@ -253,7 +249,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		PriceID:               in.NewPriceID,
 		Rail:                  models.RailSolana,
 		RailSubscriptionID:    &newPDA,
-		UserEmail:             emailPtr,
+		CustomerEmail:         in.CustomerEmail,
 		TransactionID:         in.Signature,
 		Amount:                in.NewFiatAmount,
 		AmountProvided:        true,
@@ -288,8 +284,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 			return fmt.Errorf("recurring: mirror old-membership cancel: %w", cancelErr)
 		}
 		if oldRow.ID != uuid.Nil {
-			if err := s.store.SetStatusTx(ctx, txDB, oldRow.ID, models.SolanaSubscriptionCancelled); err != nil {
-				return fmt.Errorf("recurring: mark old solana subscription cancelled: %w", err)
+			if err := s.store.SetStatusTx(ctx, txDB, oldRow.ID, models.SolanaSubscriptionCanceled); err != nil {
+				return fmt.Errorf("recurring: mark old solana subscription canceled: %w", err)
 			}
 		}
 

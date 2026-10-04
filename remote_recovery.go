@@ -19,19 +19,22 @@ func pageQuery(options billing.PageOptions) url.Values {
 }
 
 // ListSubscriptions returns one page of the merchant's subscriptions matching
-// filter.
-func (c *Client) ListSubscriptions(ctx context.Context, filter billing.SubscriptionFilter, requestOptions ...RequestOption) (*billing.Page[billing.Subscription], error) {
-	q := pageQuery(filter.PageOptions)
-	if filter.CustomerID != "" {
-		q.Set("customer_id", filter.CustomerID)
+// params, newest first.
+func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Subscription], error) {
+	q := pageValues(nil, params.PageRequest)
+	if !params.CustomerID.IsZero() {
+		q.Set("customer_id", params.CustomerID.String())
 	}
-	if filter.Status != "" {
-		q.Set("status", filter.Status)
+	if params.Status != "" {
+		q.Set("status", string(params.Status))
 	}
-	if filter.Rail != "" {
-		q.Set("rail", filter.Rail)
+	if params.Rail != "" {
+		q.Set("rail", params.Rail)
 	}
-	var out billing.Page[billing.Subscription]
+	if !params.PriceID.IsZero() {
+		q.Set("price_id", params.PriceID.String())
+	}
+	var out billing.ListPage[billing.Subscription]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -68,67 +71,69 @@ func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID,
 }
 
 // CancelSubscription cancels at the end of the paid period or, with
-// RevokeAccess, immediately. Both stop provider billing.
-func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, request billing.CancelSubscriptionRequest, requestOptions ...RequestOption) error {
-	path, err := subscriptionPath(id)
-	if err != nil {
-		return err
-	}
-	return c.do(ctx, http.MethodPost, path+"/cancel", request, nil, requestOptions...)
+// RevokeAccess, immediately, and returns the subscription. Both stop provider
+// billing.
+func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, params billing.CancelSubscriptionParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
+	return c.subscriptionAction(ctx, http.MethodPost, id, "/cancel", params, requestOptions...)
 }
 
-// ResumeSubscription queues recovery. A successful return confirms durable
-// acceptance; GetSubscription reads the resulting state after worker execution.
-func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) error {
-	path, err := subscriptionPath(id)
-	if err != nil {
-		return err
-	}
-	return c.do(ctx, http.MethodPost, path+"/resume", nil, nil, requestOptions...)
+// ResumeSubscription undoes a scheduled cancel before the paid period ends
+// and returns the subscription.
+func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
+	return c.subscriptionAction(ctx, http.MethodPost, id, "/resume", nil, requestOptions...)
 }
 
 // UpdateSubscriptionPaymentMethod charges a subscription's renewals to
-// another of the customer's saved payment methods.
-func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, request billing.UpdateSubscriptionPaymentMethodRequest, requestOptions ...RequestOption) error {
-	path, err := subscriptionPath(id)
-	if err != nil {
-		return err
+// another of the customer's saved payment methods and returns the
+// subscription.
+func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.UpdateSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
+	if params.PaymentMethodID.IsZero() {
+		return nil, invalidErr("payment_method_id is required")
 	}
-	if request.PaymentMethodID.IsZero() {
-		return invalidErr("payment_method_id is required")
-	}
-	return c.do(ctx, http.MethodPut, path+"/payment-method", request, nil, requestOptions...)
+	return c.subscriptionAction(ctx, http.MethodPut, id, "/payment-method", params, requestOptions...)
 }
 
-// PreviewTierChange reports what moving a subscription to another price
-// would charge and when it would take effect, without changing anything.
-func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionID, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangePreviewResponse, error) {
+func (c *Client) subscriptionAction(ctx context.Context, method string, id billing.SubscriptionID, suffix string, body any, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := requirePriceID(request.PriceID); err != nil {
-		return nil, err
-	}
-	var out billing.TierChangePreviewResponse
-	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", request, &out, requestOptions...); err != nil {
+	var out billing.Subscription
+	if err := c.do(ctx, method, path+suffix, body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// ChangeTier moves a subscription to another price. The same key replays the
-// change.
-func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, key string, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangeResponse, error) {
+// PreviewTierChange reports what moving a subscription to another price
+// would charge and when it would take effect, without changing anything.
+func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeTierParams, requestOptions ...RequestOption) (*billing.TierChangePreview, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := requirePriceID(request.PriceID); err != nil {
+	if _, err := requireTypedID("price_id", params.PriceID); err != nil {
 		return nil, err
 	}
-	var out billing.TierChangeResponse
-	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}, requestOptions...); err != nil {
+	var out billing.TierChangePreview
+	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ChangeTier moves a subscription to another price of its tier group. The
+// same IdempotencyKey replays the change.
+func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, params billing.ChangeTierParams, requestOptions ...RequestOption) (*billing.TierChange, error) {
+	path, err := subscriptionPath(id)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := requireTypedID("price_id", params.PriceID); err != nil {
+		return nil, err
+	}
+	var out billing.TierChange
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

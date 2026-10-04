@@ -15,6 +15,12 @@ export const apiError = (status: number, code: string, message = code) =>
 
 type Row = Record<string, unknown> & { id: string }
 
+const walletStep = {
+  type: "solana_sign_transactions",
+  redirect_to_url: null,
+  transactions: ["dHg="],
+}
+
 export function subscription(overrides: Partial<Row> = {}): Row {
   return {
     ...subscriptionFixture,
@@ -143,22 +149,11 @@ const cursorPage = (rows: Row[], limit: number, cursor: string | null) => {
   }
 }
 
-const page = (data: Row[], limit: number, offset: number, total: number) => ({
-  object: "list",
-  data,
-  total,
-  limit,
-  offset,
-  has_more: offset + data.length < total,
-})
-
 export interface FakeBilling {
   subscriptions: Row[]
   methods: Row[]
   payments: Row[]
   products: Row[]
-  /** Applies queued cancel/resume on the Nth later read (server lag). */
-  lag: number
   /** Next response override per "METHOD /path". */
   fail: Record<string, Response>
   calls: string[]
@@ -175,13 +170,10 @@ export function fakeBilling(
     methods: seed.methods ?? [paymentMethod()],
     payments: seed.payments ?? [payment()],
     products: seed.products ?? [product()],
-    lag: 0,
     fail: {},
     calls: [],
     fetch: vi.fn<typeof fetch>(),
   }
-  const queued: { reads: number; apply: () => void }[] = []
-
   const findSub = (id: string) => state.subscriptions.find((s) => s.id === id)
 
   state.fetch.mockImplementation(
@@ -198,53 +190,39 @@ export function fakeBilling(
       }
       const body = init.body ? JSON.parse(String(init.body)) : undefined
       const limit = Number(url.searchParams.get("limit") ?? 20)
-      const offset = Number(url.searchParams.get("offset") ?? 0)
       const cursor = url.searchParams.get("cursor")
       let m: RegExpMatchArray | null
 
       if (key === "GET /me/subscriptions")
-        return json(
-          200,
-          page(state.subscriptions, limit, offset, state.subscriptions.length)
-        )
+        return json(200, cursorPage(state.subscriptions, limit, cursor))
       if ((m = key.match(/^GET \/me\/subscriptions\/([^/]+)$/))) {
-        for (const q of [...queued])
-          if (q.reads-- <= 0) {
-            q.apply()
-            queued.splice(queued.indexOf(q), 1)
-          }
         const sub = findSub(decodeURIComponent(m[1]))
         return sub ? json(200, sub) : apiError(404, "resource_not_found")
       }
       if ((m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/cancel$/))) {
         const sub = findSub(decodeURIComponent(m[1]))
-        if (!sub) return apiError(404, "resource_not_found")
-        if (String(body?.feedback ?? "").trim().length < 4)
+        if (!sub) return apiError(404, "subscription_not_found")
+        if (String(body?.reason ?? "").trim().length < 4)
           return apiError(400, "invalid_param")
-        queued.push({
-          reads: state.lag,
-          apply: () =>
-            Object.assign(sub, {
-              status: "cancelled",
-              cancel_scheduled: true,
-              resumable: true,
-            }),
+        // Like OpenRails: the wallet signs a Solana cancel.
+        if (sub.rail === "solana" && !body?.signature)
+          return json(200, { ...sub, next_action: walletStep })
+        Object.assign(sub, {
+          status: "canceled",
+          cancel_scheduled: sub.rail !== "solana",
+          resumable: sub.rail !== "solana",
         })
-        return json(202, { status: "queued" })
+        return json(200, sub)
       }
       if ((m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/resume$/))) {
         const sub = findSub(decodeURIComponent(m[1]))
-        if (!sub) return apiError(404, "resource_not_found")
-        queued.push({
-          reads: state.lag,
-          apply: () =>
-            Object.assign(sub, {
-              status: "active",
-              cancel_scheduled: false,
-              resumable: false,
-            }),
+        if (!sub) return apiError(404, "subscription_not_found")
+        Object.assign(sub, {
+          status: "active",
+          cancel_scheduled: false,
+          resumable: false,
         })
-        return json(202, { status: "queued" })
+        return json(200, sub)
       }
       if ((m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/change-tier$/))) {
         const sub = findSub(decodeURIComponent(m[1]))
@@ -259,6 +237,25 @@ export function fakeBilling(
         const price = (target.prices as Row[]).find(
           (x) => x.id === body.price_id
         )!
+        const change = {
+          object: "tier_change",
+          mode: "tier_change",
+          action: "upgrade",
+          effective: "now",
+          price_id: price.id,
+          payment: { rail: sub.rail },
+          currency: price.currency,
+          amount_due_now: "10000000",
+          next_charge_amount: price.unit_amount,
+          next_charge_date: "2036-10-16T12:00:00Z",
+        }
+        if (sub.rail === "solana" && !body?.signature)
+          return json(200, {
+            ...change,
+            status: "requires_action",
+            subscription_id: sub.id,
+            next_action: walletStep,
+          })
         Object.assign(sub, {
           product_id: target.id,
           price_id: price.id,
@@ -266,32 +263,10 @@ export function fakeBilling(
           product: { ...(sub.product as Row), display_name: target.name },
         })
         return json(200, {
-          object: "tier_change",
+          ...change,
           status: "succeeded",
-          mode: "tier_change",
-          action: "upgrade",
-          effective: "now",
-          price_id: price.id,
-          payment: { rail: sub.rail },
           subscription_id: sub.id,
-          currency: price.currency,
-          amount_due_now: "10000000",
-          next_charge_amount: price.unit_amount,
-          next_charge_date: "2036-10-16T12:00:00Z",
         })
-      }
-      if (/^POST \/me\/subscriptions\/[^/]+\/solana-cancel-tx$/.test(key))
-        return json(200, { transaction: "dHg=", subscription_pda: "pda" })
-      if (
-        (m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/solana-cancel$/))
-      ) {
-        const sub = findSub(decodeURIComponent(m[1]))
-        if (!sub) return apiError(404, "resource_not_found")
-        Object.assign(sub, {
-          status: "cancelled",
-          ended_at: sub.current_period_ends_at,
-        })
-        return json(200, { subscription_id: sub.id, status: "cancelled" })
       }
       if (
         (m = key.match(/^PUT \/me\/subscriptions\/([^/]+)\/payment-method$/))
@@ -300,7 +275,7 @@ export function fakeBilling(
         const pm = state.methods.find((x) => x.id === body?.payment_method_id)
         if (!sub || !pm) return apiError(404, "resource_not_found")
         Object.assign(sub, { payment_method_id: pm.id, card: pm.card })
-        return json(200, { success: true })
+        return json(200, sub)
       }
       if (key === "GET /me/payment-methods")
         return json(200, cursorPage(state.methods, limit, cursor))

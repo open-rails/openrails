@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -149,7 +150,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	w.pullWithin(3 * time.Minute) // the pull also mirrors the whole 1,000-schedule roster
 	states = w.rowStates()
 	for _, r := range gone {
-		require.Equal(t, "cancelled", states[r.schedule].status, r.source)
+		require.Equal(t, "canceled", states[r.schedule].status, r.source)
 	}
 	for _, r := range silent {
 		require.Equal(t, "unverified", states[r.schedule].status, r.source)
@@ -190,7 +191,7 @@ func TestUnverifiedAfterWebhookIsReadAtOnce(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the unverified row was not read")
 	}
-	require.Equal(t, "unverified", w.subscription(embedded, l.sub).Status, "no charge was visible: parked")
+	require.Equal(t, billing.SubscriptionUnverified, w.subscription(embedded, l.sub).Status, "no charge was visible: parked")
 	require.True(t, l.c.entitled(l.ent), "access holds while unverified")
 	l.providerRenewal(true) // NMI charges while the read is in flight
 	close(read.release)
@@ -212,7 +213,7 @@ func TestUnverifiedAfterWebhookIsReadAtOnce(t *testing.T) {
 	w.advance(4 * day)
 	w.converge()
 	require.Equal(t, []string{"subscription:" + l.sub.UUID().String()}, w.openFindings("life.unverified.unresolved"))
-	require.Equal(t, "unverified", w.subscription(embedded, l.sub).Status)
+	require.Equal(t, billing.SubscriptionUnverified, w.subscription(embedded, l.sub).Status)
 	require.True(t, l.c.entitled(l.ent), "uncertainty never revokes access")
 	require.Zero(t, len(w.nmi.Attempts()))
 }

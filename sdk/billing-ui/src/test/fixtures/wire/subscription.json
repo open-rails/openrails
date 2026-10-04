@@ -7,17 +7,62 @@
   "payments": [
     {
       "id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      "object": "charge",
+      "kind": "charge",
       "status": "succeeded",
       "amount": "9223372036854775807",
       "amount_refunded": "0",
       "currency": "USD",
       "customer_id": "22222222-2222-2222-2222-222222222222",
       "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "price": {
+        "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "key": "pro-monthly",
+        "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "archived": false,
+        "unit_amount": "9223372036854775807",
+        "currency": "USD",
+        "access_duration_hours": 720,
+        "auto_renew": true,
+        "trial_unit_amount": null,
+        "trial_duration_hours": null,
+        "psps": {
+          "mobius": {
+            "status": "linked",
+            "ids": null,
+            "lookup_key": "",
+            "sync_status": "unknown",
+            "drift": null,
+            "message": ""
+          }
+        },
+        "pending_manual_actions": [],
+        "created_at": "2026-09-16T00:00:00.123456789Z",
+        "updated_at": "2026-09-16T00:00:00.123456789Z"
+      },
+      "product": {
+        "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "key": "pro",
+        "display_name": "Pro",
+        "description": "",
+        "tier_group": null,
+        "tier_rank": 0,
+        "archived": false
+      },
+      "channel": "rail",
       "rail": "nmi",
+      "psp_id": "55555555-5555-5555-5555-555555555555",
       "transaction_id": "txn-1",
-      "refunded": false,
-      "captured": true,
+      "card": {
+        "brand": "visa",
+        "last4": "4242",
+        "exp_month": 12,
+        "exp_year": 2030
+      },
+      "failure": null,
+      "refunded_payment_id": null,
+      "reason": null,
+      "refunds": null,
       "created_at": "2026-09-16T00:00:00.123456789Z"
     }
   ],
@@ -35,7 +80,7 @@
   "ended_at": null,
   "current_period_starts_at": "2026-09-16T00:00:00.123456789Z",
   "current_period_ends_at": "2026-09-16T00:00:00.123456789Z",
-  "cancelled_at": null,
+  "canceled_at": null,
   "cancel_type": null,
   "cancel_feedback": null,
   "resumable": false,
@@ -45,17 +90,33 @@
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "key": "pro-monthly",
     "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "archived": false,
     "unit_amount": "9223372036854775807",
     "currency": "USD",
+    "access_duration_hours": 720,
     "auto_renew": true,
-    "access_duration_hours": null,
-    "archived": false
+    "trial_unit_amount": null,
+    "trial_duration_hours": null,
+    "psps": {
+      "mobius": {
+        "status": "linked",
+        "ids": null,
+        "lookup_key": "",
+        "sync_status": "unknown",
+        "drift": null,
+        "message": ""
+      }
+    },
+    "pending_manual_actions": [],
+    "created_at": "2026-09-16T00:00:00.123456789Z",
+    "updated_at": "2026-09-16T00:00:00.123456789Z"
   },
   "product": {
     "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "key": "pro",
     "display_name": "Pro",
     "description": "",
+    "tier_group": null,
     "tier_rank": 0,
     "archived": false
   },
@@ -63,17 +124,33 @@
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
     "key": "pro-annual",
     "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "archived": false,
     "unit_amount": "9223372036854775807",
     "currency": "USD",
+    "access_duration_hours": 720,
     "auto_renew": true,
-    "access_duration_hours": null,
-    "archived": false
+    "trial_unit_amount": null,
+    "trial_duration_hours": null,
+    "psps": {
+      "mobius": {
+        "status": "linked",
+        "ids": null,
+        "lookup_key": "",
+        "sync_status": "unknown",
+        "drift": null,
+        "message": ""
+      }
+    },
+    "pending_manual_actions": [],
+    "created_at": "2026-09-16T00:00:00.123456789Z",
+    "updated_at": "2026-09-16T00:00:00.123456789Z"
   },
   "scheduled_product": {
     "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "key": "pro",
     "display_name": "Pro",
     "description": "",
+    "tier_group": null,
     "tier_rank": 0,
     "archived": false
   },
@@ -92,6 +169,7 @@
     "start_at": "2026-09-16T00:00:00.123456789Z",
     "end_at": "2026-09-16T00:00:00.123456789Z"
   },
+  "next_action": null,
   "created_at": "2026-09-16T00:00:00.123456789Z",
   "updated_at": "2026-09-16T00:00:00.123456789Z"
 }

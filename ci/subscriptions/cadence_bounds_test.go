@@ -88,7 +88,7 @@ func TestHeldRenewalKeepsAccess(t *testing.T) {
 	w.runRenewals()
 	w.wake()
 	sub := w.subscription(embedded, e.sub)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.After(w.clock.Now()), "the resumed renewal pays a current period")
 	require.Len(t, e.providerLedger(), 2, "exactly one renewal charge once collection resumes")
 	require.True(t, e.c.entitled(e.ent), "access continues")
@@ -109,12 +109,12 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 		e.toPeriodEnd()
 		accepted := w.clock.Now()
 		w.runRenewals()
-		require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
 		require.True(t, e.c.entitled(e.ent))
 
 		w.advance(accepted.Add(grace).Sub(w.clock.Now()) - time.Second)
 		w.wake()
-		require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the challenge stays open for the whole allowance")
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "the challenge stays open for the whole allowance")
 		w.advance(2 * time.Second)
 		require.True(t, e.c.entitled(e.ent), "no outcome yet: access continues past the allowance")
 		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned challenge waits for a new card")
@@ -140,14 +140,14 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 		require.Equal(t, hours >= collection.MinRetryCycleHours, e.c.entitled(e.ent), "access continues through dunning; a terminal first decline ends it")
 		switch {
 		case hours < collection.MinRetryCycleHours:
-			require.Equal(t, "cancelled", sub.Status, "the first decline is terminal below 96h")
+			require.Equal(t, billing.SubscriptionCanceled, sub.Status, "the first decline is terminal below 96h")
 			require.Nil(t, sub.NextRetryAt)
 		case hours < collection.MonthlyCycleHours:
-			require.Equal(t, "past_due", sub.Status)
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			require.NotNil(t, sub.NextRetryAt)
 			require.Equal(t, 24*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "weekly tier retries a day later")
 		default:
-			require.Equal(t, "past_due", sub.Status)
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			require.NotNil(t, sub.NextRetryAt)
 			require.Equal(t, 48*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "monthly tier retries two days later")
 		}
@@ -174,8 +174,8 @@ func TestUnknownCadenceFailsClosed(t *testing.T) {
 	charges := l.engineCharges()
 	w.runRenewals()
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "past_due", sub.Status)
-	require.Nil(t, sub.CancelledAt, "nothing ends on a guessed schedule")
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
+	require.Nil(t, sub.CanceledAt, "nothing ends on a guessed schedule")
 	require.Equal(t, charges, l.engineCharges(), "nothing is charged on a guessed schedule")
 	require.Contains(t, w.openFindings(collection.FindingUnknownCycle), uuid.UUID(l.sub).String(), "the operator is told")
 }

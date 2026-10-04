@@ -9,7 +9,7 @@ import (
 
 // DunningForensics answers, per provider: did dunning ever run, when did it
 // stop, and did attempts fail? For every locally past_due or
-// cancelled-as-expired subscription it lines up THREE evidence sources
+// canceled-as-expired subscription it lines up THREE evidence sources
 // (decision 2026-06-11 — forensics are generic OpenRails functionality):
 //
 //  1. "provider" — the rail's own charge-attempt timeline (declines
@@ -245,7 +245,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 
 	for i := range local.Subscriptions {
 		s := &local.Subscriptions[i]
-		examined := s.Status == "past_due" || (s.Status == "cancelled" && s.CancelType == "expired")
+		examined := s.Status == "past_due" || (s.Status == "canceled" && s.CancelType == "expired")
 		if !examined {
 			continue
 		}
@@ -308,7 +308,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		case !attempted && remoteDeclineEvidence:
 			line.Classification = "never_attempted"
 			report.NeverAttempted++
-		case attempted && (s.NextRetryAt == nil || s.Status == "cancelled"):
+		case attempted && (s.NextRetryAt == nil || s.Status == "canceled"):
 			line.Classification = "attempted_and_exhausted"
 			report.AttemptedExhausted++
 		case attempted:

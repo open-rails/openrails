@@ -94,12 +94,12 @@ no provider request and does not transfer ownership of NMI's billing schedule.
 
 Each subscription fact takes one of two lanes:
 
-- **Explicit cancel evidence** (`user_cancelled` / `chargeback` /
+- **Explicit cancel evidence** (`user_canceled` / `chargeback` /
   `provider_terminated`) is settled history — written directly with faithful
   `cancel_type` and dates (cancel-with-runway keeps the paid-through end).
 - **No cancel evidence** — seeded `unverified` and resolved by the decider at
   `as_of`: paid-through in the future → `active`; mid-dunning within the
-  window → `past_due` with grace; roster-dead → cancelled; evidence-starved →
+  window → `past_due` with grace; roster-dead → canceled; evidence-starved →
   stays parked `unverified` (cancellation-last-resort by construction).
 
 **Re-run semantics**: re-posting the same book at the same `as_of` is a pure
@@ -165,7 +165,7 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
 
 ### Gotchas
 
-- **Stale `past_due` is cancelled, never charged.** Anything past the
+- **Stale `past_due` is canceled, never charged.** Anything past the
   [dunning staleness window](operations.md#dunning-359) (derived from the
   billing cycle; 14 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
@@ -181,7 +181,7 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
   `started_at`. Provider-billed rails then renew on the *provider's*
   schedule — the renewal reaches you as a webhook/backfilled charge, not as
   something OpenRails initiates.
-- **Dates stay faithful.** `cancelled_at`/`ended_at` come from the declared
+- **Dates stay faithful.** `canceled_at`/`ended_at` come from the declared
   evidence, not import wall-clock; grace = missed period end + the grace
   window; a re-import never regresses them.
 - **Money is micros locally, cents on the wire.** `amount_cents: 2300` lands
@@ -214,7 +214,7 @@ OpenRails.
    `collection_policy` empty = NMI-owned, and the charge history including
    declines) at a fixed `as_of`. Declare `recurring_transaction_id` on a card
    only when legacy evidence proves the recurring stored-card agreement. A paused NMI schedule is declared as
-   `cancel: {kind: user_cancelled, at: <pause time>}`: access runs to the paid
+   `cancel: {kind: user_canceled, at: <pause time>}`: access runs to the paid
    date and OpenRails never deletes the paused schedule. A card reference the
    book does not declare blocks its row. Declared refunds and chargebacks are
    not recorded as charges; unlinked ones surface as `pull.reversal.unlinked`.

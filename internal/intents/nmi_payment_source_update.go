@@ -195,7 +195,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 		return Retryable("provider read before update failed: " + err.Error())
 	}
 	if !found {
-		return Terminal(fmt.Sprintf("recurring record %s gone at provider (cancelled/tombstoned); payment-source update cannot apply — repair: subscription lifecycle owns this, no local change made", psid))
+		return Terminal(fmt.Sprintf("recurring record %s gone at provider (canceled/tombstoned); payment-source update cannot apply — repair: subscription lifecycle owns this, no local change made", psid))
 	}
 	if strings.TrimSpace(remote.CustomerVaultID) == newRailCustomerRef {
 		if err := h.finalize(ctx, intent, p); err != nil {
@@ -264,7 +264,7 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.B
 		return Ambiguous("provider read failed: " + err.Error())
 	}
 	if !found {
-		return Terminal(fmt.Sprintf("recurring record %s gone at provider (cancelled/tombstoned) while a payment-source update was unresolved — repair: subscription lifecycle owns this, local payment-method link left untouched", psid))
+		return Terminal(fmt.Sprintf("recurring record %s gone at provider (canceled/tombstoned) while a payment-source update was unresolved — repair: subscription lifecycle owns this, local payment-method link left untouched", psid))
 	}
 	cur := strings.TrimSpace(remote.CustomerVaultID)
 	switch {

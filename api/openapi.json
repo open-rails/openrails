@@ -4063,60 +4063,6 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}/effective-tier": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "group",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EffectiveTier"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/merchant/subscriptions": {
       "get": {
         "tags": [
@@ -4124,14 +4070,7 @@
         ],
         "parameters": [
           {
-            "name": "all",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "cancelled_after",
+            "name": "canceled_after",
             "in": "query",
             "schema": {
               "type": "string",
@@ -4139,31 +4078,7 @@
             }
           },
           {
-            "name": "cancelled_after",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "cancelled_before",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "cancelled_before",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "created_after",
+            "name": "canceled_before",
             "in": "query",
             "schema": {
               "type": "string",
@@ -4187,15 +4102,7 @@
             }
           },
           {
-            "name": "created_before",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "customer_id",
+            "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
@@ -4206,14 +4113,6 @@
             "in": "query",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "expires_before",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
             }
           },
           {
@@ -4232,34 +4131,6 @@
             }
           },
           {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "price_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "price_id",
             "in": "query",
             "schema": {
@@ -4274,66 +4145,10 @@
             }
           },
           {
-            "name": "rail",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_by",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_by",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_by",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_order",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_order",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "status",
             "in": "query",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "total_items",
-            "in": "query",
-            "schema": {
-              "type": "integer"
             }
           }
         ],
@@ -4343,7 +4158,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOfSubscription"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Subscription"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -4361,7 +4194,9 @@
         "x-openrails-permission": "merchant:subscriptions:read",
         "x-openrails-errors": [
           "catalog_scope_mismatch",
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -4435,7 +4270,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CancelSubscriptionRequest"
+                "$ref": "#/components/schemas/CancelSubscriptionParams"
               }
             }
           }
@@ -4446,7 +4281,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Subscription"
                 }
               }
             }
@@ -4465,10 +4300,10 @@
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "cancel_unsupported_on_rail",
+          "customer_action_required",
           "invalid_param",
           "provider_cancel_held",
           "resource_conflict",
-          "solana_cancel_needs_wallet_signature",
           "subscription_not_active",
           "subscription_not_found"
         ],
@@ -4494,13 +4329,12 @@
           }
         ],
         "responses": {
-          "202": {
-            "description": "Accepted",
+          "200": {
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Subscription"
                 }
               }
             }
@@ -4518,7 +4352,7 @@
         "x-openrails-permission": "merchant:subscriptions:update",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found"
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -4551,7 +4385,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierRequest"
+                "$ref": "#/components/schemas/ChangeTierParams"
               }
             }
           }
@@ -4562,7 +4396,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangeResponse"
+                  "$ref": "#/components/schemas/TierChange"
                 }
               }
             }
@@ -4572,7 +4406,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangeResponse"
+                  "$ref": "#/components/schemas/TierChange"
                 }
               }
             }
@@ -4592,6 +4426,7 @@
         "x-openrails-errors": [
           "card_declined",
           "catalog_scope_mismatch",
+          "customer_action_required",
           "invalid_param",
           "payment_method_stale",
           "payment_provider_rejected",
@@ -4628,7 +4463,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierRequest"
+                "$ref": "#/components/schemas/ChangeTierParams"
               }
             }
           }
@@ -4639,7 +4474,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangePreviewResponse"
+                  "$ref": "#/components/schemas/TierChangePreview"
                 }
               }
             }
@@ -4658,6 +4493,7 @@
         "x-openrails-errors": [
           "card_declined",
           "catalog_scope_mismatch",
+          "customer_action_required",
           "invalid_param",
           "payment_method_stale",
           "payment_provider_rejected",
@@ -4692,7 +4528,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateSubscriptionPaymentMethodRequest"
+                "$ref": "#/components/schemas/UpdateSubscriptionPaymentMethodParams"
               }
             }
           }
@@ -4703,8 +4539,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Subscription"
                 }
               }
             }
@@ -4972,72 +4807,7 @@
         ]
       }
     },
-    "/v1/merchant/subscriptions/{id}/reprice": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSubscriptionRepriceRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubscriptionRepriceView"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:update",
-        "x-openrails-errors": [
-          "catalog_scope_mismatch",
-          "invalid_param",
-          "rebill_terms_committed",
-          "reprice_already_scheduled",
-          "reprice_cross_currency",
-          "reprice_cross_product",
-          "reprice_inactive_price",
-          "reprice_not_scheduled",
-          "reprice_notice_window_violation",
-          "reprice_target_price_not_found",
-          "subscription_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/catalog/reprice-all-prior-versions": {
+    "/v1/merchant/reprice-batches": {
       "post": {
         "tags": [
           "merchant"
@@ -5046,7 +4816,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RepriceAllPriorVersionsRequest"
+                "$ref": "#/components/schemas/CreateRepriceBatchParams"
               }
             }
           }
@@ -5089,14 +4859,26 @@
           "tier:merchant",
           "request"
         ]
-      }
-    },
-    "/v1/merchant/catalog/reprice-all-prior-versions/preview": {
+      },
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
           {
             "name": "price_key",
             "in": "query",
@@ -5111,7 +4893,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RepricePreviewResult"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RepriceBatch"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:subscriptions:read",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/reprice-batches/preview": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepriceBatchPreviewParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepriceBatchPreview"
                 }
               }
             }
@@ -5135,6 +4981,99 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
+        ]
+      }
+    },
+    "/v1/merchant/reprice-batches/{id}": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepriceBatch"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:subscriptions:read",
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/merchant/reprice-batches/{id}/cancel": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepriceBatchCancel"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:subscriptions:update",
+        "x-openrails-errors": [
+          "invalid_param",
+          "rebill_terms_committed",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -5242,114 +5181,6 @@
         ]
       }
     },
-    "/v1/merchant/plan-migrations/{id}": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:read",
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/plan-migrations/{id}/cancel": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlanMigrationCancelResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:update",
-        "x-openrails-errors": [
-          "invalid_param",
-          "rebill_terms_committed",
-          "reprice_not_scheduled"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/merchant/reprices": {
       "get": {
         "tags": [
@@ -5357,14 +5188,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -5398,7 +5229,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaginatedResponseOfSubscriptionRepriceView"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Reprice"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -5415,66 +5264,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:read",
         "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/reprices/batches": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "price_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaginatedResponseOfRepriceBatchView"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:read",
-        "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5503,7 +5294,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SubscriptionRepriceView"
+                  "$ref": "#/components/schemas/Reprice"
                 }
               }
             }
@@ -5549,7 +5340,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Reprice"
                 }
               }
             }
@@ -5568,6 +5359,7 @@
         "x-openrails-errors": [
           "invalid_param",
           "rebill_terms_committed",
+          "reprice_not_found",
           "reprice_not_scheduled"
         ],
         "x-openrails-error-sets": [
@@ -5594,19 +5386,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HandlersCancelSubscriptionRequest"
+                "$ref": "#/components/schemas/CustomerCancelSubscriptionRequest"
               }
             }
           }
         },
         "responses": {
-          "202": {
-            "description": "Accepted",
+          "200": {
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Subscription"
                 }
               }
             }
@@ -5624,10 +5415,12 @@
         "x-openrails-customer-scope": "subscription_management",
         "x-openrails-errors": [
           "authentication_required",
+          "cancel_unsupported_on_rail",
           "invalid_param",
           "provider_cancel_held",
-          "resource_not_found",
-          "solana_cancel_needs_wallet_signature"
+          "service_unavailable",
+          "subscription_not_active",
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -5651,13 +5444,12 @@
           }
         ],
         "responses": {
-          "202": {
-            "description": "Accepted",
+          "200": {
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Subscription"
                 }
               }
             }
@@ -5676,7 +5468,8 @@
         "x-openrails-errors": [
           "authentication_required",
           "invalid_param",
-          "resource_not_found"
+          "service_unavailable",
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer"
@@ -5702,7 +5495,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateSubscriptionPaymentMethodRequest"
+                "$ref": "#/components/schemas/UpdateSubscriptionPaymentMethodParams"
               }
             }
           }
@@ -5713,8 +5506,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Subscription"
                 }
               }
             }
@@ -5747,59 +5539,6 @@
         ]
       }
     },
-    "/v1/me/tier": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "at",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "group",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EffectiveTierResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
     "/v1/me/subscriptions": {
       "get": {
         "tags": [
@@ -5807,14 +5546,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -5834,7 +5573,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfSubscription"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Subscription"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -5852,7 +5609,9 @@
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
           "authentication_required",
-          "catalog_scope_mismatch"
+          "catalog_scope_mismatch",
+          "invalid_cursor",
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -6014,7 +5773,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierRequest"
+                "$ref": "#/components/schemas/CustomerChangeTierRequest"
               }
             }
           }
@@ -6025,7 +5784,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangeResponse"
+                  "$ref": "#/components/schemas/TierChange"
                 }
               }
             }
@@ -6035,7 +5794,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangeResponse"
+                  "$ref": "#/components/schemas/TierChange"
                 }
               }
             }
@@ -6091,7 +5850,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierRequest"
+                "$ref": "#/components/schemas/ChangeTierParams"
               }
             }
           }
@@ -6102,7 +5861,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangePreviewResponse"
+                  "$ref": "#/components/schemas/TierChangePreview"
                 }
               }
             }
@@ -6136,436 +5895,7 @@
         ]
       }
     },
-    "/v1/me/subscriptions/{id}/provider-cutover": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "idempotency_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderCutoverRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "rate_limit_exceeded",
-          "rebill_terms_committed",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      },
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "idempotency_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "rate_limit_exceeded",
-          "rebill_terms_committed",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/subscriptions/{id}/provider-cutover/preview": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "idempotency_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderCutoverRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "rate_limit_exceeded",
-          "rebill_terms_committed",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/subscriptions/{id}/solana-cancel-tx": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-mounted-when": "solana_signing",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
-    "/v1/me/subscriptions/{id}/solana-cancel": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmSolanaCancelRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-mounted-when": "solana_signing",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/subscriptions/{id}/solana-tier-change": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SolanaTierChangeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-mounted-when": "solana_signing",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "catalog_scope_mismatch",
-          "invalid_param",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/subscriptions/{id}/solana-tier-change/confirm": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SolanaTierChangeConfirmRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-mounted-when": "solana_signing",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "catalog_scope_mismatch",
-          "invalid_param",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/entitlements:batch": {
+    "/v1/merchant/entitlements/lookup": {
       "post": {
         "tags": [
           "merchant"
@@ -6574,7 +5904,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceExternalSubjectEntitlementsRequest"
+                "$ref": "#/components/schemas/EntitlementListParams"
               }
             }
           }
@@ -6585,8 +5915,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/EntitlementLookup"
                 }
               }
             }
@@ -6603,118 +5932,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/entitlements": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "at",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/EntitlementRecord"
-                  }
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GrantEntitlementRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitlementRecord"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
-        "x-openrails-operation-limit": "grant",
-        "x-openrails-errors": [
-          "invalid_param"
+          "invalid_param",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6765,7 +5984,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -6782,7 +6018,9 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6809,8 +6047,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/EntitlementCheckParams"
               }
             }
           }
@@ -6821,8 +6058,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/EntitlementCheck"
                 }
               }
             }
@@ -6839,8 +6075,62 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_param",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/tier": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveTier"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
+        "x-openrails-errors": [
+          "invalid_param",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6867,8 +6157,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/ProductAccessCheckParams"
               }
             }
           }
@@ -6879,8 +6168,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/ProductAccessCheck"
                 }
               }
             }
@@ -6897,7 +6185,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_param",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6932,20 +6221,6 @@
             "schema": {
               "type": "integer"
             }
-          },
-          {
-            "name": "product_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "product_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -6954,13 +6229,24 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/ProductAccessCheck"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProductAccessGrant"
+                      }
                     },
-                    {
-                      "$ref": "#/components/schemas/ProductAccessList"
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
                   ]
                 }
               }
@@ -6978,8 +6264,10 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -7004,7 +6292,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GrantProductAccessRequest"
+                "$ref": "#/components/schemas/CreateProductAccessParams"
               }
             }
           }
@@ -7034,8 +6322,66 @@
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "authentication_required",
-          "catalog_scope_mismatch",
-          "invalid_param"
+          "invalid_param",
+          "permanent_grant_forbidden",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/entitlements": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEntitlementParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntitlementRecord"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-operation-limit": "grant",
+        "x-openrails-errors": [
+          "invalid_param",
+          "permanent_grant_forbidden"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -7067,15 +6413,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -7122,15 +6461,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -7146,14 +6478,15 @@
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found"
+          "resource_not_found",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
       }
     },
-    "/v1/me/entitlements/active": {
+    "/v1/me/entitlements": {
       "get": {
         "tags": [
           "customer"
@@ -7174,7 +6507,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EntitlementRecord"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -7192,111 +6542,13 @@
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
           "authentication_required",
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
           "request"
-        ]
-      }
-    },
-    "/v1/me/products": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductAccessList"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "catalog_scope_mismatch",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/products/{product_id}/access": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "product_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductAccessCheck"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
         ]
       }
     },
@@ -15981,7 +15233,7 @@
           }
         }
       },
-      "CancelSubscriptionRequest": {
+      "CancelSubscriptionParams": {
         "type": "object",
         "properties": {
           "reason": {
@@ -16349,7 +15601,7 @@
           "writes_allowed"
         ]
       },
-      "ChangeTierRequest": {
+      "ChangeTierParams": {
         "type": "object",
         "properties": {
           "price_id": {
@@ -16524,26 +15776,6 @@
           "metadata"
         ]
       },
-      "CheckoutAttemptNextAction": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string"
-          },
-          "redirect_to_url": {
-            "$ref": "#/components/schemas/CheckoutAttemptRedirectToURL"
-          },
-          "transactions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "type"
-        ]
-      },
       "CheckoutAttemptPaymentResponse": {
         "type": "object",
         "properties": {
@@ -16569,14 +15801,6 @@
         "required": [
           "rail"
         ]
-      },
-      "CheckoutAttemptRedirectToURL": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        }
       },
       "CheckoutConfig": {
         "type": "object",
@@ -17440,14 +16664,6 @@
           }
         }
       },
-      "ConfirmSolanaCancelRequest": {
-        "type": "object",
-        "properties": {
-          "signature": {
-            "type": "string"
-          }
-        }
-      },
       "CopilotAskResult": {
         "type": "object",
         "properties": {
@@ -17540,6 +16756,35 @@
           },
           "success_url": {
             "type": "string"
+          }
+        }
+      },
+      "CreateEntitlementParams": {
+        "type": "object",
+        "properties": {
+          "entitlement": {
+            "type": "string"
+          },
+          "hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -17720,6 +16965,25 @@
           }
         }
       },
+      "CreateProductAccessParams": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "CreateProductParams": {
         "type": "object",
         "properties": {
@@ -17759,10 +17023,10 @@
           }
         }
       },
-      "CreateSubscriptionRepriceRequest": {
+      "CreateRepriceBatchParams": {
         "type": "object",
         "properties": {
-          "to_price": {
+          "price_key": {
             "type": "string"
           },
           "effective_at": {
@@ -18279,6 +17543,28 @@
           "product_access"
         ]
       },
+      "CustomerCancelSubscriptionRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
+      "CustomerChangeTierRequest": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
       "CustomerParams": {
         "type": "object",
         "properties": {
@@ -18482,9 +17768,6 @@
           },
           "psp": {
             "$ref": "#/components/schemas/PSPRef"
-          },
-          "user_email": {
-            "type": "string"
           },
           "started_at": {
             "type": "string",
@@ -18764,79 +18047,10 @@
           "group": {
             "type": "string"
           },
-          "entitlement": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "tier_rank": {
-            "type": "integer"
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "product_key": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "group",
-          "entitlement",
-          "display_name",
-          "tier_rank",
-          "product_id",
-          "product_key"
-        ]
-      },
-      "EffectiveTierBody": {
-        "type": "object",
-        "properties": {
-          "entitlement": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "tier_rank": {
-            "type": "integer"
-          },
-          "product": {
-            "$ref": "#/components/schemas/EffectiveTierRef"
-          }
-        },
-        "required": [
-          "entitlement",
-          "display_name",
-          "tier_rank",
-          "product"
-        ]
-      },
-      "EffectiveTierRef": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "key"
-        ]
-      },
-      "EffectiveTierResponse": {
-        "type": "object",
-        "properties": {
-          "group": {
-            "type": "string"
-          },
           "tier": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/EffectiveTierBody"
+                "$ref": "#/components/schemas/Tier"
               },
               {
                 "type": "null"
@@ -18857,6 +18071,95 @@
           }
         }
       },
+      "EntitlementCheck": {
+        "type": "object",
+        "properties": {
+          "entitlements": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "entitlements"
+        ]
+      },
+      "EntitlementCheckParams": {
+        "type": "object",
+        "properties": {
+          "entitlements": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EntitlementListParams": {
+        "type": "object",
+        "properties": {
+          "customer_ids": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EntitlementLookup": {
+        "type": "object",
+        "properties": {
+          "customers": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EntitlementRecord"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customers"
+        ]
+      },
       "EntitlementRecord": {
         "type": "object",
         "properties": {
@@ -18869,26 +18172,53 @@
           "entitlement": {
             "type": "string"
           },
-          "start_at": {
+          "starts_at": {
             "type": "string",
             "format": "date-time"
           },
-          "end_at": {
+          "ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_type": {
             "type": "string",
-            "format": "date-time"
+            "enum": [
+              "admin",
+              "grace",
+              "purchase",
+              "subscription"
+            ]
           },
           "source_id": {
             "type": "string"
           },
-          "source_type": {
-            "type": "string"
-          },
           "revoked_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revoke_reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -18901,9 +18231,14 @@
         },
         "required": [
           "id",
+          "customer_id",
           "entitlement",
-          "start_at",
+          "starts_at",
+          "ends_at",
           "source_type",
+          "source_id",
+          "revoked_at",
+          "revoke_reason",
           "created_at",
           "updated_at"
         ]
@@ -19209,32 +18544,6 @@
           "viz"
         ]
       },
-      "GrantEntitlementRequest": {
-        "type": "object",
-        "properties": {
-          "entitlement": {
-            "type": "string"
-          },
-          "hours": {
-            "type": "integer"
-          },
-          "end_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "GrantProductAccessRequest": {
-        "type": "object",
-        "properties": {
-          "product_id": {
-            "type": "string"
-          },
-          "ends_at": {
-            "type": "string"
-          }
-        }
-      },
       "Grid": {
         "type": "object",
         "properties": {
@@ -19257,14 +18566,6 @@
           "w",
           "h"
         ]
-      },
-      "HandlersCancelSubscriptionRequest": {
-        "type": "object",
-        "properties": {
-          "feedback": {
-            "type": "string"
-          }
-        }
       },
       "HostEvent": {
         "type": "object",
@@ -20903,113 +20204,6 @@
           }
         }
       },
-      "PageOfSubscription": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Subscription"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more"
-        ]
-      },
-      "PaginatedResponseOfRepriceBatchView": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/RepriceBatchView"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ]
-      },
-      "PaginatedResponseOfSubscriptionRepriceView": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SubscriptionRepriceView"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ]
-      },
       "PathPageOfNotification": {
         "type": "object",
         "properties": {
@@ -21067,51 +20261,6 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/PlatformMerchantItem"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more",
-          "url"
-        ]
-      },
-      "PathPageOfSubscription": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Subscription"
                 }
               },
               {
@@ -21208,7 +20357,7 @@
           "price": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/SubscriptionPrice"
+                "$ref": "#/components/schemas/Price"
               },
               {
                 "type": "null"
@@ -21930,26 +21079,6 @@
           }
         }
       },
-      "PlanMigrationCancelResult": {
-        "type": "object",
-        "properties": {
-          "canceled": {
-            "type": "integer"
-          },
-          "rail_release_required": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "warning": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "canceled"
-        ]
-      },
       "PlanMigrationOutcome": {
         "type": "object",
         "properties": {
@@ -21957,7 +21086,14 @@
             "type": "string"
           },
           "reprice_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rail": {
             "type": "string"
@@ -21966,13 +21102,22 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "subscription_id",
+          "reprice_id",
           "rail",
-          "disposition"
+          "disposition",
+          "reason"
         ]
       },
       "PlanMigrationRailCounts": {
@@ -22028,7 +21173,14 @@
         "type": "object",
         "properties": {
           "batch_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_price_id": {
             "type": "string"
@@ -22093,6 +21245,7 @@
           }
         },
         "required": [
+          "batch_id",
           "source_price_id",
           "target_price_id",
           "effective_at",
@@ -22449,24 +21602,54 @@
       "ProductAccessCheck": {
         "type": "object",
         "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "product_key": {
-            "type": "string"
-          },
-          "has_access": {
-            "type": "boolean"
+          "access": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "customer_id",
-          "product_id",
-          "has_access"
+          "access"
         ]
+      },
+      "ProductAccessCheckParams": {
+        "type": "object",
+        "properties": {
+          "product_ids": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product_keys": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
       },
       "ProductAccessGrant": {
         "type": "object",
@@ -22487,13 +21670,26 @@
             "type": "string"
           },
           "source_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "admin",
+              "grace",
+              "purchase",
+              "subscription"
+            ]
           },
           "source_id": {
             "type": "string"
           },
           "payment_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "type": "string"
@@ -22503,15 +21699,36 @@
             "format": "date-time"
           },
           "ends_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revoked_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revoke_reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -22526,39 +21743,18 @@
           "id",
           "customer_id",
           "product_id",
+          "product_key",
+          "product_name",
           "source_type",
+          "source_id",
+          "payment_id",
           "status",
           "starts_at",
+          "ends_at",
+          "revoked_at",
+          "revoke_reason",
           "created_at",
           "updated_at"
-        ]
-      },
-      "ProductAccessList": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ProductAccessGrant"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "next_cursor": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "data",
-          "has_more"
         ]
       },
       "ProductArchive": {
@@ -22671,7 +21867,14 @@
             "type": "string"
           },
           "tier_group": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "tier_rank": {
             "type": "integer"
@@ -22685,6 +21888,7 @@
           "key",
           "display_name",
           "description",
+          "tier_group",
           "tier_rank",
           "archived"
         ]
@@ -23564,18 +22768,257 @@
           }
         }
       },
-      "RepriceAllPriorVersionsRequest": {
+      "Reprice": {
         "type": "object",
         "properties": {
-          "price_key": {
+          "id": {
+            "type": "string"
+          },
+          "subscription_id": {
+            "type": "string"
+          },
+          "from_price_id": {
+            "type": "string"
+          },
+          "to_price_id": {
             "type": "string"
           },
           "effective_at": {
             "type": "string",
             "format": "date-time"
           },
-          "acknowledge_short_notice": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "blocked",
+              "canceled",
+              "scheduled"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "plan_change",
+              "reprice"
+            ]
+          },
+          "blocked_reason": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reprice_batch_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acknowledged_short_notice": {
             "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "applied_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canceled_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "subscription_id",
+          "from_price_id",
+          "to_price_id",
+          "effective_at",
+          "status",
+          "kind",
+          "blocked_reason",
+          "reprice_batch_id",
+          "acknowledged_short_notice",
+          "created_at",
+          "applied_at",
+          "canceled_at"
+        ]
+      },
+      "RepriceBatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "plan_change",
+              "reprice"
+            ]
+          },
+          "price_key": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_price_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_price_id": {
+            "type": "string"
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fallback_policy": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "scheduled": {
+            "type": "integer"
+          },
+          "applied": {
+            "type": "integer"
+          },
+          "canceled": {
+            "type": "integer"
+          },
+          "blocked": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "price_key",
+          "source_price_id",
+          "to_price_id",
+          "effective_at",
+          "fallback_policy",
+          "matched",
+          "skipped",
+          "scheduled",
+          "applied",
+          "canceled",
+          "blocked",
+          "created_at"
+        ]
+      },
+      "RepriceBatchCancel": {
+        "type": "object",
+        "properties": {
+          "canceled": {
+            "type": "integer"
+          },
+          "rail_release_required": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warning": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "canceled",
+          "rail_release_required",
+          "warning"
+        ]
+      },
+      "RepriceBatchPreview": {
+        "type": "object",
+        "properties": {
+          "price_key": {
+            "type": "string"
+          },
+          "to_price_id": {
+            "type": "string"
+          },
+          "matched": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "price_key",
+          "to_price_id",
+          "matched"
+        ]
+      },
+      "RepriceBatchPreviewParams": {
+        "type": "object",
+        "properties": {
+          "price_key": {
+            "type": "string"
           }
         }
       },
@@ -23626,68 +23069,6 @@
           "skipped"
         ]
       },
-      "RepriceBatchView": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "merchant_id": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "source_price_id": {
-            "type": "string"
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "plan_change",
-              "reprice"
-            ]
-          },
-          "fallback_policy": {
-            "type": "string"
-          },
-          "subscriptions_matched": {
-            "type": "integer"
-          },
-          "subscriptions_scheduled": {
-            "type": "integer"
-          },
-          "subscriptions_skipped": {
-            "type": "integer"
-          },
-          "subscriptions_blocked": {
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "merchant_id",
-          "to_price_id",
-          "effective_at",
-          "kind",
-          "subscriptions_matched",
-          "subscriptions_scheduled",
-          "subscriptions_skipped",
-          "subscriptions_blocked",
-          "created_at"
-        ]
-      },
       "RepriceDraft": {
         "type": "object",
         "properties": {
@@ -23711,36 +23092,34 @@
             "type": "string"
           },
           "reprice_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "acknowledged_short_notice": {
             "type": "boolean"
           }
         },
         "required": [
-          "subscription_id"
-        ]
-      },
-      "RepricePreviewResult": {
-        "type": "object",
-        "properties": {
-          "price_key": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "matched": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "price_key",
-          "to_price_id",
-          "matched"
+          "subscription_id",
+          "reprice_id",
+          "reason",
+          "acknowledged_short_notice"
         ]
       },
       "ResolveFindingRequest": {
@@ -24070,27 +23449,6 @@
           "dims"
         ]
       },
-      "ServiceExternalSubjectEntitlementsRequest": {
-        "type": "object",
-        "properties": {
-          "subjects": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "at": {
-            "type": "string"
-          }
-        }
-      },
       "SetMeterParams": {
         "type": "object",
         "properties": {
@@ -24256,25 +23614,6 @@
         "required": [
           "transaction"
         ]
-      },
-      "SolanaTierChangeConfirmRequest": {
-        "type": "object",
-        "properties": {
-          "signature": {
-            "type": "string"
-          },
-          "new_price_id": {
-            "type": "string"
-          }
-        }
-      },
-      "SolanaTierChangeRequest": {
-        "type": "object",
-        "properties": {
-          "new_price_id": {
-            "type": "string"
-          }
-        }
       },
       "SpendDelegation": {
         "type": "object",
@@ -24539,7 +23878,15 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "active",
+              "awaiting_method",
+              "canceled",
+              "past_due",
+              "pending",
+              "unverified"
+            ]
           },
           "scheduled_price_id": {
             "type": "string"
@@ -24591,7 +23938,7 @@
               }
             ]
           },
-          "cancelled_at": {
+          "canceled_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -24632,13 +23979,13 @@
             "type": "string"
           },
           "price": {
-            "$ref": "#/components/schemas/SubscriptionPrice"
+            "$ref": "#/components/schemas/Price"
           },
           "product": {
             "$ref": "#/components/schemas/ProductSummary"
           },
           "scheduled_price": {
-            "$ref": "#/components/schemas/SubscriptionPrice"
+            "$ref": "#/components/schemas/Price"
           },
           "scheduled_product": {
             "$ref": "#/components/schemas/ProductSummary"
@@ -24651,6 +23998,16 @@
           },
           "access": {
             "$ref": "#/components/schemas/SubscriptionAccess"
+          },
+          "next_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -24680,12 +24037,13 @@
           "ended_at",
           "current_period_starts_at",
           "current_period_ends_at",
-          "cancelled_at",
+          "canceled_at",
           "cancel_type",
           "cancel_feedback",
           "resumable",
           "cancel_scheduled",
           "cancel_mode",
+          "next_action",
           "created_at",
           "updated_at"
         ]
@@ -24724,126 +24082,6 @@
           "kind",
           "entitlement",
           "start_at"
-        ]
-      },
-      "SubscriptionPrice": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "unit_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "auto_renew": {
-            "type": "boolean"
-          },
-          "access_duration_hours": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "archived": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "key",
-          "product_id",
-          "unit_amount",
-          "currency",
-          "auto_renew",
-          "access_duration_hours",
-          "archived"
-        ]
-      },
-      "SubscriptionRepriceView": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "merchant_id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "from_price_id": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "applied",
-              "blocked",
-              "canceled",
-              "scheduled"
-            ]
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "plan_change",
-              "reprice"
-            ]
-          },
-          "blocked_reason": {
-            "type": "string"
-          },
-          "reprice_batch_id": {
-            "type": "string"
-          },
-          "acknowledged_short_notice": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "applied_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "canceled_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "merchant_id",
-          "subscription_id",
-          "from_price_id",
-          "to_price_id",
-          "effective_at",
-          "status",
-          "kind",
-          "acknowledged_short_notice",
-          "created_at"
         ]
       },
       "SubscriptionRetryNowResult": {
@@ -24886,7 +24124,103 @@
           "tokens"
         ]
       },
-      "TierChangePreviewResponse": {
+      "Tier": {
+        "type": "object",
+        "properties": {
+          "entitlement": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "tier_rank": {
+            "type": "integer"
+          },
+          "product_id": {
+            "type": "string"
+          },
+          "product_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entitlement",
+          "display_name",
+          "tier_rank",
+          "product_id",
+          "product_key"
+        ]
+      },
+      "TierChange": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "string"
+          },
+          "price_id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/CheckoutAttemptPaymentResponse"
+          },
+          "subscription_id": {
+            "type": "string"
+          },
+          "next_action": {
+            "$ref": "#/components/schemas/NextAction"
+          },
+          "message": {
+            "type": "string"
+          },
+          "delayed_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount_due_now": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "next_charge_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "next_charge_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "status",
+          "mode",
+          "price_id",
+          "payment",
+          "amount_due_now",
+          "next_charge_amount"
+        ]
+      },
+      "TierChangePreview": {
         "type": "object",
         "properties": {
           "object": {
@@ -24936,75 +24270,6 @@
           "next_charge_amount",
           "effective",
           "is_estimate"
-        ]
-      },
-      "TierChangeResponse": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string"
-          },
-          "effective": {
-            "type": "string"
-          },
-          "price_id": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutAttemptPaymentResponse"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "next_action": {
-            "$ref": "#/components/schemas/CheckoutAttemptNextAction"
-          },
-          "message": {
-            "type": "string"
-          },
-          "delayed_start": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount_due_now": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "next_charge_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "next_charge_date": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "operation_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "status",
-          "mode",
-          "price_id",
-          "payment",
-          "amount_due_now",
-          "next_charge_amount"
         ]
       },
       "TieredPrice": {
@@ -25262,7 +24527,7 @@
           }
         }
       },
-      "UpdateSubscriptionPaymentMethodRequest": {
+      "UpdateSubscriptionPaymentMethodParams": {
         "type": "object",
         "properties": {
           "payment_method_id": {
@@ -26299,7 +25564,7 @@
     "customer_action_required": {
       "status": 403,
       "type": "authorization_error",
-      "meaning": "Only the verified customer may perform this payment action."
+      "meaning": "Only the customer may take this action, through their own step."
     },
     "customer_not_found": {
       "status": 404,
@@ -26990,11 +26255,6 @@
       "status": 503,
       "type": "api_error",
       "meaning": "A dependency is temporarily unavailable; retry."
-    },
-    "solana_cancel_needs_wallet_signature": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "Cancelling a Solana subscription needs the subscriber's wallet signature."
     },
     "spend_delegation_not_found": {
       "status": 404,

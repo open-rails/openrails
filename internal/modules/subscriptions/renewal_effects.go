@@ -31,7 +31,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	if !effects.PreserveLifecycle {
 		// The payment fact decides through the state machine (#1091).
 		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
-		if effects.Reinstate && sub.Status == models.StatusCancelled {
+		if effects.Reinstate && sub.Status == models.StatusCanceled {
 			event = lifecycle.Reinstate{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
 		}
 		applied, err := Transition(sub, event, s.now())

@@ -30,7 +30,7 @@ type cancelPrepareRPC interface {
 // user authorizes, and OpenRails' DB merely mirrors it. There is NO "soft
 // cancel" (DB-only) — the user signs `cancel_subscription` for the specific
 // subscription PDA, OpenRails observes the confirmed transaction and mirrors it
-// (marks the row cancelled so the cranker stops). Cancellation is immediate (no
+// (marks the row canceled so the cranker stops). Cancellation is immediate (no
 // NMI-style undo window).
 //
 // Per-subscription cancel uses `cancel_subscription` (NOT an SPL token Revoke):
@@ -50,12 +50,12 @@ func NewPrepareCancelService(repo solanaSubscriptionReader, rpc cancelPrepareRPC
 }
 
 // PrepareCancelResult is the unsigned cancel transaction the wallet must sign,
-// plus the subscription PDA being cancelled (for the confirm/observe step).
+// plus the subscription PDA being canceled (for the confirm/observe step).
 type PrepareCancelResult struct {
 	// Transaction is the base64-encoded unsigned cancel_subscription transaction
 	// (subscriber = signer + fee payer).
 	Transaction string
-	// SubscriptionPDA is the on-chain subscription account being cancelled.
+	// SubscriptionPDA is the on-chain subscription account being canceled.
 	SubscriptionPDA string
 }
 

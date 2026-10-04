@@ -1177,7 +1177,7 @@ func (s *CCBillWebhookService) handleCustomerDataUpdate(ctx context.Context) err
 	return nil
 }
 
-// handleUserReactivation carries no payment. It resumes a cancelled membership
+// handleUserReactivation carries no payment. It resumes a canceled membership
 // only inside a period already paid for; anything else is a finding, never
 // access (#1089 audit 10).
 func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error {
@@ -1199,7 +1199,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		if err != nil {
 			return fmt.Errorf("load subscription for reactivation: %w", err)
 		}
-		if sub.Status != models.StatusCancelled {
+		if sub.Status != models.StatusCanceled {
 			log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "status": sub.Status}).
 				Info("CCBill UserReactivation on a live subscription; access follows payments")
 			return nil
@@ -1333,7 +1333,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 		if shouldTerminate {
 			// A refund returns the money: access ends now (#1094).
-			if sub.Status != models.StatusCancelled && refundReason != "" {
+			if sub.Status != models.StatusCanceled && refundReason != "" {
 				sub.CancelFeedback = &refundReason
 			}
 			_, n, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
@@ -1476,7 +1476,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 						return fmt.Errorf("lock voided subscription: %w", err)
 					}
 				}
-				if voided.Status != models.StatusCancelled {
+				if voided.Status != models.StatusCanceled {
 					reason := "CCBill void processed"
 					voided.CancelFeedback = &reason
 				}
@@ -1599,7 +1599,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 
 		// A chargeback ends access now, even inside a paid period (#1094).
-		if sub.Status != models.StatusCancelled {
+		if sub.Status != models.StatusCanceled {
 			feedback := fmt.Sprintf("CHARGEBACK: %s", chargebackReason)
 			sub.CancelFeedback = &feedback
 		}
@@ -1765,7 +1765,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		return nil
 	}
 	log.WithContext(ctx).WithError(blocked).WithFields(log.Fields{"rail_subscription_id": railSubID, "transaction_id": transactionID}).
-		Warn("CCBill RenewalSuccess on a cancelled subscription; charge recorded for refund review")
+		Warn("CCBill RenewalSuccess on a canceled subscription; charge recorded for refund review")
 	if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
 		Provider: string(models.RailCCBill), Operation: "terminal_blocked_renewal_success", TransactionID: transactionID,
 		UserID: sub.CustomerID.String(), SubscriptionID: &sub.ID, Err: blocked,
@@ -1778,7 +1778,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 
 // handleRenewalFailure mirrors a declined CCBill rebill. CCBill owns its
 // retries, so the row only moves to past_due, never further, and only for the
-// period still unpaid; a decline of a paid period or on a cancelled row changes
+// period still unpaid; a decline of a paid period or on a canceled row changes
 // nothing.
 func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 	var data CCBillRenewalFailureEvent
@@ -1877,14 +1877,14 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 		return fmt.Errorf("missing required field: subscriptionId")
 	}
 	now := s.now().UTC()
-	var ev lifecycle.Event = lifecycle.ProviderCancelled{At: now}
+	var ev lifecycle.Event = lifecycle.ProviderCanceled{At: now}
 	notice := ccbillNotice{revoke: models.EntitlementRevokeAdmin, ended: subscriptions.PremiumEndReasonRail}
 	if data.Source == "failedRB" {
 		ev = lifecycle.Cancel{Kind: lifecycle.CancelExpired, Immediate: true, At: now}
 		notice.ended, notice.providerStopped = subscriptions.PremiumEndReasonExpired, true
 	}
 	return s.ccbillMirrorEvent(ctx, data.SubscriptionID, func(sub *models.Subscription) lifecycle.Event {
-		if sub.Status != models.StatusCancelled && data.Reason != "" {
+		if sub.Status != models.StatusCanceled && data.Reason != "" {
 			reason := data.Reason
 			sub.CancelFeedback = &reason
 		}
@@ -1907,6 +1907,6 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 				Warn("Ignoring CCBill expiration inside a paid period")
 			return nil
 		}
-		return lifecycle.ProviderCancelled{At: now}
+		return lifecycle.ProviderCanceled{At: now}
 	}, ccbillNotice{revoke: models.EntitlementRevokeAdmin, ended: subscriptions.PremiumEndReasonExpired})
 }

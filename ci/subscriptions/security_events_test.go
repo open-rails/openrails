@@ -52,7 +52,7 @@ func TestSecurityRefundNoticeDuringOwnRefundCountsOnce(t *testing.T) {
 			require.NoError(t, err)
 			require.EqualValues(t, 4_000_000, got.AmountRefunded, "one refund recorded (%s)", view)
 		}
-		require.Equal(t, "active", w.subscription(tp, e.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(tp, e.sub).Status)
 		require.True(t, e.c.entitled(e.ent), "revoke_access=false keeps access")
 	})
 }
@@ -104,7 +104,7 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		p := completed(w.payments(embedded, l.c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_won1", "won", p)))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_won1", "needs_response", p)))
-		require.Equal(t, "active", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
 		require.True(t, l.c.entitled(l.ent))
 		for _, view := range []topology{embedded, remote} {
 			got, err := w.client[view].GetPayment(t.Context(), p.ID)
@@ -131,11 +131,11 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		w.converge()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerCancelNotice()))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_prior", "needs_response", p)))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_prior", "won", p)))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status, "a won dispute never revives an earlier cancellation")
-		require.Equal(t, "cancelled", w.subscription(remote, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status, "a won dispute never revives an earlier cancellation")
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, l.sub).Status)
 	})
 	t.Run("won_restores_its_own_cancellation", func(t *testing.T) {
 		t.Parallel()
@@ -144,10 +144,10 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		w.converge()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_own", "needs_response", p)))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_own", "won", p)))
-		require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "winning the dispute restores the membership it cancelled")
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "winning the dispute restores the membership it canceled")
 	})
 }
 

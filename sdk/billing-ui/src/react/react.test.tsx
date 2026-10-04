@@ -29,11 +29,7 @@ function setup<T>(
 ) {
   const client = createBillingClient({ fetch: server.fetch })
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <BillingProvider
-      client={client}
-      settle={{ intervalMs: 1, attempts: 5 }}
-      {...props}
-    >
+    <BillingProvider client={client} {...props}>
       {children}
     </BillingProvider>
   )
@@ -41,9 +37,8 @@ function setup<T>(
 }
 
 describe("useSubscriptions", () => {
-  it("cancels, waits for the queued change and notifies the host", async () => {
+  it("cancels, patches the row and notifies the host", async () => {
     const server = fakeBilling()
-    server.lag = 2
     const onChange = vi.fn()
     const { result } = setup(() => useSubscriptions(), server, { onChange })
     await waitFor(() => expect(result.current.subscriptions).toHaveLength(1))
@@ -60,9 +55,8 @@ describe("useSubscriptions", () => {
     expect(result.current.pending[id]).toBeUndefined()
     expect(result.current.subscriptions![0].cancel_scheduled).toBe(true)
     expect(onChange).toHaveBeenCalledWith({
-      type: "subscription.cancelled",
+      type: "subscription.canceled",
       subscriptionId: id,
-      settled: true,
     })
 
     await act(async () => {
@@ -97,7 +91,7 @@ describe("useSubscriptions", () => {
     server.fail[`POST /me/subscriptions/${id}/resume`] = apiError(
       400,
       "invalid_param",
-      "subscription is not cancelled"
+      "subscription is not canceled"
     )
     let error: unknown
     await act(async () => {
@@ -106,17 +100,25 @@ describe("useSubscriptions", () => {
     expect(error).toMatchObject({ status: 400, code: "invalid_param" })
   })
 
-  it("tracks Solana stages per row", async () => {
+  it("signs a Solana cancel's next action and tracks its stages", async () => {
     const server = fakeBilling({
       subscriptions: [subscription({ id: "sub_sol", rail: "solana" })],
     })
     const { result } = setup(() => useSubscriptions(), server)
     await waitFor(() => expect(result.current.subscriptions).not.toBeNull())
+    let error: unknown
+    await act(async () => {
+      error = await result.current.cancel("sub_sol", "too expensive")
+    })
+    expect(error).toMatchObject({ code: "wallet_required" })
+    expect(server.subscriptions[0].status).toBe("active")
+
     let sign!: (signature: string) => void
     let done!: Promise<unknown>
     act(() => {
-      done = result.current.cancelOnChain(
+      done = result.current.cancel(
         "sub_sol",
+        "too expensive",
         () => new Promise((resolve) => (sign = resolve))
       )
     })
@@ -125,7 +127,14 @@ describe("useSubscriptions", () => {
       sign("sig")
       expect(await done).toBeNull()
     })
-    expect(result.current.subscriptions![0].status).toBe("cancelled")
+    expect(result.current.subscriptions![0].status).toBe("canceled")
+    const posts = server.fetch.mock.calls.filter(
+      ([, i]) => i?.method === "POST"
+    )
+    expect(JSON.parse(String(posts.at(-1)?.[1]?.body))).toEqual({
+      reason: "too expensive",
+      signature: "sig",
+    })
   })
 })
 

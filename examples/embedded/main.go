@@ -29,6 +29,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
 
@@ -157,7 +158,12 @@ func run(ctx context.Context) error {
 	// Our own route: only premium members can watch.
 	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		claims, _ := auth.VerifyRequest(c.Request)
-		premium, err := bill.HasEntitlement(c, claims.UserID, "premium", time.Now())
+		customer, err := billing.ParseCustomerID(claims.UserID)
+		if err != nil {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		premium, err := bill.HasEntitlement(c, customer, "premium", time.Now())
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return

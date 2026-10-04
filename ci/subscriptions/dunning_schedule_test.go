@@ -44,7 +44,7 @@ func TestDunningScheduleParity(t *testing.T) {
 			var got []time.Duration
 			for i := range want {
 				s := w.subscription(embedded, sub)
-				require.Equal(t, "past_due", s.Status)
+				require.Equal(t, billing.SubscriptionPastDue, s.Status)
 				require.NotNil(t, s.NextRetryAt)
 				got = append(got, s.NextRetryAt.Sub(declined))
 				if i < len(want)-1 {

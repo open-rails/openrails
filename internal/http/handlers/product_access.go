@@ -1,8 +1,8 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -10,53 +10,32 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
-// ProductAccessGrantResponse is the application-facing view of a durable product
-// access grant (issue #250), enriched with product metadata so host apps can
-// build a purchased-library view without querying the catalog or payment history.
-type ProductAccessGrantResponse = billing.ProductAccessGrant
-
-type productAccessPath struct {
-	ProductID billing.ProductID `uri:"product_id" binding:"required"`
-}
-
-type adminUserProductAccessPath struct {
-	UserID string `uri:"customer_id" binding:"required"`
-}
-
-type adminProductAccessGrantPath struct {
-	UserID  string `uri:"customer_id" binding:"required"`
-	GrantID string `uri:"id" binding:"required"`
-}
-
-type GrantProductAccessRequest struct {
-	ProductID billing.ProductID `json:"product_id"`
-	EndsAt    *string           `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
-}
-
-// productAccessResponses enriches grants with product metadata from one batched
-// product load (best-effort: a missing product yields an unenriched row).
-func productAccessResponses(r *httprequest.Request, grants []models.ProductAccessGrant) []ProductAccessGrantResponse {
+// productAccessGrants enriches grants with their products' key and name from
+// one batched load (best-effort: a missing product leaves them empty).
+func productAccessGrants(r *httprequest.Request, grants []models.ProductAccessGrant) []billing.ProductAccessGrant {
 	products := map[uuid.UUID]*models.Product{}
 	if r.State != nil && r.State.ProductService != nil {
 		if loaded, err := r.State.ProductService.GetByIDs(r.Request.Context(), models.DistinctProductIDs(grants)); err == nil {
 			products = loaded
 		}
 	}
-	out := make([]ProductAccessGrantResponse, 0, len(grants))
+	out := make([]billing.ProductAccessGrant, 0, len(grants))
 	for i := range grants {
 		g := grants[i]
-		resp := ProductAccessGrantResponse{
-			ID:         g.ID.String(),
-			CustomerID: billing.CustomerID(g.CustomerID).String(),
-			ProductID:  billing.ProductID(g.ProductID).String(),
-			SourceType: string(g.SourceType),
+		resp := billing.ProductAccessGrant{
+			ID:         billing.ProductAccessID(g.ID),
+			CustomerID: billing.CustomerID(g.CustomerID),
+			ProductID:  billing.ProductID(g.ProductID),
+			SourceType: billing.EntitlementSourceType(g.SourceType),
 			SourceID:   billing.SourceRef(string(g.SourceType), g.SourceID),
 			Status:     string(g.Status),
 			StartsAt:   g.StartsAt,
@@ -66,7 +45,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 			UpdatedAt:  g.UpdatedAt,
 		}
 		if g.PaymentID != nil {
-			pid := billing.PaymentID(*g.PaymentID).String()
+			pid := billing.PaymentID(*g.PaymentID)
 			resp.PaymentID = &pid
 		}
 		if g.RevokeReason != nil {
@@ -89,149 +68,140 @@ func productAccessService(r *httprequest.Request) *productaccess.Service {
 	return r.State.ProductAccessService
 }
 
-// --- User-facing (GET /v1/me/products, /v1/me/products/:product_id/access) ---
-
-// GetMyProducts lists the authenticated user's accessible products (active
-// grants), most recent first.
-func GetMyProducts(r *httprequest.Request) {
-	user := r.GetUser()
-	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "missing user identity")
-		return
+// productAccessCustomer reads the {customer_id} path parameter.
+func productAccessCustomer(r *httprequest.Request) (billing.CustomerID, bool) {
+	customer := customerIDParam(r.Param("customer_id"))
+	if customer.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid customer_id").WithParam("customer_id"))
+		return customer, false
 	}
-	svc := productAccessService(r)
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
-		return
-	}
-	listAccessibleProductsPage(r, svc, user.ID)
+	return customer, requireServiceCustomerScope(r, identity.CustomerID(customer))
 }
 
-// GetMyProductAccess reports whether the authenticated user has access to a
-// specific product.
-func GetMyProductAccess(r *httprequest.Request) {
-	user := r.GetUser()
-	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "missing user identity")
+// ListProductAccess is one page of the products a customer has access to,
+// newest grant first.
+func ListProductAccess(r *httprequest.Request) {
+	customer, ok := productAccessCustomer(r)
+	if !ok {
 		return
 	}
-	var path productAccessPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+	page, ok := r.Page()
+	if !ok {
 		return
 	}
-	if path.ProductID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
-		return
-	}
-	productID := path.ProductID.UUID()
-	svc := productAccessService(r)
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
-		return
-	}
-	has, err := svc.HasProductAccess(r.Request.Context(), user.ID, productID)
+	limit, err := pagination.Limit(page)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
+		writeRefusal(r, err, "invalid page")
 		return
 	}
-	r.JSON(http.StatusOK, newProductAccessCheck(productID, user.ID, has))
-}
-
-func newProductAccessCheck(productID uuid.UUID, userID string, has bool) billing.ProductAccessCheck {
-	return billing.ProductAccessCheck{CustomerID: billing.CustomerID(identity.CustomerIDFromString(userID)).String(), ProductID: billing.ProductID(productID).String(), HasAccess: has}
-}
-
-// --- API-key service (GET /v1/merchant/customers/:user_id/product-access) ---
-
-// ServiceGetUserProductAccess lists a user's accessible products for a
-// server-to-server (API-key) caller. Optional ?product_id=... narrows to a single
-// has-access check.
-func ServiceGetUserProductAccess(r *httprequest.Request) {
-	user, err := billing.ParseCustomerID(r.Param("customer_id"))
-	if err != nil || user.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+	limit = min(limit, billing.MaxProductAccessChecks)
+	var after uuid.UUID
+	if _, err := pagination.Decode(page.Cursor, &after); err != nil {
+		writeRefusal(r, err, "invalid cursor")
 		return
 	}
-	userID := user.String()
 	svc := productAccessService(r)
 	if svc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	query := r.Request.URL.Query()
-	if query.Has("product_id") && query.Has("product_key") {
-		r.ErrorJSON(http.StatusBadRequest, "exactly one of product_id and product_key is required")
+	grants, more, err := svc.ListAccessibleProductsPage(r.Request.Context(), customer.String(), after, limit)
+	if err != nil {
+		r.InternalError("failed to list accessible products", err)
 		return
 	}
-	if query.Has("product_key") {
-		key := r.Query("product_key")
+	out := billing.ListPage[billing.ProductAccessGrant]{Items: productAccessGrants(r, grants)}
+	if more && len(grants) > 0 {
+		out.Next = pagination.Encode(grants[len(grants)-1].ID)
+	}
+	r.SuccessJSON(out)
+}
+
+// CheckProductAccess answers, for each requested product, whether the
+// customer has access to it now.
+func CheckProductAccess(r *httprequest.Request) {
+	customer, ok := productAccessCustomer(r)
+	if !ok {
+		return
+	}
+	var req billing.ProductAccessCheckParams
+	if !r.BindJSON(&req) {
+		return
+	}
+	if (req.ProductIDs == nil) == (req.ProductKeys == nil) {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "exactly one of product_ids and product_keys is required"))
+		return
+	}
+	if len(req.ProductIDs)+len(req.ProductKeys) > billing.MaxProductAccessChecks {
+		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("at most %d products per check", billing.MaxProductAccessChecks)))
+		return
+	}
+	for _, key := range req.ProductKeys {
 		if !validProductAccessKey(key) {
-			r.ErrorJSON(http.StatusBadRequest, "product_key is invalid")
+			r.APIError(api.Coded(billing.CodeInvalidParam, "product_key is invalid").WithParam("product_keys"))
 			return
 		}
-		decisions, err := svc.CheckProductKeys(r.Request.Context(), userID, []string{key})
-		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
+	}
+	products := make([]uuid.UUID, 0, len(req.ProductIDs))
+	for _, id := range req.ProductIDs {
+		if id.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "invalid product_id").WithParam("product_ids"))
 			return
 		}
-		decision := decisions[key]
-		out := billing.ProductAccessCheck{CustomerID: userID, ProductKey: key, HasAccess: decision.HasAccess}
-		if decision.ProductID != uuid.Nil {
-			out.ProductID = billing.ProductID(decision.ProductID).String()
-		}
-		r.JSON(http.StatusOK, out)
+		products = append(products, id.UUID())
+	}
+	svc := productAccessService(r)
+	if svc == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	if productIDStr := r.Query("product_id"); query.Has("product_id") {
-		typedProductID, err := billing.ParseProductID(productIDStr)
-		if err != nil || typedProductID.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
-			return
-		}
-		productID := typedProductID.UUID()
-		has, err := svc.HasProductAccess(r.Request.Context(), userID, productID)
+	access := map[string]bool{}
+	if req.ProductKeys != nil {
+		decisions, err := svc.CheckProductKeys(r.Request.Context(), customer.String(), req.ProductKeys)
 		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
+			r.InternalError("failed to check product access", err)
 			return
 		}
-		r.JSON(http.StatusOK, newProductAccessCheck(productID, userID, has))
-		return
+		for key, decision := range decisions {
+			access[key] = decision.HasAccess
+		}
+	} else {
+		decisions, err := svc.CheckProducts(r.Request.Context(), customer.String(), products)
+		if err != nil {
+			r.InternalError("failed to check product access", err)
+			return
+		}
+		for id, has := range decisions {
+			access[billing.ProductID(id).String()] = has
+		}
 	}
-	listAccessibleProductsPage(r, svc, userID)
+	r.SuccessJSON(billing.ProductAccessCheck{Access: access})
 }
 
-// GrantAdminProductAccess creates a durable product access grant for a user
-// (support comps / migrations / manual purchases). Idempotent at the service
-// layer per (user, product, source). One with no end also needs
-// merchant:access:grant-permanent.
-func GrantAdminProductAccess(gate billingauth.Gate) func(*httprequest.Request) {
-	return func(r *httprequest.Request) { grantAdminProductAccess(r, gate) }
+// CreateProductAccess grants a customer access to a product (support comps,
+// migrations, manual purchases), idempotent per customer and product. One with
+// no end also needs merchant:access:grant-permanent.
+func CreateProductAccess(gate billingauth.Gate) func(*httprequest.Request) {
+	return func(r *httprequest.Request) { createProductAccess(r, gate) }
 }
 
-func grantAdminProductAccess(r *httprequest.Request, gate billingauth.Gate) {
-	var path adminUserProductAccessPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+func createProductAccess(r *httprequest.Request, gate billingauth.Gate) {
+	customer, ok := productAccessCustomer(r)
+	if !ok {
 		return
 	}
-	var req GrantProductAccessRequest
+	var req billing.CreateProductAccessParams
 	if !r.BindJSON(&req) {
 		return
 	}
 	if req.ProductID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "product_id is required").WithParam("product_id"))
 		return
 	}
 	productID := req.ProductID.UUID()
 	var endsAt *time.Time
-	if req.EndsAt != nil && strings.TrimSpace(*req.EndsAt) != "" {
-		parsed, perr := time.Parse(time.RFC3339, strings.TrimSpace(*req.EndsAt))
-		if perr != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid ends_at timestamp; use RFC3339")
-			return
-		}
-		e := parsed.UTC()
+	if req.EndsAt != nil {
+		e := req.EndsAt.UTC()
 		endsAt = &e
 	}
 	if endsAt == nil && !permitPermanentGrant(r, gate) {
@@ -248,30 +218,28 @@ func grantAdminProductAccess(r *httprequest.Request, gate billingauth.Gate) {
 		return
 	}
 	grant, _, err := svc.GrantProductAccess(r.Request.Context(), productaccess.GrantParams{
-		UserID:     path.UserID,
+		UserID:     customer.String(),
 		ProductID:  productID,
 		SourceType: models.ProductAccessSourceAdmin,
 		SourceID:   "admin:" + admin.ID + ":" + productID.String(),
 		EndsAt:     endsAt,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.InternalError("failed to grant product access", err)
 		return
 	}
-	resp := productAccessResponses(r, []models.ProductAccessGrant{*grant})
-	r.JSON(http.StatusCreated, resp[0])
+	r.JSON(http.StatusCreated, productAccessGrants(r, []models.ProductAccessGrant{*grant})[0])
 }
 
-// RevokeAdminProductAccess revokes a single grant by id for a user.
-func RevokeAdminProductAccess(r *httprequest.Request) {
-	var path adminProductAccessGrantPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+// DeleteProductAccess revokes one of the customer's product-access grants.
+func DeleteProductAccess(r *httprequest.Request) {
+	customer, ok := productAccessCustomer(r)
+	if !ok {
 		return
 	}
-	grantID, err := uuid.Parse(strings.TrimSpace(path.GrantID))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid grant id format")
+	id, err := billing.ParseProductAccessID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid product access id").WithParam("id"))
 		return
 	}
 	svc := productAccessService(r)
@@ -279,128 +247,25 @@ func RevokeAdminProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	// Guard: the grant must belong to the path user (the query already
-	// scopes by merchant).
-	grant, err := svc.GetGrant(r.Request.Context(), grantID)
+	grant, err := svc.GetGrant(r.Request.Context(), id.UUID())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load grant")
+		r.InternalError("failed to load grant", err)
 		return
 	}
-	if grant == nil || grant.CustomerID.String() != path.UserID {
-		r.ErrorJSON(http.StatusNotFound, "grant not found for this user")
+	if grant == nil || grant.CustomerID != customer.UUID() {
+		r.APIError(api.Coded(billing.CodeResourceNotFound, "product access not found"))
 		return
 	}
-	found, err := svc.RevokeProductAccess(r.Request.Context(), grantID, models.ProductAccessRevokeAdmin)
+	found, err := svc.RevokeProductAccess(r.Request.Context(), id.UUID(), models.ProductAccessRevokeAdmin)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.InternalError("failed to revoke product access", err)
 		return
 	}
 	if !found {
-		r.ErrorJSON(http.StatusNotFound, "grant not found or already revoked")
+		r.APIError(api.Coded(billing.CodeResourceNotFound, "product access not found or already revoked"))
 		return
 	}
-	r.SuccessJSONMessage("product access revoked")
-}
-
-func listAccessibleProductsPage(r *httprequest.Request, svc *productaccess.Service, userID string) {
-	limit := 25
-	if raw := r.Query("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > billing.ProductAccessMaxPageSize {
-			r.ErrorJSON(http.StatusBadRequest, "limit must be between 1 and 100")
-			return
-		}
-		limit = parsed
-	}
-	var cursor uuid.UUID
-	if raw := r.Query("cursor"); raw != "" {
-		parsed, err := uuid.Parse(raw)
-		if err != nil || parsed == uuid.Nil || parsed.String() != raw {
-			r.ErrorJSON(http.StatusBadRequest, "invalid cursor")
-			return
-		}
-		cursor = parsed
-	}
-	grants, more, err := svc.ListAccessibleProductsPage(r.Request.Context(), userID, cursor, limit)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
-		return
-	}
-	page := billing.ProductAccessList{Data: productAccessResponses(r, grants), HasMore: more}
-	if more && len(grants) > 0 {
-		page.NextCursor = grants[len(grants)-1].ID.String()
-	}
-	r.JSON(http.StatusOK, page)
-}
-
-func ServiceCheckUserProductAccess(r *httprequest.Request) {
-	user, err := billing.ParseCustomerID(r.Param("customer_id"))
-	if err != nil || user.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
-		return
-	}
-	var body struct {
-		ProductIDs  []string `json:"product_ids"`
-		ProductKeys []string `json:"product_keys"`
-	}
-	if !r.BindJSON(&body) {
-		return
-	}
-	if (body.ProductIDs == nil) == (body.ProductKeys == nil) {
-		r.ErrorJSON(http.StatusBadRequest, "exactly one of product_ids and product_keys is required")
-		return
-	}
-	if len(body.ProductIDs)+len(body.ProductKeys) > billing.ProductAccessMaxPageSize {
-		r.ErrorJSON(http.StatusBadRequest, "at most 100 products are allowed")
-		return
-	}
-	for _, key := range body.ProductKeys {
-		if !validProductAccessKey(key) {
-			r.ErrorJSON(http.StatusBadRequest, "product_key is invalid")
-			return
-		}
-	}
-	products := make([]uuid.UUID, 0, len(body.ProductIDs))
-	for _, raw := range body.ProductIDs {
-		product, err := billing.ParseProductID(raw)
-		if err != nil || product.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
-			return
-		}
-		products = append(products, product.UUID())
-	}
-	svc := productAccessService(r)
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
-		return
-	}
-	if body.ProductKeys != nil {
-		decisions, err := svc.CheckProductKeys(r.Request.Context(), user.String(), body.ProductKeys)
-		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
-			return
-		}
-		access := make(map[string]bool, len(decisions))
-		for key, decision := range decisions {
-			access[key] = decision.HasAccess
-		}
-		r.JSON(http.StatusOK, struct {
-			Access map[string]bool `json:"access"`
-		}{access})
-		return
-	}
-	decisions, err := svc.CheckProducts(r.Request.Context(), user.String(), products)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
-		return
-	}
-	access := make(map[string]bool, len(decisions))
-	for id, has := range decisions {
-		access[billing.ProductID(id).String()] = has
-	}
-	r.JSON(http.StatusOK, struct {
-		Access map[string]bool `json:"access"`
-	}{access})
+	r.Status(http.StatusNoContent)
 }
 
 func validProductAccessKey(key string) bool {

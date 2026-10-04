@@ -342,7 +342,7 @@ func (w *world) start() {
 	}
 }
 
-// stop ends this process. River work in flight is cancelled, as in a crash.
+// stop ends this process. River work in flight is canceled, as in a crash.
 func (w *world) stop() {
 	if w.jobs != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -421,7 +421,7 @@ func (w *world) runRenewals() {
 	}
 }
 
-var workKinds = []string{"openrails.provider_operation", "openrails.subscription_converge", "openrails.subscription_cancel", "openrails.subscription_resume"}
+var workKinds = []string{"openrails.provider_operation", "openrails.subscription_converge"}
 
 // settle waits until no operation or convergence work is runnable. Jobs the
 // engine scheduled for a moment already past are promoted at once (River's
@@ -683,10 +683,10 @@ func (c *customer) saveCard(rail string, card card) string {
 func (c *customer) subscribe(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
 	id := c.enrollOnce(tp, rail, priceID, entitlement, method)
-	subs, err := c.w.client[tp].ListSubscriptions(c.w.t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
+	subs, err := c.w.client[tp].ListSubscriptions(c.w.t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 	require.NoError(c.w.t, err)
-	require.Len(c.w.t, subs.Data, 1)
-	require.Equal(c.w.t, id, subs.Data[0].ID)
+	require.Len(c.w.t, subs.Items, 1)
+	require.Equal(c.w.t, id, subs.Items[0].ID)
 	return id
 }
 
@@ -751,9 +751,14 @@ func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (
 
 func (c *customer) entitled(entitlement string) bool {
 	c.w.t.Helper()
-	got, err := c.w.client[embedded].CheckEntitlements(c.w.t.Context(), c.id, []string{entitlement}, c.w.clock.Now())
+	got, err := c.w.client[embedded].HasEntitlement(c.w.t.Context(), c.customerID(), entitlement, c.w.clock.Now())
 	require.NoError(c.w.t, err)
-	return got[entitlement]
+	return got
+}
+
+// customerID is the customer's typed id.
+func (c *customer) customerID() billing.CustomerID {
+	return billing.CustomerID(uuid.MustParse(c.id))
 }
 
 // membership creates a monthly auto-renew product and price.

@@ -24,7 +24,7 @@ const (
 	DefaultMaxCancelFraction = 0.05
 	// DefaultMinCancelAllowance keeps the percentage cap from livelocking small
 	// books. 5% of a nine-subscriber merchant rounds to zero, so a pure
-	// percentage cap would hold even two genuinely provider-cancelled
+	// percentage cap would hold even two genuinely provider-canceled
 	// subscriptions FOREVER and the mirror could never converge — entitlements
 	// granted in perpetuity off subscriptions that no longer exist. A handful
 	// still makes mass cancellation structurally impossible.
@@ -153,7 +153,7 @@ func (r RosterBreaker) Implausible(provider Provider, remoteLive, localLive int)
 		return false, ""
 	}
 	return true, fmt.Sprintf(
-		"circuit breaker: %s reports only %d live subscriptions against %d locally-live linked subscriptions (< %.0f%%); refusing to treat absence as cancellation — the report is more likely truncated/broken than %d users all cancelled. No findings were generated; investigate the provider report before re-running",
+		"circuit breaker: %s reports only %d live subscriptions against %d locally-live linked subscriptions (< %.0f%%); refusing to treat absence as cancellation — the report is more likely truncated/broken than %d users all canceled. No findings were generated; investigate the provider report before re-running",
 		provider, remoteLive, localLive, r.ratio()*100, localLive)
 }
 

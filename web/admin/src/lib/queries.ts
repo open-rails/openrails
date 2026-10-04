@@ -30,7 +30,7 @@ import {
   listProducts,
   listRebillCycles,
   listRepairAlerts,
-  listRepriceBatchesByKey,
+  listRepriceBatches,
   listReprices,
   listSubscriptions,
   listUsageMeterOverrides,
@@ -43,7 +43,6 @@ import {
   type AttemptFilters,
   type CycleFilters,
   type PaymentFilters,
-  type RepriceFilters,
   type SubscriptionFilters,
 } from "@/lib/api/endpoints"
 import {
@@ -139,12 +138,12 @@ export const adminQueries = {
   subscriptions: (
     filters: SubscriptionFilters,
     limit: number,
-    offset: number
+    cursor: string
   ) =>
     queryOptions({
-      queryKey: [...queryKeys.subscriptions(), { filters, limit, offset }],
+      queryKey: [...queryKeys.subscriptions(), { filters, limit, cursor }],
       queryFn: ({ signal }) =>
-        listSubscriptions(filters, limit, offset, signal),
+        listSubscriptions(filters, limit, cursor || undefined, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load subscriptions" },
     }),
@@ -162,7 +161,7 @@ export const adminQueries = {
         listReprices(
           { subscription_id: id, status: "scheduled" },
           100,
-          0,
+          undefined,
           signal
         ),
       enabled: Boolean(id),
@@ -324,15 +323,8 @@ export const adminQueries = {
         "reprice-batches",
         { priceKey, limit },
       ],
-      queryFn: ({ signal }) =>
-        listRepriceBatchesByKey(priceKey!, limit, signal),
+      queryFn: ({ signal }) => listRepriceBatches(priceKey!, limit, signal),
       enabled: Boolean(priceKey),
-    }),
-  reprices: (filters?: RepriceFilters, limit = 1000) =>
-    queryOptions({
-      queryKey: [...queryKeys.catalog(), "reprices", { filters, limit }],
-      queryFn: ({ signal }) => listReprices(filters!, limit, 0, signal),
-      enabled: Boolean(filters),
     }),
   catalogRevision: () =>
     queryOptions({

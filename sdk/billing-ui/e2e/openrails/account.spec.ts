@@ -49,7 +49,7 @@ test("customer manages a subscription from the account page", async ({
       fullPage: true,
     })
 
-  // Cancel: feedback is required, then the queued change settles.
+  // Cancel: a reason is required.
   await sub.getByRole("button", { name: "Cancel Membership" }).click()
   const dialog = page.getByRole("alertdialog")
   await expect(dialog).toContainText("Cancel Membership?")
@@ -95,7 +95,7 @@ test("customer manages a subscription from the account page", async ({
     await page.evaluate(
       () => (window as unknown as { billingChanges: string[] }).billingChanges
     )
-  ).toEqual(["subscription.cancelled", "subscription.resumed"])
+  ).toEqual(["subscription.canceled", "subscription.resumed"])
 })
 
 test("renders the dark theme and a narrow viewport", async ({

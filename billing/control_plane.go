@@ -119,10 +119,10 @@ type FleetSnapshot struct {
 
 // FleetWeeklyPoint is one week's fleet movement; quiet weeks are zero-filled.
 type FleetWeeklyPoint struct {
-	WeekStart              time.Time `json:"week_start"`
-	NewMerchants           int64     `json:"new_merchants"`
-	ActiveMerchants        int64     `json:"active_merchants"`
-	CancelledSubscriptions int64     `json:"cancelled_subscriptions"`
+	WeekStart             time.Time `json:"week_start"`
+	NewMerchants          int64     `json:"new_merchants"`
+	ActiveMerchants       int64     `json:"active_merchants"`
+	CanceledSubscriptions int64     `json:"canceled_subscriptions"`
 }
 
 // FleetWeeklyVolume is one week's settled sale volume in one currency.

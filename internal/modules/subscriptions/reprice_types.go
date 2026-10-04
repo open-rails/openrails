@@ -3,7 +3,6 @@ package subscriptions
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -55,6 +54,8 @@ var (
 	ErrRepriceNotFound = apperr.New(http.StatusNotFound, "reprice_not_found", "reprice not found")
 	// ErrRepriceTargetPriceNotFound: to_price names no price of this merchant.
 	ErrRepriceTargetPriceNotFound = apperr.New(http.StatusNotFound, "reprice_target_price_not_found", "reprice: to_price not found")
+	// ErrRepriceBatchNotFound: no batch has that id for this merchant.
+	ErrRepriceBatchNotFound = apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "reprice batch not found")
 	// ErrRepricePriceKeyNotFound: the bulk key names no current price.
 	ErrRepricePriceKeyNotFound = apperr.New(http.StatusNotFound, "reprice_price_key_not_found", "reprice: price key not found")
 )
@@ -84,68 +85,5 @@ func (e *RepriceConstraintError) Error() string {
 
 func (e *RepriceConstraintError) Unwrap() error { return e.Sentinel }
 
-// RepriceRequest is a single subscription's reprice(subscription, to_price,
-// effective) call.
-type RepriceRequest struct {
-	SubscriptionID uuid.UUID
-	ToPriceID      uuid.UUID
-	EffectiveAt    time.Time
-	// AcknowledgeShortNotice (#781) explicitly bypasses the merchant's
-	// notice-window constraint on an INCREASE whose effective_at is nearer
-	// than the window — the support/emergency escape hatch. Recorded on the
-	// scheduled row (AcknowledgedShortNotice) and logged; never silent. No
-	// effect when the window is already satisfied or the reprice is a
-	// decrease.
-	AcknowledgeShortNotice bool
-}
-
-// RepriceAllPriorVersionsRequest is the bulk reprice_all_prior_versions(key,
-// effective_date) call: every active subscription pinned to a PRIOR version
-// of PriceKey (the archived members of its version chain) is scheduled to
-// move to the key's CURRENT price at EffectiveAt.
-type RepriceAllPriorVersionsRequest struct {
-	PriceKey    string
-	EffectiveAt time.Time
-	// AcknowledgeShortNotice (#781): see RepriceRequest. Applies uniformly to
-	// every subscription in the batch — a per-subscription override isn't
-	// exposed at v1 (matches the constraint set's existing skip-not-abort
-	// granularity: subscriptions violating the window are individually
-	// skipped, with a reason, when this is false).
-	AcknowledgeShortNotice bool
-}
-
-// RepriceBatchResult summarizes a bulk reprice_all_prior_versions call. JSON
-// tags match the shape documented for #777 console consumers: {batch_id,
-// to_price_id, matched, scheduled:[...], skipped:[...]}.
-type RepriceBatchResult struct {
-	BatchID   uuid.UUID        `json:"batch_id"`
-	ToPriceID billing.PriceID  `json:"to_price_id"`
-	Matched   int              `json:"matched"`
-	Scheduled []RepriceOutcome `json:"scheduled"`
-	Skipped   []RepriceOutcome `json:"skipped"`
-}
-
-// RepriceOutcome is one subscription's result within a bulk reprice.
-type RepriceOutcome struct {
-	SubscriptionID billing.SubscriptionID `json:"subscription_id"`
-	RepriceID      uuid.UUID              `json:"reprice_id,omitempty"` // zero when Skipped
-	Reason         string                 `json:"reason,omitempty"`     // set when skipped (constraint violation)
-	// AcknowledgedShortNotice (#781) is true when this scheduled item's
-	// effective_at was inside the merchant's notice window and was scheduled
-	// anyway via the batch's AcknowledgeShortNotice override — audit evidence
-	// alongside the persisted row.
-	AcknowledgedShortNotice bool `json:"acknowledged_short_notice,omitempty"`
-}
-
-// RepricePreviewResult is the #777 read-only "affected-count preview": how
-// many active subscriptions would move if the wizard's migration step ran
-// right now, WITHOUT scheduling anything. Computed over the key's WHOLE
-// version chain (current + archived) rather than #773's "prior versions"
-// definition, because preview always runs BEFORE the price-edit step creates
-// the new version — at that moment every existing subscriber on the key is
-// still, by definition, a "prior version" candidate once the bump lands.
-type RepricePreviewResult struct {
-	PriceKey  string          `json:"price_key"`
-	ToPriceID billing.PriceID `json:"to_price_id"`
-	Matched   int             `json:"matched"`
-}
+// ref is a pointer to v.
+func ref[T any](v T) *T { return &v }

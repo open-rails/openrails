@@ -53,10 +53,9 @@ func customerSurface(auth router.Middleware) http.Handler {
 func TestSelfServiceAuthorization(t *testing.T) {
 	payer := customerSurface(customerAuth(""))
 	for _, route := range []string{
-		"GET /v1/me/balance", "GET /v1/me/transactions", "GET /v1/me/tier?group=premium", "GET /v1/me/spend-limits",
+		"GET /v1/me/balance", "GET /v1/me/transactions", "GET /v1/me/spend-limits",
 		"PUT /v1/me/collection-payment-method", "POST /v1/me/subscriptions/sub_1/cancel", "POST /v1/me/subscriptions/sub_1/resume",
 		"PUT /v1/me/subscriptions/sub_1/payment-method", "POST /v1/me/subscriptions/sub_1/change-tier",
-		"POST /v1/me/subscriptions/sub_1/solana-cancel-tx",
 	} {
 		method, path, _ := strings.Cut(route, " ")
 		code := reach(payer, method, path, nil)
@@ -97,26 +96,23 @@ func TestCustomerRouteInventories(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"POST /me/checkout-sessions", "POST /me/billing-portal",
 		"POST /me/subscriptions/{id}/change-tier", "POST /me/subscriptions/{id}/change-tier/preview",
-		"POST /me/subscriptions/{id}/provider-cutover", "GET /me/subscriptions/{id}/provider-cutover", "POST /me/subscriptions/{id}/provider-cutover/preview",
-		"POST /me/subscriptions/{id}/solana-tier-change", "POST /me/subscriptions/{id}/solana-tier-change/confirm",
 	}, purchaseOnly, "management scope never purchases or changes plans")
-	require.Subset(t, management, []string{"POST /me/subscriptions/{id}/solana-cancel", "GET /me/spend-limits"})
+	require.Subset(t, management, []string{"GET /me/spend-limits"})
 
 	require.ElementsMatch(t, []string{
 		"PUT /me/collection-payment-method", "POST /me/subscriptions/{id}/cancel", "POST /me/subscriptions/{id}/resume", "PUT /me/subscriptions/{id}/payment-method",
 	}, collect(func(r router.Router) { RegisterCustomerSubscriptionManagementRoutes(r, nil, auth) }))
 
 	for _, tc := range []struct {
-		providers         routesurface.ProviderRoutes
-		portal, solanaTxn bool
+		providers routesurface.ProviderRoutes
+		portal    bool
 	}{
-		{routesurface.ProviderRoutes{}, false, false},
-		{routesurface.ProviderRoutes{StripePortal: true}, true, false},
-		{routesurface.ProviderRoutes{Solana: true}, false, false},
-		{routesurface.ProviderRoutes{SolanaSigning: true}, false, true},
+		{routesurface.ProviderRoutes{}, false},
+		{routesurface.ProviderRoutes{StripePortal: true}, true},
+		{routesurface.ProviderRoutes{Solana: true}, false},
+		{routesurface.ProviderRoutes{SolanaSigning: true}, false},
 	} {
 		self := collect(func(r router.Router) { RegisterSelfServiceRoutes(r, nil, auth, tc.providers) })
 		require.Equal(t, tc.portal, slices.Contains(self, "POST /me/billing-portal"), "%+v", tc.providers)
-		require.Equal(t, tc.solanaTxn, slices.Contains(self, "POST /me/subscriptions/{id}/solana-cancel-tx"), "%+v", tc.providers)
 	}
 }

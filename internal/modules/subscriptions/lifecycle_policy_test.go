@@ -23,14 +23,14 @@ func TestTerminalCancellationBlocksReactivation(t *testing.T) {
 		override bool
 		blocked  bool
 	}{
-		{"chargeback", sub(models.RailCCBill, models.StatusCancelled, cancelType(models.CancelTypeChargeback)), false, true},
-		{"user", sub(models.RailStripe, models.StatusCancelled, cancelType(models.CancelTypeUser)), false, true},
-		{"merchant", sub(models.RailStripe, models.StatusCancelled, cancelType(models.CancelTypeMerchant)), false, true},
-		{"chargeback with override", sub(models.RailCCBill, models.StatusCancelled, cancelType(models.CancelTypeChargeback)), true, false},
-		{"expired", sub(models.RailCCBill, models.StatusCancelled, cancelType(models.CancelTypeExpired)), false, false},
-		{"no cancel type", sub(models.RailCCBill, models.StatusCancelled), false, false},
-		{"chargeback feedback only", sub(models.RailCCBill, models.StatusCancelled, func(s *models.Subscription) { s.CancelFeedback = &feedback }), false, false},
-		{"not cancelled", sub(models.RailStripe, models.StatusPastDue, cancelType(models.CancelTypeUser)), false, false},
+		{"chargeback", sub(models.RailCCBill, models.StatusCanceled, cancelType(models.CancelTypeChargeback)), false, true},
+		{"user", sub(models.RailStripe, models.StatusCanceled, cancelType(models.CancelTypeUser)), false, true},
+		{"merchant", sub(models.RailStripe, models.StatusCanceled, cancelType(models.CancelTypeMerchant)), false, true},
+		{"chargeback with override", sub(models.RailCCBill, models.StatusCanceled, cancelType(models.CancelTypeChargeback)), true, false},
+		{"expired", sub(models.RailCCBill, models.StatusCanceled, cancelType(models.CancelTypeExpired)), false, false},
+		{"no cancel type", sub(models.RailCCBill, models.StatusCanceled), false, false},
+		{"chargeback feedback only", sub(models.RailCCBill, models.StatusCanceled, func(s *models.Subscription) { s.CancelFeedback = &feedback }), false, false},
+		{"not canceled", sub(models.RailStripe, models.StatusPastDue, cancelType(models.CancelTypeUser)), false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := svc.assertActiveTransitionAllowed(context.Background(), tc.sub, "renewal", tc.override)
@@ -91,7 +91,7 @@ func TestUserSubscriptionResponseUsesReadClock(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(now)
 	svc := &UserSubscriptionService{}
 	svc.SetClock(clock)
-	resp := &UserSubscriptionResponse{Subscription: sub(models.RailStripe, models.StatusCancelled, endsAt(now.Add(time.Hour)))}
+	resp := &UserSubscriptionResponse{Subscription: sub(models.RailStripe, models.StatusCanceled, endsAt(now.Add(time.Hour)))}
 	check := func(want bool) {
 		t.Helper()
 		view := resp.View()

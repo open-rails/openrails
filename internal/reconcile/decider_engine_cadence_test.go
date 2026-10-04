@@ -14,7 +14,7 @@ import (
 func TestEngineSubscriptionsNeverReachSnapshotLaw(t *testing.T) {
 	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 	snap := &RemoteSnapshot{FetchedAt: now, Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
-		Subscriptions: []RemoteSubscription{{RailSubscriptionID: "", Status: SubscriptionStatusCancelled}}}
+		Subscriptions: []RemoteSubscription{{RailSubscriptionID: "", Status: SubscriptionStatusCanceled}}}
 	for _, cadence := range []time.Duration{time.Hour, 24 * time.Hour, 7 * 24 * time.Hour, 720 * time.Hour, 90 * 24 * time.Hour, 365 * 24 * time.Hour} {
 		for _, lapsed := range []time.Duration{time.Minute, cadence / 2, cadence, 3 * cadence} {
 			for _, status := range []string{"active", "unverified"} {

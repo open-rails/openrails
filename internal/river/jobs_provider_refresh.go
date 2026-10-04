@@ -501,10 +501,10 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
 			Error("Provider Refresh: unknown-cohort cancellations withheld by a pass-level guard; a requires_review finding is open")
 	}
-	if res.Renewed+res.Adopted+res.PastDue+res.Cancelled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
+	if res.Renewed+res.Adopted+res.PastDue+res.Canceled+res.Backfilled > 0 || len(res.RailErrors) > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid, "renewed": res.Renewed, "adopted": res.Adopted, "past_due": res.PastDue,
-			"cancelled": res.Cancelled, "still_unknown": res.StillUnknown, "probed": res.Probed,
+			"canceled": res.Canceled, "still_unknown": res.StillUnknown, "probed": res.Probed,
 			"backfilled": res.Backfilled, "rail_customer_accounts": res.RailCustomers, "rail_errors": len(res.RailErrors),
 		}).Info("Provider Refresh: unknown-cohort reconcile")
 	}

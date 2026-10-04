@@ -123,26 +123,3 @@ func ServiceConfirmCheckoutAttempt(r *httprequest.Request) {
 	}
 	r.SuccessJSON(out)
 }
-
-func ServiceResolveEffectiveTier(r *httprequest.Request) {
-	payer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
-	if !ok {
-		return
-	}
-	group := strings.TrimSpace(r.Query("group"))
-	if group == "" {
-		r.ErrorJSON(http.StatusBadRequest, "group required")
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	out, err := svc.ResolveEffectiveTier(r.Request.Context(), payer.String(), group)
-	if err != nil {
-		r.InternalError("effective tier lookup failed", err)
-		return
-	}
-	r.SuccessJSON(out)
-}

@@ -156,6 +156,7 @@ describe("payment detail", () => {
       key: "pro",
       display_name: "Pro plan",
       description: "",
+      tier_group: null,
       tier_rank: 1,
       archived: false,
     },

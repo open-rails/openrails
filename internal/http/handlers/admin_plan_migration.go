@@ -6,18 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// #813 plan-migration HTTP surface: POST /v1/merchant/plan-migrations
-// (commit), GET .../preview (the operator's commit gate), GET /:id (batch +
-// per-subscription ledger), POST /:id/cancel. Mounted next to the #773
-// reprice routes — same authz, same error vocabulary.
+// Plan migrations: POST /v1/merchant/plan-migrations commits one and
+// .../preview is the operator's commit gate. The migration is a reprice
+// batch of kind plan_change, read and canceled at /reprice-batches/{id}.
 
 func planMigrationServiceRequest(r *httprequest.Request, b billing.PlanMigrationRequest) (subscriptions.PlanMigrationRequest, bool) {
 	var out subscriptions.PlanMigrationRequest
@@ -109,45 +106,4 @@ func PreviewPlanMigration(r *httprequest.Request) {
 		return
 	}
 	r.JSON(http.StatusOK, out)
-}
-
-// GetPlanMigration returns one migration batch header + its per-subscription
-// ledger rows.
-func GetPlanMigration(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid plan migration id")
-		return
-	}
-	if r.State.PlanMigrationService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "plan migration service unavailable")
-		return
-	}
-	limit := parseIntDefault(r.Query("limit"), 500)
-	offset := parseIntDefault(r.Query("offset"), 0)
-	batch, rows, err := r.State.PlanMigrationService.GetBatch(r.Request.Context(), id, limit, offset)
-	if err != nil {
-		writeRepriceError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, map[string]any{"batch": subscriptions.RepriceBatchViewOf(batch), "subscriptions": subscriptions.SubscriptionRepriceViews(rows)})
-}
-
-// CancelPlanMigration cancels every still-scheduled row in the batch.
-func CancelPlanMigration(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid plan migration id")
-		return
-	}
-	if r.State.PlanMigrationService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "plan migration service unavailable")
-		return
-	}
-	res, err := r.State.PlanMigrationService.CancelBatch(r.Request.Context(), id)
-	if err != nil {
-		writeRepriceError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, res)
 }

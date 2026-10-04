@@ -72,9 +72,9 @@ func (c *customer) buyWith(rail, method string, price *billing.Price, kind billi
 
 func (c *customer) entitledAt(entitlement string, at time.Time) bool {
 	c.w.t.Helper()
-	got, err := c.w.client[embedded].CheckEntitlements(c.w.t.Context(), c.id, []string{entitlement}, at)
+	got, err := c.w.client[embedded].HasEntitlement(c.w.t.Context(), c.customerID(), entitlement, at)
 	require.NoError(c.w.t, err)
-	return got[entitlement]
+	return got
 }
 
 // SEC-25: revoked access stays revoked. A refund that revokes a stacked,
@@ -118,13 +118,13 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 		c := w.newCustomer()
 		hours := 24
 		client := w.client[embedded]
-		_, err := client.GrantEntitlement(t.Context(), c.id, billing.GrantEntitlementRequest{Entitlement: "content:gift", Hours: &hours})
+		_, err := client.CreateEntitlement(t.Context(), c.customerID(), billing.CreateEntitlementParams{Entitlement: "content:gift", Hours: &hours})
 		require.NoError(t, err)
-		future, err := client.GrantEntitlement(t.Context(), c.id, billing.GrantEntitlementRequest{Entitlement: "content:gift", Hours: &hours})
+		future, err := client.CreateEntitlement(t.Context(), c.customerID(), billing.CreateEntitlementParams{Entitlement: "content:gift", Hours: &hours})
 		require.NoError(t, err)
 		now := w.clock.Now()
 		require.True(t, c.entitledAt("content:gift", now.Add(30*time.Hour)))
-		require.NoError(t, client.RevokeEntitlement(t.Context(), c.id, future.ID))
+		require.NoError(t, client.DeleteEntitlement(t.Context(), c.customerID(), future.ID))
 		for range 2 {
 			require.False(t, c.entitledAt("content:gift", now.Add(30*time.Hour)), "the revoked grant stays revoked")
 			require.True(t, c.entitledAt("content:gift", now.Add(12*time.Hour)))
@@ -151,7 +151,7 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		var wg sync.WaitGroup
 		change := func(client *openrails.Client, target tier) {
 			defer wg.Done()
-			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID.String()})
+			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, billing.ChangeTierParams{PriceID: target.ID, IdempotencyKey: "upgrade-" + uuid.NewString()})
 			t.Logf("upgrade to %s: %v", target.ent, err)
 		}
 		wg.Add(1)
@@ -171,13 +171,13 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		w.nmi.unhold()
 		w.settle()
 		require.Len(t, w.railLedger(rail), charges+1, "one upgrade charge")
-		subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
+		subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 		require.NoError(t, err)
 		live := 0
-		for _, s := range subs.Data {
+		for _, s := range subs.Items {
 			if s.Status == "active" {
 				live++
-				require.Equal(t, plus.ID.String(), s.PriceID)
+				require.Equal(t, plus.ID, s.PriceID)
 			}
 		}
 		require.Equal(t, 1, live, "one live membership")
@@ -200,18 +200,18 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 	charges := len(w.railLedger("nmi"))
 	for _, tc := range []struct {
 		sub    billing.SubscriptionID
-		target string
-	}{{sub, loose.ID.String()}, {looseSub, basic.ID.String()}} {
+		target billing.PriceID
+	}{{sub, loose.ID}, {looseSub, basic.ID}} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].ChangeTier(t.Context(), tc.sub, "cross-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target})
+			_, err := w.client[tp].ChangeTier(t.Context(), tc.sub, billing.ChangeTierParams{PriceID: tc.target, IdempotencyKey: "cross-" + uuid.NewString()})
 			require.Error(t, err)
-			_, err = w.client[tp].PreviewTierChange(t.Context(), tc.sub, billing.ChangeTierRequest{PriceID: tc.target})
+			_, err = w.client[tp].PreviewTierChange(t.Context(), tc.sub, billing.ChangeTierParams{PriceID: tc.target})
 			require.Error(t, err)
 		}
 	}
 	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges)
-	require.Equal(t, "active", w.subscription(embedded, sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, sub).Status)
 	require.False(t, c.entitled("content:loose"))
 }
 
@@ -285,7 +285,7 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 	got, err := w.client[embedded].GetPayment(t.Context(), payment.ID)
 	require.NoError(t, err)
 	require.Zero(t, got.AmountRefunded)
-	require.Equal(t, "active", w.subscription(embedded, victim.sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, victim.sub).Status)
 	for _, entry := range victim.providerLedger() {
 		require.Zero(t, entry.Refunded)
 	}

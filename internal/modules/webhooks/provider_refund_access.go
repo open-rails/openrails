@@ -68,7 +68,7 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 			}
 			if locked.Status.Live() {
 				cancelType := models.CancelTypeMerchant
-				locked.Status, locked.CancelledAt, locked.EndedAt, locked.CancelType, locked.CancelFeedback = models.StatusCancelled, &now, &now, &cancelType, &reason
+				locked.Status, locked.CanceledAt, locked.EndedAt, locked.CancelType, locked.CancelFeedback = models.StatusCanceled, &now, &now, &cancelType, &reason
 				locked.DeletionScheduledAt = &now
 				locked.ClearRetrySchedule()
 				locked.MarkLifecycleDecision("provider_refund_revoke")

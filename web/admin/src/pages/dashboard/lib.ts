@@ -320,7 +320,7 @@ export function deepLinkFor(
       : "/subscriptions"
   }
   if (has("new_subscriptions")) return "/subscriptions?status=active"
-  if (has("cancellations")) return "/subscriptions?status=cancelled"
+  if (has("cancellations")) return "/subscriptions?status=canceled"
   if (
     has(
       "payment_count",

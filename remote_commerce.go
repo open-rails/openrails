@@ -100,18 +100,3 @@ func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.CheckoutCo
 	}
 	return &out, nil
 }
-
-// ResolveEffectiveTier returns the tier a customer currently holds in a tier
-// group, nil when none.
-func (c *Client) ResolveEffectiveTier(ctx context.Context, customerID string, group string, requestOptions ...RequestOption) (*billing.EffectiveTier, error) {
-	path, err := customerPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	var out *billing.EffectiveTier
-	path += "/effective-tier?" + url.Values{"group": {group}}.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out, nil
-}

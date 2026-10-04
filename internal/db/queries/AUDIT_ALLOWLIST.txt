@@ -30,7 +30,7 @@ unindexed-filter AdminListReconciliationFindings # optional admin filter, paged
 unindexed-filter ListReconciliationFindings      # optional admin filter, paged
 unindexed-filter ListRailIntents                 # optional admin filter, paged
 unindexed-filter CountRailIntents                # optional admin filter, paged
-unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
+unindexed-filter ListSubscriptionRepricesPage    # optional admin filter, keyset page
 
 # Transaction-level concurrency fences are executable SQL but cannot be
 # wrapped in EXPLAIN by the query auditor.
@@ -48,7 +48,7 @@ unbounded-many FleetMRRByCurrency               # operator fleet dashboard: one 
 unbounded-many FleetRailHealth                  # operator fleet dashboard: one row per rail
 unbounded-many FleetRevenueByCurrency           # operator fleet dashboard: one row per currency
 unbounded-many FleetWeeklyActiveMerchants       # operator fleet dashboard: one row per week
-unbounded-many FleetWeeklyCancelledSubscriptions # operator fleet dashboard: one row per week
+unbounded-many FleetWeeklyCanceledSubscriptions # operator fleet dashboard: one row per week
 unbounded-many FleetWeeklyVolume                # operator fleet dashboard: one row per (week, currency)
 
 # The drift pass diffs every open catalog finding against what it observed;

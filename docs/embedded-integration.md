@@ -394,10 +394,10 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle), `GetUsage` |
 | Policy | `GetMerchantSettings`, `SetMerchantSettings`, `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
-| Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `HasEntitlement`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `CheckCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
-| Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig`, `ResolveEffectiveTier` |
-| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CancelPlanMigration` |
+| Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig` |
+| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPurchaseReviews`, `ResolvePurchaseReview`, `ListPaymentMethods`, `DeletePaymentMethod` |
 | Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetCustomerInvoiceProfile`, `SetCustomerInvoiceProfile` (`IfAbsent` to only create) |
 | Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
@@ -416,12 +416,11 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
 receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
-ents, err := client.ListActiveEntitlements(ctx, []string{userID}, time.Now())
+ents, err := client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}})
 ```
 
-Entitlement lookups address subjects by the ids your auth system already holds
-(self-service users are keyed under `billing.SelfIssuer`); a user who never touched
-billing is an empty slice, never an error. Deny verdicts are `(Allowed=false, nil
+Entitlement lookups address customers by the ids your auth system already holds;
+a customer who never touched billing maps to an empty list, never an error. Deny verdicts are `(Allowed=false, nil
 error)`.
 
 `openrails.WithTimeout` configures the same call behavior as the remote
@@ -430,8 +429,8 @@ constructor; the credential and transport options (`WithAPIKey`,
 `NewRemote` and `New` refuses them. Both modes default to a two-second call deadline;
 `openrails.WithTimeout(0)` explicitly delegates the deadline to the caller.
 
-Checkout sessions and attempts, checkout options and effective-tier
-resolution use the shared client too. See [checkout](api/commerce.md).
+Checkout sessions and attempts and checkout options use the shared client
+too. See [checkout](api/commerce.md).
 
 A host that must commit its own provider obligation atomically with the OpenRails
 authorization, release or settlement uses the embedded Client's `Tx` operations

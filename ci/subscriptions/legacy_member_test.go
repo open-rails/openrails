@@ -25,7 +25,7 @@ const providerCancelHeld = "life.provider_cancel.held"
 
 // meCancel is the member cancelling one subscription on /v1/me.
 func (l *legacy) meCancel(sub billing.SubscriptionID) (int, map[string]any) {
-	return l.c.call(http.MethodPost, "/subscriptions/"+sub.String()+"/cancel", "", map[string]any{"feedback": "too expensive"})
+	return l.c.call(http.MethodPost, "/subscriptions/"+sub.String()+"/cancel", "", map[string]any{"reason": "too expensive"})
 }
 
 func errorCode(body map[string]any) string {
@@ -78,7 +78,7 @@ func TestLegacyNMICancel(t *testing.T) {
 						w.settle()
 						return status, errorCode(body)
 					}
-					err := w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionRequest{Reason: "member asked", RevokeAccess: row.revoke, AccountDeletion: row.account})
+					_, err := w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionParams{Reason: "member asked", RevokeAccess: row.revoke, AccountDeletion: row.account})
 					w.settle()
 					if err != nil {
 						requireCode(t, err, http.StatusConflict, billing.CodeProviderCancelHeld)
@@ -91,7 +91,7 @@ func TestLegacyNMICancel(t *testing.T) {
 				if !row.armed && !row.account {
 					require.Equal(t, http.StatusConflict, status)
 					require.Equal(t, billing.CodeProviderCancelHeld, code)
-					require.Equal(t, "active", w.subscription(tp, l.sub).Status, "a refused cancel changes nothing")
+					require.Equal(t, billing.SubscriptionActive, w.subscription(tp, l.sub).Status, "a refused cancel changes nothing")
 					require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
 					w.advance(time.Hour)
 					w.wake()
@@ -104,7 +104,7 @@ func TestLegacyNMICancel(t *testing.T) {
 				}
 				require.Less(t, status, 300)
 				sub := w.subscription(tp, l.sub)
-				require.Equal(t, "cancelled", sub.Status)
+				require.Equal(t, billing.SubscriptionCanceled, sub.Status)
 				require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "the paid period is not rewritten")
 
 				if row.account && !row.armed {
@@ -167,10 +167,10 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: l.c.customerID()})
 	require.NoError(t, err)
-	require.Len(t, subs.Data, 2)
-	for _, s := range subs.Data {
+	require.Len(t, subs.Items, 2)
+	for _, s := range subs.Items {
 		if s.RailSubscriptionID == railSub {
 			return s.ID, railSub, ent
 		}
@@ -190,10 +190,10 @@ func TestLegacyNMIMemberCancelsTheNamedSubscription(t *testing.T) {
 	w.converge()
 
 	status, body := l.meCancel(second)
-	require.Equal(t, http.StatusAccepted, status, "%v", body)
+	require.Equal(t, http.StatusOK, status, "%v", body)
 	w.settle()
-	require.Equal(t, "cancelled", w.subscription(embedded, second).Status)
-	require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "the other membership is untouched")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, second).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "the other membership is untouched")
 
 	w.advance(w.subscription(embedded, second).CurrentPeriodEndsAt.Sub(w.clock.Now()) - 47*time.Hour)
 	w.until(func() bool { return w.nmi.ScheduleDeletes(secondRail) > 0 }, "the named schedule's delete")
@@ -201,7 +201,7 @@ func TestLegacyNMIMemberCancelsTheNamedSubscription(t *testing.T) {
 	require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "the other schedule is never deleted")
 	require.True(t, w.nmi.ScheduleLive(l.railSub))
 	require.True(t, l.c.entitled(l.ent))
-	require.True(t, l.c.entitled(secondEnt), "the cancelled membership keeps its paid period")
+	require.True(t, l.c.entitled(secondEnt), "the canceled membership keeps its paid period")
 	require.Empty(t, w.nmi.Unexpected())
 }
 
@@ -230,7 +230,8 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 				}
 				id, err := billing.ParsePaymentMethodID(method)
 				require.NoError(t, err)
-				return w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), l.sub, billing.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id})
+				_, err = w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), l.sub, billing.UpdateSubscriptionPaymentMethodParams{PaymentMethodID: id})
+				return err
 			}
 			updates := func() []providerCall {
 				return calls(w.nmi.CallsTo(http.MethodPost, "transact.php", func(f url.Values) bool { return f.Get("recurring") == "update_subscription" }))
@@ -347,7 +348,7 @@ func TestLegacyNMIRefund(t *testing.T) {
 			if row.revoke {
 				// Revoking access ends the membership: NMI stops billing it,
 				// exactly once, and nothing re-grants the access.
-				require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
+				require.Equal(t, billing.SubscriptionCanceled, w.subscription(tp, l.sub).Status)
 				w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 				w.converge()
 				w.pull()
@@ -358,7 +359,7 @@ func TestLegacyNMIRefund(t *testing.T) {
 			} else {
 				require.True(t, w.nmi.ScheduleLive(l.railSub), "a refund without revoke leaves NMI billing")
 				require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
-				require.Equal(t, "active", w.subscription(tp, l.sub).Status)
+				require.Equal(t, billing.SubscriptionActive, w.subscription(tp, l.sub).Status)
 			}
 			require.Zero(t, l.engineCharges())
 			require.Empty(t, w.nmi.Unexpected())

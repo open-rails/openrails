@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
@@ -22,169 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// #528: AdminPublishSolanaPlan (#254 admin plan-publish) was dropped — it lived
-// only on the retired per-user admin surface. On-chain plan execution + the
-// self-service enroll/cancel/tier-change handlers below are unchanged.
-
-// PrepareSolanaCancelTx builds the UNSIGNED on-chain cancel_subscription
-// transaction the subscriber's wallet signs to TRUSTLESSLY revoke a recurring
-// Solana subscription (#266/#271). This is the PREPARE step of the on-chain
-// cancel loop: prepare -> wallet signs+sends -> confirm (ConfirmSolanaCancel) ->
-// mirror. Solana is the source of truth; OpenRails never DB-only "soft cancels" —
-// it only mirrors after observing the confirmed on-chain cancel. The caller must
-// own the subscription; the response is `{ "transaction": "<base64>",
-// "subscription_pda": "<pda>" }` for the wallet to deserialize, sign, and send.
-func PrepareSolanaCancelTx(r *httprequest.Request) {
-	svc := r.State.SolanaPrepareCancelService
-	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
-		return
-	}
-
-	uc, ok := r.UserContext()
-	if !ok || uc.UserID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return
-	}
-
-	subscriptionIDStr := r.Param("id")
-	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
-		return
-	}
-	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-
-	// Authorize: the acting user must own the lifecycle subscription before we
-	// reveal its on-chain identifiers.
-	if r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
-		return
-	}
-	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
-	if err != nil {
-		if db.IsNotFound(err) {
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
-		return
-	}
-	if sub.CustomerID.String() != uc.UserID {
-		r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		return
-	}
-
-	res, err := svc.Prepare(r.Request.Context(), subscriptionID)
-	if err != nil {
-		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
-		return
-	}
-
-	r.SuccessJSON(map[string]any{
-		"transaction":      res.Transaction,
-		"subscription_pda": res.SubscriptionPDA,
-	})
-}
-
-// confirmSolanaCancelRequest carries the signature of the cancel_subscription
-// transaction the wallet signed + sent (#271). OpenRails confirms it landed
-// on-chain before mirroring the cancel into the DB.
-type ConfirmSolanaCancelRequest struct {
-	Signature string `json:"signature" binding:"required"`
-}
-
-// ConfirmSolanaCancel is the CONFIRM step of the on-chain cancel loop (#271):
-// after the wallet signs + sends the unsigned tx from PrepareSolanaCancelTx, it
-// posts the resulting signature here. OpenRails verifies the cancel LANDED and
-// SUCCEEDED on-chain (Solana is the source of truth) and only then MIRRORS it by
-// cancelling the membership immediately — the lifecycle cascade flips the linked
-// solana_subscriptions row to cancelled so the cranker stops. There is no DB-only
-// "soft cancel": a signature that never confirms or reverted does NOT cancel. The
-// acting user must own the subscription.
-func ConfirmSolanaCancel(r *httprequest.Request) {
-	if r.State.SolanaRPCResolver == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
-		return
-	}
-	if r.State.SubscriptionLifecycleService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
-		return
-	}
-
-	uc, ok := r.UserContext()
-	if !ok || uc.UserID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return
-	}
-
-	subscriptionIDStr := r.Param("id")
-	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
-		return
-	}
-	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-
-	var req ConfirmSolanaCancelRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-
-	// Authorize: the acting user must own the lifecycle subscription before we
-	// confirm + mirror a cancel against it.
-	if r.State.SubscriptionService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
-		return
-	}
-	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
-	if err != nil {
-		if db.IsNotFound(err) {
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
-		return
-	}
-	if sub.CustomerID.String() != uc.UserID {
-		r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		return
-	}
-
-	svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
-	if err := svc.Confirm(r.Request.Context(), subscriptionID, req.Signature); err != nil {
-		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
-		return
-	}
-
-	r.SuccessJSON(map[string]any{
-		"subscription_id": subscriptionID.String(),
-		"status":          "cancelled",
-	})
-}
-
-// solanaTierChangeRequest is the body for the prepare endpoint: the target price
-// to change TO. The acting user must own the path subscription.
-type SolanaTierChangeRequest struct {
-	NewPriceID string `json:"new_price_id" binding:"required"`
-}
-
-// solanaTierChangeConfirmRequest is the body for the confirm endpoint: the
-// signature of the atomic tier-change tx the wallet signed + sent, plus the same
-// target price (so confirm resolves the identical canonical terms as prepare).
-type SolanaTierChangeConfirmRequest struct {
-	Signature  string `json:"signature" binding:"required"`
-	NewPriceID string `json:"new_price_id" binding:"required"`
-}
-
 // resolvedTierChange holds the server-resolved facts both tier-change endpoints
 // need: the OLD lifecycle subscription + its stored on-chain row, the NEW price +
 // its canonical plan terms, the upgrade/downgrade direction, and (for an upgrade)
@@ -195,8 +33,10 @@ type resolvedTierChange struct {
 	newPrice  *models.Price
 	newTerms  solanaResolvedPlanTerms
 	isUpgrade bool
-	// firstChargeBaseUnits is the Model-B prorated first pull (token base units)
-	// for an upgrade; 0 for a downgrade.
+	// firstChargeMicros and firstChargeBaseUnits are the Model-B prorated
+	// first pull for an upgrade (fiat micros, token base units); 0 for a
+	// downgrade.
+	firstChargeMicros    int64
 	firstChargeBaseUnits uint64
 }
 
@@ -328,6 +168,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		if firstChargeBaseUnits == 0 {
 			firstChargeBaseUnits = 1
 		}
+		out.firstChargeMicros = firstChargeMicros
 		out.firstChargeBaseUnits = firstChargeBaseUnits
 	}
 
@@ -370,46 +211,32 @@ func nowOrDefault(r *httprequest.Request) time.Time {
 	return time.Now()
 }
 
-// PrepareSolanaTierChange is the PREPARE step of the on-chain tier-change loop
-// (#272). It authorizes ownership, resolves the OLD on-chain identifiers + the
-// NEW price's canonical plan terms, decides upgrade vs downgrade, computes the
-// Model-B prorated first charge for an upgrade, and returns the SINGLE ATOMIC
-// transaction for the wallet to sign + send:
-//
-//	{ "transaction": "<base64>", "kind": "upgrade|downgrade",
-//	  "new_subscription_pda": "<pda>" }
-//
-// For an upgrade the tx is PARTIALLY signed (the cranker co-signed the prorated
-// transfer slot); for a downgrade it is fully UNSIGNED. After sending, the wallet
-// posts the signature to the confirm endpoint, which mirrors the switch into the
-// DB. Solana is the source of truth — nothing is mirrored until confirm.
-func PrepareSolanaTierChange(r *httprequest.Request) {
-	svc := r.State.SolanaPrepareTierChangeService
-	if svc == nil {
+// solanaTierChange is change-tier on the Solana rail: one atomic on-chain
+// transaction the customer's wallet signs (cancel the old subscription,
+// subscribe to the new plan, and for an upgrade the prorated pull the merchant
+// co-signed). Without a signature it answers requires_action with the
+// transaction; with the signature of the landed transaction it mirrors the
+// switch and answers succeeded with the new subscription. Nothing is mirrored
+// before the chain confirms it.
+func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID, signature string) {
+	if r.State.SolanaPrepareTierChangeService == nil || r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil || r.State.DB == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
-	subscriptionID, ok := parseSubscriptionIDParam(r)
-	if !ok {
-		return
-	}
-	var req SolanaTierChangeRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-
-	resolved, status, msg := resolveSolanaTierChange(r, subscriptionID, req.NewPriceID)
+	resolved, status, msg := resolveSolanaTierChange(r, subscriptionID, priceID)
 	if status != 0 {
 		r.ErrorJSON(status, msg)
 		return
 	}
-
-	merchantID, err := merchant.Require(r.Request.Context())
+	ctx := r.Request.Context()
+	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
 		return
 	}
-	res, err := svc.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
+	// Confirm derives the new subscription account from the same canonical
+	// terms rather than trusting one the client names.
+	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(ctx, recurring.PrepareTierChangeInput{
 		MerchantID:           merchantID,
 		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
 		MintSymbol:           resolved.newTerms.mintSymbol,
@@ -427,84 +254,48 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(map[string]any{
-		"transaction":          res.Transaction,
-		"kind":                 res.Kind,
-		"new_subscription_pda": res.NewSubscriptionPDA,
-	})
-}
-
-// ConfirmSolanaTierChange is the CONFIRM step of the on-chain tier-change loop
-// (#272). After the wallet signs + sends the atomic tx from
-// PrepareSolanaTierChange, it posts the resulting signature here. OpenRails
-// confirms the tx LANDED + SUCCEEDED on-chain (the source of truth) and only then
-// MIRRORS the switch into the DB: cancel the OLD membership + on-chain row, create
-// the NEW membership + on-chain row, and set the new row's next_pull_at per kind
-// (upgrade => now + new period; downgrade => the old period end). Idempotent: a
-// re-confirm after a committed mirror returns the existing new subscription.
-func ConfirmSolanaTierChange(r *httprequest.Request) {
-	if r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
-		return
+	out := billing.TierChange{
+		Object:           "tier_change",
+		Mode:             "tier_change",
+		Action:           "downgrade",
+		Effective:        "period_end",
+		PriceID:          billing.PriceID(resolved.newPrice.ID).String(),
+		Payment:          billing.CheckoutAttemptPaymentResponse{Rail: string(models.RailSolana)},
+		Currency:         resolved.newPrice.Currency,
+		NextChargeAmount: resolved.newPrice.Amount,
+		NextChargeDate:   resolved.oldSub.CurrentPeriodEndsAt,
 	}
-	subscriptionID, ok := parseSubscriptionIDParam(r)
-	if !ok {
-		return
+	if resolved.isUpgrade {
+		periodHours, err := safecast.Convert[int64](resolved.newTerms.period)
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "the target plan's period is out of range")
+			return
+		}
+		out.Action, out.Effective, out.AmountDueNow = "upgrade", "now", resolved.firstChargeMicros
+		next := nowOrDefault(r).Add(time.Duration(periodHours) * time.Hour).UTC()
+		out.NextChargeDate = &next
 	}
-	var req SolanaTierChangeConfirmRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-
-	resolved, status, msg := resolveSolanaTierChange(r, subscriptionID, req.NewPriceID)
-	if status != 0 {
-		r.ErrorJSON(status, msg)
-		return
-	}
-
-	// Re-derive the NEW subscription PDA the same way prepare did, so confirm does
-	// not trust a client-supplied PDA. PrepareTierChangeService returns it, but the
-	// confirm body only carries the signature + price; deriving it server-side from
-	// the canonical terms keeps the mirror authoritative.
-	merchantID, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
-		return
-	}
-	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(r.Request.Context(), recurring.PrepareTierChangeInput{
-		MerchantID:           merchantID,
-		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
-		MintSymbol:           resolved.newTerms.mintSymbol,
-		OldPlanPDA:           resolved.oldRow.PlanPDA,
-		OldSubscriptionPDA:   resolved.oldRow.SubscriptionPDA,
-		NewPlanID:            resolved.newTerms.planID,
-		NewAmountBaseUnits:   resolved.newTerms.amount,
-		NewPeriodHours:       resolved.newTerms.period,
-		NewPlanCreatedAt:     resolved.newTerms.createdAt,
-		IsUpgrade:            resolved.isUpgrade,
-		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
-	})
-	if err != nil {
-		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+	if signature == "" {
+		old := billing.SubscriptionID(subscriptionID)
+		out.Status, out.SubscriptionID = "requires_action", &old
+		out.NextAction = &billing.NextAction{Type: "solana_sign_transactions", Transactions: []string{prep.Transaction}}
+		r.SuccessJSON(out)
 		return
 	}
 
 	var email string
-	user := r.GetUser()
-	if user != nil && user.Email != nil {
+	if user := r.GetUser(); user != nil && user.Email != nil {
 		email = *user.Email
 	}
-	// #788: network + token set resolve from the ctx merchant's armed solana
-	// rail account; chain reads arm per merchant through the #728 resolver.
+	// The network and token set come from the merchant's armed Solana PSP.
 	network := ""
 	var tokens map[string]config.TokenConfig
 	if r.State.RailConfigs != nil {
-		if proc, cerr := r.State.RailConfigs.RailConfig(r.Request.Context(), string(models.RailSolana), ""); cerr == nil && proc.Solana != nil {
+		if proc, cerr := r.State.RailConfigs.RailConfig(ctx, string(models.RailSolana), ""); cerr == nil && proc.Solana != nil {
 			network = proc.Solana.Network
 			tokens = proc.Solana.Tokens
 		}
 	}
-
 	svc := recurring.NewConfirmTierChangeService(
 		r.State.SolanaRPCResolver.ChainReader(),
 		r.State.SubscriptionLifecycleService,
@@ -513,11 +304,11 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		network,
 		tokens,
 	)
-	result, err := svc.Confirm(r.Request.Context(), recurring.ConfirmTierChangeInput{
-		Signature:          req.Signature,
+	result, err := svc.Confirm(ctx, recurring.ConfirmTierChangeInput{
+		Signature:          signature,
 		OldSubscriptionID:  subscriptionID,
 		UserID:             resolved.oldSub.CustomerID.String(),
-		UserEmail:          email,
+		CustomerEmail:      email,
 		NewPriceID:         resolved.newPrice.ID,
 		NewSubscriptionPDA: prep.NewSubscriptionPDA,
 		NewPlanID:          resolved.newTerms.planID,
@@ -528,42 +319,16 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		NewFiatAmount:      resolved.newPrice.Amount,
 		NewCurrency:        resolved.newPrice.Currency,
 		IsUpgrade:          resolved.isUpgrade,
-		// No FirstChargeBaseUnits: this route re-quotes the proration at confirm
-		// time and cannot reproduce the amount prepare quoted, so the landed,
-		// merchant-co-signed pull is the charge.
+		// The confirm re-quotes the proration and cannot reproduce the amount
+		// the prepare quoted, so the landed, merchant-co-signed pull is the
+		// charge.
 		OldPeriodEndsAt: resolved.oldSub.CurrentPeriodEndsAt,
 	})
 	if err != nil {
 		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
-
-	kind := "downgrade"
-	if resolved.isUpgrade {
-		kind = "upgrade"
-	}
-	r.SuccessJSON(map[string]any{
-		"subscription_id":     result.NewSubscription.ID.String(),
-		"new_subscription_id": result.NewSubscription.ID.String(),
-		"kind":                kind,
-		"status":              "active",
-		"already_confirmed":   result.AlreadyConfirmed,
-	})
-}
-
-// parseSubscriptionIDParam reads + validates the :id path param, writing the
-// error response on failure.
-func parseSubscriptionIDParam(r *httprequest.Request) (uuid.UUID, bool) {
-	idStr := r.Param("id")
-	if idStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
-		return uuid.Nil, false
-	}
-	typedId, err := billing.ParseSubscriptionID(idStr)
-	if err != nil || typedId.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return uuid.Nil, false
-	}
-	id := typedId.UUID()
-	return id, true
+	next := billing.SubscriptionID(result.NewSubscription.ID)
+	out.Status, out.SubscriptionID = "succeeded", &next
+	r.SuccessJSON(out)
 }

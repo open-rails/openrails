@@ -227,15 +227,6 @@ type ConfirmCheckoutAttemptRequest struct {
 	Wallet    string `json:"wallet"`
 }
 
-type EffectiveTier struct {
-	Group       string `json:"group"`
-	Entitlement string `json:"entitlement"`
-	DisplayName string `json:"display_name"`
-	TierRank    int    `json:"tier_rank"`
-	ProductID   string `json:"product_id"`
-	ProductKey  string `json:"product_key"`
-}
-
 // PaymentFailure is the customer-facing reason a card payment was definitely
 // declined. Reason is provider-neutral (incorrect_cvc, incorrect_zip,
 // incorrect_address, incorrect_number, expired_card, invalid_expiry,

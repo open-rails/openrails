@@ -116,7 +116,7 @@ func TestDecideSnapshotLaw(t *testing.T) {
 		{name: "roster past_due beyond the window cancels on dated exhaustion", end: e30, roster: rosterSub(SubscriptionStatusPastDue, e30),
 			charge: ChargeEvidence{RetryAttempts: 3, DunningMaxAttempts: 3, LastAttemptAt: decideNow.Add(-oneDay)},
 			want:   TransitionCancel, certainty: collection.CertaintyDunningExhausted},
-		{name: "roster dead is dated by this pass, not by history", end: rel(-400 * oneDay), floor: rel(-7 * oneDay), roster: rosterSub(SubscriptionStatusCancelled, nil),
+		{name: "roster dead is dated by this pass, not by history", end: rel(-400 * oneDay), floor: rel(-7 * oneDay), roster: rosterSub(SubscriptionStatusCanceled, nil),
 			want: TransitionCancel, reason: "roster_dead", certainty: collection.CertaintyProviderConfirmedDead, gone: true},
 		{name: "a renewal charge cannot resurrect an expired roster", end: e5, roster: rosterSub(SubscriptionStatusExpired, nil),
 			txns: []RemoteTransaction{rtx("rs", TransactionTypeSale, true, e5.Add(time.Hour), "")},
@@ -298,7 +298,7 @@ func TestDecideInvariants(t *testing.T) {
 		snap(ProviderNMI, true, rosterSub(SubscriptionStatusActive, rel(20*oneDay))),
 		snap(ProviderStripe, true, rosterSub(SubscriptionStatusActive, rel(20*oneDay))),
 		snap(ProviderNMI, true, rosterSub(SubscriptionStatusPastDue, rel(-40*oneDay))),
-		snap(ProviderNMI, true, rosterSub(SubscriptionStatusCancelled, nil)),
+		snap(ProviderNMI, true, rosterSub(SubscriptionStatusCanceled, nil)),
 		snap(ProviderNMI, true, rosterSub(SubscriptionStatusActive, rel(20*oneDay)),
 			rtx("rs", TransactionTypeDecline, false, decideNow.Add(-40*oneDay), "261"), rtx("rs", TransactionTypeDecline, false, decideNow.Add(-2*oneDay), "202")),
 		snap(ProviderNMI, false, nil,
@@ -313,7 +313,7 @@ func TestDecideInvariants(t *testing.T) {
 	}
 	times := []*time.Time{nil, rel(-90 * oneDay), rel(-10 * oneDay), rel(-time.Hour), rel(20 * oneDay)}
 
-	for _, status := range []string{"active", "past_due", "unverified", "pending", "cancelled", "expired", "failed"} {
+	for _, status := range []string{"active", "past_due", "unverified", "pending", "canceled", "expired", "failed"} {
 		for _, rail := range []string{"nmi", "stripe"} {
 			for _, policy := range []models.CollectionPolicy{models.CollectionPolicyNMISchedule, models.CollectionPolicyEngine} {
 				for _, end := range times {

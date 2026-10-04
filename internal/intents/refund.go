@@ -190,7 +190,7 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 }
 
 // revokeMembershipAccess ends the access a refunded membership payment
-// bought. An engine membership is also cancelled: the engine would otherwise
+// bought. An engine membership is also canceled: the engine would otherwise
 // renew it and grant access again; so is a provider-billed NMI membership,
 // whose schedule is deleted.
 func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB, paymentID uuid.UUID) error {
@@ -219,7 +219,7 @@ func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB
 		now := r.now()
 		cancelType := models.CancelTypeMerchant
 		reason := "payment refunded with access revoked"
-		sub.Status, sub.CancelledAt, sub.CancelType, sub.CancelFeedback = models.StatusCancelled, &now, &cancelType, &reason
+		sub.Status, sub.CanceledAt, sub.CancelType, sub.CancelFeedback = models.StatusCanceled, &now, &cancelType, &reason
 		sub.DeletionScheduledAt = &now
 		sub.ClearRetrySchedule()
 		sub.MarkLifecycleDecision("refund_revoke")

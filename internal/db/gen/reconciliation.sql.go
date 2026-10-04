@@ -402,7 +402,7 @@ WITH win AS (
                AND (g.id = e.grant_id
                     OR (g.source_id = e.source_id::text
                         AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                             OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+                             OR (e.source_type = 'purchase' AND g.source_type = 'purchase'))))
                AND NOT EXISTS (SELECT 1 FROM billing.grants t
                                 WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
                                   AND t.event IN ('revoke', 'expire', 'supersede'))) AS grant_covered_until
@@ -410,9 +410,9 @@ WITH win AS (
       LEFT JOIN billing.subscriptions s
         ON e.source_type = 'subscription' AND s.merchant_id = e.merchant_id AND s.id = e.source_id AND s.deleted_at IS NULL
       LEFT JOIN billing.payments p
-        ON e.source_type = 'one_off' AND p.merchant_id = e.merchant_id AND p.id = e.source_id AND p.deleted_at IS NULL
+        ON e.source_type = 'purchase' AND p.merchant_id = e.merchant_id AND p.id = e.source_id AND p.deleted_at IS NULL
      WHERE e.merchant_id = $1::uuid
-       AND e.source_type IN ('subscription', 'one_off')
+       AND e.source_type IN ('subscription', 'purchase')
 ), freeloader AS (
     SELECT CASE WHEN w.sub_status = 'past_due' AND w.next_retry_at IS NOT NULL THEN 'sanctioned_dunning'
                 WHEN w.sub_status = 'unverified' THEN 'awaiting_verification'
@@ -442,7 +442,7 @@ WITH win AS (
        AND ((pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
             OR (s.entitlements_spec_snapshot IS NOT NULL AND s.entitlements_spec_snapshot <> '{}'::jsonb))
     UNION ALL
-    SELECT p.merchant_id, p.customer_id, 'one_off'::text, p.id, p.purchased_at,
+    SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
            p.purchased_at + make_interval(hours => pr.access_duration_hours)
       FROM billing.payments p
       JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id
@@ -485,7 +485,7 @@ type CountErrorEpisodeTotalsRow struct {
 
 // Episode analytics totals for the gauges header. Freeloader episodes are spans
 // of entitlement access not covered by payment (subscription paid-through
-// snapshot, completed one_off payment, or a live matching grant); their cause
+// snapshot, completed purchase payment, or a live matching grant); their cause
 // separates sanctioned unpaid access (sanctioned_dunning, awaiting_verification)
 // from failure (unsanctioned). Orphaned episodes are the mirror: payment
 // coverage with no entitlement window. Open = the span still accrues at now().
@@ -1238,7 +1238,7 @@ FROM billing.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
-  AND s.status = 'cancelled'
+  AND s.status = 'canceled'
   AND EXISTS (
       SELECT 1 FROM billing.entitlements e
       WHERE e.merchant_id = s.merchant_id
@@ -1943,7 +1943,7 @@ FROM billing.entitlements e
 LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
-       ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
+       ON e.source_type = 'purchase' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
 LEFT JOIN billing.prices pr
        ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
 WHERE e.merchant_id = $1::uuid
@@ -1951,7 +1951,7 @@ WHERE e.merchant_id = $1::uuid
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
   AND e.start_at <= $3::timestamptz
   AND (e.end_at IS NULL OR e.end_at > $3::timestamptz)
-  AND e.source_type IN ('subscription', 'one_off')
+  AND e.source_type IN ('subscription', 'purchase')
   -- no live un-terminated entitlement grant covering now justifies the window
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
@@ -1961,7 +1961,7 @@ WHERE e.merchant_id = $1::uuid
         AND (g.id = e.grant_id
              OR (g.source_id = e.source_id::text
                  AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                      OR (e.source_type = 'one_off' AND g.source_type = 'purchase'))))
+                      OR (e.source_type = 'purchase' AND g.source_type = 'purchase'))))
         AND g.starts_at <= $3::timestamptz
         AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
         AND NOT EXISTS (
@@ -1978,7 +1978,7 @@ WHERE e.merchant_id = $1::uuid
   )
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
-      OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
+      OR (e.source_type = 'purchase' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
 ORDER BY e.start_at, e.id
 LIMIT $4::int
@@ -2013,7 +2013,7 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 // (stale ≠ freeloader) — a freeloader's SOURCE is proven absent or reversed:
 //
 //	missing_subscription           - source_type=subscription, no sub row at all
-//	refunded_payment               - one_off window whose payment was refunded,
+//	refunded_payment               - purchase window whose payment was refunded,
 //	                                 with no live grant justifying the access
 //
 // Grant-justification guard: never fires when a live un-terminated entitlement
@@ -2405,6 +2405,8 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 }
 
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
+
+
 INSERT INTO billing.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, psp_id,
@@ -2437,6 +2439,16 @@ type ReconcileBackfillPaymentParams struct {
 	PspID          *uuid.UUID
 }
 
+// ============================================================================
+// Enforce appliers: idempotent LOCAL writes only (never a provider call)
+// ============================================================================
+// #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
+// state transitions route through the ONE decider (reconcile.Decide) applied
+// via the shared lifecycle chokepoints (reconcile.ApplyDecision).
+// DERIVE-plane derive.grant_effect.mismatch revoke
+// repair: revoke the LIVE subscription-sourced entitlements of one
+// subscription. Admin grants and grace windows are different source types and
+// are untouchable by construction.
 // PS-4: backfill a rail charge that has no local payment record.
 // Dedupe rides the uq_payments_merchant_rail_transaction identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
@@ -2452,67 +2464,6 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 		arg.PurchasedAt,
 		arg.CustomerID,
 		arg.PspID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const reconcileGrantSubscriptionEntitlement = `-- name: ReconcileGrantSubscriptionEntitlement :execrows
-
-
-INSERT INTO billing.entitlements (
-    merchant_id, customer_id, entitlement, start_at, end_at,
-    source_id, source_type
-)
-SELECT $1, $2, $3,
-       $4::timestamptz, $5::timestamptz,
-       $6, 'subscription'
-WHERE NOT EXISTS (
-    SELECT 1 FROM billing.entitlements ent
-    WHERE ent.merchant_id = $1::uuid AND ent.customer_id = $2
-      AND ent.entitlement = $3
-      AND ent.source_type = 'subscription'
-      AND ent.source_id = $6
-      AND ent.revoked_at IS NULL
-      AND ent.deleted_at IS NULL
-      AND (ent.end_at IS NULL OR ent.end_at > $7::timestamptz)
-)
-`
-
-type ReconcileGrantSubscriptionEntitlementParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Entitlement    string
-	StartAt        time.Time
-	EndAt          *time.Time
-	SubscriptionID uuid.UUID
-	Now            time.Time
-}
-
-// ============================================================================
-// Enforce appliers: idempotent LOCAL writes only (never a provider call)
-// ============================================================================
-// #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
-// state transitions route through the ONE decider (reconcile.Decide) applied
-// via the shared lifecycle chokepoints (reconcile.ApplyDecision).
-// DERIVE-plane derive.grant_effect.mismatch revoke
-// repair: revoke the LIVE subscription-sourced entitlements of one
-// subscription. Admin grants and grace windows are different source types and
-// are untouchable by construction.
-// PS-4/PS-1: grant one subscription-sourced entitlement window unless an
-// equivalent live window already exists (idempotent via NOT EXISTS; the
-// re-run inserts nothing).
-func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg ReconcileGrantSubscriptionEntitlementParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reconcileGrantSubscriptionEntitlement,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Entitlement,
-		arg.StartAt,
-		arg.EndAt,
-		arg.SubscriptionID,
-		arg.Now,
 	)
 	if err != nil {
 		return 0, err
@@ -2731,11 +2682,13 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 
 SELECT id, customer_id, price_id, product_id, status, rail,
-       rail_subscription_id, user_email, payment_method_id,
+       rail_subscription_id, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
-       cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
+       canceled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot, scheduled_price_id,
+       (SELECT c.email FROM billing.customers c
+        WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
        EXISTS (SELECT 1 FROM billing.rail_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
@@ -2760,13 +2713,12 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	Status                   string
 	Rail                     string
 	RailSubscriptionID       string
-	UserEmail                *string
 	PaymentMethodID          *uuid.UUID
 	CurrentPeriodStartsAt    *time.Time
 	CurrentPeriodEndsAt      *time.Time
 	StartedAt                time.Time
 	EndedAt                  *time.Time
-	CancelledAt              *time.Time
+	CanceledAt               *time.Time
 	CancelType               *string
 	DeletionScheduledAt      *time.Time
 	TierGroup                *string
@@ -2775,6 +2727,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	NextRetryAt              *time.Time
 	EntitlementsSpecSnapshot []byte
 	ScheduledPriceID         *uuid.UUID
+	CustomerEmail            *string
 	TierChangePending        bool
 }
 
@@ -2798,13 +2751,12 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.Status,
 			&i.Rail,
 			&i.RailSubscriptionID,
-			&i.UserEmail,
 			&i.PaymentMethodID,
 			&i.CurrentPeriodStartsAt,
 			&i.CurrentPeriodEndsAt,
 			&i.StartedAt,
 			&i.EndedAt,
-			&i.CancelledAt,
+			&i.CanceledAt,
 			&i.CancelType,
 			&i.DeletionScheduledAt,
 			&i.TierGroup,
@@ -2813,6 +2765,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.NextRetryAt,
 			&i.EntitlementsSpecSnapshot,
 			&i.ScheduledPriceID,
+			&i.CustomerEmail,
 			&i.TierChangePending,
 		); err != nil {
 			return nil, err
@@ -2847,28 +2800,27 @@ func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, arg Reconcil
 const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
-    user_email, current_period_starts_at, current_period_ends_at, started_at,
+    current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
        $3, $4,
-       $5,
+       $5::timestamptz,
        $6::timestamptz,
-       $7::timestamptz,
-       COALESCE($8::timestamptz, now()),
-       p.entitlements_spec, $9, $10::uuid, COALESCE(NULLIF($11::text,''),'provider')
+       COALESCE($7::timestamptz, now()),
+       p.entitlements_spec, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
-WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $12
+WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM billing.subscriptions s
       WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4
         AND s.deleted_at IS NULL
-        AND s.rail = ANY ($13::text[])
+        AND s.rail = ANY ($12::text[])
         -- or#893: every writer resolves a PSP now, including the declared
         -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
         -- provider subscription id is only unique within a gateway account.
-        AND s.psp_id = $10::uuid
+        AND s.psp_id = $9::uuid
   )
 RETURNING id, entitlements_spec_snapshot
 `
@@ -2878,7 +2830,6 @@ type ReconcileMaterializeSubscriptionParams struct {
 	Status             string
 	Rail               string
 	RailSubscriptionID string
-	UserEmail          *string
 	PeriodStartsAt     *time.Time
 	PeriodEndsAt       *time.Time
 	StartedAt          *time.Time
@@ -2907,7 +2858,6 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		arg.Status,
 		arg.Rail,
 		arg.RailSubscriptionID,
-		arg.UserEmail,
 		arg.PeriodStartsAt,
 		arg.PeriodEndsAt,
 		arg.StartedAt,
@@ -3146,7 +3096,7 @@ SELECT count(*)::int AS held,
        COALESCE(min(s.current_period_ends_at), $1::timestamptz)::timestamptz AS oldest_due_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = $2::uuid
-  AND s.deleted_at IS NULL AND s.cancelled_at IS NULL
+  AND s.deleted_at IS NULL AND s.canceled_at IS NULL
   AND s.status = 'active' AND s.collection_policy = 'engine'
   AND s.current_period_ends_at > s.current_period_starts_at
   AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '5 minutes',

@@ -1,17 +1,18 @@
 // Framework-free client for the OpenRails customer surface (`/billing/v1/me/*`)
 // and public catalog.
 export {
-  CANCEL_FEEDBACK_MAX,
-  CANCEL_FEEDBACK_MIN,
+  CANCEL_REASON_MAX,
+  CANCEL_REASON_MIN,
   createBillingClient,
+  isWalletAction,
   isWalletRejection,
   RETRY_BUDGET_MS,
+  signWalletAction,
   WalletRejectedError,
   type BillingClient,
   type BillingClientOptions,
   type ListOptions,
   type SendSolanaTransaction,
-  type SolanaCancelStage,
 } from "./client"
 export {
   BillingError,
@@ -29,7 +30,9 @@ export type {
   CheckoutConfig,
   CheckoutSessionLink,
   Invoice,
+  ListPage,
   NewCard,
+  NextAction,
   Page,
   Payment,
   PaymentAuthentication,
@@ -38,11 +41,8 @@ export type {
   PaymentRecovery,
   Price,
   Product,
-  SolanaTierChange,
-  SolanaTierChangeTx,
   SolanaToken,
   Subscription,
-  SubscriptionPrice,
   SubscriptionProduct,
   SubscriptionStatus,
   TierChange,

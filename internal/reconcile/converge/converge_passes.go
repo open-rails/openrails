@@ -138,7 +138,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// gated: the refund is a PRESENT recorded fact (not confirmed-absence), but a
 	// refund that intentionally keeps access (goodwill) is legitimate, so an
 	// operator decides whether to revoke — never auto-retracted. (The
-	// subscription-cancelled case is handled at write time by the #511 revocation
+	// subscription-canceled case is handled at write time by the #511 revocation
 	// unification, which terminates the grant when the effect is revoked, so it
 	// does not surface here.)
 	// derive.grant.missing (grant tier) — a completed, positive, one-off payment
@@ -315,7 +315,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// Revoke direction: a terminally-dead sub (cancelled/expired/failed —
+	// Revoke direction: a terminally-dead sub (canceled/expired/failed —
 	// `unknown` keeps access, #664) still projecting subscription-sourced
 	// STANDING windows or bounded windows past its entitled bound.
 	// #690/#691 paid-through guard:

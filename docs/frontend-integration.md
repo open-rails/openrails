@@ -70,13 +70,13 @@ GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/:id]                itemized statements (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
-GET  /v1/me/entitlements/active           active entitlements
+GET  /v1/me/entitlements                  active entitlements
 PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
 GET  /v1/me/subscriptions[/:id]           own subscriptions: the shared Subscription shape (typed ids, price/product, scheduled change, card, access)
-POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"status":"queued"}
-POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202
-POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} — upgrades/downgrades
-PUT  /v1/me/subscriptions/:id/payment-method  swap the card on an NMI-backed subscription
+POST /v1/me/subscriptions/:id/cancel      body {"reason": "..."} → the Subscription (next_action when the wallet must sign)
+POST /v1/me/subscriptions/:id/resume      undo a scheduled cancel → the Subscription
+POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} → a TierChange (upgrades/downgrades)
+PUT  /v1/me/subscriptions/:id/payment-method  swap the saved card → the Subscription
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/:id     replace NMI card / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
@@ -209,7 +209,7 @@ every skipped candidate with its reason.
 
 The pay answer's `status` tells the page what to do next:
 
-- `succeeded` — done; `payment_id` / `subscription_id` are set. Refresh `/v1/me/entitlements/active`.
+- `succeeded` — done; `payment_id` / `subscription_id` are set. Refresh `/v1/me/entitlements`.
 - `failed` — a definite decline; `failure` (`{reason, message, field}`) is safe to
   show the buyer, and `field` names the card field to correct. Fraud-related declines
   always read `generic_decline`. Pay again with another card.

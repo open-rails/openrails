@@ -14,7 +14,7 @@ export const ja: BillingUiMessageBundle = {
     active: "有効",
     pending: "保留中",
     past_due: "支払い遅延",
-    cancelled: "解約済み",
+    canceled: "解約済み",
     cancel_scheduled: "終了予定",
     unknown: "不明",
     awaiting_method: "カード更新が必要",

@@ -8,11 +8,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -69,7 +69,7 @@ func adminTierChangeRequest(
 	if !r.BindJSON(&body) {
 		return nil, nil, nil, false
 	}
-	if id, err := billing.ParsePriceID(body.PriceID); err != nil || id.IsZero() {
+	if body.PriceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return nil, nil, nil, false
 	}
@@ -100,12 +100,18 @@ func adminTierChangeRequest(
 		r.ErrorJSON(http.StatusInternalServerError, "subscription customer unavailable")
 		return nil, nil, nil, false
 	}
+	customer, err := r.State.DB.Gen(r.Request.Context()).GetCustomer(r.Request.Context(), gen.GetCustomerParams{MerchantID: subscription.MerchantID, ID: subscription.CustomerID})
+	if err != nil {
+		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: load customer")
+		r.ErrorJSON(http.StatusInternalServerError, "subscription customer unavailable")
+		return nil, nil, nil, false
+	}
 	return &checkout.TierChangeRequest{
-			PriceID:        body.PriceID,
+			PriceID:        body.PriceID.String(),
 			SubscriptionID: subscriptionID,
 		}, &checkout.UserIdentity{
 			ID:    subscription.CustomerID.String(),
-			Email: subscription.UserEmail,
+			Email: customer.Email,
 		}, subscription, true
 }
 
@@ -123,26 +129,24 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeTierChangeAlreadyScheduled, "subscription already has a tier change scheduled"))
 		return false
 	}
-	if subscription.Rail == models.RailCCBill {
-		r.ErrorJSON(http.StatusBadRequest, "CCBill tier changes require customer self-service")
-		return false
-	}
-	if subscription.Rail == models.RailSolana {
-		r.ErrorJSON(http.StatusBadRequest, "Solana tier changes require the customer's wallet signature")
+	// CCBill changes on its own hosted page and Solana in the customer's
+	// wallet: only the customer can take that step.
+	if subscription.Rail == models.RailCCBill || subscription.Rail == models.RailSolana {
+		r.APIError(api.Coded(billing.CodeCustomerActionRequired, "this subscription's tier changes only through the customer's own step on its rail"))
 		return false
 	}
 
-	scheduled := models.RepriceStatusScheduled
-	reprices, err := r.State.RepriceService.List(r.Request.Context(), subscriptions.SubscriptionRepriceFilter{
-		SubscriptionID: &subscriptionID,
-		Status:         &scheduled,
-	}, 1, 0)
+	reprices, err := r.State.RepriceService.ListReprices(r.Request.Context(), billing.RepriceListParams{
+		PageRequest:    billing.PageRequest{Limit: 1},
+		SubscriptionID: billing.SubscriptionID(subscriptionID),
+		Status:         billing.RepriceScheduled,
+	})
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check scheduled reprices")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to check scheduled price changes")
 		return false
 	}
-	if len(reprices) > 0 {
+	if len(reprices.Items) > 0 {
 		r.ErrorJSON(http.StatusConflict, "subscription already has a scheduled price change")
 		return false
 	}

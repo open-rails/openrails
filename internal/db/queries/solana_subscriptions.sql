@@ -38,7 +38,7 @@ JOIN billing.subscriptions sub ON sub.id = s.subscription_id
 -- defence in depth if a failed/legacy cascade ever leaves its mirror active.
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND s.status = 'active' AND s.next_pull_at <= sqlc.arg(now)::timestamptz
   AND sub.deleted_at IS NULL
-  AND sub.status <> 'cancelled'
+  AND sub.status <> 'canceled'
 ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
