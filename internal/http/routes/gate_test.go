@@ -100,7 +100,7 @@ func hostDelegated(p *billingauth.DelegatedPrincipal, err error) billingauth.Del
 	return billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) { return p, err })
 }
 
-func service(perms ...string) *credential.ResolvedServiceCredential {
+func serviceCredential(perms ...string) *credential.ResolvedServiceCredential {
 	return &credential.ResolvedServiceCredential{MerchantID: merchantA, Permissions: perms}
 }
 
@@ -129,16 +129,16 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "host principal wins over any header", host: &requestauth.HostPrincipal{MerchantID: merchantA, Subject: "svc", Permissions: []string{"merchant:*"}},
 			opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("never consulted")}}, header: map[string]string{"Authorization": "Bearer sk_1"}, want: want{merchant: merchantA, subject: "svc"}},
 
-		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(billing.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
+		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
+		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
+		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(billing.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
 		{name: "api key resolved to nothing", opts: GateOptions{ServiceCredentialResolver: credResolver{}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
 		{name: "api key scope denied", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialScopeDenied}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},
 		{name: "api key merchant unresolved", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialMerchantUnresolved}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_merchant_unresolved"}},
 		{name: "api key for another host", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialHostMismatch}}, header: bearer("sk_1"), want: want{status: 403, message: "host_merchant_mismatch"}},
 		{name: "api key invalid", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("bad key")}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
 
-		{name: "remote application", opts: GateOptions{ServiceCredentialResolver: credResolver{remote: service(read)}}, header: bearer("a.b.c"), want: want{merchant: merchantA}},
+		{name: "remote application", opts: GateOptions{ServiceCredentialResolver: credResolver{remote: serviceCredential(read)}}, header: bearer("a.b.c"), want: want{merchant: merchantA}},
 		{name: "rejected remote application without user fallback", opts: GateOptions{ServiceCredentialResolver: credResolver{remoteErr: credential.ErrDelegatedInvalid}}, header: bearer("a.b.c"), want: want{status: 401, message: "service_credential_invalid"}},
 		{name: "rejected remote application falls through to user session", opts: GateOptions{ServiceCredentialResolver: credResolver{remoteErr: credential.ErrDelegatedInvalid}, Authenticator: userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated)}, header: bearer("a.b.c"), want: want{status: 401, message: "authentication required"}},
 		{name: "verified service jwt scope denial never falls through", opts: GateOptions{ServiceCredentialResolver: credResolver{jwtErr: credential.ErrServiceCredentialScopeDenied}, DelegatedResolver: delegatedOK}, header: bearer("a.b.c"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},

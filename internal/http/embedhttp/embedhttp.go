@@ -38,7 +38,10 @@ import (
 //
 // Embedded hosts typically mount billing under "/billing", so the stable
 // contract becomes "/billing/v1/*".
-const EmbeddedV1Prefix = "/billing/v1"
+const EmbeddedV1Prefix = embeddedMount + "/v1"
+
+// embeddedMount is where an embedded host mounts the API root.
+const embeddedMount = "/billing"
 
 // Options controls which billing HTTP route groups are included in the returned
 // handler. A zero RouteSets slice uses EmbeddedDefaultRouteSets.
@@ -198,7 +201,9 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
-	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", capabilitiesHandler(capabilities))
+	httproutes.RegisterMetaRoutes(router.NewMux(mux, embeddedMount, s.Runtime), httproutes.Options{External: httproutes.External{
+		Capabilities: capabilitiesHandler(capabilities),
+	}})
 
 	// browserTier tracks the checkout patterns mounted below (#765): the ONLY
 	// route set on this combined handler that belongs to the permissive-CORS
@@ -208,14 +213,13 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	browserRoutes := make(map[string]bool)
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
 	if routeSets[RouteSetCheckout] {
-		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
-		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
-		recordBrowser(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/status")
-		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
-		recordBrowser(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/client.js")
 		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 			Authenticator:  s.Authenticator,
 			ProviderRoutes: &providerRoutes,
+			External: httproutes.External{
+				CaptchaStatus: http.HandlerFunc(s.captchaStatusHandler),
+				CaptchaScript: http.HandlerFunc(s.captchaClientScriptHandler),
+			},
 		})
 	}
 	if routeSets[RouteSetMerchantAdmin] {

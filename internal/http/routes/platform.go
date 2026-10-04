@@ -5,17 +5,40 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/open-rails/openrails/billing"
-
 	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 )
+
+// platformRoutes is the cross-merchant operator directory (#721;
+// openrails-saas #16): standalone only, human operator sessions only.
+// Deliberately no platform create or patch, no hard delete, and nothing that
+// touches a merchant's customers, payments or subscriptions.
+var platformRoutes = []Route{
+	// #SEC-22: cross-merchant worker health (last_error is another merchant's
+	// verbatim job error) lives on the platform tier; the merchant tier keeps
+	// the same list with the error text withheld.
+	{Method: GET, Path: "/v1/platform/worker-health", Group: Platform, Auth: AuthOperator, Perm: billing.RootWorkerHealthRead, NoConn: true,
+		Responses: []Reply{{200, []handlers.WorkerHealthItem{}}}, Handler: h(handlers.GetPlatformWorkerHealth)},
+	{Method: GET, Path: "/v1/platform/merchants", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRead, NoConn: true,
+		Query: queryOf(handlers.PlatformMerchantListQuery{}), Responses: []Reply{{200, PathPage[handlers.PlatformMerchantItem]{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PlatformListMerchants)},
+	{Method: GET, Path: "/v1/platform/merchants/{id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRead, NoConn: true,
+		Responses: []Reply{{200, handlers.PlatformMerchantItem{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PlatformGetMerchant)},
+	{Method: DELETE, Path: "/v1/platform/merchants/{id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsDelete, NoConn: true,
+		Responses: []Reply{{200, handlers.PlatformMerchantItem{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PlatformSoftDeleteMerchant)},
+	{Method: POST, Path: "/v1/platform/merchants/{id}/restore", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRestore, NoConn: true,
+		Responses: []Reply{{200, handlers.PlatformMerchantItem{}}}, Errors: codes("invalid_param", "resource_conflict", "resource_not_found"), Handler: h(handlers.PlatformRestoreMerchant)},
+	// Root-owner-only manual override. Bounded merchant-directory roles do not
+	// hold this distinct permission.
+	{Method: DELETE, Path: "/v1/platform/admin-rate-limit-lockouts/{user_id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootAdminRateLimitsUnlock, NoConn: true,
+		Responses: []Reply{{200, Message{}}}, Errors: codes("authentication_required", "invalid_param", "service_unavailable"), Bind: unlockAdminRateLimit},
+}
 
 // RootPermissionChecker authorizes the user r authenticates as against the
 // singleton ROOT permission group (#721), the platform-operator tier, with the
@@ -40,34 +63,18 @@ type AdminRateLimitUnlocker interface {
 	Unlock(ctx context.Context, userID, actorID string) error
 }
 
-// RegisterPlatformRoutes mounts the cross-merchant platform operator directory
-// (#721; openrails-saas #16). STANDALONE ONLY — the platform tier does not
-// exist on the embedded surface (an embedded host controls exactly one
-// merchant). Explicitly NO platform create/patch, NO hard delete, and NO routes
-// touching a merchant's customers/payments/subscriptions: creation stays the
-// self-service flow and destructive purge stays the #225 gated path.
+// RegisterPlatformRoutes mounts the platform tier on a router rooted at
+// /v1/platform. Standalone only: an embedded host controls exactly one
+// merchant.
 func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOptions) {
-	read := opts.platformPermissionMW(billing.RootMerchantsRead)
-	del := opts.platformPermissionMW(billing.RootMerchantsDelete)
-	restore := opts.platformPermissionMW(billing.RootMerchantsRestore)
-	unlock := opts.platformPermissionMW(billing.RootAdminRateLimitsUnlock)
+	env := newEnv(rt, Options{Authenticator: opts.Authenticator})
+	env.Root, env.Unlocker = opts.Root, opts.AdminLimiter
+	env.mount(rr, "/v1/platform", in(Platform))
+}
 
-	// #SEC-22: cross-merchant worker health (last_error is another merchant's
-	// verbatim job error) lives on the platform tier; the merchant tier keeps
-	// the same list with the error TEXT withheld.
-	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetPlatformWorkerHealth),
-		opts.platformPermissionMW(billing.RootWorkerHealthRead))
-
-	merchants := rr.Group("/merchants")
-	merchants.Handle(http.MethodGet, "", h(httphandlers.PlatformListMerchants), read)
-	merchants.Handle(http.MethodGet, "/:id", h(httphandlers.PlatformGetMerchant), read)
-	merchants.Handle(http.MethodDelete, "/:id", h(httphandlers.PlatformSoftDeleteMerchant), del)
-	merchants.Handle(http.MethodPost, "/:id/restore", h(httphandlers.PlatformRestoreMerchant), restore)
-
-	// Root-owner-only manual override. Bounded merchant-directory roles do not
-	// hold this distinct permission.
-	rr.Handle(http.MethodDelete, "/admin-rate-limit-lockouts/:user_id", h(func(r *httprequest.Request) {
-		if opts.AdminLimiter == nil {
+func unlockAdminRateLimit(e *Env) router.Handler {
+	return func(r *httprequest.Request) {
+		if e.Unlocker == nil {
 			r.AbortJSON(http.StatusServiceUnavailable, "admin rate limit unlock unavailable")
 			return
 		}
@@ -81,24 +88,24 @@ func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOpti
 			r.AbortJSON(http.StatusUnauthorized, "authentication required")
 			return
 		}
-		if err := opts.AdminLimiter.Unlock(r.Request.Context(), target, actor.UserID); err != nil {
+		if err := e.Unlocker.Unlock(r.Request.Context(), target, actor.UserID); err != nil {
 			r.AbortJSON(http.StatusServiceUnavailable, "admin rate limit unlock unavailable")
 			return
 		}
 		r.SuccessJSONMessage("admin rate limit lockout cleared")
-	}), unlock)
+	}
 }
 
 // platformPermissionMW authenticates the user session and requires perm in the
 // root group: 401 without a valid user credential, 403 without the grant.
-func (opts PlatformOptions) platformPermissionMW(perm string) router.Middleware {
+func (e *Env) platformPermissionMW(perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			if opts.Authenticator == nil || opts.Root == nil {
+			if e.Authenticator == nil || e.Root == nil {
 				r.AbortCode(billing.CodeInternalError, "authorization unavailable")
 				return
 			}
-			uc, err := opts.Authenticator.Authenticate(r.Request.Context(), r.Request)
+			uc, err := e.Authenticator.Authenticate(r.Request.Context(), r.Request)
 			if err != nil {
 				r.AbortGate(billingauth.Unauthenticated(err))
 				return
@@ -107,7 +114,7 @@ func (opts PlatformOptions) platformPermissionMW(perm string) router.Middleware 
 				r.AbortCode(billing.CodeAuthenticationRequired, verr.Error())
 				return
 			}
-			allowed, err := opts.Root.HasRootPermission(r.Request.Context(), r.Request, perm)
+			allowed, err := e.Root.HasRootPermission(r.Request.Context(), r.Request, perm)
 			if errors.Is(err, auth.ErrRevoked) || errors.Is(err, billingauth.ErrUnauthenticated) {
 				r.AbortGate(credentialFailure(err))
 				return

@@ -17,12 +17,12 @@ import (
 // browser tier (#765): every pattern registered here is also recorded into
 // browserTierRoutes, so it's eligible for the static permissive CORS policy.
 func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {
-	s.handleBrowser(mux, http.MethodGet+" "+apiPrefix+"/captcha/status",
-		embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()))
-	s.handleBrowser(mux, http.MethodGet+" "+apiPrefix+"/captcha/client.js",
-		embedhttp.CaptchaClientScriptHandler(s.cfg.Captcha))
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{
 		Authenticator: s.authenticator,
+		External: httproutes.External{
+			CaptchaStatus: embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()),
+			CaptchaScript: embedhttp.CaptchaClientScriptHandler(s.cfg.Captcha),
+		},
 	})
 }
 
@@ -40,22 +40,9 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 // registerStandaloneMetaRoutes registers banner/health endpoints that are appropriate for the
 // standalone billing service, but should not be forced onto embedded hosts.
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
-	// Root: simple JSON banner for API servers. "GET /{$}" pins the exact root
-	// (a bare "/" ServeMux pattern would swallow every unmatched path).
-	s.handle(mux, http.MethodGet+" /{$}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"service":   "billing",
-			"status":    "ok",
-			"endpoints": []string{"/health/live", "/health/ready", StandaloneV1Prefix},
-		})
-	}))
-
 	live := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "billing"})
 	})
-	s.handle(mux, http.MethodGet+" /health/live", live)
-	s.handle(mux, http.MethodGet+" /health/ready", http.HandlerFunc(s.readyHandler))
-
 	// Capability discovery (#623): which route groups this deployment serves.
 	// Configuration management is opt-in even on the standalone server.
 	groups := make([]embedhttp.RouteSet, 0, len(embedhttp.StandaloneDefaultRouteSets))
@@ -64,13 +51,20 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 			groups = append(groups, group)
 		}
 	}
-	s.handle(mux, http.MethodGet+" "+StandaloneV1Prefix+"/capabilities",
-		embedhttp.CapabilitiesHandler(groups, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)))
-
-	// Kubernetes-style health check endpoints (aliases)
-	s.handle(mux, http.MethodGet+" /healthz", live)
-	s.handle(mux, http.MethodGet+" /readyz", http.HandlerFunc(s.readyHandler))
-	s.handle(mux, http.MethodGet+" /metrics", http.HandlerFunc(s.metricsHandler))
+	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
+		// A simple JSON banner for API servers.
+		Banner: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"service":   "billing",
+				"status":    "ok",
+				"endpoints": []string{"/health/live", "/health/ready", StandaloneV1Prefix},
+			})
+		}),
+		Live:         live,
+		Ready:        http.HandlerFunc(s.readyHandler),
+		Metrics:      http.HandlerFunc(s.metricsHandler),
+		Capabilities: embedhttp.CapabilitiesHandler(groups, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)),
+	}})
 }
 
 // readyHandler serves /health/ready and /readyz. Dependency checks are the

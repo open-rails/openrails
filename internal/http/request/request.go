@@ -173,6 +173,20 @@ func (r *Request) InternalError(msg string, cause error) {
 	r.t.WriteJSON(http.StatusInternalServerError, response)
 }
 
+// FromHTTP adapts a plain net/http handler to a route handler, for a route
+// whose handler an assembly builds outside the handlers package.
+func FromHTTP(h http.Handler) func(*Request) {
+	return func(r *Request) {
+		t, ok := r.t.(*httpTransport)
+		if !ok {
+			r.InternalError("route handler unavailable", errors.New("request: FromHTTP needs the net/http transport"))
+			return
+		}
+		t.wrote = true
+		h.ServeHTTP(t.w, r.Request)
+	}
+}
+
 // AbortGate answers a Gate or authenticator refusal with its code.
 func (r *Request) AbortGate(err error) {
 	var refusal billingauth.GateError
