@@ -181,21 +181,29 @@ func TestAuthKitDerivesAuthentication(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, gate.Status)
 }
 
-// The console is the host's build when supplied, mounted only when enabled.
+// The console is the host's build when supplied, mounted only when enabled,
+// at its configured path.
 func TestAdminConsoleServesHostAssets(t *testing.T) {
-	assets := fstest.MapFS{"index.html": {Data: []byte("<!doctype html>host build")}}
-	engine := func(enabled bool) *Engine {
-		cfg := &config.Config{AdminConsole: &config.AdminConsoleConfig{Enabled: enabled, APIBaseURL: "/billing/v1", AuthBaseURL: "/api/v1"}}
-		return &Engine{App: &app.App{Config: cfg, ConsoleAssets: assets, Runtime: &app.Runtime{Config: cfg}}}
+	assets := fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><base href="/admin/">host build`)}}
+	cfg := func(enabled bool) *config.Config {
+		return &config.Config{AdminConsole: &config.AdminConsoleConfig{Enabled: enabled, Path: "/billing/admin", APIBaseURL: "/billing/v1", AuthBaseURL: "/api/v1"}}
 	}
-	require.Nil(t, engine(false).Console())
-	require.Nil(t, (&Engine{App: &app.App{Config: &config.Config{AdminConsole: &config.AdminConsoleConfig{Enabled: true}}}}).Console(), "no build, no console")
-	console := engine(true).Console()
+	off, err := console(cfg(false), assets)
+	require.NoError(t, err)
+	require.Nil(t, off)
+	off, err = console(cfg(true), nil)
+	require.NoError(t, err)
+	require.Nil(t, off, "no build, no console")
+	_, err = console(cfg(true), fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}})
+	require.ErrorContains(t, err, "rebuild it")
+
+	on, err := console(cfg(true), assets)
+	require.NoError(t, err)
 	rec := httptest.NewRecorder()
-	console.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/", nil))
-	require.Contains(t, rec.Body.String(), "host build")
+	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/", nil))
+	require.Equal(t, `<!doctype html><base href="/billing/admin/">host build`, rec.Body.String())
 	rec = httptest.NewRecorder()
-	console.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/config.json", nil))
+	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/config.json", nil))
 	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false}`, rec.Body.String())
 }
 

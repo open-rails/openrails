@@ -349,7 +349,8 @@ unchanged. Routes are materialized once, so remounting never resets rate limits.
 
 **Admin console** (optional, #754): with `Config.AdminConsole.Enabled`,
 `client.AdminConsole()` is the console's handler for the host to mount at
-`/admin/` on its root router. The console is `Deps.ConsoleAssets` when the host
+`Config.AdminConsole.Path` (`/admin` by default; e.g. `/billing/admin` when the
+host owns `/admin`) on its root router. The console is `Deps.ConsoleAssets` when the host
 supplies its own build, else the build embedded in the OpenRails module when
 the binary was built with one. See [admin-console.md](admin-console.md).
 

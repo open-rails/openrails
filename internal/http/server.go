@@ -45,7 +45,7 @@ type Dependencies struct {
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
 	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
-	// /admin mounts only when this is present AND admin_console.enabled;
+	// The console mounts only when this is present AND admin_console.enabled;
 	// enabled without assets is a boot error.
 	ConsoleAssets fs.FS
 }
@@ -279,12 +279,6 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		return nil, err
 	}
 
-	// Merchant admin console SPA (#740/#754): mounted only when assets are
-	// present AND admin_console.enabled; enabled without assets refuses boot.
-	if err := s.registerAdminConsoleRoutes(mux); err != nil {
-		return nil, err
-	}
-
 	// Browser-direct self-service API: delegated-access-token-authenticated, on
 	// the SAME public surface (issue #222 browser tier). Always mounted (#469);
 	// a host-supplied DelegatedAuthenticator overrides the control plane's
@@ -302,6 +296,13 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	// identity, so a URL slug is a second way to say the same thing. Embedded
 	// hosts still mount it — a pinned merchant has no payload-derived identity
 	// to resolve — via internal/http/embedhttp.
+
+	// Merchant admin console SPA (#740/#754): mounted only when assets are
+	// present AND admin_console.enabled; enabled without assets refuses boot.
+	// Last, so it can refuse a path that overlaps any route above (#1127).
+	if err := s.registerAdminConsoleRoutes(mux); err != nil {
+		return nil, err
+	}
 
 	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies())
 	s.publicHandler = s.wrapPublicHandler(mux.Handler())

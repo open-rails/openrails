@@ -16,22 +16,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { MerchantNotification } from "@/lib/api/types"
 import { timeAgo } from "@/lib/format"
+import { normalizeLink } from "@/lib/mount"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { cn } from "@/lib/utils"
-
-// normalizeLink maps an alert's stored link to an in-app router path (basename
-// /admin) or an external URL. Returns { path } for router navigation or { href }
-// to open in a new tab.
-function normalizeLink(link?: string | null): { path?: string; href?: string } {
-  if (!link) return {}
-  if (/^https?:\/\//i.test(link)) return { href: link }
-  let path = link
-  if (path.startsWith("/admin/")) path = path.slice("/admin".length)
-  else if (path === "/admin") path = "/"
-  if (!path.startsWith("/")) path = `/${path}`
-  return { path }
-}
 
 export function NotificationBell() {
   const navigate = useNavigate()

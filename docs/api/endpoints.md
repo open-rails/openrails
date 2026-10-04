@@ -358,7 +358,7 @@ Server-to-server billing operations. Every route is gated on the listed
 
 Same `/v1/merchant` prefix and permission gate; these are the console/support
 surface. The merchant admin console SPA (when enabled and built) is served at
-`GET /admin/`, and the selected AuthKit control-plane route groups (login,
+`GET {admin_console.path}/` (`/admin/` by default), and the selected AuthKit control-plane route groups (login,
 tokens, membership) are mounted under `/auth/v1/*` — see AuthKit's own reference
 for those routes.
 
@@ -608,7 +608,7 @@ mounted when the secret backend is read-only.
 | PATCH | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Change a member's role |
 | DELETE | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Remove a member |
 
-On deployments without a control plane these routes are not registered (404), like every other capability the deployment cannot serve: the LLM routes (`/dashboard/widgets/generate`, `/metrics/ask`, `/catalog/ask`, `/catalog/copilot/confirm`) exist only with `llm.api_key` and the matching consent, and `/api-host` only when the merchant directory is armed. `GET /v1/capabilities` and `/admin/config.json` advertise what is mounted.
+On deployments without a control plane these routes are not registered (404), like every other capability the deployment cannot serve: the LLM routes (`/dashboard/widgets/generate`, `/metrics/ask`, `/catalog/ask`, `/catalog/copilot/confirm`) exist only with `llm.api_key` and the matching consent, and `/api-host` only when the merchant directory is armed. `GET /v1/capabilities` and the console's `config.json` advertise what is mounted.
 
 ### Platform operator (`/v1/platform`, standalone only)
 

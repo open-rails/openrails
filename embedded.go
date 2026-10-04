@@ -185,8 +185,9 @@ func (c *Client) RoutesRequireRoot() bool {
 }
 
 // AdminConsole is the merchant admin console, for an embedded host to mount at
-// /admin/ on its root router (the build's asset URLs are rooted there). It is
-// nil unless Config.AdminConsole is enabled; the console comes from
+// Config.AdminConsole.Path ("/admin" by default) on its root router, without
+// stripping the prefix; a request outside that path answers 500 and is logged.
+// It is nil unless Config.AdminConsole is enabled; the console comes from
 // Deps.ConsoleAssets, else from the build embedded in this module. With
 // Config.ControlPlane the console is part of Routes instead.
 func (c *Client) AdminConsole() http.Handler {

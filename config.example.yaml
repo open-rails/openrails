@@ -144,12 +144,13 @@ captcha:
   secret_key: ""
 
 
-# Merchant admin console SPA served at /admin/ (#740). Off by default.
+# Merchant admin console SPA served at admin_console.path (#740). Off by default.
 # Enabling requires console assets in the binary (#754): `task build` embeds
 # web/admin/dist after `task admin-build`; embedded hosts pass
-# embed.Options.ConsoleAssets. Enabled without assets = boot error.
+# Deps.ConsoleAssets. Enabled without assets = boot error.
 admin_console:
   enabled: false
+  # path: /admin             # mount path; e.g. /billing/admin when /admin is taken
   # auth_base_url: /auth/v1   # AuthKit JSON API; embedded hosts set theirs (AuthKit default /api/v1)
   # api_base_url: /v1      # merchant API base; embedded hosts typically /billing/v1
 

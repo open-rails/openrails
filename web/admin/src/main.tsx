@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { AppLayout } from "@/layouts/app-layout"
 import { loadBootstrap } from "@/lib/api/client"
+import { bootstrapURL, routerBasename } from "@/lib/mount"
 import { queryClient } from "@/lib/query-client"
 import { ConsoleSession, createConsoleSession } from "@/lib/session"
 const routeLoading = (
@@ -188,11 +189,11 @@ const router = createBrowserRouter(
       ],
     },
   ],
-  { basename: "/admin" }
+  { basename: routerBasename() }
 )
 
 const root = createRoot(document.getElementById("root")!)
-loadBootstrap().then(
+loadBootstrap(bootstrapURL()).then(
   (config) => {
     const session = createConsoleSession(config)
     root.render(

@@ -92,6 +92,24 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 	}
 }
 
+// The console path lands in route patterns and its <base href> (#1127).
+func TestValidateAdminConsolePath(t *testing.T) {
+	for path, ok := range map[string]bool{
+		"": true, "/admin": true, "/billing/admin": true, "/a.b/c~d/e_f-g": true,
+		"/": false, "admin": false, "/admin/": false, "//admin": false, "/a//b": false,
+		"/a/../b": false, "/./a": false, "/..": false, "/a b": false, "/a%2Fb": false,
+		`/x"><script>`: false, "/a?b": false, "/a#b": false, "/{x}": false, " /admin": false,
+	} {
+		cfg := validConfig()
+		cfg.AdminConsole = &AdminConsoleConfig{Path: path}
+		if err := Validate(cfg); ok {
+			require.NoError(t, err, path)
+		} else {
+			require.ErrorContains(t, err, "invalid admin_console.path", path)
+		}
+	}
+}
+
 func TestPostureAccessorsFailClosed(t *testing.T) {
 	for _, row := range []struct {
 		mode              string

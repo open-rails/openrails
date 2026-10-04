@@ -41,8 +41,9 @@ Prefixes accept literal segments and whole-segment `{name}` parameters; native
 router wildcard characters `*` and `+` are rejected. Routes sharing a parameter
 position must use the same name, including when their paths diverge afterward,
 so every supported native router can register the bundle.
-An enabled standalone console owns the `/admin/` GET subtree, so full customer
-audiences beneath it are rejected before native registration.
+An enabled standalone console owns the GET subtree at `admin_console.path`
+(`/admin/` by default), so full customer audiences beneath it are rejected
+before native registration.
 
 Standalone bundles contain issuer-anchored AuthKit and console URLs and therefore
 mount at the application root. Gin requires the root Engine; Fiber requires the

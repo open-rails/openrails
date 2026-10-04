@@ -1,5 +1,5 @@
-// Thin fetch wrapper for the OpenRails merchant API. Base URLs come from
-// /admin/config.json (served by the Go binary): standalone defaults are
+// Thin fetch wrapper for the OpenRails merchant API. Base URLs come from the
+// mount's config.json (served by the Go binary): standalone defaults are
 // auth=/auth/v1, api=/v1; embedded hosts point at their own bases. The
 // session is auth-ui's: it holds the bearer, refreshes it, and steps up.
 import {
@@ -28,9 +28,10 @@ export interface BootstrapConfig {
 
 let bootstrapConfig: BootstrapConfig | null = null
 
-export async function loadBootstrap(): Promise<BootstrapConfig> {
+// loadBootstrap reads config.json from url, the mount's (lib/mount).
+export async function loadBootstrap(url: string): Promise<BootstrapConfig> {
   if (bootstrapConfig) return bootstrapConfig
-  const res = await fetch(`${import.meta.env.BASE_URL}config.json`, {
+  const res = await fetch(url, {
     cache: "no-store",
   })
   if (!res.ok) {

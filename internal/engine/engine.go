@@ -41,6 +41,7 @@ type Engine struct {
 	closed      bool
 	stopWorkers func()
 	routes      []routebundle.Route
+	console     http.Handler
 
 	handlerOnce sync.Once
 	handler     http.Handler
@@ -139,6 +140,9 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
 	application.ConsoleAssets = consoleAssets
+	if e.console, err = console(&cfg, consoleAssets); err != nil {
+		return fail(err)
+	}
 	rt.Auth = auth
 	signerPending, err := configureMerchant(ctx, application, e.merchant)
 	if err != nil {
