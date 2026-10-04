@@ -68,6 +68,12 @@ and the outer host page provides stable labelled containers. Verify saved-card
 autofill against the real gateway in each supported browser because a DOM unit
 test cannot inspect or control the cross-origin fields.
 
+A PSP that takes cards on OpenRails itself (`card_entry: server`, driver
+`card`) gets plain inputs instead, with `autocomplete` `cc-number`, `cc-exp`
+and `cc-csc`, the same layout and field errors, and no gateway script. Its
+request carries `card: {number, exp_month, exp_year, cvc}` in place of
+`payment_token`; the inputs are cleared once the card is sent.
+
 A new-card payment request includes the one-time `payment_token` plus canonical
 `name_on_card`, uppercase ISO country in `country`, and `zip`. Paying with an
 existing saved method sends only `payment_method_id`; it does not overwrite the

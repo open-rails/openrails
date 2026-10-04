@@ -85,11 +85,20 @@ export const paymentRailOptionSchema = z.object({
   id: z.string().min(1),
   rail: z.string(),
   mode: z.enum(["one_off", "subscription"]),
-  driver: z.enum(["collect_js", "stripe_elements", "redirect", "solana_pay"]),
+  // card: the PSP takes cards on OpenRails itself (card_entry: server); the
+  // page posts the card and loads no gateway script.
+  driver: z.enum([
+    "collect_js",
+    "card",
+    "stripe_elements",
+    "redirect",
+    "solana_pay",
+  ]),
   /** The PSP's checkout key; saving a new card names it. */
   psp_key: z.string().optional(),
   // Browser-safe rail config the host serves (nmi: Collect.js
-  // tokenization_key + tokenization_url; stripe: publishable_key).
+  // tokenization_key + tokenization_url; stripe: publishable_key; driver
+  // card: none).
   public_config: z.record(z.string(), z.string()).optional(),
 })
 export type PaymentRailOption = z.infer<typeof paymentRailOptionSchema>
@@ -163,6 +172,15 @@ export const payRequestSchema = z.object({
   state: z.string().optional(),
   zip: z.string().optional(),
   country: z.string().optional(),
+  // A new card for a rail whose driver is card; never beside payment_token.
+  card: z
+    .object({
+      number: z.string(),
+      exp_month: z.number(),
+      exp_year: z.number(),
+      cvc: z.string(),
+    })
+    .optional(),
   // Collect.js display metadata for a new card (never the PAN).
   last_four: z.string().optional(),
   card_type: z.string().optional(),

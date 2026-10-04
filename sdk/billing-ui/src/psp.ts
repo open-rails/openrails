@@ -14,7 +14,7 @@ export const pspConfigSchema = z.object({
   /** Who holds the card: "psp" or a third-party custodian. */
   custodian: z.string(),
   display_name: z.string(),
-  /** `tokenize | elements | redirect | wallet` */
+  /** `tokenize | card | elements | redirect | wallet` */
   flow: z.string(),
   config: z.record(z.string(), z.string()).nullish(),
   /**
@@ -41,6 +41,7 @@ export interface CheckoutRailOffer {
 
 const drivers = new Set<string>([
   "collect_js",
+  "card",
   "stripe_elements",
   "redirect",
   "solana_pay",
@@ -67,6 +68,7 @@ export function checkoutRails(
 
 const cardDrivers = new Set<PaymentRailOption["driver"]>([
   "collect_js",
+  "card",
   "stripe_elements",
 ])
 
@@ -111,7 +113,7 @@ export function savedMethodsFor(
   })
 }
 
-export type CardSetupDriver = "collect_js" | "stripe_elements"
+export type CardSetupDriver = "collect_js" | "card" | "stripe_elements"
 
 const usable = (value?: string) => !!value && !value.startsWith("preview_")
 
@@ -121,6 +123,8 @@ const stripeKey = (psp: PspConfig) =>
 /** How a card is saved with this PSP in the page, or null when it cannot be. */
 export function cardSetupDriver(psp: PspConfig): CardSetupDriver | null {
   if (psp.custodian !== "psp") return null
+  // The PSP takes cards on OpenRails itself (card_entry: server).
+  if (psp.flow === "card" && psp.rail === "nmi") return "card"
   if (
     psp.flow === "tokenize" &&
     usable(psp.config?.tokenization_key) &&
@@ -146,7 +150,12 @@ export function railPsp(rail: PaymentRailOption): PspConfig {
     rail: rail.rail,
     custodian: "psp",
     display_name: "",
-    flow: rail.driver === "stripe_elements" ? "elements" : "tokenize",
+    flow:
+      rail.driver === "stripe_elements"
+        ? "elements"
+        : rail.driver === "card"
+          ? "card"
+          : "tokenize",
     config: rail.public_config ?? null,
   }
 }

@@ -33,6 +33,7 @@ Three values, all found in (or issued for) the NMI merchant dashboard:
 2. **Tokenization key** (`tokenization_key`) — the *public* Collect.js key.
    Your checkout page loads Collect.js with it; the raw card goes browser →
    NMI, and OpenRails only ever receives the opaque `payment_token` (SAQ-A).
+   Not needed with `card_entry: server` (below).
 3. **Gateway ID** (`account_id`) — shown in the dashboard as "Gateway ID".
    In NMI this **is** the merchant account id (NMI provisions every merchant as
    a "gateway account"; the v4 API documents `{gateway_id}` as "the merchant
@@ -62,6 +63,56 @@ merchants:
 Store real secret values in Vault (or the encrypted DB store) and overlay them;
 never commit them. A PSP declares no environment (#882): the deployment-level
 `test_mode` decides, and every PSP in the deployment follows it.
+
+### Card entry: browser or server
+
+Where a new card is typed is a PSP setting, `settings.card_entry`:
+
+- `browser` (the default): Collect.js fields on your page send the card to
+  NMI; OpenRails receives a single-use `payment_token`. Your servers never
+  see a card number: PCI **SAQ A**.
+- `server`: your page posts the card to OpenRails, which vaults it at NMI.
+  Checkout options advertise driver `card`, billing-ui renders plain card
+  inputs, and no NMI script loads in the browser. The checkout, saved-card
+  and card-update bodies take
+  `"card": {"number", "exp_month", "exp_year", "cvc"}` (never beside
+  `payment_token`).
+
+`server` puts the servers that receive the request — your proxy, the host
+application embedding OpenRails, OpenRails — in PCI scope: **SAQ D**, with
+its network segmentation, logging, and quarterly scan obligations. Declare it
+only with that assessment in hand.
+
+What OpenRails does in `server` mode:
+
+- The card is vaulted with the classic Customer Vault call
+  (`customer_vault=add_customer` / `add_billing`, `ccnumber`, `ccexp`, `cvv`)
+  under a vault id and billing id OpenRails derives from a durable operation.
+  Charges, subscriptions and rebills then use the vault exactly as for a
+  token-vaulted card.
+- Nothing about the card is stored except brand, last four and expiry: no
+  number or security code, hashed or not, in any table, operation record,
+  idempotency record, log line or error. The card is one type that prints
+  and encodes as `[card]` and is wiped once NMI has it.
+- A vault call whose answer is lost is settled by reading the vault id the
+  operation named; if NMI does not show it, the buyer enters the card again.
+  A card is never sent twice.
+- In live posture the `card` field is refused over plain HTTP: TLS must reach
+  OpenRails, or a trusted proxy (`trusted_proxies`) must say
+  `X-Forwarded-Proto: https`.
+- Every other request field is still scanned for card numbers, and a PSP left
+  on `browser` refuses `card` outright.
+
+```yaml
+      mobius:
+        nmi:
+          account_id: "1234567"
+          settings:
+            card_entry: server
+```
+
+Boot refuses `card_entry: server` on any rail other than NMI and on a PSP
+whose cards a custodian holds.
 
 ### Catalog prices
 

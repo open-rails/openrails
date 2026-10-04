@@ -413,7 +413,10 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** Stores a card tokenized in the page (`cardSetupDriver` "collect_js"). */
+    /**
+     * Stores a card entered in the page: a Collect.js token
+     * (`cardSetupDriver` "collect_js") or the card itself ("card").
+     */
     addPaymentMethod(card: NewCard): Promise<PaymentMethod> {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",

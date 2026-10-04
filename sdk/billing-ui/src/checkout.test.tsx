@@ -1184,3 +1184,165 @@ describe("one card panel", () => {
     expect(message).toHaveAttribute("id", expect.stringMatching(/cvv-error$/))
   })
 })
+
+// #1129: a PSP whose card_entry is server is advertised with driver card. The
+// page renders plain card inputs, loads no gateway script and posts the card
+// to OpenRails.
+describe("server card entry", () => {
+  const cardRail: PaymentRailOption = {
+    id: "option_nmi",
+    rail: "nmi",
+    mode: "subscription",
+    driver: "card",
+    psp_key: "nmi",
+  }
+  const enterCard = async (number = "4111111111111111") => {
+    fireEvent.change(await screen.findByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.change(screen.getByLabelText("Card number"), {
+      target: { value: number },
+    })
+    fireEvent.change(screen.getByLabelText("Expiry"), {
+      target: { value: "10 / 27" },
+    })
+    fireEvent.change(screen.getByLabelText("CVC"), { target: { value: "999" } })
+  }
+  const card = {
+    number: "4111111111111111",
+    exp_month: 10,
+    exp_year: 2027,
+    cvc: "999",
+  }
+
+  it("saves the card with OpenRails first and charges it by id", async () => {
+    const calls: { path: string; body: unknown }[] = []
+    const fetch = vi.fn(async (input: string, init: RequestInit) => {
+      calls.push({ path: input, body: JSON.parse(String(init.body)) })
+      return Response.json({
+        id: "pm_card",
+        psp_id: "option_nmi",
+        card: { brand: "visa", last4: "1111", exp_month: 10, exp_year: 2027 },
+      })
+    })
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "succeeded",
+    })
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <Checkout
+          source={{
+            getSession: async () =>
+              fixtureSession({ rails: [cardRail], saved_methods: [] }),
+            pay,
+          }}
+        />
+      </BillingProvider>
+    )
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+    expect(button).toBeDisabled()
+    await enterCard()
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+    await waitFor(() =>
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_nmi",
+        payment_method_id: "pm_card",
+      })
+    )
+    expect(calls).toEqual([
+      {
+        path: "/billing/v1/me/payment-methods",
+        body: {
+          provider: "nmi",
+          name_on_card: "Pat Reader",
+          country: expect.any(String),
+          zip: "94107",
+          card,
+        },
+      },
+    ])
+    expect(document.getElementById("openrails-collectjs")).toBeNull()
+    expect(window.CollectJS).toBeUndefined()
+  })
+
+  it("sends the card in the pay request of a page without a billing client", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "succeeded",
+    })
+    render(
+      <Checkout
+        source={{
+          getSession: async () =>
+            fixtureSession({ rails: [cardRail], saved_methods: [] }),
+          pay,
+        }}
+      />
+    )
+    await enterCard()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    await waitFor(() =>
+      expect(pay).toHaveBeenCalledWith(
+        expect.objectContaining({ option_id: "option_nmi", card })
+      )
+    )
+    const sent = pay.mock.calls[0][0]
+    expect(sent.payment_token).toBeUndefined()
+    expect(document.getElementById("openrails-collectjs")).toBeNull()
+  })
+
+  it("keeps an invalid card in the page and names the field", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>()
+    render(
+      <Checkout
+        source={{
+          getSession: async () =>
+            fixtureSession({ rails: [cardRail], saved_methods: [] }),
+          pay,
+        }}
+      />
+    )
+    await enterCard("4111111111111112")
+    fireEvent.blur(screen.getByLabelText("Card number"))
+    expect(await screen.findByText("Enter a valid card number")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    ).toBeDisabled()
+    expect(pay).not.toHaveBeenCalled()
+  })
+
+  it("shows a field-specific decline next to that field and clears the card", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "failed",
+      failure: {
+        reason: "incorrect_cvc",
+        message: "The security code is incorrect.",
+        field: "cvc",
+      },
+    })
+    render(
+      <Checkout
+        source={{
+          getSession: async () =>
+            fixtureSession({ rails: [cardRail], saved_methods: [] }),
+          pay,
+        }}
+      />
+    )
+    await enterCard()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    const message = await screen.findByText("The security code is incorrect.")
+    expect(message).toHaveAttribute("id", expect.stringMatching(/cvc-error$/))
+    expect(screen.getByLabelText("Card number")).toHaveValue("")
+    expect(screen.getByLabelText("CVC")).toHaveValue("")
+  })
+})
