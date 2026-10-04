@@ -40,11 +40,9 @@ merchants:
   myapp:
     psps:
       mobius:
-        nmi:
-          secrets: { security_key: ..., webhook_signing_secret: ... }
+        secrets: { security_key: ..., webhook_signing_secret: ... }
       ccbill:
-        ccbill:
-          secrets: { datalink_username: ..., datalink_password: ..., salt: ... }
+        secrets: { datalink_username: ..., datalink_password: ..., salt: ... }
 ```
 
 OpenRails needs **no live Vault connection** at runtime (Vault Transit for

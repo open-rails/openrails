@@ -120,8 +120,8 @@ type rival struct {
 func (w *world) rival() *rival {
 	// Its own identity provider: merchant A's credentials mean nothing there.
 	return w.peer("rival-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]openrails.PSPConfig{
-		"stripe": {"stripe": {AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}}},
-		"nmi":    {"nmi": {AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}}},
+		"stripe": {Rail: "stripe", AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}},
+		"nmi":    {Rail: "nmi", AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}},
 	})
 }
 
@@ -138,9 +138,9 @@ func (w *world) siblingWith(scope openrails.CustomerHTTPScope) *rival {
 
 func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 	return map[string]openrails.PSPConfig{
-		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}}},
-		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}},
-		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}}},
+		"stripe": {Rail: "stripe", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}},
+		"nmi":    {Rail: "nmi", AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}},
+		"ccbill": {Rail: "ccbill", AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}},
 	}
 }
 

@@ -510,9 +510,9 @@ func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.selfService = true
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		account := psps["nmi"]["nmi"]
+		account := psps["nmi"]
 		account.Settings = map[string]any{"card_entry": "server"}
-		psps["nmi"]["nmi"] = account
+		psps["nmi"] = account
 	}
 	w.mount = func(h *openrails.HTTPConfig) { h.Checkout = &openrails.CheckoutConfig{} }
 	w.start()
@@ -569,9 +569,9 @@ func TestCheckoutSessionPaysWithAStripeElementsCard(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		account := psps["stripe"]["stripe"]
+		account := psps["stripe"]
 		account.Settings = map[string]any{"publishable_key": "pk_test_e2e"}
-		psps["stripe"]["stripe"] = account
+		psps["stripe"] = account
 	}
 	w.start()
 	price := w.membership("content:members", 9_990_000)

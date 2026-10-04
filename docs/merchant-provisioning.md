@@ -179,13 +179,13 @@ merchants:
       arrears_grace_days: 7        # days past due before delinquent (default 14)
     psps:                          # operator-declared rail accounts
       mobius:
-        nmi:
-          account_id: "100001"
-          settings:
-            tokenization_key: replace-with-nmi-tokenization-key
-          secrets:
-            security_key: replace-with-nmi-security-key
-            webhook_signing_secret: replace-with-nmi-webhook-secret
+        rail: nmi
+        account_id: "100001"
+        settings:
+          tokenization_key: replace-with-nmi-tokenization-key
+        secrets:
+          security_key: replace-with-nmi-security-key
+          webhook_signing_secret: replace-with-nmi-webhook-secret
 ```
 
 Per merchant:
@@ -210,12 +210,14 @@ Per merchant:
   `billing_policy_bindings` and `delegated_invoker_wasted_spend_limits`
   (windows in seconds). Omitted fields keep their stored values; a declared list
   replaces the stored one.
-- `psps.<key>.<rail>` — one entry per PSP. `key` is the manifest PSP name
-  catalog `psp_links` and checkout use ("mobius"); the rail nests inside.
-  Fields: `account_id`, `archived`, non-secret `settings`, `secrets`, and
-  (Solana) `signer`. There is NO `environment` (#882) — it is derived from the
-  deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`), so a deployment is
-  all-test or all-live; a manifest still declaring it fails loudly.
+- `psps.<key>` — one entry per PSP. `key` is the manifest PSP name catalog
+  `psp_links` and checkout use ("mobius"). Fields: `rail` (`nmi`, `ccbill`,
+  `stripe`, `solana`), `account_id`, `archived`, `custodian`, non-secret
+  `settings`, `secrets`, and (Solana) `signer`. There is no `environment`: it is
+  derived from the deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`),
+  so a deployment is all-test or all-live.
+- `custodians.<key>` — one entry per card custodian a PSP references. Fields:
+  `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
 
 `account_id` is operator-declared, per rail (never derived from credentials at
 runtime — details in `docs/rails/*.md`):
@@ -238,7 +240,7 @@ may reference the same custodian. See
 ### Secret overlays
 
 Secret values do not belong in the committed YAML. Overlays are YAML documents
-in the manifest's own shape (`merchants.<slug>.psps.<key>.<rail>.secrets.*`),
+in the manifest's own shape (`merchants.<slug>.psps.<key>.secrets.*`),
 merged over the manifest in order (later wins) and strict-parsed with it:
 an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.

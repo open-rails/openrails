@@ -70,11 +70,11 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Cli
 		t.Cleanup(func() { _ = rdb.Close() })
 	}
 	psps := map[string]openrails.PSPConfig{
-		"stripe": {"stripe": {AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}},
-		"solana": {"solana": {Signer: &openrails.PSPSignerConfig{Mode: "vault_transit", Key: transitKey}}},
+		"stripe": {Rail: "stripe", AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}},
+		"solana": {Rail: "solana", Signer: &openrails.PSPSignerConfig{Mode: "vault_transit", Key: transitKey}},
 	}
 	if b.nmi != nil {
-		psps["nmi"] = openrails.PSPConfig{"nmi": {AccountID: "e2e-nmi", Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": "whsec_nmi"}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}}
+		psps["nmi"] = openrails.PSPConfig{Rail: "nmi", AccountID: "e2e-nmi", Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": "whsec_nmi"}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}
 	}
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull

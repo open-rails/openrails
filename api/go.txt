@@ -340,14 +340,13 @@ pkg openrails, type CredentialPosture string
 pkg openrails, type CredentialTarget struct
 pkg openrails, type CredentialTarget struct, MerchantID billing.MerchantID
 pkg openrails, type CredentialTarget struct, MerchantSlug string
-pkg openrails, type CustodianAccountConfig = config.CustodianAccountConfig
-pkg openrails, type CustodianAccountConfig struct
-pkg openrails, type CustodianAccountConfig struct, AccountID string `yaml:"account_id,omitempty"`
-pkg openrails, type CustodianAccountConfig struct, Archived bool `yaml:"archived,omitempty"`
-pkg openrails, type CustodianAccountConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
-pkg openrails, type CustodianAccountConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
 pkg openrails, type CustodianConfig = config.CustodianConfig
-pkg openrails, type CustodianConfig map[string]config.CustodianAccountConfig
+pkg openrails, type CustodianConfig struct
+pkg openrails, type CustodianConfig struct, AccountID string `yaml:"account_id,omitempty"`
+pkg openrails, type CustodianConfig struct, Archived bool `yaml:"archived,omitempty"`
+pkg openrails, type CustodianConfig struct, Kind string `yaml:"kind"`
+pkg openrails, type CustodianConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
+pkg openrails, type CustodianConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
 pkg openrails, type CustomerHTTPScope = config.CustomerHTTPScope
 pkg openrails, type CustomerHTTPScope uint8
 pkg openrails, type CustomerRoutesConfig = config.CustomerRoutesConfig
@@ -495,7 +494,14 @@ pkg openrails, type NamingConfig struct, Enabled *bool
 pkg openrails, type NamingConfig struct, FormerNames config.FormerNamesConfig
 pkg openrails, type NamingConfig struct, RenameInterval *time.Duration
 pkg openrails, type PSPConfig = config.PSPConfig
-pkg openrails, type PSPConfig map[string]config.ProviderRailAccountConfig
+pkg openrails, type PSPConfig struct
+pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
+pkg openrails, type PSPConfig struct, Archived bool `yaml:"archived,omitempty"`
+pkg openrails, type PSPConfig struct, Custodian string `yaml:"custodian,omitempty"`
+pkg openrails, type PSPConfig struct, Rail billing.Rail `yaml:"rail"`
+pkg openrails, type PSPConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
+pkg openrails, type PSPConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
+pkg openrails, type PSPConfig struct, Signer *config.PSPSignerConfig `yaml:"signer,omitempty"`
 pkg openrails, type PSPSignerConfig = config.PSPSignerConfig
 pkg openrails, type PSPSignerConfig struct
 pkg openrails, type PSPSignerConfig struct, Key string `yaml:"key,omitempty"`
@@ -511,15 +517,6 @@ pkg openrails, type ProviderCredentialSnapshot struct, AccountID string
 pkg openrails, type ProviderCredentialSnapshot struct, Credentials map[string]string
 pkg openrails, type ProviderCredentialSnapshot struct, MerchantID billing.MerchantID
 pkg openrails, type ProviderCredentialSnapshot struct, Rail string
-pkg openrails, type ProviderRailAccountConfig = config.ProviderRailAccountConfig
-pkg openrails, type ProviderRailAccountConfig struct
-pkg openrails, type ProviderRailAccountConfig struct, AccountID string `yaml:"account_id,omitempty"`
-pkg openrails, type ProviderRailAccountConfig struct, Archived bool `yaml:"archived,omitempty"`
-pkg openrails, type ProviderRailAccountConfig struct, Custodian string `yaml:"custodian,omitempty"`
-pkg openrails, type ProviderRailAccountConfig struct, LegacyEnvironment string `yaml:"environment,omitempty"`
-pkg openrails, type ProviderRailAccountConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
-pkg openrails, type ProviderRailAccountConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
-pkg openrails, type ProviderRailAccountConfig struct, Signer *config.PSPSignerConfig `yaml:"signer,omitempty"`
 pkg openrails, type ProviderSandboxConfig = config.ProviderSandboxConfig
 pkg openrails, type ProviderSandboxConfig struct
 pkg openrails, type ProviderSandboxConfig struct, CCBillDataLinkURL string

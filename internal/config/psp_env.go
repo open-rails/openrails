@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -16,7 +17,7 @@ import (
 func PSPFromEnv(key string, lookup func(string) (string, bool)) (PSPConfig, error) {
 	key = strings.ToLower(strings.TrimSpace(key))
 	if key == "" {
-		return nil, fmt.Errorf("PSP key is required")
+		return PSPConfig{}, fmt.Errorf("PSP key is required")
 	}
 	prefix := strings.ToUpper(strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
@@ -34,21 +35,21 @@ func PSPFromEnv(key string, lookup func(string) (string, bool)) (PSPConfig, erro
 	}
 	descriptor, ok := rails.Lookup(models.Rail(rail))
 	if !ok || !descriptor.HasPSPs {
-		return nil, fmt.Errorf("PSP %q: unknown rail %q (set %sRAIL)", key, rail, prefix)
+		return PSPConfig{}, fmt.Errorf("PSP %q: unknown rail %q (set %sRAIL)", key, rail, prefix)
 	}
 	if descriptor.Rail == models.RailSolana {
-		return nil, fmt.Errorf("PSP %q: solana PSPs are declared programmatically", key)
+		return PSPConfig{}, fmt.Errorf("PSP %q: solana PSPs are declared programmatically", key)
 	}
-	account := ProviderRailAccountConfig{AccountID: get("ACCOUNT_ID")}
+	account := PSPConfig{Rail: billing.Rail(descriptor.Rail), AccountID: get("ACCOUNT_ID")}
 	if account.AccountID == "" {
-		return nil, fmt.Errorf("PSP %q requires %sACCOUNT_ID", key, prefix)
+		return PSPConfig{}, fmt.Errorf("PSP %q requires %sACCOUNT_ID", key, prefix)
 	}
 	for _, slot := range descriptor.CredentialKeys {
 		name := strings.ToUpper(slot.Name)
 		value := get(name)
 		if value == "" {
 			if slot.Required {
-				return nil, fmt.Errorf("PSP %q requires %s%s", key, prefix, name)
+				return PSPConfig{}, fmt.Errorf("PSP %q requires %s%s", key, prefix, name)
 			}
 			continue
 		}
@@ -65,5 +66,5 @@ func PSPFromEnv(key string, lookup func(string) (string, bool)) (PSPConfig, erro
 			account.Settings[setting] = value
 		}
 	}
-	return PSPConfig{string(descriptor.Rail): account}, nil
+	return account, nil
 }

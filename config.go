@@ -56,19 +56,14 @@ type (
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.
 	MerchantDeclaration = config.MerchantDeclaration
-	// PSPConfig is one PSP of MerchantDeclaration.PSPs: a single entry keyed
-	// by its rail.
+	// PSPConfig is one PSP of MerchantDeclaration.PSPs: the merchant's account
+	// on a rail, with its credentials and settings.
 	PSPConfig = config.PSPConfig
-	// ProviderRailAccountConfig is a PSP's account on its rail: the account
-	// ID, credentials and settings.
-	ProviderRailAccountConfig = config.ProviderRailAccountConfig
 	// PSPSignerConfig selects how a Solana PSP signs.
 	PSPSignerConfig = config.PSPSignerConfig
-	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: a
-	// single entry keyed by its kind.
+	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: the
+	// merchant's account with a card custodian.
 	CustodianConfig = config.CustodianConfig
-	// CustodianAccountConfig is the merchant's account with a custodian.
-	CustodianAccountConfig = config.CustodianAccountConfig
 
 	// DBConfig is Config.DB: the Postgres connection OpenRails opens when
 	// Deps.Postgres is nil.

@@ -567,13 +567,9 @@ const DefaultMerchantConfigManifestPath = merchantbootstrap.DefaultMerchantConfi
 
 var validateMerchantSecretOverlay = merchantbootstrap.ValidateMerchantSecretOverlay
 var rejectRenamedMerchantConfigKeys = merchantbootstrap.RejectRenamedMerchantConfigKeys
-var mergeCustodianAccountConfig = merchantbootstrap.MergeCustodianAccountConfig
-var mergeProviderRailAccountConfig = merchantbootstrap.MergeProviderRailAccountConfig
 
 type PSPConfig = config.PSPConfig
 type CustodianConfig = config.CustodianConfig
-type CustodianAccountConfig = config.CustodianAccountConfig
-type ProviderRailAccountConfig = config.ProviderRailAccountConfig
 type PSPSignerConfig = config.PSPSignerConfig
 type MerchantManifestReconcileOptions = merchantbootstrap.MerchantManifestReconcileOptions
 type ManifestProviderIdentityResolver = merchantbootstrap.ManifestProviderIdentityResolver

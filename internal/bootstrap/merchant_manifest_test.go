@@ -33,14 +33,10 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.Len(t, *m.Settings.CheckoutRouting, 3)
 	require.Equal(t, "Local Stack Billing", m.Settings.Profile.DisplayName)
 
-	byName, railOf := map[string]ProviderRailAccountConfig{}, map[string]string{}
+	byName, railOf := m.PSPs, map[string]string{}
 	require.Len(t, m.PSPs, 10)
-	for name, rails := range m.PSPs {
-		require.Len(t, rails, 1, "one rail per named PSP")
-		for rail, account := range rails {
-			require.Empty(t, account.LegacyEnvironment, "environment is derived from posture, never declared")
-			byName[name], railOf[name] = account, rail
-		}
+	for name, account := range m.PSPs {
+		railOf[name] = string(account.Rail)
 	}
 	require.Equal(t, "nmi", railOf["mobius"])
 	require.Equal(t, "nmi", railOf["mobius-bt"])
@@ -50,7 +46,8 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.True(t, byName["paykings"].Archived)
 	require.Equal(t, "999999-0000", byName["ccbill"].AccountID)
 
-	bt := m.Custodians["bt"][models.CustodianBasisTheory]
+	bt := m.Custodians["bt"]
+	require.Equal(t, models.CustodianBasisTheory, bt.Kind)
 	require.NoError(t, config.ValidateCustodianEntry(config.CustodianEntry{
 		Key: "bt", Kind: models.CustodianBasisTheory, AccountID: bt.AccountID, Settings: bt.Settings, SecretKeys: []string{custodians.SecretAPIKey},
 	}))
@@ -66,7 +63,7 @@ func TestMerchantManifestValidation(t *testing.T) {
 		return "version: 1\nmerchants:\n  host-three:\n    display_name: Host Three\n" + fragment
 	}
 	psp := func(fragment string) string {
-		return base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n" + fragment)
+		return base("    psps:\n      stripe:\n        rail: stripe\n        account_id: acct_test_123\n" + fragment)
 	}
 	remote := func(fragment string) string {
 		return base("    remote_application:\n" + fragment)
@@ -97,15 +94,17 @@ func TestMerchantManifestValidation(t *testing.T) {
 		"remote allowed origins":       {remote("      issuer: https://auth.example\n      jwks_uri: https://auth.example/jwks\n      allowed_origins: [https://auth.example]\n"), "allowed_origins"},
 		"renamed rail accounts":        {base("    rail_merchant_accounts: {}\n"), "merchants.host-three.rail_merchant_accounts was renamed to psps"},
 		"renamed provider accounts":    {base("    provider_accounts: {}\n"), "merchants.host-three.provider_accounts was renamed to psps"},
-		"psp routing removed":          {psp("          routing: standby\n"), `unknown field "routing"`},
-		"psp mode removed":             {psp("          mode: primary\n"), `unknown field "mode"`},
-		"psp role removed":             {psp("          role: primary\n"), `unknown field "role"`},
-		"psp environment retired":      {psp("          environment: live\n"), "psps.stripe.stripe.environment was removed (#882)"},
-		"unknown secret":               {psp("          secrets: {api_key: one}\n"), "unknown PSP secret"},
-		"nmi tokenization is setting":  {base("    psps:\n      mobius:\n        nmi:\n          account_id: p\n          secrets: {tokenization_key: t}\n"), "unknown PSP secret"},
-		"solana network not a PSP key": {base("    psps:\n      solana:\n        solana:\n          network: devnet\n"), `unknown field "network"`},
-		"solana without signer":        {base("    psps:\n      solana:\n        solana:\n          archived: false\n"), "requires a signer"},
-		"ccbill slash account":         {base("    psps:\n      ccbill:\n        ccbill:\n          account_id: \"945280/0000\"\n"), "CCBill account_id uses a dash"},
+		"psp routing removed":          {psp("        routing: standby\n"), `unknown field "routing"`},
+		"psp mode removed":             {psp("        mode: primary\n"), `unknown field "mode"`},
+		"psp role removed":             {psp("        role: primary\n"), `unknown field "role"`},
+		"psp environment retired":      {psp("        environment: live\n"), `unknown field "environment"`},
+		"unknown secret":               {psp("        secrets: {api_key: one}\n"), "unknown PSP secret"},
+		"psp without rail":             {base("    psps:\n      mobius:\n        account_id: p\n"), "psps.mobius.rail is required"},
+		"psp rail-keyed block":         {base("    psps:\n      mobius:\n        nmi:\n          account_id: p\n"), `unknown field "nmi"`},
+		"nmi tokenization is setting":  {base("    psps:\n      mobius:\n        rail: nmi\n        account_id: p\n        secrets: {tokenization_key: t}\n"), "unknown PSP secret"},
+		"solana network not a PSP key": {base("    psps:\n      solana:\n        rail: solana\n        network: devnet\n"), `unknown field "network"`},
+		"solana without signer":        {base("    psps:\n      solana:\n        rail: solana\n        archived: false\n"), "requires a signer"},
+		"ccbill slash account":         {base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"945280/0000\"\n"), "CCBill account_id uses a dash"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseMerchantConfigManifest([]byte(tc.body))
@@ -114,11 +113,11 @@ func TestMerchantManifestValidation(t *testing.T) {
 	}
 
 	// A declared Solana account_id is ignored (derived from the signer), not an error.
-	_, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")))
+	_, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      solana:\n        rail: solana\n        account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n        signer: { mode: local_keypair }\n        secrets:\n          private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")))
 	require.NoError(t, err)
-	m, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      ccbill:\n        ccbill:\n          account_id: \"945280-0000\"\n")))
+	m, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"945280-0000\"\n")))
 	require.NoError(t, err)
-	require.Equal(t, "945280-0000", m.Merchants["host-three"].PSPs["ccbill"]["ccbill"].AccountID)
+	require.Equal(t, "945280-0000", m.Merchants["host-three"].PSPs["ccbill"].AccountID)
 }
 
 // The CLI file path is as strict as the bytes path: koanf alone would drop a
@@ -181,16 +180,16 @@ func TestSolanaSignerEvidence(t *testing.T) {
 
 	for name, tc := range map[string]struct {
 		declared    string
-		account     ProviderRailAccountConfig
+		account     PSPConfig
 		secrets     manifestSecretValues
 		wantAccount string
 		wantSigner  map[string]string
 	}{
-		"implicit local keypair":        {"", ProviderRailAccountConfig{}, withKey, local.PublicKey().String(), map[string]string{"mode": "local_keypair"}},
-		"declared id ignored (local)":   {transitAccount, ProviderRailAccountConfig{Signer: &PSPSignerConfig{Mode: "local_keypair"}}, withKey, local.PublicKey().String(), map[string]string{"mode": "local_keypair"}},
-		"transit":                       {"", ProviderRailAccountConfig{Signer: transit}, empty, transitAccount, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}},
-		"declared id ignored (transit)": {"not-the-key", ProviderRailAccountConfig{Signer: transit}, empty, transitAccount, nil},
-		"receive only":                  {"", ProviderRailAccountConfig{}, empty, "", nil},
+		"implicit local keypair":        {"", PSPConfig{}, withKey, local.PublicKey().String(), map[string]string{"mode": "local_keypair"}},
+		"declared id ignored (local)":   {transitAccount, PSPConfig{Signer: &PSPSignerConfig{Mode: "local_keypair"}}, withKey, local.PublicKey().String(), map[string]string{"mode": "local_keypair"}},
+		"transit":                       {"", PSPConfig{Signer: transit}, empty, transitAccount, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}},
+		"declared id ignored (transit)": {"not-the-key", PSPConfig{Signer: transit}, empty, transitAccount, nil},
+		"receive only":                  {"", PSPConfig{}, empty, "", nil},
 	} {
 		signer, account, err := manifestProviderSignerEvidence(ctx, "solana", tc.declared, tc.account, tc.secrets, fakeTransit{pub: pub})
 		require.NoError(t, err, name)
@@ -215,7 +214,7 @@ func TestSolanaSignerEvidence(t *testing.T) {
 		if tc.transit {
 			client = fakeTransit{pub: pub}
 		}
-		_, _, err := manifestProviderSignerEvidence(ctx, tc.rail, "", ProviderRailAccountConfig{Signer: tc.signer}, tc.secrets, client)
+		_, _, err := manifestProviderSignerEvidence(ctx, tc.rail, "", PSPConfig{Signer: tc.signer}, tc.secrets, client)
 		require.ErrorContains(t, err, want)
 	}
 }

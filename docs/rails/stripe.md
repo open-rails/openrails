@@ -30,11 +30,11 @@ merchants:
   acme:
     psps:
       stripe:                    # PSP name (reserved gateway name)
-        stripe:                  # rail block
-          account_id: acct_XXXXXXXXXXXXXXXX
-          secrets:
-            secret_key: sk_live_...                # or rk_live_...
-            webhook_signing_secret: whsec_...      # required in manifest mode; see Webhooks
+        rail: stripe
+        account_id: acct_XXXXXXXXXXXXXXXX
+        secrets:
+          secret_key: sk_live_...                # or rk_live_...
+          webhook_signing_secret: whsec_...      # required in manifest mode; see Webhooks
 ```
 
 `account_id` is your Stripe account id (`acct_…`). Stripe is the one rail where it

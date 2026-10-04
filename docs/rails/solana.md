@@ -35,27 +35,27 @@ derived from the signer's public key (a declared value is ignored with a warning
 ```yaml
 psps:
   solana:
-    solana:
-      signer: { mode: local_keypair }
-      settings:
-        # Optional destination wallet; defaults to the signer public key.
-        recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
-        rpc_provider: helius     # helius | public; empty defaults to helius
-        rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
-        # tokens is OPTIONAL and IS the accepted set; omit it to accept USDC only.
-        tokens:
-          USDC: {}               # built-in symbol: SELECTED, mint from the registry.
-                                 # Declaring `mint:` here is an ERROR.
-          MYTK: { name: My Token, mint: replace-with-spl-mint-address }
-                                 # custom symbol: `mint:` is REQUIRED.
-                                 # `decimals:` is rejected on both — read on-chain.
-      secrets:
-        private_key: replace-with-base58-private-key   # local_keypair mode only
+    rail: solana
+    signer: { mode: local_keypair }
+    settings:
+      # Optional destination wallet; defaults to the signer public key.
+      recipient_wallet: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu
+      rpc_provider: helius     # helius | public; empty defaults to helius
+      rpc_api_key: replace-with-helius-api-key   # forbidden with rpc_provider: public
+      # tokens is OPTIONAL and IS the accepted set; omit it to accept USDC only.
+      tokens:
+        USDC: {}               # built-in symbol: SELECTED, mint from the registry.
+                               # Declaring `mint:` here is an ERROR.
+        MYTK: { name: My Token, mint: replace-with-spl-mint-address }
+                               # custom symbol: `mint:` is REQUIRED.
+                               # `decimals:` is rejected on both — read on-chain.
+    secrets:
+      private_key: replace-with-base58-private-key   # local_keypair mode only
 
   # Alternative: Vault Transit signer — no private_key secret at all.
   solana-vault:
-    solana:
-      signer: { mode: vault_transit, key: openrails-solana-<slug> }
+    rail: solana
+    signer: { mode: vault_transit, key: openrails-solana-<slug> }
 ```
 
 `settings` keys are strictly validated: a typo'd key fails the manifest push

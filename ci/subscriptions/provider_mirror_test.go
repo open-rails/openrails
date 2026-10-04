@@ -225,9 +225,9 @@ func newDataLinkWorld(t *testing.T, dl *dataLinkFake) *world {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{CCBillDataLinkURL: dl.URL}
 	})
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		account := psps["ccbill"]["ccbill"]
+		account := psps["ccbill"]
 		account.Secrets = map[string]string{"salt": "e2e-ccbill-salt", "datalink_username": "e2e-datalink", "datalink_password": "e2e-datalink-password"}
-		psps["ccbill"]["ccbill"] = account
+		psps["ccbill"] = account
 	}
 	w.start()
 	return w

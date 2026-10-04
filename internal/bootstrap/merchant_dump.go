@@ -99,7 +99,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	for _, c := range declaredCustodians {
 		key := strings.TrimSpace(c.Key)
 		custodianKeyByID[c.ID] = key
-		entry := CustodianAccountConfig{AccountID: c.AccountID, Archived: c.Archived}
+		entry := CustodianConfig{Kind: c.Kind, AccountID: c.AccountID, Archived: c.Archived}
 		var settings map[string]any
 		if len(c.Settings) > 0 && json.Unmarshal(c.Settings, &settings) == nil && len(settings) > 0 {
 			entry.Settings = settings
@@ -107,7 +107,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if values := custodianSecrets[custodianSecretGroupKey(c.Kind, c.Environment, c.AccountID)]; len(values) > 0 {
 			entry.Secrets = values
 		}
-		mt.Custodians[key] = CustodianConfig{c.Kind: entry}
+		mt.Custodians[key] = entry
 	}
 
 	// PSPs (identity + lifecycle + secret references).
@@ -129,9 +129,8 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if localKey == "" {
 			localKey = pspDumpKey(a.Rail, a.Environment, a.AccountID)
 		}
-		// #882: environment is derived from test_mode, so it is never emitted —
-		// dumping it would round-trip into the removal error on apply.
-		account := ProviderRailAccountConfig{
+		account := PSPConfig{
+			Rail:      billing.Rail(a.Rail),
 			AccountID: a.AccountID,
 			Archived:  a.Archived,
 		}
@@ -148,7 +147,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if values := secretValuesByAccount[key]; len(values) > 0 {
 			account.Secrets = values
 		}
-		mt.PSPs[localKey] = PSPConfig{a.Rail: account}
+		mt.PSPs[localKey] = account
 	}
 
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil

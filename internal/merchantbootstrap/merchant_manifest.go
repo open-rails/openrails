@@ -134,7 +134,7 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 	}
 	for key := range root {
 		if key != "merchants" {
-			return fmt.Errorf("merchant secret overlay only accepts the merchants.psps.<psp>.<rail>.secrets shape (found %q)", key)
+			return fmt.Errorf("merchant secret overlay only accepts the merchants.<slug>.psps.<psp>.secrets shape (found %q)", key)
 		}
 	}
 	merchants, ok := root["merchants"].(map[string]any)
@@ -156,23 +156,17 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 			return fmt.Errorf("merchant secret overlay merchants.%s.psps must be a mapping", slug)
 		}
 		for psp, rawPSP := range psps {
-			rails, ok := rawPSP.(map[string]any)
+			declared, ok := rawPSP.(map[string]any)
 			if !ok {
 				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s must be a mapping", slug, psp)
 			}
-			for rail, rawRail := range rails {
-				railConfig, ok := rawRail.(map[string]any)
-				if !ok {
-					return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.%s must be a mapping", slug, psp, rail)
+			for key := range declared {
+				if key != "secrets" {
+					return fmt.Errorf("merchant secret overlay cannot set merchants.%s.psps.%s.%s; only secrets are overlayed", slug, psp, key)
 				}
-				for key := range railConfig {
-					if key != "secrets" {
-						return fmt.Errorf("merchant secret overlay cannot set merchants.%s.psps.%s.%s.%s; only secrets are overlayed", slug, psp, rail, key)
-					}
-				}
-				if _, ok := railConfig["secrets"].(map[string]any); !ok {
-					return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.%s.secrets must be a mapping", slug, psp, rail)
-				}
+			}
+			if _, ok := declared["secrets"].(map[string]any); !ok {
+				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.secrets must be a mapping", slug, psp)
 			}
 		}
 	}
@@ -258,39 +252,28 @@ func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDec
 		if dst.Custodians == nil {
 			dst.Custodians = map[string]config.CustodianConfig{}
 		}
-		for key, srcKinds := range src.Custodians {
-			dstKinds := dst.Custodians[key]
-			if dstKinds == nil {
-				dstKinds = config.CustodianConfig{}
-			}
-			for kind, srcEntry := range srcKinds {
-				dstEntry := dstKinds[kind]
-				MergeCustodianAccountConfig(&dstEntry, srcEntry)
-				dstKinds[kind] = dstEntry
-			}
-			dst.Custodians[key] = dstKinds
+		for key, srcEntry := range src.Custodians {
+			dstEntry := dst.Custodians[key]
+			MergeCustodianConfig(&dstEntry, srcEntry)
+			dst.Custodians[key] = dstEntry
 		}
 	}
 	if len(src.PSPs) > 0 {
 		if dst.PSPs == nil {
 			dst.PSPs = map[string]config.PSPConfig{}
 		}
-		for key, srcRails := range src.PSPs {
-			dstRails := dst.PSPs[key]
-			if dstRails == nil {
-				dstRails = config.PSPConfig{}
-			}
-			for rail, srcAccount := range srcRails {
-				dstAccount := dstRails[rail]
-				MergeProviderRailAccountConfig(&dstAccount, srcAccount)
-				dstRails[rail] = dstAccount
-			}
-			dst.PSPs[key] = dstRails
+		for key, srcAccount := range src.PSPs {
+			dstAccount := dst.PSPs[key]
+			MergePSPConfig(&dstAccount, srcAccount)
+			dst.PSPs[key] = dstAccount
 		}
 	}
 }
 
-func MergeCustodianAccountConfig(dst *config.CustodianAccountConfig, src config.CustodianAccountConfig) {
+func MergeCustodianConfig(dst *config.CustodianConfig, src config.CustodianConfig) {
+	if strings.TrimSpace(src.Kind) != "" {
+		dst.Kind = src.Kind
+	}
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
 	}
@@ -315,9 +298,9 @@ func MergeCustodianAccountConfig(dst *config.CustodianAccountConfig, src config.
 	}
 }
 
-func MergeProviderRailAccountConfig(dst *config.ProviderRailAccountConfig, src config.ProviderRailAccountConfig) {
-	if strings.TrimSpace(src.LegacyEnvironment) != "" {
-		dst.LegacyEnvironment = src.LegacyEnvironment
+func MergePSPConfig(dst *config.PSPConfig, src config.PSPConfig) {
+	if strings.TrimSpace(string(src.Rail)) != "" {
+		dst.Rail = src.Rail
 	}
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
@@ -391,7 +374,7 @@ type MerchantManifestReconcileOptions struct {
 }
 
 type ManifestProviderIdentityResolver interface {
-	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error)
+	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.PSPConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error)
 }
 
 type ManifestProviderIdentity struct {
@@ -519,9 +502,10 @@ func sortedMerchantKeys(in map[string]config.MerchantDeclaration) []string {
 type PspEntry struct {
 	key    string
 	rail   string
-	config config.ProviderRailAccountConfig
+	config config.PSPConfig
 }
 
+// PspEntries are the declared PSPs in key order.
 func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
@@ -530,14 +514,7 @@ func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 	sort.Strings(keys)
 	out := make([]PspEntry, 0, len(in))
 	for _, key := range keys {
-		rails := make([]string, 0, len(in[key]))
-		for rail := range in[key] {
-			rails = append(rails, rail)
-		}
-		sort.Strings(rails)
-		for _, rail := range rails {
-			out = append(out, PspEntry{key: key, rail: rail, config: in[key][rail]})
-		}
+		out = append(out, PspEntry{key: key, rail: string(in[key].Rail), config: in[key]})
 	}
 	return out
 }
@@ -545,9 +522,10 @@ func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 type CustodianEntry struct {
 	key    string
 	kind   string
-	config config.CustodianAccountConfig
+	config config.CustodianConfig
 }
 
+// CustodianEntries are the declared custodians in key order.
 func CustodianEntries(in map[string]config.CustodianConfig) []CustodianEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
@@ -556,14 +534,7 @@ func CustodianEntries(in map[string]config.CustodianConfig) []CustodianEntry {
 	sort.Strings(keys)
 	out := make([]CustodianEntry, 0, len(in))
 	for _, key := range keys {
-		kinds := make([]string, 0, len(in[key]))
-		for kind := range in[key] {
-			kinds = append(kinds, kind)
-		}
-		sort.Strings(kinds)
-		for _, kind := range kinds {
-			out = append(out, CustodianEntry{key: key, kind: kind, config: in[key][kind]})
-		}
+		out = append(out, CustodianEntry{key: key, kind: in[key].Kind, config: in[key]})
 	}
 	return out
 }
@@ -752,7 +723,7 @@ func NonNilSettings(in map[string]any) map[string]any {
 // the merchant's declared custodians. An undeclared key is a HARD error: a PSP
 // that means to charge a vault-held card and cannot find the vault must not
 // arm as though its gateway held the card.
-func ResolveManifestCustodianReference(rail string, account config.ProviderRailAccountConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
+func ResolveManifestCustodianReference(rail string, account config.PSPConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
 	key := strings.ToLower(strings.TrimSpace(account.Custodian))
 	if key == "" {
 		return nil, nil
@@ -861,10 +832,7 @@ func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID bi
 	}
 	for _, entry := range PspEntries(mt.PSPs) {
 		rail := NormalizeManifestRail(entry.rail)
-		environment, err := ManifestProviderEnvironment(cfg, entry.config)
-		if err != nil {
-			return err
-		}
+		environment := ManifestProviderEnvironment(cfg)
 		accountID := strings.TrimSpace(entry.config.AccountID)
 		if accountID == "" {
 			if rail != string(models.RailSolana) {
@@ -922,15 +890,12 @@ type ResolvedManifestRailAccount struct {
 	signerEvidence map[string]string
 }
 
-func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account config.ProviderRailAccountConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (ResolvedManifestRailAccount, error) {
+func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account config.PSPConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (ResolvedManifestRailAccount, error) {
 	out := ResolvedManifestRailAccount{rail: NormalizeManifestRail(rail)}
 	if out.rail == "" {
 		return out, fmt.Errorf("PSP rail is required")
 	}
-	environment, err := ManifestProviderEnvironment(cfg, account)
-	if err != nil {
-		return out, err
-	}
+	environment := ManifestProviderEnvironment(cfg)
 	out.environment = environment
 	// #711: the Solana runtime knobs live in the account settings block —
 	// validate strictly at push time so a typo'd key/value fails loudly here
@@ -1038,7 +1003,7 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, me
 	return nil
 }
 
-func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, merchantSlug, localKey, rail string, account config.ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, merchantSlug, localKey, rail string, account config.PSPConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	ra, err := ResolveManifestRailAccount(ctx, cfg, rail, account, transit, opts.IdentityResolver)
 	if err != nil {
 		return err
@@ -1193,7 +1158,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 // evidence plus the derived PSP identity. Solana never needs
 // account_id — the stored DB identity is always the signer public key; a declared
 // value is ignored (warned).
-func ManifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
+func ManifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account config.PSPConfig, secrets ManifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
 	if rail == string(models.RailSolana) && strings.TrimSpace(accountID) != "" {
 		log.Warnf("solana PSP: declared account_id %s is ignored; it is always derived from the signer's public key", strings.TrimSpace(accountID))
 		accountID = ""
@@ -1277,13 +1242,9 @@ func SolanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, k
 }
 
 // ManifestProviderEnvironment derives a PSP's environment from deployment
-// posture (#681/#882 — test under test_mode, live otherwise). It is never
-// declared: a manifest that still carries `environment:` fails loudly here.
-func ManifestProviderEnvironment(cfg *config.Config, account config.ProviderRailAccountConfig) (string, error) {
-	if strings.TrimSpace(account.LegacyEnvironment) != "" {
-		return "", fmt.Errorf("psp `environment:` is no longer configurable (#882) — it is derived from test_mode (sandbox => test, live => live); remove the key")
-	}
-	return config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg)), nil
+// posture: test under test_mode, live otherwise. It is never declared.
+func ManifestProviderEnvironment(cfg *config.Config) string {
+	return config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg))
 }
 
 // ManifestSolanaNetwork maps a PSP environment onto the Solana network the same
@@ -1366,7 +1327,7 @@ func (v ManifestSecretValues) ResolveIfPresent(key string) (string, bool, error)
 
 type DefaultManifestProviderIdentityResolver struct{}
 
-func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
+func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.PSPConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
 	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
 		return ManifestProviderIdentity{AccountID: accountID}, nil
 	}
@@ -1397,20 +1358,19 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 			return err
 		}
 	}
-	for key, psp := range mt.PSPs {
-		for rail, account := range psp {
-			// A CCBill account with inline credentials must sign its FlexForm links.
-			if strings.EqualFold(strings.TrimSpace(rail), string(models.RailCCBill)) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
-				return fmt.Errorf("psps.%s.ccbill.secrets.salt is required", key)
-			}
-			if !strings.EqualFold(strings.TrimSpace(rail), string(models.RailStripe)) {
-				continue
-			}
-			if raw, ok := account.Settings["publishable_key"]; ok {
-				value, _ := raw.(string)
-				if err := config.ValidateStripePublishableKeyPosture(cfg, value); err != nil {
-					return fmt.Errorf("psps.%s.stripe.settings.publishable_key: %w", key, err)
-				}
+	for key, account := range mt.PSPs {
+		rail := NormalizeManifestRail(string(account.Rail))
+		// A CCBill account with inline credentials must sign its FlexForm links.
+		if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
+			return fmt.Errorf("psps.%s.secrets.salt is required", key)
+		}
+		if rail != string(models.RailStripe) {
+			continue
+		}
+		if raw, ok := account.Settings["publishable_key"]; ok {
+			value, _ := raw.(string)
+			if err := config.ValidateStripePublishableKeyPosture(cfg, value); err != nil {
+				return fmt.Errorf("psps.%s.settings.publishable_key: %w", key, err)
 			}
 		}
 	}

@@ -734,7 +734,7 @@ type SolanaRailConfig struct {
 // declared custodian: who holds the card, under what tenant identity, and the
 // credentials to detokenize it into a gateway. It is resolved from ONE
 // custodians row and may be shared by every PSP that references it — the
-// gateway credentials themselves stay on the rail block, one source of truth.
+// gateway credentials themselves stay on the PSP, one source of truth.
 type ResolvedCustodian struct {
 	// Key is the merchant's name for this custodian (custodians.key).
 	Key string

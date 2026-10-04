@@ -52,58 +52,47 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 	return nil
 }
 
-func ValidateManifestPSP(slug string, key string, account config.PSPConfig) error {
+func ValidateManifestPSP(slug string, key string, cfg config.PSPConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return fmt.Errorf("merchant %q accounts key is required", slug)
+		return fmt.Errorf("merchant %q psps key is required", slug)
 	}
-	if len(account) != 1 {
-		return fmt.Errorf("merchant %q accounts.%s must set exactly one rail block", slug, key)
+	rail := NormalizeManifestRail(string(cfg.Rail))
+	if rail == "" {
+		return fmt.Errorf("merchant %q psps.%s.rail is required", slug, key)
 	}
-	for rail, cfg := range account {
-		rail = strings.ToLower(strings.TrimSpace(rail))
-		if rail == "" {
-			return fmt.Errorf("merchant %q accounts.%s rail is required", slug, key)
+	for secretKey := range cfg.Secrets {
+		if _, err := merchants.NormalizePSPSecretKey(rail, secretKey); err != nil {
+			return fmt.Errorf("merchant %q psps.%s: %w", slug, key, err)
 		}
-		// #882: environment is DERIVED from test_mode, never declared. The field
-		// could only ever agree (a no-op) or disagree (refuse to boot), so it is
-		// retired — a manifest that still carries it fails loudly.
-		if strings.TrimSpace(cfg.LegacyEnvironment) != "" {
-			return fmt.Errorf("merchant %q psps.%s.%s.environment was removed (#882): the environment is derived from test_mode (sandbox => test, live => live) — delete the key", slug, key, rail)
+	}
+	// #710: the per-merchant CCBill webhook IP allowlist is retired (it was
+	// parsed and never enforced); the built-in documented CCBill ranges apply.
+	if rail == "ccbill" {
+		if _, ok := cfg.Settings["allowed_cidrs"]; ok {
+			return fmt.Errorf("merchant %q psps.%s.settings.allowed_cidrs was removed (#710): CCBill webhook source IPs are the built-in documented ranges — delete the key", slug, key)
 		}
-		for secretKey := range cfg.Secrets {
-			if _, err := merchants.NormalizePSPSecretKey(rail, secretKey); err != nil {
-				return fmt.Errorf("merchant %q accounts.%s.%s: %w", slug, key, rail, err)
-			}
+	}
+	if rail == "solana" {
+		// Solana never needs account_id — it is always derived from the signer's
+		// public key, and a declared value is ignored (warned at apply). A signer
+		// is required so there is a key to derive from.
+		if !SolanaSignerConfigured(cfg) {
+			return fmt.Errorf("merchant %q psps.%s requires a signer (local_keypair private_key or vault_transit)", slug, key)
 		}
-		// #710: the per-merchant CCBill webhook IP allowlist is retired (it was
-		// parsed and never enforced); the built-in documented CCBill ranges apply.
-		if rail == "ccbill" {
-			if _, ok := cfg.Settings["allowed_cidrs"]; ok {
-				return fmt.Errorf("merchant %q accounts.%s.ccbill.settings.allowed_cidrs was removed (#710): CCBill webhook source IPs are the built-in documented ranges — delete the key", slug, key)
-			}
-		}
-		if rail == "solana" {
-			// Solana never needs account_id — it is always derived from the signer's
-			// public key, and a declared value is ignored (warned at apply). A signer
-			// is required so there is a key to derive from.
-			if !SolanaSignerConfigured(cfg) {
-				return fmt.Errorf("merchant %q accounts.%s.solana requires a signer (local_keypair private_key or vault_transit)", slug, key)
-			}
-			continue
-		}
-		if strings.TrimSpace(cfg.AccountID) == "" {
-			return fmt.Errorf("merchant %q accounts.%s.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key, rail)
-		}
-		// #697: rail-specific format doctrine (CCBill ids are dash-joined).
-		if err := config.ValidateRailAccountID(models.Rail(rail), strings.TrimSpace(cfg.AccountID)); err != nil {
-			return fmt.Errorf("merchant %q accounts.%s.%s: %w", slug, key, rail, err)
-		}
+		return nil
+	}
+	if strings.TrimSpace(cfg.AccountID) == "" {
+		return fmt.Errorf("merchant %q psps.%s.account_id is required (auto-discovery removed; declare account_id in the manifest)", slug, key)
+	}
+	// #697: rail-specific format doctrine (CCBill ids are dash-joined).
+	if err := config.ValidateRailAccountID(models.Rail(rail), strings.TrimSpace(cfg.AccountID)); err != nil {
+		return fmt.Errorf("merchant %q psps.%s: %w", slug, key, err)
 	}
 	return nil
 }
 
-func SolanaSignerConfigured(cfg config.ProviderRailAccountConfig) bool {
+func SolanaSignerConfigured(cfg config.PSPConfig) bool {
 	if cfg.Signer != nil {
 		return true
 	}

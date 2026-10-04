@@ -144,10 +144,10 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	cfg.ReturnOrigins = []string{"https://example.test"}
 	cfg.HTTP = &openrails.HTTPConfig{}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug,
-		PSPs: map[string]openrails.PSPConfig{"stripe": {"stripe": {
+		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
 			AccountID: account,
 			Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
-		}}},
+		}},
 	}
 	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, StripeTransport: fake})
 	require.NoError(t, err)

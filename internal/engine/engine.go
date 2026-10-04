@@ -268,11 +268,9 @@ func validate(cfg *config.Config, deps config.Deps) error {
 		}
 	}
 	if len(deps.ProviderCredentials) > 0 {
-		for _, rails := range cfg.Merchant.PSPs {
-			for _, account := range rails {
-				if len(account.Secrets) > 0 {
-					return fmt.Errorf("openrails: supply snapshot credentials through either Deps.ProviderCredentials or Config.Merchant, not both")
-				}
+		for _, account := range cfg.Merchant.PSPs {
+			if len(account.Secrets) > 0 {
+				return fmt.Errorf("openrails: supply snapshot credentials through either Deps.ProviderCredentials or Config.Merchant, not both")
 			}
 		}
 	}

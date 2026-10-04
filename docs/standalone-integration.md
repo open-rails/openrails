@@ -6,7 +6,7 @@ is an integer in the currency's native units (`GET /v1/currencies`; micros for
 USD), a decimal string on the wire ([money-wire.md](money-wire.md)). Vocabulary:
 a **rail** is a gateway kind (`nmi`, `ccbill`,
 `stripe`, `solana`); a **PSP** is your concrete account on a rail (e.g. `mobius`
-on nmi) — declared under `merchants.<slug>.psps.<key>.<rail>`.
+on nmi) — declared under `merchants.<slug>.psps.<key>`, with its `rail:`.
 
 ```mermaid
 flowchart LR
