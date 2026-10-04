@@ -44,7 +44,7 @@ const EmbeddedV1Prefix = embeddedMount + "/v1"
 const embeddedMount = "/billing"
 
 // Options controls which billing HTTP route groups are included in the returned
-// handler. A zero RouteSets slice uses EmbeddedDefaultRouteSets.
+// handler. A zero RouteSets slice uses AllRouteSets.
 type Options struct {
 	RouteSets []RouteSet
 	// AdvertiseRouteSets is the full selection reported by GET /v1/capabilities,
@@ -222,33 +222,11 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			},
 		})
 	}
-	if routeSets[RouteSetMerchantAdmin] {
-		adminOpts := httproutes.Options{
+	if routeSets[RouteSetMerchant] {
+		httproutes.RegisterMerchantRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Gate:         s.Gate,
 			AdminLimiter: s.AdminLimiter,
-		}
-		// #528: per-user `/admin` retired; the delegated admin surface is mounted
-		// via embgin.SelfHandler (issuer→owner), not the base handler.
-		httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
-		// #737: DeclaredBilling import — same route the standalone surface serves.
-		httproutes.RegisterImportRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/import", s.Runtime), s.Runtime, adminOpts)
-	}
-	if routeSets[RouteSetCatalog] {
-		adminOpts := httproutes.Options{
-			Gate: s.Gate,
-		}
-		httproutes.RegisterCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalog", s.Runtime), s.Runtime, adminOpts)
-		httproutes.RegisterCatalogCollectionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalogs", s.Runtime), s.Runtime, adminOpts)
-		httproutes.RegisterOwnedCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/catalog", s.Runtime), s.Runtime, adminOpts)
-	}
-	if routeSets[RouteSetMerchantConfig] {
-		adminOpts := httproutes.Options{
-			Gate: s.Gate,
-		}
-		httproutes.RegisterMerchantConfigRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
-	}
-	if routeSets[RouteSetMerchantAPI] {
-		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{Gate: s.Gate})
+		})
 	}
 	if routeSets[RouteSetWebhooks] {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
@@ -320,8 +298,8 @@ func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
 	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user route groups require Options.Authenticator")
 	}
-	if (routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetCatalog] || routeSets[RouteSetMerchantConfig] || routeSets[RouteSetMerchantAPI]) && (s == nil || s.Gate == nil) {
-		return fmt.Errorf("embedded billing: merchant route groups require Options.Gate")
+	if routeSets[RouteSetMerchant] && (s == nil || s.Gate == nil) {
+		return fmt.Errorf("embedded billing: the merchant route group requires Options.Gate")
 	}
 	return nil
 }

@@ -319,7 +319,7 @@ func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPC
 		out.Checkout = &checkout
 	}
 	if cfg.ControlPlane != nil {
-		if out.Checkout != nil || out.MerchantAdmin || out.Catalog || out.MerchantConfig || out.MerchantAPI {
+		if out.Checkout != nil || out.Merchant {
 			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes serves the standalone surface; Config.HTTP may only add CustomerRoutes")
 		}
 		for _, routes := range out.CustomerRoutes {

@@ -326,7 +326,6 @@ pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig
 pkg openrails, type Config struct, LLM *config.LLMConfig
 pkg openrails, type Config struct, Logger *config.LoggerConfig
 pkg openrails, type Config struct, Merchant config.MerchantDeclaration
-pkg openrails, type Config struct, MerchantConfigHTTP bool
 pkg openrails, type Config struct, ProviderBillingQuiescenceInterval string
 pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig
 pkg openrails, type Config struct, ProviderWriteMode string
@@ -448,13 +447,10 @@ pkg openrails, type GateError struct, Metadata map[string]any
 pkg openrails, type GateError struct, Status int
 pkg openrails, type HTTPConfig = config.HTTPConfig
 pkg openrails, type HTTPConfig struct
-pkg openrails, type HTTPConfig struct, Catalog bool
 pkg openrails, type HTTPConfig struct, Checkout *config.CheckoutConfig
 pkg openrails, type HTTPConfig struct, CookieOrigin string
 pkg openrails, type HTTPConfig struct, CustomerRoutes []config.CustomerRoutesConfig
-pkg openrails, type HTTPConfig struct, MerchantAPI bool
-pkg openrails, type HTTPConfig struct, MerchantAdmin bool
-pkg openrails, type HTTPConfig struct, MerchantConfig bool
+pkg openrails, type HTTPConfig struct, Merchant bool
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
 pkg openrails, type HyperSwitchConfig struct, APIBaseURL string

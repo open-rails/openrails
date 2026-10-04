@@ -261,7 +261,7 @@ Mounting gives your users these routes under `/billing`:
 |---|---|
 | `POST /billing/v1/webhooks/{provider}/{account_id}` | processor notifications (Stripe, NMI, CCBill), signature-checked per account |
 
-More route groups exist for your staff rather than your users: `HTTP.MerchantAdmin` (customers, refunds, support), `HTTP.Catalog` (edit products and prices), `HTTP.MerchantConfig` (settings, PSPs, outbound webhooks) and `HTTP.MerchantAPI` (machine access with API keys). Every route, request and response is in the [API reference](docs/api/endpoints.md).
+`HTTP.Merchant` publishes the merchant API for your staff and machines rather than your users (customers, refunds, catalog, settings, PSPs, outbound webhooks), each route gated by its merchant permission. Every route, request and response is in the [API reference](docs/api/endpoints.md).
 
 #### The frontend
 

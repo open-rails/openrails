@@ -44,14 +44,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 		opts.Gate = embedhttp.IntegrationGate(rt)
 		authn = embedhttp.RuntimeCustomerAuthentication(rt)
 	}
-	httproutes.RegisterServiceRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
-	httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
-	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", rt), rt, opts)
-	httproutes.RegisterCatalogCollectionRoutes(router.NewMux(mux, "/v1/merchant/catalogs", rt), rt, opts)
-	httproutes.RegisterOwnedCatalogRoutes(router.NewMux(mux, "/v1/catalog", rt), rt, opts)
-	httproutes.RegisterMerchantConfigRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
-	// #737: DeclaredBilling import, same gate (host principal holds merchant:*).
-	httproutes.RegisterImportRoutes(router.NewMux(mux, "/v1/import", rt), rt, opts)
+	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	if authn != nil {
 		httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, "/v1/me", rt), rt, middleware.DelegatedPrincipalRequired(authn), embedhttp.ProviderRoutesForRuntime(rt, nil))
 	}

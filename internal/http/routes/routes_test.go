@@ -65,13 +65,7 @@ func doBody(h http.Handler, method, path, body string, header map[string]string)
 // standalone server does.
 func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 	table := &router.Table{}
-	RegisterServiceRoutes(router.NewMux(table, "/v1/merchant", rt), rt, opts)
-	RegisterMerchantActionRoutes(router.NewMux(table, "/v1/merchant", rt), rt, opts)
-	RegisterMerchantConfigRoutes(router.NewMux(table, "/v1/merchant", rt), rt, opts)
-	RegisterImportRoutes(router.NewMux(table, "/v1/import", rt), rt, opts)
-	RegisterCatalogRoutes(router.NewMux(table, "/v1/merchant/catalog", rt), rt, opts)
-	RegisterCatalogCollectionRoutes(router.NewMux(table, "/v1/merchant/catalogs", rt), rt, opts)
-	RegisterOwnedCatalogRoutes(router.NewMux(table, "/v1/catalog", rt), rt, opts)
+	RegisterMerchantRoutes(router.NewMux(table, "/v1", rt), rt, opts)
 	return table
 }
 
@@ -192,32 +186,19 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 	}
 }
 
-// Ordinary billing surfaces never publish merchant configuration; it exists
-// only where RegisterMerchantConfigRoutes is explicitly mounted.
-func TestConfigurationIsSeparatelyMounted(t *testing.T) {
-	rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}
-	table := &router.Table{}
-	RegisterServiceRoutes(router.NewMux(table, "/m", rt), rt, Options{})
-	RegisterMerchantActionRoutes(router.NewMux(table, "/m", rt), rt, Options{})
-	RegisterCatalogRoutes(router.NewMux(table, "/m/catalog", rt), rt, Options{})
-	for _, key := range routeKeys(table) {
-		for _, forbidden := range []string{" /m/configuration", " /m/settings", " /m/payment-providers", " /m/webhooks"} {
-			require.NotContains(t, key, forbidden)
-		}
-	}
-
-	// Provider metadata and lifecycle archives stay mounted (and gated) even
-	// when the secret backend is read-only.
+// Provider metadata and lifecycle archives stay mounted (and gated) even when
+// the secret backend is read-only.
+func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
 		for _, writable := range []bool{false, true} {
 			rt := &app.Runtime{Config: &config.Config{SecretBackend: backend}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
 			table := &router.Table{}
-			RegisterMerchantConfigRoutes(router.NewMux(table, "/m", rt), rt, Options{})
+			RegisterMerchantRoutes(router.NewMux(table, "", rt), rt, Options{})
 			keys := routeKeys(table)
 			for _, key := range []string{
-				"GET /m/configuration", "POST /m/configuration/applications", "GET /m/settings", "PUT /m/settings",
-				"GET /m/payment-providers", "PUT /m/payment-providers/{provider}", "DELETE /m/payment-providers/{provider}",
-				"POST /m/payment-providers/{provider}/accounts/{psp_id}/archive", "POST /m/webhooks", "PUT /m/webhooks/{id}/url",
+				"GET /merchant/configuration", "POST /merchant/configuration/applications", "GET /merchant/settings", "PUT /merchant/settings",
+				"GET /merchant/payment-providers", "PUT /merchant/payment-providers/{provider}", "DELETE /merchant/payment-providers/{provider}",
+				"POST /merchant/payment-providers/{provider}/accounts/{psp_id}/archive", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url",
 			} {
 				require.Contains(t, keys, key, "%s/%v", backend, writable)
 			}
@@ -231,11 +212,17 @@ func TestCatalogWritePolicy(t *testing.T) {
 	reads := []string{"POST /merchant/catalog/offers/lookup", "POST /catalog/offers/lookup"}
 	for _, allow := range []bool{false, true} {
 		rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: allow}}
-		table := &router.Table{}
-		RegisterCatalogRoutes(router.NewMux(table, "/merchant/catalog", rt), rt, Options{})
-		RegisterOwnedCatalogRoutes(router.NewMux(table, "/catalog", rt), rt, Options{})
-		RegisterCatalogCollectionRoutes(router.NewMux(table, "/merchant/catalogs", rt), rt, Options{})
-		keys := routeKeys(table)
+		merchant := &router.Table{}
+		RegisterMerchantRoutes(router.NewMux(merchant, "", rt), rt, Options{})
+		all := routeKeys(merchant)
+		var keys []string
+		for _, key := range all {
+			_, path, _ := strings.Cut(key, " ")
+			// Repricing changes agreements, not definitions.
+			if (strings.HasPrefix(path, "/merchant/catalog") || strings.HasPrefix(path, "/catalog")) && !strings.HasPrefix(path, "/merchant/catalog/reprice-") {
+				keys = append(keys, key)
+			}
+		}
 		for _, key := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /catalog", "GET /catalog/products", "GET /merchant/catalogs"}, reads...) {
 			require.Contains(t, keys, key)
 		}
@@ -253,9 +240,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 			}
 		}
 
-		action := &router.Table{}
-		RegisterMerchantActionRoutes(router.NewMux(action, "/merchant", rt), rt, Options{})
-		keys = routeKeys(action)
+		keys = all
 		require.Contains(t, keys, "GET /merchant/customers/{customer_id}/rate-overrides")
 		require.Contains(t, keys, "POST /merchant/customers/{customer_id}/credits", "credit grants are not catalog authoring")
 		for _, method := range []string{http.MethodPut, http.MethodDelete} {
@@ -274,7 +259,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	// and the guard admits only its host principal: the process owner.
 	rt := &app.Runtime{Config: &config.Config{}}
 	inProcess := &router.Table{}
-	RegisterCatalogRoutes(router.NewMux(inProcess, "/merchant/catalog", rt), rt, Options{InProcess: true})
+	RegisterMerchantRoutes(router.NewMux(inProcess, "", rt), rt, Options{InProcess: true})
 	require.Contains(t, routeKeys(inProcess), "POST /merchant/catalog/applications")
 	owner := httptest.NewRequest(http.MethodPost, "/products", nil)
 	owner = owner.WithContext(requestauth.WithHostPrincipal(owner.Context(), &requestauth.HostPrincipal{}))
@@ -290,14 +275,14 @@ func TestAdminOperationLimits(t *testing.T) {
 		return billingauth.Principal{MerchantID: merchantA, Subject: userB, UserContext: billingauth.UserContext{UserID: userB}}, nil
 	})
 	table := &router.Table{}
-	RegisterMerchantActionRoutes(router.NewMux(table, "/m", nil), nil, Options{Gate: allow, AdminLimiter: middleware.NewAdminOperationLimiter(nil)})
+	RegisterMerchantRoutes(router.NewMux(table, "/m", nil), nil, Options{Gate: allow, AdminLimiter: middleware.NewAdminOperationLimiter(nil)})
 	h := table.Handler()
-	preview := "/m/subscriptions/" + userA + "/change-tier/preview"
+	preview := "/m/merchant/subscriptions/" + userA + "/change-tier/preview"
 	// A malformed body answers from the handler without a runtime.
 	for range 12 {
 		require.NotEqual(t, http.StatusTooManyRequests, doBody(h, http.MethodPost, preview, "{", nil).Code)
 	}
-	action := "/m/subscriptions/" + userA + "/change-tier"
+	action := "/m/merchant/subscriptions/" + userA + "/change-tier"
 	for range 10 {
 		require.NotEqual(t, http.StatusTooManyRequests, doBody(h, http.MethodPost, action, "{", nil).Code)
 	}
@@ -305,10 +290,8 @@ func TestAdminOperationLimits(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
 	require.NotEmpty(t, rec.Header().Get("Retry-After"))
 
-	service := &router.Table{}
-	RegisterServiceRoutes(router.NewMux(service, "/m", nil), nil, Options{Gate: allow})
 	rec = httptest.NewRecorder()
-	service.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/m/admissions", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/m/merchant/admissions", nil))
 	require.Equal(t, http.StatusBadRequest, rec.Code, "an authorized call reaches its handler")
 }
 

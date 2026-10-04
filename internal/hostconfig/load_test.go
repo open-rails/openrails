@@ -54,7 +54,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 		"VAULT_ENABLED": "true", "VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root",
 		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "SENDGRID_API_KEY": "SG.test-key",
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
-		"ALLOW_CATALOG_UPDATES": "true", "MERCHANT_CONFIG_HTTP": "true", "TRUSTED_PROXIES": `["10.0.0.0/8"]`,
+		"ALLOW_CATALOG_UPDATES": "true", "TRUSTED_PROXIES": `["10.0.0.0/8"]`,
 		"AUTHKIT_ACTIVE_KEY_ID": "kid-1", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----", "AUTHKIT_PUBLIC_KEYS": `{"kid-0":"pem"}`,
 		"AUTH_ISSUER": "https://billing.example.com/", "AUTH_DIRECT_PEER_IP": "true",
 	} {
@@ -80,7 +80,6 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 36*time.Hour, quiet)
 	require.True(t, cfg.AllowCatalogUpdates)
-	require.True(t, cfg.MerchantConfigHTTP)
 	require.Equal(t, []string{"10.0.0.0/8"}, cfg.TrustedProxies)
 	require.Equal(t, "kid-1", cfg.Auth.ActiveKeyID)
 	require.Equal(t, "-----BEGIN PRIVATE KEY-----", cfg.Auth.ActivePrivateKeyPEM)

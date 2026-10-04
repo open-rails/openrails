@@ -72,7 +72,6 @@ type fileConfig struct {
 	CredentialSnapshotID string `koanf:"credential_snapshot_id"`
 	CredentialReadOnly   bool   `koanf:"credential_read_only"`
 	AlertSecretBackend   string `koanf:"alert_secret_backend"`
-	MerchantConfigHTTP   bool   `koanf:"merchant_config_http"`
 	AllowCatalogUpdates  bool   `koanf:"allow_catalog_updates"`
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
@@ -142,7 +141,6 @@ func (f *fileConfig) config() (*Config, error) {
 			CredentialSnapshotID:              f.CredentialSnapshotID,
 			CredentialReadOnly:                f.CredentialReadOnly,
 			AlertSecretBackend:                f.AlertSecretBackend,
-			MerchantConfigHTTP:                f.MerchantConfigHTTP,
 			AllowCatalogUpdates:               f.AllowCatalogUpdates,
 			CatalogReconciliationInterval:     f.CatalogReconciliationInterval,
 			ProviderBillingQuiescenceInterval: f.ProviderBillingQuiescenceInterval,

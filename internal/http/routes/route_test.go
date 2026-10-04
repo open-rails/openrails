@@ -122,13 +122,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 
 	RegisterMetaRoutes(at(""), opts)
 	RegisterUserRoutes(at("/v1"), rt, opts)
-	RegisterServiceRoutes(at("/v1/merchant"), rt, opts)
-	RegisterMerchantActionRoutes(at("/v1/merchant"), rt, opts)
-	RegisterMerchantConfigRoutes(at("/v1/merchant"), rt, opts)
-	RegisterImportRoutes(at("/v1/import"), rt, opts)
-	RegisterCatalogRoutes(at("/v1/merchant/catalog"), rt, opts)
-	RegisterCatalogCollectionRoutes(at("/v1/merchant/catalogs"), rt, opts)
-	RegisterOwnedCatalogRoutes(at("/v1/catalog"), rt, opts)
+	RegisterMerchantRoutes(at("/v1"), rt, opts)
 	RegisterControlPlaneRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
 	RegisterSelfServiceRoutes(at("/v1/me"), rt, pass, providers)
@@ -161,7 +155,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	// The archive routes are also a surface of their own (the database-only
 	// CLI runtime), and a narrower customer exposure serves a subset.
 	archive := map[string]int{}
-	RegisterMerchantArchiveRoutes(recorder{base: "/v1/merchant", seen: archive}, rt, opts)
+	RegisterMerchantRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/merchant/billing-archive")
 	require.Equal(t, map[string]int{"GET /v1/merchant/billing-archive": 1, "POST /v1/merchant/billing-archive": 1}, archive)
 	management, subscriptions := map[string]int{}, map[string]int{}
 	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, pass, providers)
@@ -196,8 +190,8 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.Contains(t, seen, "GET /v1/products")
 
 	closed, open := map[string]int{}, map[string]int{}
-	RegisterCatalogRoutes(recorder{base: "/v1/merchant/catalog", seen: closed}, &app.Runtime{Config: &config.Config{}}, Options{})
-	RegisterCatalogRoutes(recorder{base: "/v1/merchant/catalog", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{InProcess: true})
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: closed}, &app.Runtime{Config: &config.Config{}}, Options{})
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{InProcess: true})
 	require.NotContains(t, closed, "POST /v1/merchant/catalog/products")
 	require.Contains(t, closed, "GET /v1/merchant/catalog/products")
 	require.Contains(t, closed, "POST /v1/merchant/catalog/offers/lookup", "a lookup is a read")

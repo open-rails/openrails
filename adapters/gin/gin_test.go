@@ -69,7 +69,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: denyDelegated(new(int))}}
 	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}},
-		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
+		Merchant: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -173,7 +173,7 @@ func TestRootOnlyBundleRefusesGroupBeforeRegistration(t *testing.T) {
 // Configured customer prefixes may use a merchant parameter, never a Gin wildcard.
 func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, AllowCatalogUpdates: true}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 	for _, tc := range []struct {
 		prefixes []string

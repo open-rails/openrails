@@ -404,56 +404,19 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
 }
 
-// RegisterMerchantArchiveRoutes mounts the complete portable billing archive
-// surface, shared by the server and database-only CLI runtime.
-func RegisterMerchantArchiveRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/merchant", in(MerchantAPI, under("/v1/merchant/billing-archive")))
-}
-
-// RegisterServiceRoutes mounts the merchant billing surface. Access is gated by
-// merchant permissions, not credential type (#564).
-func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/merchant", in(MerchantAPI))
-}
-
-// RegisterMerchantActionRoutes mounts merchant staff's support and money
-// operations.
-func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+// RegisterMerchantRoutes mounts the merchant API and creator-owned catalogs,
+// each route gated by its merchant permission, on a router rooted at /v1.
+func RegisterMerchantRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient)
 	}
-	newEnv(rt, opts).mount(rr, "/v1/merchant", in(MerchantAdmin, under("/v1/merchant")))
+	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Group == Merchant || r.Group == CatalogOwned })
 }
 
-// RegisterCatalogRoutes mounts merchant catalog administration.
-func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/merchant/catalog", in(CatalogAdmin, under("/v1/merchant/catalog")))
-}
-
-// RegisterCatalogCollectionRoutes is the separately authorized merchant-admin
-// collection. Supplying an owner subject here is permitted only by that grant.
-func RegisterCatalogCollectionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/merchant/catalogs", in(CatalogAdmin, under("/v1/merchant/catalogs")))
-}
-
-// RegisterOwnedCatalogRoutes exposes only creator product/price operations.
-// Provider configuration, entitlement grants, meters and batch application retain
-// their merchant-administrator surfaces and are never mounted in this group.
-func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/catalog", in(CatalogOwned))
-}
-
-// RegisterImportRoutes mounts the #737 DeclaredBilling import door
-// (POST <prefix>/billing).
-func RegisterImportRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/import", in(MerchantAdmin, under("/v1/import")))
-}
-
-// RegisterMerchantConfigRoutes is shared by the private Client transport and
-// explicitly selected external management surface. Route publication grants no
-// authority and does not change the selected credential backend's capabilities.
-func RegisterMerchantConfigRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1/merchant", in(MerchantConfig))
+// RegisterMerchantRoutesUnder mounts the merchant routes under prefix, on a
+// router rooted at /v1: the CLI's database-only runtimes serve one resource.
+func RegisterMerchantRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, prefix string) {
+	newEnv(rt, opts).mount(rr, "/v1", in(Merchant, under(prefix)))
 }
 
 // RegisterControlPlaneRoutes mounts the standalone control plane's merchant

@@ -200,8 +200,8 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	rt := &app.Runtime{DB: database, Config: cfg, Clock: clockwork.NewRealClock()}
 	rt.SetConfiguredMerchant(mid)
 	mux := http.NewServeMux()
-	httproutes.RegisterMerchantArchiveRoutes(router.NewMux(mux, "/v1/merchant", rt), rt,
-		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})})
+	httproutes.RegisterMerchantRoutesUnder(router.NewMux(mux, "/v1", rt), rt,
+		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})}, "/v1/merchant/billing-archive")
 	handler := middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux)
 	transport, hostCapability := inprocess.NewTransport(handler, rt.ConfiguredMerchant)
 	clientOpts = append(clientOpts,

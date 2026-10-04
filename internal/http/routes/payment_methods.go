@@ -11,11 +11,11 @@ import (
 // paymentMethodsRoutes is saved payment methods, for the customer, a treasury
 // co-manager and merchant staff, and which method pays what.
 var paymentMethodsRoutes = []Route{
-	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/payment-methods", Group: MerchantAdmin, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/payment-methods", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
 		Responses: []Reply{{200, api.List[handlers.PaymentMethodResponse]{}}}, Errors: codes("invalid_param"), Handler: h(handlers.GetAdminUserPaymentMethods)},
-	{Method: DELETE, Path: "/v1/merchant/customers/{customer_id}/payment-methods/{id}", Group: MerchantAdmin, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate, Limit: middleware.AdminOperationDestructive,
+	{Method: DELETE, Path: "/v1/merchant/customers/{customer_id}/payment-methods/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{202, nil}, {204, nil}}, Errors: codes("authentication_required", "invalid_param", "payment_method_delete_failed", "payment_method_delete_unsupported", "rate_limit_exceeded", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminDeletePaymentMethod)},
-	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}/default-payment-method", Group: MerchantAdmin, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate,
+	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}/default-payment-method", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate,
 		Request: Untyped{}, Responses: []Reply{{200, handlers.PaymentMethodResponse{}}}, Errors: codes("authentication_required", "invalid_param", "payment_method_not_usable", "resource_not_found"), Handler: h(handlers.AdminSetDefaultPaymentMethod)},
 	{Method: PUT, Path: "/v1/me/collection-payment-method", Group: Customer, Auth: AuthCustomer, Scope: ScopeSubscriptionManagement,
 		Request: handlers.CollectionPaymentMethodRequest{}, Responses: []Reply{{200, handlers.CollectionPaymentMethodResponse{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.SetMyCollectionPaymentMethod)},

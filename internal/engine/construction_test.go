@@ -48,8 +48,8 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Merchant: "m"}}}
 		}), config.Deps{}, "must be Delegated"},
-		"merchant admin without auth": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{MerchantAdmin: true} }), config.Deps{}, "management surfaces require"},
-		"catalog without authorize":   {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Catalog: true} }), config.Deps{Authenticate: authenticate}, "management surfaces require"},
+		"merchant without auth":       {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{}, "the merchant surface requires"},
+		"merchant without authorize":  {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{Authenticate: authenticate}, "the merchant surface requires"},
 		"control plane with groups": {with(sandbox, func(c *config.Config) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}
@@ -64,7 +64,7 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"authkit and authenticate":    {sandbox, config.Deps{AuthKit: verifier{}, Authenticate: authenticate}, "not both"},
 		"customer hook without kit":   {sandbox, config.Deps{CustomerFor: func(context.Context, billingauth.Identity) (string, error) { return "", nil }}, "require Deps.AuthKit"},
 		"nil authkit client":          {sandbox, config.Deps{AuthKit: (*verifier)(nil)}, "Deps.AuthKit"},
-		"authkit staff without group": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{MerchantAdmin: true} }), config.Deps{AuthKit: verifier{}}, "Deps.AuthorityFor"},
+		"authkit staff without group": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{AuthKit: verifier{}}, "Deps.AuthorityFor"},
 		"control plane and authkit":   {with(sandbox, func(c *config.Config) { c.ControlPlane = &config.ControlPlaneConfig{} }), config.Deps{AuthKit: verifier{}}, "its own AuthKit"},
 		"console without a build":     {with(sandbox, func(c *config.Config) { c.AdminConsole = &config.AdminConsoleConfig{Enabled: true} }), config.Deps{ConsoleAssets: fstest.MapFS{}}, "no console build"},
 		"half a user directory":       {sandbox, config.Deps{UserExists: func(context.Context, string) (bool, error) { return true, nil }}, "together"},

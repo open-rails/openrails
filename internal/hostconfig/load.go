@@ -290,10 +290,10 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database; set allow_catalog_updates / ALLOW_CATALOG_UPDATES to enable ordinary catalog mutations")
 	}
 	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
-		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: select secret_backend and merchant_config_http independently")
+		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: select secret_backend")
 	}
 	if _, present := os.LookupEnv("MERCHANT_CONFIG_SOURCE"); k.Exists("merchant_config_source") || present {
-		return nil, fmt.Errorf("merchant_config_source / MERCHANT_CONFIG_SOURCE was removed: select secret_backend and merchant_config_http independently")
+		return nil, fmt.Errorf("merchant_config_source / MERCHANT_CONFIG_SOURCE was removed: select secret_backend")
 	}
 
 	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {

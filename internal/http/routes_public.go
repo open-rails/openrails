@@ -43,14 +43,6 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	live := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "billing"})
 	})
-	// Capability discovery (#623): which route groups this deployment serves.
-	// Configuration management is opt-in even on the standalone server.
-	groups := make([]embedhttp.RouteSet, 0, len(embedhttp.StandaloneDefaultRouteSets))
-	for _, group := range embedhttp.StandaloneDefaultRouteSets {
-		if group != embedhttp.RouteSetMerchantConfig || (s.cfg != nil && s.cfg.MerchantConfigHTTP) {
-			groups = append(groups, group)
-		}
-	}
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
 		// A simple JSON banner for API servers.
 		Banner: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +55,7 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 		Live:         live,
 		Ready:        http.HandlerFunc(s.readyHandler),
 		Metrics:      http.HandlerFunc(s.metricsHandler),
-		Capabilities: embedhttp.CapabilitiesHandler(groups, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)),
+		Capabilities: embedhttp.CapabilitiesHandler(embedhttp.AllRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)),
 	}})
 }
 

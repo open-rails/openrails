@@ -86,9 +86,9 @@ openrails run-server --config /etc/openrails/config.yaml \
 ### Credential custody and configuration publication
 
 Merchant metadata lives in PostgreSQL. `secret_backend` selects snapshot, Vault
-or encrypted DB credential custody. `merchant_config_http` independently selects
-external configuration routes. Authorized local Client operations remain available
-with HTTP off; credential mutation additionally requires a writable backend.
+or encrypted DB credential custody. The configuration routes are part of the
+merchant API, each gated by its permission; credential mutation additionally
+requires a writable backend.
 
 Startup initializes missing identities and metadata and reloads snapshot values.
 It preserves subsequent API edits and archived providers. Explicit metadata
