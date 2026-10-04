@@ -775,6 +775,7 @@ pkg openrails/billing, const DeclineTransactionNotAllowed DeclineReason = "trans
 pkg openrails/billing, const DeclineTryAgainLater DeclineReason = "try_again_later"
 pkg openrails/billing, const DeclineUnknown DeclineReason = "unknown"
 pkg openrails/billing, const DeclineUpdateCardholderData DeclineReason = "update_cardholder_data"
+pkg openrails/billing, const DefaultPageLimit untyped int = 50
 pkg openrails/billing, const DunningAccessKeep untyped string = "keep"
 pkg openrails/billing, const DunningAccessSuspend untyped string = "suspend"
 pkg openrails/billing, const ErrorTypeAPI untyped string = "api_error"
@@ -796,6 +797,7 @@ pkg openrails/billing, const InvokerTypePayer untyped string = "payer"
 pkg openrails/billing, const MaxEntitlementChecks untyped int = 100
 pkg openrails/billing, const MaxHostEventPageSize untyped int = 1000
 pkg openrails/billing, const MaxMerchantConfigurationBytes untyped int = 1048576
+pkg openrails/billing, const MaxPageLimit untyped int = 500
 pkg openrails/billing, const MerchantAccessGrantPermanent untyped string = "merchant:access:grant-permanent"
 pkg openrails/billing, const MerchantAdmissionsCreate untyped string = "merchant:admissions:create"
 pkg openrails/billing, const MerchantAll untyped string = "merchant:*"
@@ -933,6 +935,7 @@ pkg openrails/billing, method (*Card) Zero()
 pkg openrails/billing, method (*CatalogID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CheckoutSessionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CustomerID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*ListPage[T]) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*MerchantID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*OperationAuthorizationConflict) Error() string
 pkg openrails/billing, method (*OperationAuthorizationConflict) Unwrap() error
@@ -977,6 +980,7 @@ pkg openrails/billing, method (CustomerID) String() string
 pkg openrails/billing, method (CustomerID) UUID() uuid.UUID
 pkg openrails/billing, method (DeclineReason) Failure() PaymentFailure
 pkg openrails/billing, method (DeclineReason) FraudSignal() bool
+pkg openrails/billing, method (ListPage[T]) MarshalJSON() ([]byte, error)
 pkg openrails/billing, method (MerchantConfigurationApplyParams) MarshalJSON() ([]byte, error)
 pkg openrails/billing, method (MerchantID) IsZero() bool
 pkg openrails/billing, method (MerchantID) MarshalText() ([]byte, error)
@@ -1792,6 +1796,9 @@ pkg openrails/billing, type InvoiceProfileDTO struct, Memo string `json:"memo,om
 pkg openrails/billing, type InvoiceProfileDTO struct, NetTermsDays int `json:"net_terms_days"`
 pkg openrails/billing, type InvoiceProfileDTO struct, PONumber string `json:"po_number,omitempty"`
 pkg openrails/billing, type InvoiceProfileDTO struct, Tax map[string]any `json:"tax,omitempty"`
+pkg openrails/billing, type ListPage struct, Items []T
+pkg openrails/billing, type ListPage struct, Next string
+pkg openrails/billing, type ListPage[T any] struct
 pkg openrails/billing, type MerchantBillingImportResult struct
 pkg openrails/billing, type MerchantBillingImportResult struct, AlreadyImported bool `json:"already_imported"`
 pkg openrails/billing, type MerchantBillingImportResult struct, Digest string `json:"digest"`
@@ -1985,6 +1992,9 @@ pkg openrails/billing, type Page struct, Total int64 `json:"total"`
 pkg openrails/billing, type PageOptions struct
 pkg openrails/billing, type PageOptions struct, Limit int
 pkg openrails/billing, type PageOptions struct, Offset int
+pkg openrails/billing, type PageRequest struct
+pkg openrails/billing, type PageRequest struct, Cursor string
+pkg openrails/billing, type PageRequest struct, Limit int
 pkg openrails/billing, type Page[T any] struct
 pkg openrails/billing, type PayInvoiceNowRequest struct
 pkg openrails/billing, type PayInvoiceNowRequest struct, IdempotencyKey string `json:"-"`

@@ -85,8 +85,9 @@ var pendingNumericMoney = map[string]string{
 	"internal/db/models/product_catalog.go:Price.Amount amount":                                                                                      notHTTPStorageRow,
 	"internal/db/models/product_catalog.go:Price.TrialUnitAmount trial_unit_amount":                                                                  notHTTPStorageRow,
 	"internal/db/models/usage_event.go:UsageEvent.Amount amount":                                                                                     notHTTPStorageRow,
-	"internal/http/handlers/admin_catalog.go:paginatedResponse.Limit limit":                                                                          notMoneyPageSize,
-	"internal/http/handlers/admin_findings.go:findingsListResponse.Limit limit":                                                                      notMoneyPageSize,
+	"internal/http/handlers/admin_catalog.go:PaginatedResponse.Limit limit":                                                                          notMoneyPageSize,
+	"internal/http/handlers/admin_findings.go:FindingsListResponse.Limit limit":                                                                      notMoneyPageSize,
+	"internal/http/routes/route.go:PathPage.Limit limit":                                                                                             notMoneyPageSize,
 	"internal/integrations/nmi/v5.go:v5PaymentRequest.Amount amount":                                                                                 notHTTPProviderWire,
 	"internal/nmimock/v5.go:func v5.Amount amount":                                                                                                   notHTTPProviderWire,
 	"internal/nmimock/v5.go:func v5.Amount plan_amount":                                                                                              notHTTPProviderWire,
@@ -210,6 +211,8 @@ var pinnedMarshalers = map[string]string{
 	"internal/modules/metrics/service.go:MoneyCell":                      "TestResultWireEncoding — decimal string",
 	"catalog/application.go:Field":                                       "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
 	"internal/cardguard/card.go:Card":                                    "TestCardRedactsItself — no money: always the redaction",
+	"billing/list_page.go:ListPage":                                      "TestListPageWire — no money of its own: {data, next_cursor}, items encode as their own type",
+	"internal/contract/openapi.go:obj":                                   "TestOpenAPICoversTheCatalog — the generated OpenAPI document, never a wire value",
 }
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {

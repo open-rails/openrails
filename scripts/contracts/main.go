@@ -1,5 +1,7 @@
-// contracts verifies or rewrites the reviewed contracts: the pre-v1 release
-// contract (compatibility/contract.json) and the Go API list (api/go.txt).
+// contracts verifies or rewrites the reviewed contracts: the Go API list
+// (api/go.txt), the Go wire snapshot (compatibility/contract.json) and the
+// files generated from the route catalog (api/openapi.json, the TypeScript
+// wire types, the route and error-code tables in docs/api).
 package main
 
 import (
@@ -8,8 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 
 	"github.com/open-rails/openrails/internal/apisurface"
+	"github.com/open-rails/openrails/internal/contract"
 	"github.com/open-rails/openrails/internal/contractaudit"
 )
 
@@ -40,7 +44,10 @@ func run(write bool) error {
 		if !bytes.Equal(listed, surface.Text()) {
 			return apisurface.ErrStale
 		}
-		return contractaudit.Verify(root.FS())
+		if err := contractaudit.Verify(root.FS()); err != nil {
+			return err
+		}
+		return contract.Verify(root.FS())
 	}
 	if err := root.MkdirAll("api", 0o755); err != nil {
 		return err
@@ -52,5 +59,20 @@ func run(write bool) error {
 	if err != nil {
 		return err
 	}
-	return root.WriteFile(contractaudit.SnapshotPath, snapshot, 0o644)
+	if err := root.WriteFile(contractaudit.SnapshotPath, snapshot, 0o644); err != nil {
+		return err
+	}
+	files, err := contract.Files(root.FS())
+	if err != nil {
+		return err
+	}
+	for name, body := range files {
+		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
+			return err
+		}
+		if err := root.WriteFile(name, body, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }

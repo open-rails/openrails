@@ -201,8 +201,8 @@ sale and saved card on a credential-less NMI PSP).
 
 ```sh
 pnpm test:e2e        # Playwright against the real server
-pnpm contract        # regenerate src/client/generated from the in-repo OpenRails
-pnpm contract:check  # fail if the generated contract is stale
+pnpm contract        # regenerate OpenRails' contract files, src/client/generated among them
+pnpm contract:check  # fail if a generated contract file is stale
 ```
 
 `e2e/openrails/account.spec.ts` drives the packaged `AccountBilling` (built from

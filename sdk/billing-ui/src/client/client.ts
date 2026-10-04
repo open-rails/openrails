@@ -13,7 +13,7 @@ import {
   localError,
   readBillingError,
 } from "./errors"
-import { OPENRAILS_CURRENCY_SCALES } from "./generated/openrails-routes"
+import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import {
   billingStatusSchema,
   cardSetupSchema,

@@ -9,6 +9,8 @@ import {
 } from "@openrails/auth-ui/client"
 import type { Guard } from "@openrails/auth-ui/react"
 
+import type { OpenRailsErrorCode } from "./generated/error-codes"
+
 export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
@@ -74,11 +76,11 @@ export function bindStepUp(guard: Guard | null) {
   stepUp = guard ?? unguarded
 }
 
-// Stripe-shaped error envelope (internal/api).
+// Stripe-shaped error envelope (internal/api); codes are billing.ErrorCodes.
 export interface ApiErrorBody {
   error?: {
     type?: string
-    code?: string
+    code?: OpenRailsErrorCode
     message?: string
     param?: string
     metadata?: Record<string, unknown>
@@ -88,7 +90,7 @@ export interface ApiErrorBody {
 export class ApiError extends Error {
   status: number
   type?: string
-  code?: string
+  code?: OpenRailsErrorCode
   param?: string
   metadata?: Record<string, unknown>
 
