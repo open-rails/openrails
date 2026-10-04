@@ -4,6 +4,7 @@ package routebundle
 import (
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/http/router"
@@ -16,12 +17,39 @@ type Route struct {
 	Handler http.Handler
 }
 
+// FromTable binds a table's registrations for a host router. A router that
+// matches in registration order (Fiber) must see a literal segment before a
+// wildcard at the same position, so the routes are ordered that way whatever
+// order they were declared in.
 func FromTable(table *router.Table) []Route {
 	routes := make([]Route, 0, len(table.Entries))
 	for _, entry := range table.Entries {
 		routes = append(routes, Route{Method: entry.Method, Path: entry.Path, Handler: withVerificationMemo(BindPathValues(entry.Path, entry.Handler))})
 	}
+	sort.SliceStable(routes, func(i, j int) bool { return moreSpecific(routes[i].Path, routes[j].Path) })
 	return routes
+}
+
+// moreSpecific reports whether path a must be matched before path b: at the
+// first segment where exactly one of them is a wildcard, the literal wins.
+func moreSpecific(a, b string) bool {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		if ra, rb := segmentRank(as[i]), segmentRank(bs[i]); ra != rb {
+			return ra < rb
+		}
+	}
+	return false
+}
+
+func segmentRank(segment string) int {
+	switch {
+	case strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "...}"):
+		return 2
+	case strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}"):
+		return 1
+	}
+	return 0
 }
 
 func BindPathValues(pattern string, next http.Handler) http.Handler {

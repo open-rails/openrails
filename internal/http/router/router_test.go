@@ -92,32 +92,36 @@ func TestTableWrapRetainsChainAndAddsBrowserPreflight(t *testing.T) {
 	}
 }
 
-// v2 selector routes are real registrations (never a URI rewrite) that demand
-// an explicit merchant selector and pin exactly the resolved target.
-func TestMerchantSelectorRoutes(t *testing.T) {
+// A merchant-scoped route honors the OpenRails-Merchant selector in place: a
+// named merchant is resolved and pinned before the route runs, an absent
+// selector changes nothing, and no second path version exists.
+func TestMerchantSelectorResolution(t *testing.T) {
 	type seen struct {
 		path     string
 		merchant billing.MerchantID
 		target   billingauth.Target
+		resolved bool
 	}
 	var last *seen
 	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s := seen{path: r.URL.Path}
 		s.merchant, _ = merchant.FromContext(r.Context())
-		s.target, _ = merchanttarget.FromContext(r.Context())
+		s.target, s.resolved = merchanttarget.FromContext(r.Context())
 		last = &s
 		w.WriteHeader(http.StatusOK)
 	})
+	patterns := []string{
+		"GET /billing/v1/merchant/payments", "GET /billing/v1/catalog", "POST /billing/v1/import/billing",
+		"GET /billing/v1/me/invoices/{id}", "GET /billing/v1/customers/{customer_id}/balance", "GET /billing/account/invoices",
+		"OPTIONS /billing/v1/me/invoices/{id}",
+		"GET /billing/v1/merchants", "GET /billing/v1/products", "GET /billing/v1/capabilities",
+	}
 	build := func(resolve func(context.Context, *http.Request) (billingauth.Target, error)) *Table {
 		table := &Table{}
-		for _, p := range []string{
-			"GET /billing/v1/merchant/payments", "GET /billing/v1/catalog", "POST /billing/v1/import/billing",
-			"GET /billing/v1/me/invoices/{id}", "POST /billing/v1/me/subscriptions/{id}/retry-now",
-			"GET /billing/v1/me/balance", "GET /billing/v1/merchantx", "GET /billing/v1/capabilities",
-		} {
+		for _, p := range patterns {
 			table.Handle(p, probe)
 		}
-		AddMerchantSelectorRoutes(table, "/billing", resolve)
+		ResolveMerchantSelectors(table, "/billing", resolve, "/billing/account")
 		return table
 	}
 	target := billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}
@@ -127,68 +131,79 @@ func TestMerchantSelectorRoutes(t *testing.T) {
 		calls++
 		return target, resolveErr
 	})
-	var v2 []string
-	for _, e := range table.Entries {
-		if strings.HasPrefix(e.Path, "/billing/v2/") {
-			v2 = append(v2, e.Method+" "+e.Path)
-		}
-	}
-	require.ElementsMatch(t, []string{
-		"GET /billing/v2/merchant/payments", "GET /billing/v2/catalog", "POST /billing/v2/import/billing",
-		"GET /billing/v2/me/invoices/{id}", "POST /billing/v2/me/subscriptions/{id}/retry-now",
-	}, v2, "browser-only /me routes and look-alike prefixes are not duplicated")
-	require.Len(t, table.Entries, 8+len(v2))
+	require.Len(t, table.Entries, len(patterns), "the selector adds no route")
 
 	h := table.Handler()
-	call := func(method, path string, header map[string]string) *httptest.ResponseRecorder {
+	call := func(method, path string, header http.Header) *httptest.ResponseRecorder {
 		last = nil
 		r := httptest.NewRequest(method, path, nil)
 		for k, v := range header {
-			r.Header.Set(k, v)
+			r.Header[http.CanonicalHeaderKey(k)] = v
 		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, r)
 		return rec
 	}
+	slug := http.Header{merchant.SelectorHeader: {"store"}}
 
-	rec := call(http.MethodGet, "/billing/v2/merchant/payments", nil)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "merchant_selector_required")
-	require.Nil(t, last)
-	require.Zero(t, calls)
+	for _, path := range []string{"/billing/v1/merchant/payments", "/billing/v1/catalog", "/billing/v1/me/invoices/inv_1", "/billing/v1/customers/c/balance", "/billing/account/invoices"} {
+		rec := call(http.MethodGet, path, nil)
+		require.Equal(t, http.StatusOK, rec.Code, path)
+		require.False(t, last.resolved, "%s: no selector, nothing pinned", path)
+		require.True(t, last.merchant.IsZero())
 
-	for _, header := range []map[string]string{{merchant.SlugHeader: "store"}, {merchant.BindingHeader: target.MerchantID.String()}} {
-		rec = call(http.MethodGet, "/billing/v2/merchant/payments", header)
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Equal(t, "/billing/v2/merchant/payments", last.path, "the proof-bound URI is never rewritten")
-		require.Equal(t, target.MerchantID, last.merchant)
-		require.Equal(t, target, last.target)
+		for _, header := range []http.Header{slug, {merchant.SelectorHeader: {"id:" + target.MerchantID.String()}}} {
+			rec = call(http.MethodGet, path, header)
+			require.Equal(t, http.StatusOK, rec.Code, path)
+			require.Equal(t, path, last.path, "the proof-bound URI is never rewritten")
+			require.Equal(t, target.MerchantID, last.merchant)
+			require.Equal(t, target, last.target)
+		}
 	}
-	rec = call(http.MethodGet, "/billing/v1/merchant/payments", nil)
-	require.Equal(t, http.StatusOK, rec.Code, "v1 keeps its original registration")
-	require.True(t, last.merchant.IsZero(), "v1 is not pinned by the selector wrapper")
+	require.Equal(t, 10, calls)
+
+	// Routes that act on no credential's merchant never resolve a selector.
+	for _, route := range []string{"GET /billing/v1/merchants", "GET /billing/v1/products", "GET /billing/v1/capabilities", "OPTIONS /billing/v1/me/invoices/inv_1"} {
+		method, path, _ := strings.Cut(route, " ")
+		rec := call(method, path, slug)
+		require.Equal(t, http.StatusOK, rec.Code, route)
+		require.False(t, last.resolved, route)
+	}
+	require.Equal(t, 10, calls)
+
+	for name, header := range map[string]http.Header{
+		"repeated":     {merchant.SelectorHeader: {"store", "store"}},
+		"blank":        {merchant.SelectorHeader: {" "}},
+		"malformed id": {merchant.SelectorHeader: {"id:nope"}},
+		"illegal slug": {merchant.SelectorHeader: {"Not A Slug"}},
+	} {
+		rec := call(http.MethodGet, "/billing/v1/merchant/payments", header)
+		require.Equal(t, http.StatusBadRequest, rec.Code, name)
+		require.Contains(t, rec.Body.String(), `"code":"merchant_selector_invalid"`, name)
+		require.Nil(t, last, name)
+	}
+	require.Equal(t, 10, calls, "a malformed selector is refused before resolution")
 
 	for _, tc := range []struct {
 		err    error
 		status int
 		code   string
 	}{
-		{billingauth.GateError{Status: http.StatusForbidden, Message: "not yours"}, http.StatusForbidden, "merchant_selection_invalid"},
-		{billingauth.GateError{Status: http.StatusNotFound, Message: "unknown"}, http.StatusNotFound, "merchant_selection_invalid"},
+		{billingauth.Refusal(billing.CodeMerchantNotFound), http.StatusNotFound, "merchant_not_found"},
+		{billingauth.Refusal(billing.CodeMerchantBindingMismatch), http.StatusConflict, "merchant_binding_mismatch"},
+		{billingauth.GateError{Status: http.StatusForbidden, Message: "not yours"}, http.StatusForbidden, "resource_access_denied"},
 		{errors.New("db down"), http.StatusServiceUnavailable, "merchant_directory_unavailable"},
 	} {
 		resolveErr = tc.err
-		rec = call(http.MethodGet, "/billing/v2/me/invoices/inv_1", map[string]string{merchant.SlugHeader: "store"})
+		rec := call(http.MethodGet, "/billing/v1/me/invoices/inv_1", slug)
 		require.Equal(t, tc.status, rec.Code)
-		require.Contains(t, rec.Body.String(), tc.code)
+		require.Contains(t, rec.Body.String(), `"code":"`+tc.code+`"`)
 		require.Nil(t, last)
 	}
 
-	rec = httptest.NewRecorder()
-	build(nil).Handler().ServeHTTP(rec, func() *http.Request {
-		r := httptest.NewRequest(http.MethodGet, "/billing/v2/catalog", nil)
-		r.Header.Set(merchant.SlugHeader, "store")
-		return r
-	}())
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/billing/v1/catalog", nil)
+	r.Header.Set(merchant.SelectorHeader, "store")
+	build(nil).Handler().ServeHTTP(rec, r)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "no resolver fails closed")
 }

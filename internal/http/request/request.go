@@ -1,12 +1,14 @@
 package request
 
 import (
+	"bytes"
 	"context"
 	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -170,6 +173,45 @@ func (r *Request) InternalError(msg string, cause error) {
 	r.t.WriteJSON(http.StatusInternalServerError, response)
 }
 
+// FromHTTP adapts a plain net/http handler to a route handler, for a route
+// whose handler an assembly builds outside the handlers package.
+func FromHTTP(h http.Handler) func(*Request) {
+	return func(r *Request) {
+		t, ok := r.t.(*httpTransport)
+		if !ok {
+			r.InternalError("route handler unavailable", errors.New("request: FromHTTP needs the net/http transport"))
+			return
+		}
+		t.wrote = true
+		h.ServeHTTP(t.w, r.Request)
+	}
+}
+
+// AbortGate answers a Gate or authenticator refusal with its code.
+func (r *Request) AbortGate(err error) {
+	var refusal billingauth.GateError
+	if !errors.As(err, &refusal) {
+		r.AbortAPIError(api.Coded(billing.CodeInternalError, "authorization unavailable"))
+		return
+	}
+	if refusal.Code == billing.CodeSenderProofRequired {
+		r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
+	}
+	r.AbortAPIError(billingauth.RefusalError(refusal))
+}
+
+// AbortCode stops the chain with a registered error code; an empty message
+// answers the code's meaning.
+func (r *Request) AbortCode(code, message string) {
+	r.AbortAPIError(api.Coded(code, message))
+}
+
+// ErrorCode answers a registered error code; an empty message answers the
+// code's meaning.
+func (r *Request) ErrorCode(code, message string) {
+	r.APIError(api.Coded(code, message))
+}
+
 // AbortAPIError is APIError that also stops the middleware chain.
 func (r *Request) AbortAPIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
@@ -250,21 +292,60 @@ func (r *Request) Bind(data any) error {
 	return r.t.Bind(data)
 }
 
+// BindJSON is the one request-body decoder: exactly one JSON value, no field
+// the target does not declare, then the target's binding rules. A refusal is
+// answered here (unknown_field with param, unsupported_media_type,
+// request_body_too_large, or invalid_param) and BindJSON returns false.
 func (r *Request) BindJSON(data any) bool {
 	if err := r.t.BindJSON(data); err != nil {
-		if isRequestBodyTooLarge(err) {
-			r.ErrorJSON(http.StatusRequestEntityTooLarge, "request body too large")
-			return false
-		}
-		r.ErrorJSON(http.StatusBadRequest, normaliseBindError(err))
+		r.APIError(BindError(err))
 		return false
 	}
 	return true
 }
 
+// BindOptionalJSON is BindJSON for a route whose body may be absent: an empty
+// body leaves data untouched.
+func (r *Request) BindOptionalJSON(data any) bool {
+	err := r.t.BindJSON(data)
+	if err == nil || errors.Is(err, io.EOF) {
+		return true
+	}
+	r.APIError(BindError(err))
+	return false
+}
+
+// DecodeJSON is BindJSON for a handler that answers a refusal itself: the
+// error is the refusal BindJSON would have written.
+func (r *Request) DecodeJSON(data any) error {
+	if err := r.t.BindJSON(data); err != nil {
+		return BindError(err)
+	}
+	return nil
+}
+
+// Page reads a list route's ?limit= and ?cursor=: the page size
+// (billing.DefaultPageLimit when absent) and the opaque cursor a previous
+// page returned. A limit that is not an integer in 1..billing.MaxPageLimit is
+// answered 400 invalid_query and Page returns false.
+func (r *Request) Page() (billing.PageRequest, bool) {
+	page := billing.PageRequest{Cursor: r.Query("cursor"), Limit: billing.DefaultPageLimit}
+	if raw := r.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > billing.MaxPageLimit {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "limit is invalid").WithParam("limit"))
+			return billing.PageRequest{}, false
+		}
+		page.Limit = n
+	}
+	return page, true
+}
+
+// BindQuery reads the query string into data's `form` fields. A value that
+// does not parse as its field's type is 400 invalid_query on that parameter.
 func (r *Request) BindQuery(data any) bool {
 	if err := r.t.BindQuery(data); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, normaliseBindError(err))
+		r.APIError(QueryError(err))
 		return false
 	}
 	return true
@@ -455,6 +536,73 @@ func (r *Request) GetState() *app.Runtime {
 	return r.State
 }
 
+// errTrailingJSON is a body holding more than one JSON value.
+var errTrailingJSON = errors.New("request body must be one JSON value")
+
+// errMediaType is a body sent as something other than JSON.
+var errMediaType = errors.New("request body must be application/json")
+
+// DecodeStrict decodes raw as exactly one JSON value into data and refuses a
+// field data does not declare.
+func DecodeStrict(raw []byte, data any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(data); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return errTrailingJSON
+	}
+	return nil
+}
+
+// BindError is the refusal for a body BindJSON could not accept.
+func BindError(err error) *api.APIError {
+	var tooLarge *http.MaxBytesError
+	var typeErr *json.UnmarshalTypeError
+	var safe ClientSafeBindError
+	switch {
+	case errors.As(err, &tooLarge), isRequestBodyTooLarge(err):
+		return api.Coded(billing.CodeRequestBodyTooLarge, "request body too large")
+	case errors.Is(err, errMediaType):
+		return api.Coded(billing.CodeUnsupportedMediaType, "")
+	case errors.As(err, &safe):
+		return api.Coded(billing.CodeInvalidParam, safe.ClientSafeBindMessage())
+	case errors.Is(err, errTrailingJSON):
+		return api.Coded(billing.CodeInvalidParam, errTrailingJSON.Error())
+	case errors.As(err, &typeErr) && typeErr.Field != "":
+		return api.Coded(billing.CodeInvalidParam, typeErr.Field+" is invalid").WithParam(typeErr.Field)
+	}
+	if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+		field = strings.Trim(field, `"`)
+		return api.Coded(billing.CodeUnknownField, "unknown field "+field).WithParam(field)
+	}
+	return api.Coded(billing.CodeInvalidParam, normaliseBindError(err))
+}
+
+// QueryError is the refusal for a query string BindQuery could not accept.
+func QueryError(err error) *api.APIError {
+	var field *fieldError
+	if errors.As(err, &field) {
+		return api.Coded(billing.CodeInvalidQuery, field.name+" is invalid").WithParam(field.name)
+	}
+	var verr validator.ValidationErrors
+	if errors.As(err, &verr) && len(verr) > 0 {
+		name := strings.ToLower(verr[0].Field())
+		return api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name)
+	}
+	return api.Coded(billing.CodeInvalidQuery, "")
+}
+
+// fieldError is a query or path value that does not parse as its field's type.
+type fieldError struct {
+	name string
+	err  error
+}
+
+func (e *fieldError) Error() string { return e.name + ": " + e.err.Error() }
+func (e *fieldError) Unwrap() error { return e.err }
+
 // ClientSafeBindError is a decode error whose message is written FOR the
 // caller — e.g. a retired wire key naming its replacement. Everything else
 // collapses to "invalid_request": a decoder's own text can echo internal
@@ -476,7 +624,7 @@ func normaliseBindError(err error) string {
 			return strings.ToLower(e.Field()) + " is invalid"
 		}
 	}
-	if strings.Contains(err.Error(), "EOF") {
+	if errors.Is(err, io.EOF) {
 		return "empty_request_body"
 	}
 	return "invalid_request"
@@ -532,10 +680,27 @@ func (h *httpTransport) BindJSON(data any) error {
 	// The body may carry a card (#1129); decoded values are copies, so the
 	// bytes read from the wire are wiped once decoding is done.
 	defer clear(raw)
-	if err := json.Unmarshal(raw, data); err != nil {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return io.EOF
+	}
+	if !jsonBody(h.r) {
+		return errMediaType
+	}
+	if err := DecodeStrict(raw, data); err != nil {
 		return err
 	}
 	return validateBinding(data)
+}
+
+// jsonBody reports whether the request declares a JSON body; a request that
+// declares no media type is read as JSON.
+func jsonBody(r *http.Request) bool {
+	declared := r.Header.Get("Content-Type")
+	if declared == "" {
+		return true
+	}
+	mediaType, _, err := mime.ParseMediaType(declared)
+	return err == nil && (mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"))
 }
 
 func (h *httpTransport) BindQuery(data any) error {
@@ -664,7 +829,7 @@ func decodeStructValues(v reflect.Value, tag string, get func(string) string) er
 			continue
 		}
 		if err := setField(fv, raw, field.Tag); err != nil {
-			return fmt.Errorf("%s: %w", field.Name, err)
+			return &fieldError{name: name, err: err}
 		}
 	}
 	return nil

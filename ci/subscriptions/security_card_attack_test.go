@@ -23,7 +23,7 @@ import (
 // the status and body.
 func (c *customer) cardSave(ip string, cd card) (int, string) {
 	c.w.t.Helper()
-	return c.cardSaveJSON(ip, map[string]any{"provider": "nmi", "psp_id": c.w.psp["nmi"], "payment_token": c.w.nmi.Tokenize(cd), "name_on_card": "Card Holder"})
+	return c.cardSaveJSON(ip, map[string]any{"provider": "nmi", "payment_token": c.w.nmi.Tokenize(cd), "name_on_card": "Card Holder"})
 }
 
 // cardSaveJSON submits a card save request body for c from client address ip.

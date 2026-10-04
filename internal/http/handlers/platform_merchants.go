@@ -25,7 +25,7 @@ import (
 // the existing deleted_at IS NULL filters), never the #225 gated purge.
 
 // platformMerchantItem is the operator directory view of one merchant.
-type platformMerchantItem struct {
+type PlatformMerchantItem struct {
 	ID          string     `json:"id"`
 	Slug        string     `json:"slug"`
 	Status      string     `json:"status"`
@@ -41,7 +41,7 @@ type platformMerchantItem struct {
 	LastPaymentAt *time.Time `json:"last_payment_at,omitempty"`
 }
 
-type platformMerchantListQuery struct {
+type PlatformMerchantListQuery struct {
 	// Status filters the directory: active (default — soft-deleted excluded),
 	// deleted, or all.
 	Status string `form:"status"`
@@ -56,7 +56,7 @@ type platformMerchantListQuery struct {
 // Stable ordering: created_at DESC, id DESC.
 func PlatformListMerchants(r *httprequest.Request) {
 	ctx := r.Request.Context()
-	q := platformMerchantListQuery{Status: "active", Limit: 50}
+	q := PlatformMerchantListQuery{Status: "active", Limit: 50}
 	if err := r.ShouldBindQuery(&q); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -105,9 +105,9 @@ func PlatformListMerchants(r *httprequest.Request) {
 		return
 	}
 
-	items := make([]platformMerchantItem, 0, len(rows))
+	items := make([]PlatformMerchantItem, 0, len(rows))
 	for _, row := range rows {
-		item := platformMerchantItem{
+		item := PlatformMerchantItem{
 			ID:          row.ID.String(),
 			Slug:        row.Slug,
 			Status:      row.Status,
@@ -143,7 +143,7 @@ func PlatformGetMerchant(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load merchant")
 		return
 	}
-	item := platformMerchantItem{
+	item := PlatformMerchantItem{
 		ID:          row.ID.String(),
 		Slug:        row.Slug,
 		Status:      row.Status,
@@ -182,7 +182,7 @@ func PlatformSoftDeleteMerchant(r *httprequest.Request) {
 		return
 	}
 	logPlatformMerchantAccess(r, "soft-delete", row.Slug)
-	r.SuccessJSON(platformMerchantItem{
+	r.SuccessJSON(PlatformMerchantItem{
 		ID:          row.ID.String(),
 		Slug:        row.Slug,
 		Status:      row.Status,
@@ -221,7 +221,7 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 		return
 	}
 	logPlatformMerchantAccess(r, "restore", row.Slug)
-	r.SuccessJSON(platformMerchantItem{
+	r.SuccessJSON(PlatformMerchantItem{
 		ID:          row.ID.String(),
 		Slug:        row.Slug,
 		Status:      row.Status,
@@ -236,7 +236,7 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 // enrichPlatformMerchant fills rails-armed + last-activity under a MerchantTx:
 // psps and payments are merchant-owned, so each probe is a per-merchant query
 // (one tiny tx per directory row — page-bounded, both queries indexed).
-func enrichPlatformMerchant(ctx context.Context, d *db.DB, id uuid.UUID, item *platformMerchantItem) error {
+func enrichPlatformMerchant(ctx context.Context, d *db.DB, id uuid.UUID, item *PlatformMerchantItem) error {
 	item.RailsArmed = []string{}
 	mctx := merchant.WithID(ctx, billing.MerchantID(id))
 	return d.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {

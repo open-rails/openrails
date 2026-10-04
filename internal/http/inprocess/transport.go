@@ -133,7 +133,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 // like any real non-2xx wire response, so the call surfaces as a StatusError
 // (ErrConflict) identically to every other in-process rejection.
 func conflictResponse(req *http.Request, message string) *http.Response {
-	body, _ := json.Marshal(api.ConflictError(message).ToResponse())
+	body, _ := json.Marshal(api.Coded(billing.CodeMerchantBindingMismatch, message).ToResponse())
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 	return &http.Response{
@@ -211,7 +211,7 @@ type detachedValues struct{ context.Context }
 func (detachedValues) Value(any) any { return nil }
 
 func selectionErrorResponse(req *http.Request, failure billingauth.GateError) *http.Response {
-	body, _ := json.Marshal(api.NewAPIError(failure.Status, api.ErrorTypeForStatus(failure.Status), "merchant_selection_invalid", failure.Message).ToResponse())
+	body, _ := json.Marshal(billingauth.RefusalError(failure).ToResponse())
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 	return &http.Response{StatusCode: failure.Status, Status: http.StatusText(failure.Status), Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1, Header: header, Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body)), Request: req}

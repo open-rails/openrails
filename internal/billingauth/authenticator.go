@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 
+	auth "github.com/open-rails/helpers/auth"
+
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 )
 
@@ -51,16 +54,17 @@ func Required(a Authenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if a == nil {
-				WriteJSONError(w, http.StatusInternalServerError, "server_error", "authentication disabled")
+				WriteJSONError(w, http.StatusInternalServerError, billing.CodeInternalError, "authentication disabled")
 				return
 			}
 			uc, err := a.Authenticate(r.Context(), r)
 			if err != nil {
-				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", UnauthenticatedMessage(err))
+				refusal := Unauthenticated(err)
+				WriteJSONError(w, refusal.Status, refusal.Code, refusal.Message)
 				return
 			}
 			if verr := uc.ValidateSubject(); verr != nil {
-				WriteJSONError(w, http.StatusUnauthorized, "unauthorized", verr.Error())
+				WriteJSONError(w, http.StatusUnauthorized, billing.CodeAuthenticationRequired, verr.Error())
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(SetUserContext(r.Context(), uc)))
@@ -95,6 +99,25 @@ func UnauthenticatedMessage(err error) string {
 	return err.Error()
 }
 
+// Unauthenticated is the 401 for an authentication error: a refusal the
+// authenticator already coded keeps its code, an expired or revoked credential
+// gets its own, and anything else is authentication_required with the error's
+// client-safe text.
+func Unauthenticated(err error) GateError {
+	var gate GateError
+	switch {
+	case errors.As(err, &gate) && gate.Status == http.StatusUnauthorized && gate.Code != "":
+		return gate
+	case errors.Is(err, auth.ErrExpired):
+		return Refusal(billing.CodeCredentialExpired)
+	case errors.Is(err, auth.ErrRevoked):
+		return Refusal(billing.CodeCredentialRevoked)
+	case errors.Is(err, auth.ErrSenderProofRequired):
+		return Refusal(billing.CodeSenderProofRequired)
+	}
+	return Refusal(billing.CodeAuthenticationRequired, UnauthenticatedMessage(err))
+}
+
 // WriteJSONError writes the one OpenRails error envelope
 // ({"error":{"type","code","message","request_id"}}) from a plain
 // http.ResponseWriter, for middleware that answers before a handler exists.
@@ -103,7 +126,7 @@ func UnauthenticatedMessage(err error) string {
 func WriteJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	body := api.NewAPIError(status, api.ErrorTypeForStatus(status), code, message)
+	body := api.NewAPIError(status, api.TypeForCode(status, code), code, message)
 	if id := strings.TrimSpace(w.Header().Get("X-Request-ID")); id != "" {
 		body.WithRequestID(id)
 	}

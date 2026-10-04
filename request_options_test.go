@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -23,7 +22,20 @@ import (
 type observedRequest struct{ method, path, slug, id, auth string }
 
 func observe(r *http.Request) observedRequest {
-	return observedRequest{r.Method, r.URL.Path, r.Header.Get(merchant.SlugHeader), r.Header.Get(merchant.BindingHeader), r.Header.Get("Authorization")}
+	slug, id := selection(r)
+	return observedRequest{r.Method, r.URL.Path, slug, id, r.Header.Get("Authorization")}
+}
+
+// selection is the request's one OpenRails-Merchant selector, by form.
+func selection(r *http.Request) (slug, id string) {
+	selector, _, err := merchant.ParseSelector(r.Header)
+	if err != nil {
+		return "invalid", "invalid"
+	}
+	if !selector.ID.IsZero() {
+		id = selector.ID.String()
+	}
+	return selector.Slug, id
 }
 
 // targetCredential mints a credential naming the requested target, so the
@@ -43,9 +55,8 @@ func catalogApplication() *billing.CatalogApplyParams {
 		Products: []billing.CatalogApplyProduct{{Key: "post", DisplayName: billing.CatalogValue("Post")}}}
 }
 
-// Slug selection uses /v2 (a pre-selector server cannot execute it under the
-// credential's merchant); ID selection keeps the /v1 assertion protocol.
-// Exactly one selector reaches both the headers and the credential provider.
+// Exactly one selector, a slug or an id, reaches both the OpenRails-Merchant
+// header and the credential provider; the path never depends on it.
 func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 	seen := make(chan observedRequest, 1)
 	id := billing.MerchantID(uuid.New())
@@ -57,11 +68,11 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 		name, version, slug, id, auth string
 		options                       []RequestOption
 	}{
-		{"client default", "/v2", "alpha", "", "Bearer slug:alpha", nil},
-		{"slug override", "/v2", "bravo", "", "Bearer slug:bravo", []RequestOption{WithMerchant("BRAVO ")}},
+		{"client default", "/v1", "alpha", "", "Bearer slug:alpha", nil},
+		{"slug override", "/v1", "bravo", "", "Bearer slug:bravo", []RequestOption{WithMerchant("BRAVO ")}},
 		{"ID override", "/v1", "", id.String(), "Bearer id:" + id.String(), []RequestOption{ForMerchantID(id)}},
-		{"UUID-shaped slug stays a slug", "/v2", id.String(), "", "Bearer slug:" + id.String(), []RequestOption{WithMerchant(id.String())}},
-		{"nil options ignored", "/v2", "alpha", "", "Bearer slug:alpha", []RequestOption{nil}},
+		{"UUID-shaped slug stays a slug", "/v1", id.String(), "", "Bearer slug:" + id.String(), []RequestOption{WithMerchant(id.String())}},
+		{"nil options ignored", "/v1", "alpha", "", "Bearer slug:alpha", []RequestOption{nil}},
 	}
 	calls := map[string]func(opts []RequestOption) (string, error){
 		"GET /merchant/settings": func(o []RequestOption) (string, error) { return http.MethodGet, client.Verify(t.Context(), o...) },
@@ -96,7 +107,7 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 	require.NoError(t, byID.Verify(t.Context()))
 	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/settings", "", id.String(), "Bearer id:" + id.String()}, <-seen)
 	require.NoError(t, byID.Verify(t.Context(), WithMerchant("bravo")))
-	require.Equal(t, observedRequest{http.MethodGet, "/v2/merchant/settings", "bravo", "", "Bearer slug:bravo"}, <-seen)
+	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/settings", "bravo", "", "Bearer slug:bravo"}, <-seen)
 }
 
 func TestInvalidMerchantSelectionFailsBeforeCredentialMint(t *testing.T) {
@@ -149,7 +160,7 @@ func TestAmbientMerchantAssertion(t *testing.T) {
 	var calls atomic.Int64
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		require.Equal(t, id.String(), r.Header.Get(merchant.BindingHeader))
+		require.Equal(t, "id:"+id.String(), r.Header.Get(merchant.SelectorHeader))
 		_, _ = w.Write([]byte(`{}`))
 	})
 	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), other), ForMerchantID(id)), billing.ErrConflict)
@@ -166,21 +177,17 @@ func TestExtraHeadersCannotDuplicateSelectionOrAuthority(t *testing.T) {
 	id := billing.MerchantID(uuid.New())
 	for _, byID := range []bool{false, true} {
 		client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
-			slugs, ids := r.Header.Values(merchant.SlugHeader), r.Header.Values(merchant.BindingHeader)
+			want := "alpha"
 			if byID {
-				require.Empty(t, slugs)
-				require.Equal(t, []string{id.String()}, ids)
-			} else {
-				require.Empty(t, ids)
-				require.Equal(t, []string{"alpha"}, slugs)
+				want = "id:" + id.String()
 			}
+			require.Equal(t, []string{want}, r.Header.Values(merchant.SelectorHeader))
 			require.Equal(t, []string{"Bearer selected-key"}, r.Header.Values("Authorization"))
 			require.Equal(t, "kept", r.Header.Get("X-Trace"))
 			_, _ = w.Write([]byte(`{}`))
 		}, WithAPIKey("selected-key"))
 		extra := http.Header{
-			merchant.BindingHeader: {"wrong", "another"}, strings.ToLower(merchant.BindingHeader): {"lowercase"},
-			merchant.SlugHeader: {"wrong"}, strings.ToLower(merchant.SlugHeader): {"lowercase"},
+			merchant.SelectorHeader: {"wrong", "another"}, strings.ToLower(merchant.SelectorHeader): {"lowercase"},
 			"authorization": {"Bearer broader-key"}, "Authorization": {"Bearer broader-key"}, "X-Trace": {"kept"},
 		}
 		original := extra.Clone()
@@ -193,37 +200,11 @@ func TestExtraHeadersCannotDuplicateSelectionOrAuthority(t *testing.T) {
 	}
 }
 
-// A pre-selector server ignores the slug header and would write under the
-// credential's merchant. Slug selection must use a route it does not serve.
-func TestSlugSelectionCannotWriteThroughOldServer(t *testing.T) {
-	var writes atomic.Int64
-	mux := http.NewServeMux()
-	for _, path := range []string{"/v1/merchant/catalog/products", "/v1/merchant/catalog/applications"} {
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, _ *http.Request) {
-			writes.Add(1)
-			_ = json.NewEncoder(w).Encode(map[string]any{})
-		})
-	}
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	id := billing.MerchantID(uuid.New())
-	client, err := NewRemote(server.URL, WithAPIKey("merchant-alpha-key"), WithMerchantID(id))
-	require.NoError(t, err)
-	_, err = client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "bravo-post", DisplayName: "Bravo"}, WithMerchant("bravo"))
-	require.ErrorIs(t, err, billing.ErrNotFound)
-	_, err = client.Catalog.Apply(t.Context(), catalogApplication(), WithMerchant("bravo"))
-	require.ErrorIs(t, err, billing.ErrNotFound)
-	require.Zero(t, writes.Load())
-	_, err = client.Catalog.Apply(t.Context(), catalogApplication(), ForMerchantID(id))
-	require.NoError(t, err, "positive control: the old route accepts this credential")
-	require.EqualValues(t, 1, writes.Load())
-}
-
 func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
 	var calls atomic.Int64
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		require.Equal(t, "/v2/catalog/products", r.URL.Path)
+		require.Equal(t, "/v1/catalog/products", r.URL.Path)
 		require.Equal(t, "Y2hhbm5lbC_DqQ", r.Header.Get("OpenRails-Catalog-Owner"), "owner is base64url of the UTF-8 subject")
 		_, _ = w.Write([]byte(`{}`))
 	})
@@ -253,8 +234,8 @@ func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
 func TestConcurrentSelectionDoesNotContaminate(t *testing.T) {
 	var requests atomic.Int64
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
-		slug := r.Header.Get(merchant.SlugHeader)
-		if r.Header.Get("Authorization") != "Bearer slug:"+slug || r.Header.Get(merchant.BindingHeader) != "" {
+		slug, id := selection(r)
+		if r.Header.Get("Authorization") != "Bearer slug:"+slug || id != "" {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}

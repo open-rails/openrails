@@ -23,7 +23,7 @@ func (c *Client) ForCatalogOwner(subject string) (*Client, error) {
 		return nil, invalidErr("client is required")
 	}
 	if c.catalogOwner != "" && c.catalogOwner != subject {
-		return nil, &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients cannot change owner"}}
+		return nil, &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeResourceAccessDenied, Message: "catalog-scoped clients cannot change owner"}}
 	}
 	scoped := *c
 	scoped.derived = true

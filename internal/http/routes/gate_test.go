@@ -100,7 +100,7 @@ func hostDelegated(p *billingauth.DelegatedPrincipal, err error) billingauth.Del
 	return billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) { return p, err })
 }
 
-func service(perms ...string) *credential.ResolvedServiceCredential {
+func serviceCredential(perms ...string) *credential.ResolvedServiceCredential {
 	return &credential.ResolvedServiceCredential{MerchantID: merchantA, Permissions: perms}
 }
 
@@ -129,16 +129,16 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "host principal wins over any header", host: &requestauth.HostPrincipal{MerchantID: merchantA, Subject: "svc", Permissions: []string{"merchant:*"}},
 			opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("never consulted")}}, header: map[string]string{"Authorization": "Bearer sk_1"}, want: want{merchant: merchantA, subject: "svc"}},
 
-		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(billing.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
+		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
+		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
+		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(billing.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
 		{name: "api key resolved to nothing", opts: GateOptions{ServiceCredentialResolver: credResolver{}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
 		{name: "api key scope denied", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialScopeDenied}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},
 		{name: "api key merchant unresolved", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialMerchantUnresolved}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_merchant_unresolved"}},
 		{name: "api key for another host", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialHostMismatch}}, header: bearer("sk_1"), want: want{status: 403, message: "host_merchant_mismatch"}},
 		{name: "api key invalid", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("bad key")}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
 
-		{name: "remote application", opts: GateOptions{ServiceCredentialResolver: credResolver{remote: service(read)}}, header: bearer("a.b.c"), want: want{merchant: merchantA}},
+		{name: "remote application", opts: GateOptions{ServiceCredentialResolver: credResolver{remote: serviceCredential(read)}}, header: bearer("a.b.c"), want: want{merchant: merchantA}},
 		{name: "rejected remote application without user fallback", opts: GateOptions{ServiceCredentialResolver: credResolver{remoteErr: credential.ErrDelegatedInvalid}}, header: bearer("a.b.c"), want: want{status: 401, message: "service_credential_invalid"}},
 		{name: "rejected remote application falls through to user session", opts: GateOptions{ServiceCredentialResolver: credResolver{remoteErr: credential.ErrDelegatedInvalid}, Authenticator: userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated)}, header: bearer("a.b.c"), want: want{status: 401, message: "authentication required"}},
 		{name: "verified service jwt scope denial never falls through", opts: GateOptions{ServiceCredentialResolver: credResolver{jwtErr: credential.ErrServiceCredentialScopeDenied}, DelegatedResolver: delegatedOK}, header: bearer("a.b.c"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},
@@ -217,7 +217,7 @@ func TestGateUserSessionMerchantSelection(t *testing.T) {
 			gate := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA, Merchant: tc.tokenMerchant}, nil), AdminPermissionChecker: &checker})
 			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/settings", nil)
 			if tc.selector != "" {
-				r.Header.Set(billingauth.MerchantSelectorHeader, tc.selector)
+				r.Header.Set(merchant.SelectorHeader, tc.selector)
 			}
 			ctx := r.Context()
 			if tc.ctx != nil {
@@ -253,9 +253,12 @@ func assertGate(t *testing.T, principal billingauth.Principal, err error, status
 	var gateErr billingauth.GateError
 	require.ErrorAs(t, err, &gateErr)
 	require.Equal(t, status, gateErr.Status, gateErr.Message)
-	if message != "" {
+	if _, coded := billing.LookupErrorCode(message); coded {
+		require.Equal(t, message, gateErr.Code)
+	} else if message != "" {
 		require.Equal(t, message, gateErr.Message)
 	}
+	require.NotEmpty(t, gateErr.Code, "every gate refusal carries its code")
 	require.Zero(t, principal)
 }
 
@@ -317,14 +320,14 @@ func TestMerchantPermissionMiddleware(t *testing.T) {
 	}{
 		{"no gate", nil, nil, t.Context(), 500},
 		{"gate refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-			return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "permission_required"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}), nil, t.Context(), 403},
 		{"gate failure is not a refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
 			return billingauth.Principal{}, errors.New("db down")
 		}), nil, t.Context(), 500},
-		{"binding header for another merchant", allowGate, map[string]string{merchant.BindingHeader: merchantB.String()}, t.Context(), 409},
-		{"malformed binding header", allowGate, map[string]string{merchant.BindingHeader: "nope"}, t.Context(), 400},
-		{"slug selector without a resolved target", allowGate, map[string]string{merchant.SlugHeader: "a"}, t.Context(), 409},
+		{"id selector for another merchant", allowGate, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, t.Context(), 409},
+		{"malformed id selector", allowGate, map[string]string{merchant.SelectorHeader: "id:nope"}, t.Context(), 400},
+		{"slug selector without a resolved target", allowGate, map[string]string{merchant.SelectorHeader: "a"}, t.Context(), 409},
 		{"configured merchant differs", allowGate, nil, merchant.WithID(t.Context(), merchantB), 409},
 	} {
 		rec, got := run(tc.gate, tc.header, tc.ctx)
@@ -333,7 +336,7 @@ func TestMerchantPermissionMiddleware(t *testing.T) {
 	}
 
 	rec, _ = run(gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-		return billingauth.Principal{}, billingauth.GateError{Status: 401, Message: "sender_proof_required"}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeSenderProofRequired)
 	}), nil, t.Context())
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	require.Contains(t, rec.Header().Get("WWW-Authenticate"), "DPoP")

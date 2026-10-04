@@ -204,7 +204,7 @@ func (c *Client) Verify(ctx context.Context, requestOptions ...RequestOption) er
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
 // matches ErrInvalid identically to the embedded transport.
 func invalidErr(msg string) error {
-	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeInvalidParam, Message: msg}}
 }
 
 // requireID trims a caller-supplied identifier and refuses a blank one with
@@ -789,20 +789,11 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error, requestOptions ...RequestOption) error {
 	if c.catalogOwner != "" && path != "/v1/catalog" && !strings.HasPrefix(path, "/v1/catalog/") {
-		return &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients only support catalog operations"}}
+		return &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeResourceAccessDenied, Message: "catalog-scoped clients only support catalog operations"}}
 	}
 	target, err := c.requestTarget(requestOptions)
 	if err != nil {
 		return err
-	}
-	if target.MerchantSlug != "" {
-		// A pre-selector server ignores the new slug header. A distinct route
-		// prevents it from executing the operation under the credential's
-		// merchant instead. Never retry this request on the v1 route.
-		if !strings.HasPrefix(path, "/v1/") {
-			return invalidErr("merchant operation path must start with /v1/")
-		}
-		path = "/v2/" + strings.TrimPrefix(path, "/v1/")
 	}
 	expectedMerchant := target.MerchantID
 	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
@@ -812,7 +803,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 			return invalidErr("merchant slug selection cannot be combined with an ambient merchant ID assertion")
 		}
 		if pinned != expectedMerchant {
-			return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "resource_conflict",
+			return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeMerchantBindingMismatch,
 				Message: fmt.Sprintf("openrails: call pinned to merchant %s but operation selects merchant %s", pinned, expectedMerchant)}}
 		}
 	}
@@ -841,9 +832,9 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		return fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	for name, values := range headers {
-		// Extra metadata cannot provide another spelling of a target header.
+		// Extra metadata cannot provide another spelling of the target header.
 		// Canonicalize all remaining names before replacing Authorization below.
-		if strings.EqualFold(name, merchant.BindingHeader) || strings.EqualFold(name, merchant.SlugHeader) {
+		if strings.EqualFold(name, merchant.SelectorHeader) {
 			continue
 		}
 		for _, value := range values {
@@ -857,11 +848,9 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}
-	if !expectedMerchant.IsZero() {
-		req.Header.Set(merchant.BindingHeader, expectedMerchant.String())
-	} else {
-		req.Header.Set(merchant.SlugHeader, target.MerchantSlug)
-	}
+	// Exactly one selector: the server resolves it, authorizes the credential
+	// for that merchant, and refuses a credential bound to another.
+	req.Header.Set(merchant.SelectorHeader, merchant.Selector{Slug: target.MerchantSlug, ID: expectedMerchant}.String())
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)

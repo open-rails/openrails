@@ -116,7 +116,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 			return
 		}
 		require.Equal(t, billingauth.Delegated, identity.Kind)
-		require.Contains(t, r.RequestURI, "/v2/merchant/")
+		require.Contains(t, r.RequestURI, "/v1/merchant/")
 		principal, err := gate.Authorize(r.Context(), r, billing.MerchantCatalogRead)
 		if err != nil {
 			w.WriteHeader(403)
@@ -126,7 +126,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		w.WriteHeader(200)
 	})
 	table := &router.Table{Entries: []router.Entry{{Method: "GET", Path: "/v1/merchant/proof", Handler: handler}, {Method: "POST", Path: "/v1/merchant/proof", Handler: handler}, {Method: "GET", Path: "/v1/merchant/other", Handler: handler}}}
-	router.AddMerchantSelectorRoutes(table, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+	router.ResolveMerchantSelectors(table, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, directory, billing.MerchantID{}, "")
 	})
 	mounted := table.Handler()
@@ -134,18 +134,17 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		r := requestauth.Begin(httptest.NewRequest(method, origin+path, nil))
 		r.Header.Set("Authorization", "DPoP "+access)
 		r.Header.Set("DPoP", signedProof)
-		r.Header.Set(merchant.SlugHeader, "store")
+		r.Header.Set(merchant.SelectorHeader, "store")
 		w := httptest.NewRecorder()
 		mounted.ServeHTTP(w, r)
 		return w.Code
 	}
-	const route = "/v2/merchant/proof"
+	const route = "/v1/merchant/proof"
 	first := proof("GET", route)
 	require.Equal(t, 200, call("GET", route, first))
 	require.Equal(t, 1, proofClaims, "authentication plus operation authorization consumes one genuine proof")
 	require.Equal(t, 401, call("GET", route, first), "identical proof cannot replay across requests")
 	require.Equal(t, 401, call("POST", route, proof("GET", route)), "method mismatch")
-	require.Equal(t, 401, call("GET", "/v2/merchant/other", proof("GET", route)), "URI mismatch")
-	require.Equal(t, 401, call("GET", route, proof("GET", "/v1/merchant/proof")), "v2 URI is never rewritten before proof verification")
+	require.Equal(t, 401, call("GET", "/v1/merchant/other", proof("GET", route)), "URI mismatch")
 	require.Equal(t, 200, call("GET", route, proof("GET", route)), "a fresh correctly bound proof remains usable")
 }

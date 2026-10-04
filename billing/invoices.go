@@ -81,7 +81,7 @@ type InvoicePaymentAttemptDTO struct {
 }
 
 type InvoiceCollectionRetryRequest struct {
-	InvoiceID       uuid.UUID       `json:"invoice_id"`
+	InvoiceID       uuid.UUID       `json:"-"`
 	IdempotencyKey  string          `json:"-"`
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }

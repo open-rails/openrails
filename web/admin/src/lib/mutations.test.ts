@@ -146,7 +146,7 @@ it("sends the selected merchant, the caller's tier key and a fresh refund key", 
   await exec(queryClient, M.changeSubscriptionTier(queryClient, "sub_1", "cus_1"), { priceId: "price_2", idempotencyKey: "tier-key-1" })
   await exec(queryClient, M.refundPayment(queryClient, "pay_1"), once)
   await exec(queryClient, M.refundPayment(queryClient, "pay_1"), once)
-  expect(requests[0].headers.get("X-OpenRails-Merchant")).toBe("merchant-a")
+  expect(requests[0].headers.get("OpenRails-Merchant")).toBe("merchant-a")
   expect(requests[0].headers.get("Idempotency-Key")).toBe("tier-key-1")
   // A refund is a new operation every time it is submitted.
   const keys = requests.slice(1).map((r) => r.headers.get("Idempotency-Key"))

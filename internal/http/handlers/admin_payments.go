@@ -40,14 +40,14 @@ type paymentPath struct {
 
 // refundRequest names either an exact native amount or the full remaining
 // refundable amount; exactly one is required.
-type refundRequest struct {
+type RefundRequest struct {
 	Amount       int64  `json:"amount,omitempty,string"`
 	Full         bool   `json:"full,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }
 
-func (req refundRequest) validate() error {
+func (req RefundRequest) validate() error {
 	switch {
 	case req.Full && req.Amount != 0:
 		return adminRefundHTTPError(http.StatusBadRequest, "amount and full are mutually exclusive")
@@ -72,7 +72,7 @@ type adminOffChannelPaymentPath struct {
 	UserID string `uri:"customer_id" binding:"required"`
 }
 
-type adminOffChannelPaymentRequest struct {
+type AdminOffChannelPaymentRequest struct {
 	PriceID          string         `json:"price_id" binding:"required"`
 	TransactionID    string         `json:"transaction_id" binding:"required"`
 	Amount           *int64         `json:"amount,omitempty,string"`
@@ -95,7 +95,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 		return
 	}
 	paymentID := typedPaymentID.UUID()
-	var req refundRequest
+	var req RefundRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -127,7 +127,7 @@ func writeAdminRefundError(r *httprequest.Request, err error) {
 	r.ErrorJSON(status, message)
 }
 
-func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*models.Payment, int, error) {
+func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req RefundRequest, idempotencyKey string) (*models.Payment, int, error) {
 	if r.State.DB == nil {
 		// The provider-side mutation rides the intent ledger, which lives in
 		// the database; without one there is nothing durable to execute.
@@ -267,7 +267,7 @@ func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, er
 	return cents, nil
 }
 
-func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB, paymentService *payments.PaymentService, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
+func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB, paymentService *payments.PaymentService, paymentID uuid.UUID, req RefundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -353,7 +353,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	return &adminRefundPrepared{reservationID: reservation.ID, intentID: intent.ID}, nil
 }
 
-func adminRefundMatchesRequest(existing *models.Payment, req refundRequest) bool {
+func adminRefundMatchesRequest(existing *models.Payment, req RefundRequest) bool {
 	if existing == nil {
 		return false
 	}
@@ -444,7 +444,7 @@ func adminRefundHash(value string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-func adminRefundMetadata(idempotencyKey string, req refundRequest, status string, refundTransactionID string) map[string]any {
+func adminRefundMetadata(idempotencyKey string, req RefundRequest, status string, refundTransactionID string) map[string]any {
 	metadata := map[string]any{
 		"admin_refund_idempotency_key": strings.TrimSpace(idempotencyKey),
 		"admin_refund_status":          status,
@@ -555,7 +555,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	var req adminOffChannelPaymentRequest
+	var req AdminOffChannelPaymentRequest
 	if !r.BindJSON(&req) {
 		return
 	}

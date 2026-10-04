@@ -42,14 +42,14 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 		sub, e := r.State.SubscriptionService.GetByID(ctx, id)
 		if e != nil {
 			if db.IsNotFound(e) {
-				cutoverRefusal(r, http.StatusNotFound, "resource_missing", "subscription not found", "subscription_id")
+				cutoverRefusal(r, http.StatusNotFound, api.CodeResourceNotFound, "subscription not found", "subscription_id")
 			} else {
 				r.InternalError("could not load subscription", e)
 			}
 			return
 		}
 		if sub.CustomerID.String() != user.ID {
-			cutoverRefusal(r, http.StatusNotFound, "resource_missing", "subscription not found", "subscription_id")
+			cutoverRefusal(r, http.StatusNotFound, api.CodeResourceNotFound, "subscription not found", "subscription_id")
 			return
 		}
 	}
@@ -105,9 +105,9 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 			r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded,
 				"Destructive operation rate limit reached; try again later or contact support"))
 		case db.IsNotFound(err), errors.Is(err, providerqualification.ErrNotFound):
-			cutoverRefusal(r, http.StatusNotFound, "resource_missing", "cutover or subscription not found", "")
+			cutoverRefusal(r, http.StatusNotFound, api.CodeResourceNotFound, "cutover or subscription not found", "")
 		default:
-			cutoverRefusal(r, http.StatusInternalServerError, "provider_cutover_unavailable", "provider cutover failed", "")
+			cutoverRefusal(r, http.StatusInternalServerError, api.CodeInternalError, "provider cutover failed", "")
 		}
 		return
 	}

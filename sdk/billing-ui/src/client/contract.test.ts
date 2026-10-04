@@ -1,13 +1,13 @@
-// Every `/me` route the client calls must be in the in-repo route catalog,
-// which does not list the public catalog routes.
+// Every route the client calls must be in OpenRails' route catalog
+// (src/client/generated/routes.ts), beneath the client's /billing mount.
 import { expect, it, vi } from "vitest"
 
 import { createBillingClient } from "./client"
-import contract from "./generated/openrails-contract.json"
+import { OPENRAILS_ROUTES } from "./generated/routes"
 
-const routes = contract.routes.map(({ method, path }) => ({
+const routes = OPENRAILS_ROUTES.map(({ method, path }) => ({
   method,
-  pattern: new RegExp(`^${path.replace(/\{[^}]+\}/g, "[^/]+")}$`),
+  pattern: new RegExp(`^/billing${path.replace(/\{[^}]+\}/g, "[^/]+")}$`),
 }))
 
 it("calls only routes OpenRails mounts for customers", async () => {

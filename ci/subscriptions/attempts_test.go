@@ -111,7 +111,7 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
-	status, _ := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"],
+	status, _ := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi",
 		"payment_token": w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"}), "name_on_card": "E2E Payer"})
 	require.Equal(t, http.StatusPaymentRequired, status)
 	c.saveCard("nmi", visa)

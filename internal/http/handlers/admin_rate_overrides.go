@@ -16,7 +16,7 @@ import (
 // adminRateOverrideRequest is the PUT body. Price is the canonical
 // catalog.RatePrice charge-model JSON (same shape the catalog speaks);
 // allowance.included is the pre-overage quantity in the meter's raw unit.
-type adminRateOverrideRequest struct {
+type AdminRateOverrideRequest struct {
 	Price     catalog.RatePrice  `json:"price" binding:"required"`
 	Allowance *catalog.Allowance `json:"allowance"`
 }
@@ -34,7 +34,7 @@ func PutAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return
 	}
-	var req adminRateOverrideRequest
+	var req AdminRateOverrideRequest
 	if !r.BindJSON(&req) {
 		return
 	}

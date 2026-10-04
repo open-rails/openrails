@@ -63,18 +63,18 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 		httprequest.NewHTTP(rec, wire, &app.Runtime{}).BindJSON(into)
 		return rec
 	}
-	var create createPaymentMethodRequest
+	var create CreatePaymentMethodRequest
 	require.Empty(t, bind(`{"provider":"nmi",`+cardBody+`}`, &create).Body.String())
 	require.Equal(t, []string{"visa", "1111", "10/27"}, []string{create.Card.Brand(), create.Card.LastFour(), create.Card.Expiry()})
 	require.NoError(t, create.rejectRawCardFields())
-	var update updatePaymentMethodRequest
+	var update UpdatePaymentMethodRequest
 	require.Empty(t, bind(`{`+cardBody+`}`, &update).Body.String())
 	require.NotNil(t, update.Card)
-	var session checkoutSessionCreateRequest
+	var session CheckoutSessionCreateRequest
 	require.Empty(t, bind(`{"price_key":"k","payment":{"rail":"nmi",`+cardBody+`}}`, &session).Body.String())
 	require.NotNil(t, session.Payment.Card)
 
-	for _, into := range []any{new(createPaymentMethodRequest), new(updatePaymentMethodRequest)} {
+	for _, into := range []any{new(CreatePaymentMethodRequest), new(UpdatePaymentMethodRequest)} {
 		rec := bind(`{"provider":"nmi"}`, into)
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 		require.Contains(t, rec.Body.String(), "paymenttoken is invalid")
@@ -84,7 +84,7 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 		`{"card":{"number":"4111111111111111","exp_month":10,"exp_year":2027}}`:             "card cvc is invalid",
 		`{"card":"[card]"}`: "card was redacted in transit",
 	} {
-		rec := bind(body, new(createPaymentMethodRequest))
+		rec := bind(body, new(CreatePaymentMethodRequest))
 		require.Equal(t, http.StatusBadRequest, rec.Code, body)
 		require.Contains(t, rec.Body.String(), message, body)
 		require.NotContains(t, rec.Body.String(), "4111", body)

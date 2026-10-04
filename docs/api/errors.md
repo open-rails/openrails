@@ -9,6 +9,11 @@ payload. An unsuccessful request returns its HTTP status and this envelope:
 
 `type` is the category, `code` is the machine-readable reason, and `message` is a
 human diagnostic that may change. `request_id`, `param` and `metadata` are optional.
+Every code is registered once with its status and type (`billing.ErrorCodes()`,
+listed in [error-codes.md](error-codes.md)); a code always comes with the same
+status and type, and an authentication or authorization refusal names its
+reason in `code` (`credential_expired`, `permission_required`, ...), never only
+in `message`. Each route's codes are in `api/openapi.json`.
 Batch admission places the same error object inside each unsuccessful item's
 `error` field; an ordinary admission denial instead returns its complete decision.
 
@@ -41,8 +46,11 @@ Refusals the transport answers before a handler runs use the same envelope:
 a request body over the deployment's cap (1 MiB in every deployment, the
 in-process embedded Client included) is `413` with code `request_body_too_large`
 (`billing.ErrRequestBodyTooLarge`); an unreadable body is `400
-invalid_request_body`; an unauthenticated request on a host-authenticated
-route is `401 unauthorized`.
+invalid_request_body`; a body field the route does not declare is `400
+unknown_field` (with `param`); a malformed declared query parameter is `400
+invalid_query`; a body that is not JSON is `415 unsupported_media_type`; an
+unauthenticated request on a host-authenticated route is `401
+authentication_required`.
 
 Reassigning a subscription to a saved method vaulted by a different provider
 account (`PUT .../subscriptions/{id}/payment-method`) is `409

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -31,7 +30,7 @@ func CatalogCopilotAsk(r *httprequest.Request) {
 	var body struct {
 		Question string `json:"question"`
 	}
-	if err := json.NewDecoder(r.Request.Body).Decode(&body); err != nil || strings.TrimSpace(body.Question) == "" {
+	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.Question) == "" {
 		r.ErrorJSON(http.StatusBadRequest, `body must be {"question":"<what you want to know>"}`)
 		return
 	}
@@ -67,7 +66,7 @@ func CatalogCopilotConfirmDraft(r *httprequest.Request) {
 		Kind     string `json:"kind"`
 		PriceKey string `json:"price_key,omitempty"`
 	}
-	if err := json.NewDecoder(r.Request.Body).Decode(&body); err != nil || strings.TrimSpace(body.DraftID) == "" || strings.TrimSpace(body.Kind) == "" {
+	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.DraftID) == "" || strings.TrimSpace(body.Kind) == "" {
 		r.ErrorJSON(http.StatusBadRequest, `body must be {"draft_id":"...","kind":"price_change"|"catalog_diff","price_key":"..."}`)
 		return
 	}

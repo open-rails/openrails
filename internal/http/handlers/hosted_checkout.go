@@ -12,7 +12,7 @@ import (
 // Hosted checkout (#1124). Minting needs the signed-in customer; reading and
 // paying need only the session id, which is never logged.
 
-type hostedCheckoutMintRequest struct {
+type HostedCheckoutMintRequest struct {
 	PriceID    string `json:"price_id,omitempty"`
 	PriceKey   string `json:"price_key,omitempty"`
 	SuccessURL string `json:"success_url,omitempty" binding:"omitempty,url"`
@@ -20,7 +20,7 @@ type hostedCheckoutMintRequest struct {
 
 // CreateHostedCheckoutSession handles POST /v1/me/checkout/sessions.
 func CreateHostedCheckoutSession(r *httprequest.Request) {
-	var body hostedCheckoutMintRequest
+	var body HostedCheckoutMintRequest
 	if !r.BindJSON(&body) {
 		return
 	}

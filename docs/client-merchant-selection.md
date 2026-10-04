@@ -47,17 +47,20 @@ sender-constrained credentials into an unrestricted Bearer. The server preserves
 the original credential's scope and proof requirements. Native permissions remain
 live; client selection never assigns a role or broadens a credential ceiling.
 
-The SDK emits exactly one target header: `X-OpenRails-Merchant-Slug` or
-`X-OpenRails-Merchant-ID`. Ambient merchant context values cannot supply a missing
-selector. An ambient ID must match an explicit/default ID; combining it with a
-slug is refused because the SDK cannot resolve that equality locally.
+The SDK sends exactly one selector in the `OpenRails-Merchant` header: a slug
+(`OpenRails-Merchant: alpha`) or a stable ID (`OpenRails-Merchant: id:<uuid>`).
+Ambient merchant context values cannot supply a missing selector. An ambient ID
+must match an explicit/default ID; combining it with a slug is refused because
+the SDK cannot resolve that equality locally.
 
-Slug-selected operations use the distinct `/v2/merchant`, `/v2/catalog`, `/v2/me`
-and `/v2/import` operation paths. A pre-selector server must refuse these paths
-before any mutation; it must not ignore an unknown header and execute against the
-credential's merchant. There is no retry or fallback to v1. UUID-selected calls
-retain v1's already enforced binding. The actual request path is chosen before
-request construction/signing and is preserved through server verification.
+Every merchant-scoped route (`/v1/merchant`, `/v1/catalog`, `/v1/import`,
+`/v1/me`, `/v1/customers`) honors the header the same way: the server resolves
+the selector, authorizes the credential for that merchant, and only then pins
+it. A repeated, blank or malformed header is `400 merchant_selector_invalid`;
+an unknown or inactive merchant is `404 merchant_not_found`; a credential or
+deployment bound to another merchant is `409 merchant_binding_mismatch`. A
+request without the header is served as its credential resolves it. The
+request path never depends on the selector.
 
 ## Operation classification and migration
 

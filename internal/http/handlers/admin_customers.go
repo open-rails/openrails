@@ -12,7 +12,7 @@ import (
 )
 
 // adminCustomerSummary is one row of the merchant customer list/search (#740).
-type adminCustomerSummary struct {
+type AdminCustomerSummary struct {
 	ID         string    `json:"id"`
 	Subject    *string   `json:"subject,omitempty"`
 	Email      *string   `json:"email,omitempty"`
@@ -77,9 +77,9 @@ func ListAdminCustomers(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count customers")
 		return
 	}
-	items := make([]adminCustomerSummary, 0, len(rows))
+	items := make([]AdminCustomerSummary, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, adminCustomerSummary{
+		items = append(items, AdminCustomerSummary{
 			ID:         row.ID.String(),
 			Subject:    &row.Subject,
 			Email:      row.Email,

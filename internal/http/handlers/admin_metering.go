@@ -14,21 +14,21 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-type adminUsageMeterResponse struct {
+type AdminUsageMeterResponse struct {
 	billingservice.UsageMeterDTO
 	ConfigurationSource string `json:"configuration_source"`
 	WritesAllowed       bool   `json:"writes_allowed"`
 }
 
-type adminUsageMeterPageResponse struct {
-	paginatedResponse[adminUsageMeterResponse]
+type AdminUsageMeterPageResponse struct {
+	PaginatedResponse[AdminUsageMeterResponse]
 	ConfigurationSource string `json:"configuration_source"`
 	WritesAllowed       bool   `json:"writes_allowed"`
 }
 
-type adminUsageMeterRequest = billing.UsageMeterRequest
+type AdminUsageMeterRequest = billing.UsageMeterRequest
 
-type adminDefaultUsageRateCardRequest = billing.DefaultUsageRateCardRequest
+type AdminDefaultUsageRateCardRequest = billing.DefaultUsageRateCardRequest
 
 func AdminListUsageMeters(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
@@ -43,7 +43,7 @@ func AdminListUsageMeters(r *httprequest.Request) {
 		writeMeteringError(r, err)
 		return
 	}
-	items := make([]adminUsageMeterResponse, 0, len(page.Data))
+	items := make([]AdminUsageMeterResponse, 0, len(page.Data))
 	for _, meter := range page.Data {
 		items = append(items, adminUsageMeterDTO(r, meter))
 	}
@@ -89,7 +89,7 @@ func AdminListUsageMeterOverrides(r *httprequest.Request) {
 		writeMeteringError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[billingservice.UsageMeterOverrideDTO]{
+	r.JSON(http.StatusOK, PaginatedResponse[billingservice.UsageMeterOverrideDTO]{
 		Items:  page.Data,
 		Total:  page.TotalItems,
 		Limit:  page.Limit,
@@ -98,7 +98,7 @@ func AdminListUsageMeterOverrides(r *httprequest.Request) {
 }
 
 func AdminPutUsageMeter(r *httprequest.Request) {
-	var req adminUsageMeterRequest
+	var req AdminUsageMeterRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -124,7 +124,7 @@ func AdminPutUsageMeter(r *httprequest.Request) {
 }
 
 func AdminPutDefaultUsageRateCard(r *httprequest.Request) {
-	var req adminDefaultUsageRateCardRequest
+	var req AdminDefaultUsageRateCardRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -170,7 +170,7 @@ func AdminDeleteDefaultUsageRateCard(r *httprequest.Request) {
 	r.Status(http.StatusNoContent)
 }
 
-func usageMeterSpec(pathKey string, req adminUsageMeterRequest) (billingservice.UsageMeterSpec, error) {
+func usageMeterSpec(pathKey string, req AdminUsageMeterRequest) (billingservice.UsageMeterSpec, error) {
 	meter := catalog.Meter{
 		Key:           pathKey,
 		EventType:     req.EventType,
@@ -197,7 +197,7 @@ func usageMeterSpec(pathKey string, req adminUsageMeterRequest) (billingservice.
 
 func defaultUsageRateCardInput(
 	meter billingservice.UsageMeterDTO,
-	req adminDefaultUsageRateCardRequest,
+	req AdminDefaultUsageRateCardRequest,
 ) (billingservice.UsageRateCardInput, error) {
 	typedProductID, err := billing.ParseProductID(req.ProductID)
 	if err != nil || typedProductID.IsZero() {
@@ -246,9 +246,9 @@ func loadAdminUsageMeter(r *httprequest.Request, rawKey string) (*billingservice
 	return meter, true
 }
 
-func adminUsageMeterDTO(r *httprequest.Request, meter billingservice.UsageMeterDTO) adminUsageMeterResponse {
+func adminUsageMeterDTO(r *httprequest.Request, meter billingservice.UsageMeterDTO) AdminUsageMeterResponse {
 	source, writesAllowed := adminCatalogOwnership(r)
-	return adminUsageMeterResponse{
+	return AdminUsageMeterResponse{
 		UsageMeterDTO:       meter,
 		ConfigurationSource: source,
 		WritesAllowed:       writesAllowed,
@@ -257,14 +257,14 @@ func adminUsageMeterDTO(r *httprequest.Request, meter billingservice.UsageMeterD
 
 func adminUsageMeterPageDTO(
 	r *httprequest.Request,
-	items []adminUsageMeterResponse,
+	items []AdminUsageMeterResponse,
 	total int64,
 	limit int,
 	offset int,
-) adminUsageMeterPageResponse {
+) AdminUsageMeterPageResponse {
 	source, writesAllowed := adminCatalogOwnership(r)
-	return adminUsageMeterPageResponse{
-		paginatedResponse: paginatedResponse[adminUsageMeterResponse]{
+	return AdminUsageMeterPageResponse{
+		PaginatedResponse: PaginatedResponse[AdminUsageMeterResponse]{
 			Items:  items,
 			Total:  total,
 			Limit:  limit,

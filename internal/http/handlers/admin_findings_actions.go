@@ -382,13 +382,13 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 		return paramErrorf("refund payment %s not found", paymentID)
 	}
 	// Without an explicit amount the remaining refundable amount is refunded.
-	request := refundRequest{Full: true, Reason: reason}
+	request := RefundRequest{Full: true, Reason: reason}
 	if raw, ok := params["amount"]; ok && raw != nil {
 		parsed, perr := paramAmountMicros(raw)
 		if perr != nil {
 			return perr
 		}
-		request = refundRequest{Amount: parsed, Reason: reason}
+		request = RefundRequest{Amount: parsed, Reason: reason}
 	}
 	if revoke, ok := params["revoke_access"].(bool); ok {
 		request.RevokeAccess = revoke

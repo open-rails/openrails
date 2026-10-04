@@ -1,8 +1,6 @@
 package server
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -17,11 +15,13 @@ func (s *Server) registerMerchantAccountRoutes(mux router.Registrar) {
 	if s.controlPlane == nil {
 		return
 	}
-	user := httproutes.Options{Authenticator: s.authenticator}.RequireUser()
-	rr := router.NewMuxRecorded(mux, StandaloneV1Prefix+"/merchants", s.runtime, s.recordRoute)
-	rr.Handle(http.MethodGet, "", router.Handler(standalonehandlers.MerchantListMine(s.controlPlane)), user)
-	if s.controlPlane.MerchantCreationEnabled() {
-		rr.Handle(http.MethodPost, "", router.Handler(standalonehandlers.MerchantCreate(s.controlPlane)),
-			user, middleware.VelocityLimit(middleware.MerchantCreationVelocity, s.rdb, s.trustedProxies()))
-	}
+	httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix, s.runtime, s.recordRoute), s.runtime, httproutes.Options{
+		Authenticator: s.authenticator,
+		External: httproutes.External{
+			ListMerchants:           router.Handler(standalonehandlers.MerchantListMine(s.controlPlane)),
+			CreateMerchant:          router.Handler(standalonehandlers.MerchantCreate(s.controlPlane)),
+			MerchantCreationEnabled: s.controlPlane.MerchantCreationEnabled(),
+			MerchantCreationLimit:   middleware.VelocityLimit(middleware.MerchantCreationVelocity, s.rdb, s.trustedProxies()),
+		},
+	})
 }

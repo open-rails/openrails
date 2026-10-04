@@ -92,7 +92,7 @@ func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.Pa
 	return payment
 }
 
-type userPaymentObject struct {
+type UserPaymentObject struct {
 	ID             billing.PaymentID       `json:"id"`
 	Object         string                  `json:"object"`
 	Status         string                  `json:"status,omitempty"`
@@ -133,9 +133,9 @@ func paymentCardFromModel(p *models.Payment) *paymentCardJSON {
 	return &paymentCardJSON{Brand: brand, Last4: last4}
 }
 
-func PaymentToUserAPI(p *models.Payment, amountRefunded int64) userPaymentObject {
+func PaymentToUserAPI(p *models.Payment, amountRefunded int64) UserPaymentObject {
 	payment := paymentToAPIWithRefundTotal(p, amountRefunded)
-	return userPaymentObject{
+	return UserPaymentObject{
 		ID:             payment.ID,
 		Object:         payment.Object,
 		Status:         payment.Status,

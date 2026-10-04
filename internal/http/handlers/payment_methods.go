@@ -40,7 +40,7 @@ const (
 	codePaymentMethodUpdateRetryRequired    = "payment_method_update_retry_required"
 )
 
-type listPaymentMethodsQuery struct {
+type ListPaymentMethodsQuery struct {
 	Limit  int `form:"limit"`
 	Offset int `form:"offset"`
 }
@@ -49,26 +49,22 @@ type paymentMethodURI struct {
 	ID string `uri:"id" binding:"required"`
 }
 
-type createPaymentMethodRequest struct {
-	PaymentToken   string `json:"payment_token" binding:"required_without=Card"`
-	NameOnCard     string `json:"name_on_card" binding:"omitempty"`
-	FirstName      string `json:"first_name" binding:"omitempty"`
-	LastName       string `json:"last_name" binding:"omitempty"`
-	Address1       string `json:"address1" binding:"omitempty"`
-	City           string `json:"city" binding:"omitempty"`
-	State          string `json:"state" binding:"omitempty"`
-	Zip            string `json:"zip" binding:"omitempty"`
-	PostalCode     string `json:"postal_code" binding:"omitempty"`
-	Country        string `json:"country" binding:"omitempty"`
-	BillingCountry string `json:"billing_country" binding:"omitempty"`
-	Phone          string `json:"phone" binding:"omitempty"`
-	Email          string `json:"email" binding:"omitempty,email"`
-	Company        string `json:"company" binding:"omitempty"`
-	Address2       string `json:"address2" binding:"omitempty"`
-	Provider       string `json:"provider" binding:"omitempty"`
-	LastFour       string `json:"last_four" binding:"omitempty"`
-	CardType       string `json:"card_type" binding:"omitempty"`
-	ExpiryDate     string `json:"expiry_date" binding:"omitempty"`
+type CreatePaymentMethodRequest struct {
+	PaymentToken string `json:"payment_token" binding:"required_without=Card"`
+	NameOnCard   string `json:"name_on_card" binding:"omitempty"`
+	Address1     string `json:"address1" binding:"omitempty"`
+	City         string `json:"city" binding:"omitempty"`
+	State        string `json:"state" binding:"omitempty"`
+	Zip          string `json:"zip" binding:"omitempty"`
+	Country      string `json:"country" binding:"omitempty"`
+	Phone        string `json:"phone" binding:"omitempty"`
+	Email        string `json:"email" binding:"omitempty,email"`
+	Company      string `json:"company" binding:"omitempty"`
+	Address2     string `json:"address2" binding:"omitempty"`
+	Provider     string `json:"provider" binding:"omitempty"`
+	LastFour     string `json:"last_four" binding:"omitempty"`
+	CardType     string `json:"card_type" binding:"omitempty"`
+	ExpiryDate   string `json:"expiry_date" binding:"omitempty"`
 
 	// Card is the card itself, for a PSP whose card_entry is server (#1129).
 	Card *cardguard.Card `json:"card,omitempty"`
@@ -84,26 +80,22 @@ type createPaymentMethodRequest struct {
 	RawVerificationValue *json.RawMessage `json:"verification_value,omitempty"`
 }
 
-type updatePaymentMethodRequest struct {
-	PaymentToken   string  `json:"payment_token" binding:"required_without=Card"`
-	NameOnCard     *string `json:"name_on_card"`
-	FirstName      *string `json:"first_name"`
-	LastName       *string `json:"last_name"`
-	Address1       *string `json:"address1"`
-	City           *string `json:"city"`
-	State          *string `json:"state"`
-	Zip            *string `json:"zip"`
-	PostalCode     *string `json:"postal_code"`
-	Country        *string `json:"country"`
-	BillingCountry *string `json:"billing_country"`
-	Phone          *string `json:"phone"`
-	Email          *string `json:"email" binding:"omitempty,email"`
-	Company        *string `json:"company"`
-	Address2       *string `json:"address2"`
-	Provider       *string `json:"provider"`
-	LastFour       *string `json:"last_four" binding:"omitempty"`
-	CardType       *string `json:"card_type" binding:"omitempty"`
-	ExpiryDate     *string `json:"expiry_date" binding:"omitempty"`
+type UpdatePaymentMethodRequest struct {
+	PaymentToken string  `json:"payment_token" binding:"required_without=Card"`
+	NameOnCard   *string `json:"name_on_card"`
+	Address1     *string `json:"address1"`
+	City         *string `json:"city"`
+	State        *string `json:"state"`
+	Zip          *string `json:"zip"`
+	Country      *string `json:"country"`
+	Phone        *string `json:"phone"`
+	Email        *string `json:"email" binding:"omitempty,email"`
+	Company      *string `json:"company"`
+	Address2     *string `json:"address2"`
+	Provider     *string `json:"provider"`
+	LastFour     *string `json:"last_four" binding:"omitempty"`
+	CardType     *string `json:"card_type" binding:"omitempty"`
+	ExpiryDate   *string `json:"expiry_date" binding:"omitempty"`
 
 	// Card replaces the method's card, for a PSP whose card_entry is server.
 	Card *cardguard.Card `json:"card,omitempty"`
@@ -124,7 +116,7 @@ type rawCardField struct {
 	value *json.RawMessage
 }
 
-func (req *createPaymentMethodRequest) rejectRawCardFields() error {
+func (req *CreatePaymentMethodRequest) rejectRawCardFields() error {
 	return rejectRawCardFieldValues(
 		rawCardField{name: "card_number", value: req.RawCardNumber},
 		rawCardField{name: "number", value: req.RawNumber},
@@ -138,7 +130,7 @@ func (req *createPaymentMethodRequest) rejectRawCardFields() error {
 	)
 }
 
-func (req *updatePaymentMethodRequest) rejectRawCardFields() error {
+func (req *UpdatePaymentMethodRequest) rejectRawCardFields() error {
 	return rejectRawCardFieldValues(
 		rawCardField{name: "card_number", value: req.RawCardNumber},
 		rawCardField{name: "number", value: req.RawNumber},
@@ -163,7 +155,7 @@ func rejectRawCardFieldValues(fields ...rawCardField) error {
 
 type subscriptionSummary = billing.PaymentMethodSubscription
 
-type paymentMethodResponse = billing.PaymentMethod
+type PaymentMethodResponse = billing.PaymentMethod
 
 // paymentMethodHealth is the #589 DERIVED per-method health, computed at query
 // time (never a stored column). last_charge_* come from billing.payments via the
@@ -183,7 +175,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	req := new(createPaymentMethodRequest)
+	req := new(CreatePaymentMethodRequest)
 	if !r.BindJSON(req) {
 		return
 	}
@@ -194,8 +186,8 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	}
 
 	if req.Card != nil {
-		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", req.NameOnCard, req.FirstName, req.LastName, req.Address1, req.Address2,
-			req.City, req.State, req.Zip, req.PostalCode, req.Country, req.BillingCountry, req.Phone, req.Email, req.Company, req.Provider) {
+		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", req.NameOnCard, req.Address1, req.Address2,
+			req.City, req.State, req.Zip, req.Country, req.Phone, req.Email, req.Company, req.Provider) {
 			return
 		}
 	} else if strings.TrimSpace(req.PaymentToken) == "" {
@@ -275,19 +267,13 @@ func createPaymentMethodProviderError(err error) *api.APIError {
 	)
 }
 
-func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
+func toCreatePaymentMethodRequest(req *CreatePaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
 	lastFour := strings.TrimSpace(req.LastFour)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
 	}
-	country := strings.TrimSpace(req.BillingCountry)
-	if country == "" {
-		country = strings.TrimSpace(req.Country)
-	}
-	postalCode := strings.TrimSpace(req.PostalCode)
-	if postalCode == "" {
-		postalCode = strings.TrimSpace(req.Zip)
-	}
+	country := strings.TrimSpace(req.Country)
+	postalCode := strings.TrimSpace(req.Zip)
 
 	metadata := map[string]any{}
 	setMetadata := func(key, value string) {
@@ -310,8 +296,6 @@ func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string)
 		PaymentToken: req.PaymentToken,
 		Card:         req.Card,
 		NameOnCard:   req.NameOnCard,
-		FirstName:    req.FirstName,
-		LastName:     req.LastName,
 		Address1:     req.Address1,
 		City:         req.City,
 		State:        req.State,
@@ -334,7 +318,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if !r.BindURI(path) {
 		return
 	}
-	body := new(updatePaymentMethodRequest)
+	body := new(UpdatePaymentMethodRequest)
 	if !r.BindJSON(body) {
 		return
 	}
@@ -360,8 +344,8 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	trimmedToken := strings.TrimSpace(body.PaymentToken)
 	attemptKey := ""
 	if body.Card != nil {
-		if !cardFieldAdmitted(r, trimmedToken != "", optionalStrings(body.NameOnCard, body.FirstName, body.LastName, body.Address1, body.Address2,
-			body.City, body.State, body.Zip, body.PostalCode, body.Country, body.BillingCountry, body.Phone, body.Email, body.Company, body.Provider)...) {
+		if !cardFieldAdmitted(r, trimmedToken != "", optionalStrings(body.NameOnCard, body.Address1, body.Address2,
+			body.City, body.State, body.Zip, body.Country, body.Phone, body.Email, body.Company, body.Provider)...) {
 			return
 		}
 		// A retry of this replacement is recognised by its Idempotency-Key,
@@ -406,13 +390,11 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		AttemptKey:   attemptKey,
 		Provider:     body.Provider,
 		NameOnCard:   body.NameOnCard,
-		FirstName:    body.FirstName,
-		LastName:     body.LastName,
 		Address1:     body.Address1,
 		City:         body.City,
 		State:        body.State,
-		Zip:          firstNonNilString(body.PostalCode, body.Zip),
-		Country:      firstNonNilString(body.BillingCountry, body.Country),
+		Zip:          body.Zip,
+		Country:      body.Country,
 		Phone:        body.Phone,
 		Email:        body.Email,
 		Company:      body.Company,
@@ -484,17 +466,8 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(singlePaymentMethodToAPI(r, updated))
 }
 
-func firstNonNilString(values ...*string) *string {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
 func ListPaymentMethods(r *httprequest.Request) {
-	req := &listPaymentMethodsQuery{Limit: 20, Offset: 0}
+	req := &ListPaymentMethodsQuery{Limit: 20, Offset: 0}
 	if !r.BindQuery(req) {
 		return
 	}
@@ -670,7 +643,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 	}
 }
 
-func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) paymentMethodResponse {
+func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) PaymentMethodResponse {
 	card := &paymentMethodCardDetails{Brand: pm.CardType, Last4: pm.LastFour}
 	if pm.ExpiryDate != nil {
 		if month, year, err := sharedformat.ParseExpiry(*pm.ExpiryDate); err == nil {
@@ -690,7 +663,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 	}
 
 	metadata := paymentMethodMetadataToAPI(pm.Metadata)
-	return paymentMethodResponse{
+	return PaymentMethodResponse{
 		ID:             billing.PaymentMethodID(pm.ID).String(),
 		Object:         "payment_method",
 		Type:           "card",
@@ -809,8 +782,8 @@ func stringPtrFromMap(metadata map[string]string, key string) *string {
 	return &value
 }
 
-func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]models.PaymentMethodCharge) []paymentMethodResponse {
-	result := make([]paymentMethodResponse, len(methods))
+func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]models.PaymentMethodCharge) []PaymentMethodResponse {
+	result := make([]PaymentMethodResponse, len(methods))
 	for i, pm := range methods {
 		var charge *models.PaymentMethodCharge
 		if c, ok := charges[pm.ID]; ok {
@@ -825,7 +798,7 @@ func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]
 // subscription default or client-side "first card" inference participates.
 // Here the defaults are load-bearing (the response IS the payment methods), so
 // a loader failure is the caller's 500; the admin profile degrades instead.
-func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]paymentMethodResponse, bool) {
+func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]PaymentMethodResponse, bool) {
 	response := paymentMethodsToAPI(methods, paymentMethodCharges(r, methods))
 	stampDefaultPaymentMethod(r, methods, response)
 	if err := applyCollectionDefaults(r, payer, methods, response); err != nil {
@@ -840,7 +813,7 @@ func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity
 // onto its already-built API response. response must be index-aligned with
 // methods (paymentMethodsToAPI). The loader error is returned untouched so the
 // caller decides whether it is fatal.
-func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod, response []paymentMethodResponse) error {
+func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod, response []PaymentMethodResponse) error {
 	if len(methods) == 0 {
 		return nil
 	}
@@ -865,7 +838,7 @@ var loadCollectionPaymentMethodDefaults = func(r *httprequest.Request, payer ide
 
 // stampDefaultPaymentMethod marks the customer's default method on an
 // index-aligned response. Best-effort: a lookup failure leaves no mark.
-func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.PaymentMethod, response []paymentMethodResponse) {
+func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.PaymentMethod, response []PaymentMethodResponse) {
 	if r.State.PaymentMethodService == nil || len(methods) == 0 {
 		return
 	}
@@ -890,8 +863,8 @@ func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.Payment
 	}
 }
 
-func singlePaymentMethodToAPI(r *httprequest.Request, pm *models.PaymentMethod) paymentMethodResponse {
-	out := []paymentMethodResponse{paymentMethodToAPI(pm, nil)}
+func singlePaymentMethodToAPI(r *httprequest.Request, pm *models.PaymentMethod) PaymentMethodResponse {
+	out := []PaymentMethodResponse{paymentMethodToAPI(pm, nil)}
 	stampDefaultPaymentMethod(r, []*models.PaymentMethod{pm}, out)
 	return out[0]
 }

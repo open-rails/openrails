@@ -34,8 +34,6 @@ type checkoutSessionPaymentParams struct {
 	Wallet          string `json:"wallet,omitempty" binding:"omitempty"`
 	Email           string `json:"email,omitempty" binding:"omitempty,email"`
 	NameOnCard      string `json:"name_on_card,omitempty" binding:"omitempty,max=200"`
-	FirstName       string `json:"first_name,omitempty" binding:"omitempty,max=100"`
-	LastName        string `json:"last_name,omitempty" binding:"omitempty,max=100"`
 	Address1        string `json:"address1,omitempty" binding:"omitempty,max=200"`
 	City            string `json:"city,omitempty" binding:"omitempty,max=100"`
 	State           string `json:"state,omitempty" binding:"omitempty,max=50"`
@@ -49,7 +47,7 @@ type checkoutSessionPaymentParams struct {
 	Card *cardguard.Card `json:"card,omitempty"`
 }
 
-type checkoutSessionCreateRequest struct {
+type CheckoutSessionCreateRequest struct {
 	// Exactly one PriceID or PriceKey is required for purchase/subscribe. For solana_cancel /
 	// solana_tier_change it is optional (cancel uses the subscription's current
 	// price; tier-change uses new_price_id).
@@ -78,7 +76,7 @@ type checkoutSessionCreateRequest struct {
 	CancelURL  string `json:"cancel_url,omitempty" binding:"omitempty,url"`
 }
 
-type checkoutSessionConfirmRequest struct {
+type CheckoutSessionConfirmRequest struct {
 	Payment struct {
 		Capture   *billing.CustodianCaptureReference `json:"capture,omitempty"`
 		Rail      string                             `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi stripe"`
@@ -89,7 +87,7 @@ type checkoutSessionConfirmRequest struct {
 
 func CreateCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var req checkoutSessionCreateRequest
+	var req CheckoutSessionCreateRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -130,7 +128,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, Card: req.Payment.Card, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, Card: req.Payment.Card, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if checkout.CardAttemptFailed(resp, err) {
 		recordCardFailure(r)
@@ -210,7 +208,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return
 	}
-	var req checkoutSessionConfirmRequest
+	var req CheckoutSessionConfirmRequest
 	if !r.BindJSON(&req) {
 		return
 	}

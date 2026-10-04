@@ -9,7 +9,7 @@ import (
 
 // checkoutRoutingDryRunRequest is the dry-run body. Every field is a routing
 // INPUT: nothing here creates or mutates anything.
-type checkoutRoutingDryRunRequest struct {
+type CheckoutRoutingDryRunRequest struct {
 	// Supply exactly one explicit ID or opaque key.
 	PriceID  string `json:"price_id,omitempty"`
 	PriceKey string `json:"price_key,omitempty"`
@@ -27,7 +27,7 @@ type checkoutRoutingCandidateResponse struct {
 	Skip string `json:"skip,omitempty"`
 }
 
-type checkoutRoutingDryRunResponse struct {
+type CheckoutRoutingDryRunResponse struct {
 	Object string `json:"object"`
 	// Policy is who decided: explicit | merchant | default.
 	Policy string `json:"policy"`
@@ -48,7 +48,7 @@ type checkoutRoutingDryRunResponse struct {
 // checkout for this price would land on, and why every other candidate did not,
 // without creating a session.
 func MerchantDryRunCheckoutRouting(r *httprequest.Request) {
-	var req checkoutRoutingDryRunRequest
+	var req CheckoutRoutingDryRunRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -69,7 +69,7 @@ func MerchantDryRunCheckoutRouting(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	out := checkoutRoutingDryRunResponse{
+	out := CheckoutRoutingDryRunResponse{
 		Object:     "checkout_routing_decision",
 		Policy:     trace.Policy,
 		Rule:       trace.Rule,

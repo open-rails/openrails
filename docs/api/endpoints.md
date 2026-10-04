@@ -5,14 +5,18 @@ public port under the `/v1` prefix (plus unprefixed health probes and the `/auth
 control-plane mount). Embedded hosts mount a subset of the same route groups —
 `GET /v1/capabilities` reports which groups a deployment actually serves.
 
-All requests and responses are JSON unless noted. Non-2xx responses use the
-Stripe-shaped error envelope from `internal/api`:
+Every route, with its tier, permission and types, is in [routes.md](routes.md)
+and `api/openapi.json`, generated from the route catalog.
+
+All requests and responses are JSON unless noted. A request body may hold only
+the fields its route declares. Non-2xx responses use the error envelope of
+[errors.md](errors.md):
 
 ```json
 {
   "error": {
     "type": "invalid_request_error",
-    "code": "invalid_parameter",
+    "code": "invalid_param",
     "message": "Human readable description",
     "param": "optional_param_name"
   }
@@ -24,6 +28,9 @@ List endpoints use a Stripe-like list envelope:
 ```json
 { "object": "list", "data": [], "total": 0, "limit": 20, "offset": 0, "has_more": false }
 ```
+
+Cursor lists answer `{"data": [...], "next_cursor": "..."}`; `next_cursor` is
+null on the last page and is passed back as `?cursor=`.
 
 ## Authentication overview
 
@@ -42,8 +49,8 @@ issuer) carry a self-asserted `permissions` claim scoped to the issuer's
 merchant; human sessions are checked against the user's merchant-group role.
 The required permission is listed per route below. A human session also needs a
 recent sign-in for every `merchant:` permission except reads, the dashboard
-layout and host-event acknowledgement, whichever route (`/v1`, `/v2`, import,
-catalog) serves the operation: otherwise 403 `step_up_required` with the auth
+layout and host-event acknowledgement, whichever route (import, catalog,
+merchant API) serves the operation: otherwise 403 `step_up_required` with the auth
 provider's step-up methods in `metadata`. Delegated merchant requests
 use the same DPoP or native certificate profile as self-service requests.
 
@@ -99,7 +106,7 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
   - `rail` (optional) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`). Naming one pins it (never silently switched); omitting it hands the choice to the merchant's routing policy, which falls through unavailable PSPs and records the decision on the session's `routing_reason` (or#288)
   - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
   - `token_symbol` for `solana`; `flow` — `transfer_request` (default) or `transaction_request` (`wallet` required)
-  - billing details for `ccbill`: canonical `name_on_card`, `zip`, and ISO-3166 alpha-2 `country`; `address1`, `city`, and `state` are optional, and the verified email comes from the authenticated identity rather than this payload. Legacy `first_name`/`last_name` aliases remain accepted
+  - billing details for `ccbill`: canonical `name_on_card`, `zip`, and ISO-3166 alpha-2 `country`; `address1`, `city`, and `state` are optional, and the verified email comes from the authenticated identity rather than this payload
   - Stripe hosted Checkout collects its own email and billing address; those fields are not required in this request
 - `metadata` (optional string map)
 

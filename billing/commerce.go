@@ -178,9 +178,7 @@ type CheckoutPaymentOptions struct {
 	// country; its verified email comes from CheckoutCustomerIdentity. Street,
 	// city, and state are optional. Stripe hosted Checkout collects its own.
 	Email      string `json:"email"`
-	NameOnCard string `json:"name_on_card"` // Canonical full name; first/last are legacy aliases.
-	FirstName  string `json:"first_name"`
-	LastName   string `json:"last_name"`
+	NameOnCard string `json:"name_on_card"` // Full name as it appears on the card.
 	Address1   string `json:"address1"`
 	City       string `json:"city"`
 	State      string `json:"state"`

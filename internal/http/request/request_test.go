@@ -96,38 +96,111 @@ func TestBindingMatchesGinSemantics(t *testing.T) {
 	require.Error(t, NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/things/", nil), nil).ShouldBindURI(&uri{}))
 }
 
-// Bind failures answer with a stable client-safe message, never decoder text.
-func TestBindFailuresAnswerWithSafeMessages(t *testing.T) {
+// The one decoder: exactly one JSON value, no undeclared field, a coded and
+// client-safe refusal (never decoder text).
+func TestBindJSONIsStrict(t *testing.T) {
 	type body struct {
-		Name string `json:"name" binding:"required"`
+		Name   string `json:"name" binding:"required"`
+		Nested struct {
+			Count int `json:"count"`
+		} `json:"nested"`
 	}
 	for _, tc := range []struct {
-		name, body string
-		target     any
-		limit      int64
-		status     int
-		message    string
+		name, body, contentType string
+		target                  any
+		limit                   int64
+		status                  int
+		code, message, param    string
 	}{
-		{"empty body", "", &body{}, 0, 400, ""},
-		{"missing required", `{}`, &body{}, 0, 400, "name is invalid"},
-		{"malformed", `{"name":`, &body{}, 0, 400, "invalid_request"},
-		{"wrong type", `{"name":1}`, &body{}, 0, 400, "invalid_request"},
-		{"client-safe decoder error", `{}`, &retiredKeyBody{}, 0, 400, "role_id was removed: use scope_key"},
-		{"too large", `{"name":"ada"}`, &body{}, 4, 413, "request body too large"},
+		{"empty body", "", "", &body{}, 0, 400, "invalid_param", "empty_request_body", ""},
+		{"missing required", `{}`, "", &body{}, 0, 400, "invalid_param", "name is invalid", ""},
+		{"malformed", `{"name":`, "", &body{}, 0, 400, "invalid_param", "invalid_request", ""},
+		{"wrong type", `{"name":1}`, "", &body{}, 0, 400, "invalid_param", "name is invalid", "name"},
+		{"unknown field", `{"name":"ada","nmae":"typo"}`, "", &body{}, 0, 400, "unknown_field", "unknown field nmae", "nmae"},
+		{"unknown nested field", `{"name":"ada","nested":{"cuont":1}}`, "", &body{}, 0, 400, "unknown_field", "unknown field cuont", "cuont"},
+		{"two values", `{"name":"ada"}{"name":"bob"}`, "", &body{}, 0, 400, "invalid_param", "request body must be one JSON value", ""},
+		{"not json", `name=ada`, "application/x-www-form-urlencoded", &body{}, 0, 415, "unsupported_media_type", "", ""},
+		{"client-safe decoder error", `{}`, "", &retiredKeyBody{}, 0, 400, "invalid_param", "role_id was removed: use scope_key", ""},
+		{"too large", `{"name":"ada"}`, "", &body{}, 4, 413, "request_body_too_large", "request body too large", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(tc.body))
+			if tc.contentType != "" {
+				r.Header.Set("Content-Type", tc.contentType)
+			}
 			if tc.limit > 0 {
 				r.Body = http.MaxBytesReader(rec, r.Body, tc.limit)
 			}
 			require.False(t, NewHTTP(rec, r, nil).BindJSON(tc.target))
 			require.Equal(t, tc.status, rec.Code)
+			got := errorBody(t, rec).Error
+			require.Equal(t, tc.code, got.Code)
 			if tc.message != "" {
-				require.Equal(t, tc.message, errorBody(t, rec).Error.Message)
+				require.Equal(t, tc.message, got.Message)
+			}
+			if tc.param != "" {
+				require.NotNil(t, got.Param)
+				require.Equal(t, tc.param, *got.Param)
 			}
 		})
 	}
+
+	for _, contentType := range []string{"", "application/json", "application/json; charset=utf-8", "application/merge-patch+json"} {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(` {"name":"ada","nested":{"count":2}} `))
+		if contentType != "" {
+			r.Header.Set("Content-Type", contentType)
+		}
+		var got body
+		require.True(t, NewHTTP(rec, r, nil).BindJSON(&got), contentType)
+		require.Equal(t, "ada", got.Name)
+		require.Equal(t, 2, got.Nested.Count)
+	}
+
+	// An optional body may be absent, and is strict when present.
+	var optional body
+	rec := httptest.NewRecorder()
+	require.True(t, NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/x", nil), nil).BindOptionalJSON(&optional))
+	require.Empty(t, optional.Name)
+	rec = httptest.NewRecorder()
+	require.False(t, NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"name":"ada","extra":1}`)), nil).BindOptionalJSON(&optional))
+	require.Equal(t, "unknown_field", errorBody(t, rec).Error.Code)
+
+	// DecodeJSON hands the same refusal to a handler that answers it itself.
+	err := NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"extra":1}`)), nil).DecodeJSON(&optional)
+	var refusal *api.APIError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, "unknown_field", refusal.Code)
+}
+
+// A query value that does not parse as its field's type is refused, never
+// read as the default.
+func TestBindQueryRefusesMalformedValues(t *testing.T) {
+	type query struct {
+		Limit  int       `form:"limit"`
+		Active *bool     `form:"active"`
+		Since  time.Time `form:"since"`
+		Name   string    `form:"name"`
+	}
+	for _, tc := range []struct{ raw, param string }{
+		{"limit=ten", "limit"},
+		{"active=maybe", "active"},
+		{"since=yesterday", "since"},
+	} {
+		rec := httptest.NewRecorder()
+		require.False(t, NewHTTP(rec, httptest.NewRequest(http.MethodGet, "/x?"+tc.raw, nil), nil).BindQuery(&query{}), tc.raw)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		got := errorBody(t, rec).Error
+		require.Equal(t, "invalid_query", got.Code)
+		require.NotNil(t, got.Param)
+		require.Equal(t, tc.param, *got.Param)
+	}
+	var got query
+	require.True(t, NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x?limit=5&active=true&name=ada&unknown=1", nil), nil).BindQuery(&got))
+	require.Equal(t, 5, got.Limit)
+	require.True(t, *got.Active)
+	require.Equal(t, "ada", got.Name)
 }
 
 func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
@@ -168,7 +241,7 @@ func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
 			if tc.supplied != "" {
 				r.Header.Set("X-Request-ID", tc.supplied)
 			}
-			NewHTTP(rec, r, nil).APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, "card_declined", "declined"))
+			NewHTTP(rec, r, nil).APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, "card_declined", "declined"))
 			id := errorBody(t, rec).Error.RequestID
 			require.NotEmpty(t, id)
 			require.LessOrEqual(t, len(id), 128)
@@ -193,11 +266,11 @@ func TestRefusalLogLevel(t *testing.T) {
 		{func(r *Request) { r.ErrorJSON(http.StatusNotFound, "product_not_found") }, logrus.InfoLevel, 404},
 		{func(r *Request) { r.AbortJSON(http.StatusConflict, "conflict") }, logrus.InfoLevel, 409},
 		{func(r *Request) {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, "card_declined", "declined"))
-		}, logrus.InfoLevel, 400},
+			r.APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, "card_declined", "declined"))
+		}, logrus.InfoLevel, 402},
 		{func(r *Request) { r.ErrorJSON(http.StatusInternalServerError, "boom") }, logrus.ErrorLevel, 500},
 		{func(r *Request) {
-			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "unavailable", "down"))
+			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "service_unavailable", "down"))
 		}, logrus.ErrorLevel, 503},
 	} {
 		hook.Reset()

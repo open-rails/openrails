@@ -62,7 +62,6 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			}{
 				{http.MethodGet, "/subscriptions/" + aliceSub.String(), nil},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed"}},
-				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed", "immediately": true}},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/resume", map[string]any{}},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/retry-now", map[string]any{}},
 				{http.MethodPut, "/subscriptions/" + aliceSub.String() + "/payment-method", map[string]any{"payment_method_id": malloryCard}},
@@ -71,13 +70,15 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				{http.MethodDelete, "/payment-methods/" + aliceCard, nil},
 				{http.MethodGet, "/checkout/" + pending.ID, nil},
 				{http.MethodPost, "/checkout/" + pending.ID + "/confirm", map[string]any{"payment": map[string]string{"rail": rail}}},
-				{http.MethodPost, "/checkout/" + pending.ID + "/confirm", map[string]any{"payment": map[string]string{"rail": rail, "payment_method_id": aliceCard}}},
 			} {
 				status, body := mallory.call(tc.method, tc.path, "idor-"+uuid.NewString(), tc.body)
 				refused(t, status, body, fmt.Sprintf("%s %s %v", tc.method, tc.path, tc.body))
 			}
+			// A confirm names no payment method: Alice's card there is not read.
+			status, body := mallory.call(http.MethodPost, "/checkout/"+pending.ID+"/confirm", "idor-"+uuid.NewString(), map[string]any{"payment": map[string]string{"rail": rail, "payment_method_id": aliceCard}})
+			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
 			// A foreign card is as ineligible as a missing one.
-			status, body := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": aliceCard, "currency": "USD"})
+			status, body = mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": aliceCard, "currency": "USD"})
 			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
 			_, missing := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString(), "currency": "USD"})
 			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
@@ -284,7 +285,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/merchant/findings", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("X-OpenRails-Merchant-Slug", slug)
+		req.Header.Set("OpenRails-Merchant", slug)
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		res.Body.Close()

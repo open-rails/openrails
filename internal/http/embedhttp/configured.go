@@ -87,9 +87,9 @@ func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*
 		entry.Path = "/billing" + entry.Path
 		table.Entries = append(table.Entries, entry)
 	}
-	router.AddMerchantSelectorRoutes(table, "/billing", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+	router.ResolveMerchantSelectors(table, "/billing", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-	})
+	}, CustomerPrefixes("/billing", cfg.CustomerRoutes)...)
 	return table, nil
 }
 

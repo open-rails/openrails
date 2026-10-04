@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
@@ -72,17 +70,8 @@ func providerOperationService(r *httprequest.Request, body any) (*billingservice
 	if !requireMerchantRoutePrincipal(r) {
 		return nil, false
 	}
-	if body != nil {
-		decoder := json.NewDecoder(r.Request.Body)
-		decoder.DisallowUnknownFields()
-		err := decoder.Decode(body)
-		if err == nil && decoder.Decode(&json.RawMessage{}) != io.EOF {
-			err = errors.New("request body must contain exactly one JSON object")
-		}
-		if err != nil {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, err.Error()))
-			return nil, false
-		}
+	if body != nil && !r.BindJSON(body) {
+		return nil, false
 	}
 	return newAdminBillingService(r)
 }

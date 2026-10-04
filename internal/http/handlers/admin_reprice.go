@@ -24,7 +24,7 @@ func writeRepriceError(r *httprequest.Request, err error) {
 	writeRefusal(r, err, "reprice operation failed")
 }
 
-type createSubscriptionRepriceRequest struct {
+type CreateSubscriptionRepriceRequest struct {
 	// ToPrice accepts either a price UUID/opaque id or a #774 price_key.
 	ToPrice     string    `json:"to_price"`
 	EffectiveAt time.Time `json:"effective_at"`
@@ -43,7 +43,7 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 		return
 	}
 	subscriptionID := typedSubscriptionID.UUID()
-	var req createSubscriptionRepriceRequest
+	var req CreateSubscriptionRepriceRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -81,7 +81,7 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, subscriptions.SubscriptionRepriceViewOf(out))
 }
 
-type repriceAllPriorVersionsRequest struct {
+type RepriceAllPriorVersionsRequest struct {
 	PriceKey    string    `json:"price_key"`
 	EffectiveAt time.Time `json:"effective_at"`
 	// AcknowledgeShortNotice (#781): see createSubscriptionRepriceRequest.
@@ -92,7 +92,7 @@ type repriceAllPriorVersionsRequest struct {
 // RepriceAllPriorVersions bulk-schedules every active subscription pinned to
 // a prior version of price_key to move to its current price.
 func RepriceAllPriorVersions(r *httprequest.Request) {
-	var req repriceAllPriorVersionsRequest
+	var req RepriceAllPriorVersionsRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -163,7 +163,7 @@ func ListRepriceBatchesByKey(r *httprequest.Request) {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[subscriptions.RepriceBatchView]{
+	r.JSON(http.StatusOK, PaginatedResponse[subscriptions.RepriceBatchView]{
 		Items:  subscriptions.RepriceBatchViews(items),
 		Total:  int64(len(items)),
 		Limit:  limit,
@@ -208,7 +208,7 @@ func ListSubscriptionReprices(r *httprequest.Request) {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[subscriptions.SubscriptionRepriceView]{
+	r.JSON(http.StatusOK, PaginatedResponse[subscriptions.SubscriptionRepriceView]{
 		Items:  subscriptions.SubscriptionRepriceViews(items),
 		Total:  int64(len(items)),
 		Limit:  limit,

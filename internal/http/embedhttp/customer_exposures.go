@@ -45,6 +45,18 @@ func validateCustomerRoutes(exposures []config.CustomerRoutesConfig, auth *billi
 	return nil
 }
 
+// CustomerPrefixes are the paths, beneath mount, at which the exposures serve
+// customer routes.
+func CustomerPrefixes(mount string, exposures []config.CustomerRoutesConfig) []string {
+	out := make([]string, 0, len(exposures))
+	for _, e := range exposures {
+		if e.Prefix != "" {
+			out = append(out, mount+e.Prefix)
+		}
+	}
+	return out
+}
+
 // BuildCustomerRoutes builds additional customer audiences from the same
 // authoritative registrations used by the canonical customer surface.
 func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutesConfig, auth *billingauth.Integration) (*router.Table, error) {

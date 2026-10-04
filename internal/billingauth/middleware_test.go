@@ -47,7 +47,7 @@ func TestRequiredAndOptionalGateOnUUIDSubject(t *testing.T) {
 			require.Contains(t, body.Error.Message, tc.reqMessage)
 			if tc.reqStatus == 401 {
 				require.Equal(t, "authentication_error", body.Error.Type)
-				require.Equal(t, "unauthorized", body.Error.Code)
+				require.Equal(t, "authentication_required", body.Error.Code)
 			}
 		}
 

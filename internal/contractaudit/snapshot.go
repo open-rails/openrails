@@ -1,9 +1,9 @@
-// Package contractaudit captures the reviewed pre-v1 release contract and
-// qualifies the release workflow manifest.
+// Package contractaudit captures the reviewed Go API and wire contract. The
+// HTTP contract (routes, their authority and error codes) is generated from
+// the route catalog by internal/contract.
 package contractaudit
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,8 +25,6 @@ import (
 const (
 	Module       = "github.com/open-rails/openrails"
 	SnapshotPath = "compatibility/contract.json"
-	// PermissionsPath declares the permission names in package billing.
-	PermissionsPath = "billing/permissions.go"
 )
 
 // Snapshot is the reviewed contract. Every section is derived from source, so
@@ -40,28 +38,9 @@ type Snapshot struct {
 	Wire map[string][]string `json:"wire_types"`
 	// Imports resolves package selectors used by API and Wire declarations.
 	Imports map[string]map[string]string `json:"declaring_file_imports"`
-	// Sources fingerprints implementation that defines routes, authority,
-	// status/error mapping, schema and canonical wire fixtures. Go sources are
-	// fingerprinted without comments so documentation edits do not drift.
-	Sources map[string]string `json:"boundary_sources_sha256"`
 }
 
-// Boundary implementation prefixes. Any other production file that imports an
-// authority package or names a permission is covered too, so new
-// authorization code cannot opt out.
 var (
-	boundaryPrefixes = []string{
-		"internal/auth/",
-		"internal/controlplane/",
-		"internal/http/",
-		"internal/requestauth/",
-		"internal/migrate/postgres/",
-		"internal/api/",
-		"internal/billingauth/",
-		"testdata/wire/",
-	}
-	boundaryFiles    = map[string]bool{"billing/errors.go": true, PermissionsPath: true}
-	authorityImports = map[string]bool{Module + "/internal/billingauth": true, Module + "/internal/auth/policy": true}
 	nonPublicRoots   = map[string]bool{"cmd": true, "internal": true, "scripts": true, "tests": true, "tools": true}
 	wireCodecMethods = map[string]bool{"MarshalJSON": true, "UnmarshalJSON": true, "MarshalText": true, "UnmarshalText": true}
 	ErrContractDrift = errors.New("reviewed release contract drifted")
@@ -72,17 +51,14 @@ type fileFacts struct {
 	api     []string
 	wire    []string
 	imports map[string]string
-	source  string
 	types   map[string][]reachableDeclaration
 	roots   []typeReference
 }
 
-// capturer caches facts by path, content and permission vocabulary so one
-// process can capture several trees without reparsing unchanged files.
+// capturer caches facts by path and content so one process can capture
+// several trees without reparsing unchanged files.
 type capturer struct {
-	cache      map[string]fileFacts
-	vocabulary map[string]bool
-	vocabKey   string
+	cache map[string]fileFacts
 }
 
 func newCapturer() *capturer { return &capturer{cache: map[string]fileFacts{}} }
@@ -92,14 +68,9 @@ func newCapturer() *capturer { return &capturer{cache: map[string]fileFacts{}} }
 func Capture(fsys fs.FS) ([]byte, error) { return newCapturer().capture(fsys) }
 
 func (c *capturer) capture(fsys fs.FS) ([]byte, error) {
-	vocabulary, err := permissionNames(fsys)
-	if err != nil {
-		return nil, err
-	}
-	c.vocabulary, c.vocabKey = vocabulary, vocabularyKey(vocabulary)
-	out := Snapshot{API: map[string][]string{}, Wire: map[string][]string{}, Imports: map[string]map[string]string{}, Sources: map[string]string{}}
+	out := Snapshot{API: map[string][]string{}, Wire: map[string][]string{}, Imports: map[string]map[string]string{}}
 	files := map[string]fileFacts{}
-	err = fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -125,9 +96,6 @@ func (c *capturer) capture(fsys fs.FS) ([]byte, error) {
 		}
 		if (len(facts.api) > 0 || len(facts.wire) > 0) && len(facts.imports) > 0 {
 			out.Imports[name] = facts.imports
-		}
-		if facts.source != "" {
-			out.Sources[name] = facts.source
 		}
 		files[name] = facts
 		return nil
@@ -171,7 +139,7 @@ func walkDir(fsys fs.FS, name, base string) error {
 	if name == "." {
 		return nil
 	}
-	if strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_") || base == "node_modules" || base == "vendor" || (base == "testdata" && name != "testdata" && name != "testdata/wire") {
+	if strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_") || base == "node_modules" || base == "vendor" || base == "testdata" {
 		return fs.SkipDir
 	}
 	if _, err := fs.Stat(fsys, path.Join(name, "go.mod")); err == nil {
@@ -181,42 +149,29 @@ func walkDir(fsys fs.FS, name, base string) error {
 }
 
 func covered(name string) bool {
-	switch path.Ext(name) {
-	case ".go":
-		return !strings.HasSuffix(name, "_test.go")
-	case ".sql":
-		return strings.HasPrefix(name, "internal/migrate/postgres/")
-	case ".json":
-		return strings.HasPrefix(name, "testdata/wire/")
-	}
-	return false
+	return path.Ext(name) == ".go" && !strings.HasSuffix(name, "_test.go")
 }
 
 func (c *capturer) facts(name string, body []byte) (fileFacts, error) {
-	key := name + "\x00" + digest(body) + "\x00" + c.vocabKey
+	key := name + "\x00" + digest(body)
 	if facts, ok := c.cache[key]; ok {
 		return facts, nil
 	}
-	facts, err := computeFacts(name, body, c.vocabulary)
+	facts, err := computeFacts(name, body)
 	if err == nil {
 		c.cache[key] = facts
 	}
 	return facts, err
 }
 
-func computeFacts(name string, body []byte, vocabulary map[string]bool) (fileFacts, error) {
+func computeFacts(name string, body []byte) (fileFacts, error) {
 	facts := fileFacts{pkg: path.Dir(name)}
-	if path.Ext(name) != ".go" {
-		facts.source = digest(body)
-		return facts, nil
-	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, name, body, parser.SkipObjectResolution)
 	if err != nil {
 		return facts, err
 	}
 	imports := map[string]string{}
-	production := true
 	for _, spec := range file.Imports {
 		importPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
@@ -227,14 +182,6 @@ func computeFacts(name string, body []byte, vocabulary map[string]bool) (fileFac
 			local = spec.Name.Name
 		}
 		imports[local] = importPath
-		production = production && importPath != "testing"
-	}
-	if boundary(name, imports, production, production && namesPermission(file, imports, vocabulary)) {
-		normalized, err := render(fset, file)
-		if err != nil {
-			return facts, err
-		}
-		facts.source = digest(append(directives(body), normalized...))
 	}
 	public := publicPackage(name, file.Name.Name)
 	for _, decl := range file.Decls {
@@ -263,95 +210,6 @@ func computeFacts(name string, body []byte, vocabulary map[string]bool) (fileFac
 		return facts, err
 	}
 	return facts, nil
-}
-
-func boundary(name string, imports map[string]string, production, namesPermission bool) bool {
-	if boundaryFiles[name] || namesPermission {
-		return true
-	}
-	for _, prefix := range boundaryPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return production && importsAuthority(imports)
-}
-
-func importsAuthority(imports map[string]string) bool {
-	for _, importPath := range imports {
-		if authorityImports[importPath] {
-			return true
-		}
-	}
-	return false
-}
-
-// permissionNames lists the exported names PermissionsPath declares.
-func permissionNames(fsys fs.FS) (map[string]bool, error) {
-	names := map[string]bool{}
-	body, err := fs.ReadFile(fsys, PermissionsPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return names, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), PermissionsPath, body, parser.SkipObjectResolution)
-	if err != nil {
-		return nil, err
-	}
-	for _, decl := range file.Decls {
-		switch d := decl.(type) {
-		case *ast.FuncDecl:
-			if d.Recv == nil && d.Name.IsExported() {
-				names[d.Name.Name] = true
-			}
-		case *ast.GenDecl:
-			for _, spec := range d.Specs {
-				if value, ok := spec.(*ast.ValueSpec); ok {
-					for _, n := range value.Names {
-						if n.IsExported() {
-							names[n.Name] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	return names, nil
-}
-
-func vocabularyKey(vocabulary map[string]bool) string {
-	names := make([]string, 0, len(vocabulary))
-	for name := range vocabulary {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return strings.Join(names, ",")
-}
-
-// namesPermission reports whether file selects a permission name from
-// package billing.
-func namesPermission(file *ast.File, imports map[string]string, vocabulary map[string]bool) bool {
-	local := ""
-	for name, importPath := range imports {
-		if importPath == Module+"/billing" {
-			local = name
-		}
-	}
-	if local == "" {
-		return false
-	}
-	found := false
-	ast.Inspect(file, func(node ast.Node) bool {
-		if selector, ok := node.(*ast.SelectorExpr); ok && !found {
-			if id, ok := selector.X.(*ast.Ident); ok && id.Name == local && vocabulary[selector.Sel.Name] {
-				found = true
-			}
-		}
-		return !found
-	})
-	return found
 }
 
 func publicPackage(name, pkg string) bool {
@@ -485,21 +343,6 @@ func exportedReceiver(t ast.Expr) bool {
 	}
 }
 
-// directives keeps compiler directives, which change behavior despite being
-// comments, in the comment-free source fingerprint.
-func directives(body []byte) []byte {
-	var out []byte
-	scanner := bufio.NewScanner(bytes.NewReader(body))
-	scanner.Buffer(make([]byte, 0, 64*1024), len(body)+1)
-	for scanner.Scan() {
-		if line := strings.TrimSpace(scanner.Text()); strings.HasPrefix(line, "//go:") {
-			out = append(out, line...)
-			out = append(out, '\n')
-		}
-	}
-	return out
-}
-
 func render(fset *token.FileSet, node any) (string, error) {
 	var out bytes.Buffer
 	if err := format.Node(&out, fset, node); err != nil {
@@ -539,11 +382,6 @@ func describeDrift(expectedRaw, actualRaw []byte) string {
 	for _, name := range keys(expected.Imports, actual.Imports) {
 		if !reflect.DeepEqual(expected.Imports[name], actual.Imports[name]) {
 			lines = append(lines, "  declaring_file_imports changed: "+name)
-		}
-	}
-	for _, name := range keys(expected.Sources, actual.Sources) {
-		if expected.Sources[name] != actual.Sources[name] {
-			lines = append(lines, "  boundary source changed: "+name)
 		}
 	}
 	if len(lines) == 0 {

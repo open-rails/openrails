@@ -1,11 +1,9 @@
 package server
 
 import (
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/standalonehandlers"
-	"net/http"
 )
 
 func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
@@ -20,43 +18,24 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 		}),
 		AdminLimiter: s.adminLimiter,
 	}
-	rr := router.NewMuxRecorded(mux, prefix, s.runtime, s.recordRoute)
-	// #757 merchant self-serve API keys: mint/list/revoke scoped credentials
-	// through AuthKit core. Gated on merchant:credentials:manage — the SAME
-	// string AuthKit's own mint authorization checks; only the merchant owner
-	// (merchant:*) holds it in the fixed #567 catalog. No MerchantDBConnMW:
-	// these handlers touch only the control plane, never the runtime DB.
+	// The control plane's own merchant routes: API keys (#757), the team (#760)
+	// and the merchant's name (#1106). Their handlers touch only the control
+	// plane, never the runtime DB.
 	if s.controlPlane != nil {
-		credentialsManage := opts.RequireMerchantPermission(billing.MerchantCredentialsManage)
-		apiKeys := rr.Group("/api-keys")
-		apiKeys.Handle(http.MethodPost, "", router.Handler(standalonehandlers.MerchantCreateAPIKey(s.controlPlane)), credentialsManage)
-		apiKeys.Handle(http.MethodGet, "", router.Handler(standalonehandlers.MerchantListAPIKeys(s.controlPlane)), credentialsManage)
-		apiKeys.Handle(http.MethodDelete, "/:id", router.Handler(standalonehandlers.MerchantRevokeAPIKey(s.controlPlane)), credentialsManage)
-	}
-
-	// #760 merchant team management: roster, invites (register+join links),
-	// role changes, and removal — all through AuthKit group membership. Reads
-	// gate on merchant:members:read; mutations on merchant:members:manage. Only
-	// the owner (merchant:*) holds either in the fixed #567 catalog, so the whole
-	// surface is owner-only (mirrors #757). No MerchantDBConnMW: control plane
-	// only. `/team/invites` (literal) and `/team/:user_id` never collide — they
-	// differ by segment shape/method.
-	if s.controlPlane != nil {
-		membersRead := opts.RequireMerchantPermission(billing.MerchantMembersRead)
-		membersManage := opts.RequireMerchantPermission(billing.MerchantMembersManage)
-		team := rr.Group("/team")
-		team.Handle(http.MethodGet, "", router.Handler(standalonehandlers.MerchantListTeam(s.controlPlane)), membersRead)
-		team.Handle(http.MethodGet, "/invites", router.Handler(standalonehandlers.MerchantListTeamInvites(s.controlPlane)), membersRead)
-		team.Handle(http.MethodPost, "/invites", router.Handler(standalonehandlers.MerchantInviteTeamMember(s.controlPlane)), membersManage)
-		team.Handle(http.MethodDelete, "/invites/:id", router.Handler(standalonehandlers.MerchantRevokeTeamInvite(s.controlPlane)), membersManage)
-		team.Handle(http.MethodPatch, "/:user_id", router.Handler(standalonehandlers.MerchantChangeTeamRole(s.controlPlane)), membersManage)
-		team.Handle(http.MethodDelete, "/:user_id", router.Handler(standalonehandlers.MerchantRemoveTeamMember(s.controlPlane)), membersManage)
-	}
-
-	// #1106: OpenRails owns merchant names; renaming is a settings change.
-	if s.controlPlane != nil {
-		rr.Handle(http.MethodPut, "/name", router.Handler(standalonehandlers.MerchantRename(s.controlPlane)),
-			opts.RequireMerchantPermission(billing.MerchantSettingsUpdate))
+		control := opts
+		control.External = httproutes.External{
+			RenameMerchant:   router.Handler(standalonehandlers.MerchantRename(s.controlPlane)),
+			CreateAPIKey:     router.Handler(standalonehandlers.MerchantCreateAPIKey(s.controlPlane)),
+			ListAPIKeys:      router.Handler(standalonehandlers.MerchantListAPIKeys(s.controlPlane)),
+			RevokeAPIKey:     router.Handler(standalonehandlers.MerchantRevokeAPIKey(s.controlPlane)),
+			ListTeam:         router.Handler(standalonehandlers.MerchantListTeam(s.controlPlane)),
+			ListTeamInvites:  router.Handler(standalonehandlers.MerchantListTeamInvites(s.controlPlane)),
+			InviteTeamMember: router.Handler(standalonehandlers.MerchantInviteTeamMember(s.controlPlane)),
+			RevokeTeamInvite: router.Handler(standalonehandlers.MerchantRevokeTeamInvite(s.controlPlane)),
+			ChangeTeamRole:   router.Handler(standalonehandlers.MerchantChangeTeamRole(s.controlPlane)),
+			RemoveTeamMember: router.Handler(standalonehandlers.MerchantRemoveTeamMember(s.controlPlane)),
+		}
+		httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordRoute), s.runtime, control)
 	}
 
 	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. Standalone

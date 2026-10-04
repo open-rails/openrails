@@ -594,7 +594,7 @@ func (w *world) merchantCall(token, method, path string) (int, string) {
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, nil)
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-OpenRails-Merchant-Slug", w.slug)
+	req.Header.Set("OpenRails-Merchant", w.slug)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
 	defer res.Body.Close()
@@ -670,7 +670,7 @@ func (c *customer) saveCard(rail string, card card) string {
 		return confirmed["payment_method_id"].(string)
 	case "nmi":
 		token := c.w.nmi.Tokenize(card)
-		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": c.w.psp["nmi"], "payment_token": token, "name_on_card": "E2E Payer"}))
+		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "payment_token": token, "name_on_card": "E2E Payer"}))
 		return saved["id"].(string)
 	}
 	c.w.t.Fatalf("unknown rail %s", rail)

@@ -113,7 +113,7 @@ func ListAdminInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 		for i := range items {
 			permittedInvoiceActions(&items[i], update, collect)
 		}
-		r.JSON(http.StatusOK, paginatedResponse[billingservice.MerchantInvoiceDTO]{Items: items, Total: total, Limit: limit, Offset: offset})
+		r.JSON(http.StatusOK, PaginatedResponse[billingservice.MerchantInvoiceDTO]{Items: items, Total: total, Limit: limit, Offset: offset})
 	}
 }
 
@@ -199,7 +199,7 @@ func ListAdminInvoicePayments(r *httprequest.Request) {
 		}
 		rows = append(rows, entry{item, scale})
 	}
-	r.JSON(http.StatusOK, paginatedResponse[entry]{Items: rows, Total: int64(total), Limit: limit, Offset: offset})
+	r.JSON(http.StatusOK, PaginatedResponse[entry]{Items: rows, Total: int64(total), Limit: limit, Offset: offset})
 }
 func MutateAdminInvoice(action billingservice.InvoiceAdminAction) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {

@@ -111,7 +111,7 @@ func merchantRoutePrincipal(r *httprequest.Request) (billingauth.Principal, bool
 func apiKeyMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
-		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+		r.ErrorCode(billing.CodeMerchantUnresolved, "")
 		return billing.MerchantID{}, false
 	}
 	return mid, true
@@ -160,7 +160,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
 					"cannot mint a key with authority beyond your own"))
 			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
-				r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+				r.ErrorCode(billing.CodeMerchantUnresolved, "")
 			default:
 				r.ErrorJSON(http.StatusInternalServerError, "failed to mint API key")
 			}
@@ -185,7 +185,7 @@ func MerchantListAPIKeys(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 		keys, err := svc.ListMerchantAPIKeys(r.Request.Context(), mid)
 		if err != nil {
 			if errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
-				r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+				r.ErrorCode(billing.CodeMerchantUnresolved, "")
 				return
 			}
 			r.ErrorJSON(http.StatusInternalServerError, "failed to list API keys")
@@ -207,7 +207,7 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 		if _, err := uuid.Parse(id); err != nil {
 			// Key ids are UUIDs; a malformed id can't match anything (and would
 			// otherwise error inside the ::uuid cast).
-			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found",
+			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound,
 				"no live API key with that id in this merchant"))
 			return
 		}
@@ -221,14 +221,14 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				return
 			}
 			if errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
-				r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+				r.ErrorCode(billing.CodeMerchantUnresolved, "")
 				return
 			}
 			r.ErrorJSON(http.StatusInternalServerError, "failed to revoke API key")
 			return
 		}
 		if !revoked {
-			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found",
+			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound,
 				"no API key with that id in this merchant"))
 			return
 		}

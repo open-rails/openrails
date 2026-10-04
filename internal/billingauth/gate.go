@@ -8,6 +8,7 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 )
 
 // Gate protects merchant-scoped routes.
@@ -39,8 +40,9 @@ type Principal struct {
 	Permissions []string
 }
 
-// GateError maps authorization failures to stable HTTP responses. Code, when
-// set, is the error's wire code, and Metadata its machine-readable context.
+// GateError maps authorization failures to stable HTTP responses. Code is the
+// error's wire code (a host hook that names none answers its status's generic
+// code), and Metadata its machine-readable context.
 type GateError struct {
 	Status   int
 	Message  string
@@ -48,7 +50,36 @@ type GateError struct {
 	Metadata map[string]any
 }
 
-func (e GateError) Error() string { return e.Message }
+func (e GateError) Error() string {
+	if e.Message == "" {
+		return e.Code
+	}
+	return e.Message
+}
+
+// Refusal is the GateError of a registered error code; message, when given,
+// replaces the code's meaning as the human text.
+func Refusal(code string, message ...string) GateError {
+	info, ok := billing.LookupErrorCode(code)
+	if !ok {
+		return GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "unregistered refusal " + code}
+	}
+	out := GateError{Status: info.Status, Code: info.Code, Message: info.Meaning}
+	if len(message) > 0 && message[0] != "" {
+		out.Message = message[0]
+	}
+	return out
+}
+
+// RefusalError is a refusal as the wire answers it: its code, or its status's
+// generic code when a host hook named none.
+func RefusalError(e GateError) *api.APIError {
+	if e.Code == "" {
+		simple := api.SimpleErrorResponse(e.Status, e.Message).Error
+		return api.NewAPIError(e.Status, simple.Type, simple.Code, e.Message)
+	}
+	return api.NewAPIError(e.Status, api.TypeForCode(e.Status, e.Code), e.Code, e.Message).WithMetadata(e.Metadata)
+}
 
 // ErrRecentSignInUnavailable is a native user's credential whose auth provider
 // cannot say how recently the user signed in.
@@ -70,9 +101,9 @@ func RequireRecentSignIn(ctx context.Context, p Principal, check func(context.Co
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrRecentSignInUnavailable):
-		return GateError{Status: http.StatusForbidden, Message: "step_up_unavailable"}
+		return Refusal(billing.CodeStepUpUnavailable)
 	case errors.Is(err, auth.ErrStepUpRequired):
-		refusal := GateError{Status: http.StatusForbidden, Message: "step_up_required", Code: "step_up_required"}
+		refusal := Refusal(billing.CodeStepUpRequired)
 		var challenge interface{ Metadata() map[string]any }
 		if errors.As(err, &challenge) {
 			refusal.Metadata = challenge.Metadata()
@@ -81,8 +112,8 @@ func RequireRecentSignIn(ctx context.Context, p Principal, check func(context.Co
 	case errors.Is(err, auth.ErrRevoked), errors.Is(err, auth.ErrExpired):
 		return authenticationFailure(err)
 	case errors.Is(err, auth.ErrForbidden):
-		return GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		return Refusal(billing.CodePermissionRequired)
 	default:
-		return GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
+		return Refusal(billing.CodeAuthorizationUnavailable)
 	}
 }

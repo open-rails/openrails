@@ -82,7 +82,7 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 // effectiveTierResponse is the GET /me/tier payload (or#912). Tier is null
 // when the user holds no active entitlement in the group — the host applies
 // its own default; "no tier" is a normal answer, never an error.
-type effectiveTierResponse struct {
+type EffectiveTierResponse struct {
 	Group string             `json:"group"`
 	Tier  *effectiveTierBody `json:"tier"`
 }
@@ -132,7 +132,7 @@ func GetMyTier(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve effective tier")
 		return
 	}
-	resp := effectiveTierResponse{Group: group}
+	resp := EffectiveTierResponse{Group: group}
 	if tier != nil {
 		resp.Tier = &effectiveTierBody{
 			Entitlement: tier.Entitlement,

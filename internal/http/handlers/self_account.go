@@ -39,7 +39,7 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	return payer, true
 }
 
-type selfBalanceResponse struct {
+type SelfBalanceResponse struct {
 	Currency      string `json:"currency"`
 	BalanceAmount int64  `json:"balance_amount,string"`
 }
@@ -64,15 +64,15 @@ func GetMyBalance(r *httprequest.Request) {
 		writeRefusal(r, err, "balance unavailable")
 		return
 	}
-	r.SuccessJSON(selfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
+	r.SuccessJSON(SelfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
 }
 
-type collectionPaymentMethodRequest struct {
+type CollectionPaymentMethodRequest struct {
 	Currency        string                  `json:"currency"`
 	PaymentMethodID billing.PaymentMethodID `json:"payment_method_id"`
 }
 
-type collectionPaymentMethodResponse struct {
+type CollectionPaymentMethodResponse struct {
 	Currency        string                  `json:"currency"`
 	PaymentMethodID billing.PaymentMethodID `json:"payment_method_id"`
 }
@@ -84,7 +84,7 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req collectionPaymentMethodRequest
+	var req CollectionPaymentMethodRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -114,7 +114,7 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to set collection payment method")
 		return
 	}
-	r.SuccessJSON(collectionPaymentMethodResponse{Currency: currency, PaymentMethodID: req.PaymentMethodID})
+	r.SuccessJSON(CollectionPaymentMethodResponse{Currency: currency, PaymentMethodID: req.PaymentMethodID})
 }
 
 // GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)

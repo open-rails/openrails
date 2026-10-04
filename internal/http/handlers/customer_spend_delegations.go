@@ -19,22 +19,22 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-type customerSpendDelegationsDocument struct {
+type CustomerSpendDelegationsDocument struct {
 	CustomerID  string                    `json:"customer_id,omitempty"`
-	Delegations []customerSpendDelegation `json:"delegations"`
+	Delegations []CustomerSpendDelegation `json:"delegations"`
 }
 
 // customerSpendDelegation is the shared Client wire type with strict decoding.
 // A per-delegation customer_id is an unknown field: the payer comes from the
 // path scope.
-type customerSpendDelegation billing.SpendDelegationInput
+type CustomerSpendDelegation billing.SpendDelegationInput
 
 // UnmarshalJSON keeps the delegation wire shape strict. or#893 deleted the
 // role_id alias for scope_key — one representation, {scope:"role",
 // scope_key:"<role uuid>"} — and strict decoding is the ONE mechanism that
 // enforces it: no sentinel field, and any other retired key fails the same way.
-func (d *customerSpendDelegation) UnmarshalJSON(raw []byte) error {
-	type declared customerSpendDelegation
+func (d *CustomerSpendDelegation) UnmarshalJSON(raw []byte) error {
+	type declared CustomerSpendDelegation
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var out declared
@@ -47,7 +47,7 @@ func (d *customerSpendDelegation) UnmarshalJSON(raw []byte) error {
 		}
 		return err
 	}
-	*d = customerSpendDelegation(out)
+	*d = CustomerSpendDelegation(out)
 	return nil
 }
 
@@ -81,7 +81,7 @@ func GetCustomerSpendDelegations(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "spend delegation lookup failed")
 		return
 	}
-	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(rows)})
+	r.SuccessJSON(CustomerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(rows)})
 }
 
 // PutCustomerSpendDelegations replaces the customer policy document.
@@ -91,7 +91,7 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 		return
 	}
 
-	var doc customerSpendDelegationsDocument
+	var doc CustomerSpendDelegationsDocument
 	if !r.BindJSON(&doc) {
 		return
 	}
@@ -114,7 +114,7 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromInputs(next)})
+	r.SuccessJSON(CustomerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromInputs(next)})
 }
 
 // PutCustomerSpendDelegation atomically upserts one addressed delegation and
@@ -125,11 +125,11 @@ func PutCustomerSpendDelegation(r *httprequest.Request) {
 		return
 	}
 
-	var delegation customerSpendDelegation
+	var delegation CustomerSpendDelegation
 	if !r.BindJSON(&delegation) {
 		return
 	}
-	next, err := validateCustomerSpendDelegations([]customerSpendDelegation{delegation})
+	next, err := validateCustomerSpendDelegations([]CustomerSpendDelegation{delegation})
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -143,14 +143,14 @@ func PutCustomerSpendDelegation(r *httprequest.Request) {
 		customerSpendDelegationWriteError(r, err, "spend delegation upsert failed")
 		return
 	}
-	r.SuccessJSON(customerSpendDelegation(next[0]))
+	r.SuccessJSON(CustomerSpendDelegation(next[0]))
 }
 
 // ServicePutCustomerSpendDelegations is the merchant-machine counterpart of
 // PutCustomerSpendDelegations. Route authentication pins the merchant; the
 // path names a payable customer within that merchant.
 func ServicePutCustomerSpendDelegations(r *httprequest.Request) {
-	var doc customerSpendDelegationsDocument
+	var doc CustomerSpendDelegationsDocument
 	if !r.BindJSON(&doc) {
 		return
 	}
@@ -171,17 +171,17 @@ func ServicePutCustomerSpendDelegations(r *httprequest.Request) {
 		customerSpendDelegationWriteError(r, err, "spend delegation replace failed")
 		return
 	}
-	r.SuccessJSON(customerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromInputs(next)})
+	r.SuccessJSON(CustomerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromInputs(next)})
 }
 
 // ServicePutCustomerSpendDelegation atomically reasserts one payer grant for a
 // merchant-authenticated machine caller without touching sibling grants.
 func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
-	var delegation customerSpendDelegation
+	var delegation CustomerSpendDelegation
 	if !r.BindJSON(&delegation) {
 		return
 	}
-	next, err := validateCustomerSpendDelegations([]customerSpendDelegation{delegation})
+	next, err := validateCustomerSpendDelegations([]CustomerSpendDelegation{delegation})
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -194,7 +194,7 @@ func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
 		customerSpendDelegationWriteError(r, err, "spend delegation upsert failed")
 		return
 	}
-	r.SuccessJSON(customerSpendDelegation(next[0]))
+	r.SuccessJSON(CustomerSpendDelegation(next[0]))
 }
 
 // DeleteCustomerSpendDelegation revokes exactly ONE addressed delegation
@@ -233,7 +233,7 @@ func deleteCustomerSpendDelegation(r *httprequest.Request, svc *billingservice.S
 		return
 	}
 	if !deleted {
-		r.ErrorJSON(http.StatusNotFound, "spend_delegation_not_found")
+		r.ErrorCode("spend_delegation_not_found", "")
 		return
 	}
 	r.SuccessJSON(map[string]any{"deleted": true})
@@ -294,7 +294,7 @@ func customerTreasuryStore(r *httprequest.Request) (*admission.InvokerSpendLimit
 	return admission.NewInvokerSpendLimitStore(r.State.DB), true
 }
 
-func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]billingservice.InvokerSpendLimitInput, error) {
+func validateCustomerSpendDelegations(in []CustomerSpendDelegation) ([]billingservice.InvokerSpendLimitInput, error) {
 	out := make([]billingservice.InvokerSpendLimitInput, 0, len(in))
 	for _, row := range in {
 		out = append(out, billingservice.InvokerSpendLimitInput(row))
@@ -302,8 +302,8 @@ func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]billingse
 	return billingservice.ValidateInvokerSpendLimitInputs(out)
 }
 
-func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []customerSpendDelegation {
-	out := make([]customerSpendDelegation, 0, len(rows))
+func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []CustomerSpendDelegation {
+	out := make([]CustomerSpendDelegation, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, customerSpendDelegationFromRow(row))
 	}
@@ -313,23 +313,23 @@ func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []cust
 	return out
 }
 
-func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpendDelegation {
+func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) CustomerSpendDelegation {
 	windows := make([]billing.SpendLimitWindow, 0, len(row.Windows))
 	for _, window := range row.Windows {
 		windows = append(windows, billing.SpendLimitWindow{
 			Key: window.Key, WindowSeconds: window.WindowSeconds, Limit: window.Limit, Currency: window.Currency,
 		})
 	}
-	return customerSpendDelegation{
+	return CustomerSpendDelegation{
 		Scope: budgets.NormalizeScope(row.Scope), ScopeKey: row.ScopeKey, Windows: windows,
 		Provenance: row.Provenance,
 	}
 }
 
-func customerSpendDelegationsFromInputs(rows []billingservice.InvokerSpendLimitInput) []customerSpendDelegation {
-	out := make([]customerSpendDelegation, 0, len(rows))
+func customerSpendDelegationsFromInputs(rows []billingservice.InvokerSpendLimitInput) []CustomerSpendDelegation {
+	out := make([]CustomerSpendDelegation, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, customerSpendDelegation(row))
+		out = append(out, CustomerSpendDelegation(row))
 	}
 	return out
 }

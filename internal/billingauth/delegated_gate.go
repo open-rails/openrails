@@ -26,18 +26,18 @@ func NewDelegatedGate(authn DelegatedAuthenticator) DelegatedGate {
 // Authorize implements Gate.
 func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permission string) (Principal, error) {
 	if g.authn == nil {
-		return Principal{}, GateError{Status: http.StatusInternalServerError, Message: "authorization unavailable"}
+		return Principal{}, GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "authorization unavailable"}
 	}
 	principal, err := g.authn.AuthenticateDelegated(ctx, r)
 	if err != nil {
-		return Principal{}, GateError{Status: http.StatusUnauthorized, Message: UnauthenticatedMessage(err)}
+		return Principal{}, Unauthenticated(err)
 	}
 	if !HasPermission(principal.Permissions, permission) {
-		return Principal{}, GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		return Principal{}, Refusal(billing.CodePermissionRequired)
 	}
 	mid, err := billing.ParseMerchantID(principal.MerchantID)
 	if err != nil {
-		return Principal{}, GateError{Status: http.StatusUnauthorized, Message: "delegated_principal_invalid"}
+		return Principal{}, Refusal(billing.CodeDelegatedPrincipalInvalid)
 	}
 	return Principal{
 		MerchantID:  mid,

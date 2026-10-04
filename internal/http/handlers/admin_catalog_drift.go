@@ -35,7 +35,7 @@ func AdminListCatalogDrift(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogDriftEventView]{
+	r.JSON(http.StatusOK, PaginatedResponse[billingservice.CatalogDriftEventView]{
 		Items:  items,
 		Total:  total,
 		Limit:  filter.Limit,

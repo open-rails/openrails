@@ -65,7 +65,7 @@ func (w *world) relayPay(c *customer, price, key string, payment map[string]any)
 	req, err := http.NewRequestWithContext(w.t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/merchant/checkout-sessions", bytes.NewReader(raw))
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+w.auth.token(w.t, "staff"))
-	req.Header.Set("X-OpenRails-Merchant-Slug", w.slug)
+	req.Header.Set("OpenRails-Merchant", w.slug)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", key)
 	res, err := http.DefaultClient.Do(req)
@@ -418,7 +418,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 
 	// Save a card: the customer route a payment-method panel posts to.
 	saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "Card Holder",
-		"address1": "1 Main St", "city": "Springfield", "state": "IL", "postal_code": "62701", "billing_country": "US",
+		"address1": "1 Main St", "city": "Springfield", "state": "IL", "zip": "62701", "country": "US",
 		// What a caller says about the card is ignored: the card names itself.
 		"last_four": "0000", "card_type": "amex", "expiry_date": "01/99"}))
 	method := saved["id"].(string)

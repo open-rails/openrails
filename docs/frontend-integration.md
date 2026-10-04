@@ -205,8 +205,8 @@ original response instead of double-charging.
 
 Render `name_on_card` as one visible input with `autocomplete="cc-name"`.
 OpenRails keeps that full value canonical and projects it onto provider-specific
-first/last fields only at the rail boundary. Legacy `first_name` and `last_name`
-request aliases remain accepted for existing integrations.
+first/last fields only at the rail boundary. `first_name` and `last_name` are
+not request fields: a body that names them is refused (`unknown_field`).
 
 CCBill uses the authenticated account's verified email; do not treat a browser
 `payment.email` value as identity. Its hosted-card API requires name, country,

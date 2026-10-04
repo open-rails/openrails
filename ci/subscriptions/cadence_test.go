@@ -170,7 +170,7 @@ func (w *world) staffJSON(method, path string, body any) (int, map[string]any) {
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, bytes.NewReader(raw))
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+w.auth.token(w.t, "staff"))
-	req.Header.Set("X-OpenRails-Merchant-Slug", w.slug)
+	req.Header.Set("OpenRails-Merchant", w.slug)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)

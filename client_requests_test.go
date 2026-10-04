@@ -45,11 +45,11 @@ func TestClientRequestShapes(t *testing.T) {
 	customer := billing.CustomerID(uuid.MustParse("7d5b4a0e-8c3f-4c1e-9b2a-1f0e2d3c4b5a")).String()
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
-		"/v2/merchant/admissions":                                  `{"items":[{"status":200,"result":{"allowed":true}}]}`,
-		"/v2/merchant/trust-level":                                 `{"currency":"USD","trust_level":"gold"}`,
-		"/v2/merchant/credits/deposit":                             `{"amount":"1"}`,
-		"/v2/merchant/users/" + customer + "/product-access":       `{"customer_id":"` + customer + `","product_id":"` + product + `","has_access":true,"data":[],"has_more":true,"next_cursor":"next"}`,
-		"/v2/merchant/users/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
+		"/v1/merchant/admissions":                                  `{"items":[{"status":200,"result":{"allowed":true}}]}`,
+		"/v1/merchant/trust-level":                                 `{"currency":"USD","trust_level":"gold"}`,
+		"/v1/merchant/credits/deposit":                             `{"amount":"1"}`,
+		"/v1/merchant/users/" + customer + "/product-access":       `{"customer_id":"` + customer + `","product_id":"` + product + `","has_access":true,"data":[],"has_more":true,"next_cursor":"next"}`,
+		"/v1/merchant/users/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
 	})
 	key := "operation-key"
 	who := billing.CheckoutCustomerIdentity{ID: customer}
@@ -66,7 +66,7 @@ func TestClientRequestShapes(t *testing.T) {
 		{"checkout purchase", func() error {
 			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{Customer: who, PriceID: billing.PriceID(uuid.New()).String(), IdempotencyKey: key})
 			return err
-		}, http.MethodPost, "/v2/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
 			require.Contains(t, b, "price_id")
 			require.NotContains(t, b, "subscription_id")
 			require.NotContains(t, b, "mode", "the endpoint selects the operation")
@@ -74,14 +74,14 @@ func TestClientRequestShapes(t *testing.T) {
 		{"payment method session", func() error {
 			_, err := client.CreatePaymentMethodSession(t.Context(), billing.CreatePaymentMethodSessionRequest{Customer: who, IdempotencyKey: key})
 			return err
-		}, http.MethodPost, "/v2/merchant/payment-method-sessions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/payment-method-sessions", "", func(t *testing.T, b map[string]any) {
 			require.NotContains(t, b, "price_id")
 			require.NotContains(t, b, "mode")
 		}},
 		{"solana cancel", func() error {
 			_, err := client.CreateSolanaCancelSession(t.Context(), billing.CreateSolanaCancelSessionRequest{Customer: who, SubscriptionID: billing.SubscriptionID(uuid.New()).String(), IdempotencyKey: key})
 			return err
-		}, http.MethodPost, "/v2/merchant/solana-cancel-sessions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/solana-cancel-sessions", "", func(t *testing.T, b map[string]any) {
 			require.Contains(t, b, "subscription_id")
 			require.NotContains(t, b, "price_id")
 			require.NotContains(t, b, "new_price_id")
@@ -89,7 +89,7 @@ func TestClientRequestShapes(t *testing.T) {
 		{"solana tier change", func() error {
 			_, err := client.CreateSolanaTierChangeSession(t.Context(), billing.CreateSolanaTierChangeSessionRequest{Customer: who, SubscriptionID: billing.SubscriptionID(uuid.New()).String(), NewPriceID: billing.PriceID(uuid.New()).String(), IdempotencyKey: key})
 			return err
-		}, http.MethodPost, "/v2/merchant/solana-tier-change-sessions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/solana-tier-change-sessions", "", func(t *testing.T, b map[string]any) {
 			require.Contains(t, b, "subscription_id")
 			require.Contains(t, b, "new_price_id")
 		}},
@@ -98,7 +98,7 @@ func TestClientRequestShapes(t *testing.T) {
 				BillingPolicies:       []billing.BillingPolicyInput{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
 				BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "api_line", Tier: "gold"}},
 			})
-		}, http.MethodPut, "/v2/merchant/settings", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPut, "/v1/merchant/settings", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, "api_line", b["billing_policies"].([]any)[0].(map[string]any)["name"])
 			binding := b["billing_policy_bindings"].([]any)[0].(map[string]any)
 			require.Equal(t, "api_line", binding["policy"])
@@ -107,7 +107,7 @@ func TestClientRequestShapes(t *testing.T) {
 		{"admission carries trust level and prospective rate", func() error {
 			_, err := client.AdmitBatch(t.Context(), []billing.AdmitRequest{{CustomerID: customer, TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: &expires, RequestID: "req_1", AccrualRateDeltaPerHour: 42}})
 			return err
-		}, http.MethodPost, "/v2/merchant/admissions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/admissions", "", func(t *testing.T, b map[string]any) {
 			item := b["items"].([]any)[0].(map[string]any)
 			require.Equal(t, "gold", item["trust_level"])
 			require.Equal(t, "42", item["accrual_rate_delta_per_hour"])
@@ -118,45 +118,45 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("trust level not decoded: " + level)
 			}
 			return err
-		}, http.MethodGet, "/v2/merchant/trust-level", "currency=USD&customer_id=" + customer, nil},
+		}, http.MethodGet, "/v1/merchant/trust-level", "currency=USD&customer_id=" + customer, nil},
 		{"deposit keys are opaque query values", func() error {
 			receipt, err := client.GetDeposit(t.Context(), customer, "../source/receipt?part=1&currency=JPY")
 			if err == nil && receipt.Amount != 1 {
 				err = errors.New("deposit amount not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v2/merchant/credits/deposit", "customer_id=" + customer + "&source_id=..%2Fsource%2Freceipt%3Fpart%3D1%26currency%3DJPY", nil},
+		}, http.MethodGet, "/v1/merchant/credits/deposit", "customer_id=" + customer + "&source_id=..%2Fsource%2Freceipt%3Fpart%3D1%26currency%3DJPY", nil},
 		{"delegation document replace", func() error {
 			return client.SetCustomerSpendDelegations(t.Context(), customer, []billing.SpendDelegationInput{{Scope: "invoker", ScopeKey: "invoker-1", Windows: window}})
-		}, http.MethodPut, "/v2/merchant/customers/" + customer + "/spend-delegations", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations", "", func(t *testing.T, b map[string]any) {
 			require.Len(t, b["delegations"], 1)
 		}},
 		{"delegation upsert", func() error {
 			return client.SetCustomerSpendDelegation(t.Context(), customer, billing.SpendDelegationInput{Scope: "invoker", ScopeKey: "issuer:subject", Windows: window})
-		}, http.MethodPut, "/v2/merchant/customers/" + customer + "/spend-delegations:upsert", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations:upsert", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, "issuer:subject", b["scope_key"])
 		}},
 		{"delegation delete escapes one segment per key", func() error {
 			return client.DeleteCustomerSpendDelegation(t.Context(), customer, " invoker ", "a/b:c")
-		}, http.MethodDelete, "/v2/merchant/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
+		}, http.MethodDelete, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
 		{"access check by id", func() error {
 			got, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: customer, ProductID: product})
 			if err == nil && !got.HasAccess {
 				err = errors.New("access not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v2/merchant/users/" + customer + "/product-access", "product_id=" + product, nil},
+		}, http.MethodGet, "/v1/merchant/users/" + customer + "/product-access", "product_id=" + product, nil},
 		{"access check by key", func() error {
 			_, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: customer, ProductKey: "pro plan&x"})
 			return err
-		}, http.MethodGet, "/v2/merchant/users/" + customer + "/product-access", "product_key=pro+plan%26x", nil},
+		}, http.MethodGet, "/v1/merchant/users/" + customer + "/product-access", "product_key=pro+plan%26x", nil},
 		{"access batch keeps duplicates", func() error {
 			got, err := client.ProductAccess.CheckMany(t.Context(), &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{product, product}})
 			if err == nil && !got[product] {
 				err = errors.New("batch access not decoded")
 			}
 			return err
-		}, http.MethodPost, "/v2/merchant/users/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/users/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{product, product}, b["product_ids"])
 		}},
 		{"access list pages", func() error {
@@ -165,7 +165,7 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("page not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v2/merchant/users/" + customer + "/product-access", "cursor=cursor&limit=7", nil},
+		}, http.MethodGet, "/v1/merchant/users/" + customer + "/product-access", "cursor=cursor&limit=7", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

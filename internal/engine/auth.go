@@ -65,9 +65,9 @@ func integration(deps config.Deps) (*billingauth.Integration, error) {
 			case err == nil, errors.As(err, &gate):
 				return err
 			case errors.Is(err, billingauth.ErrUnauthenticated):
-				return billingauth.GateError{Status: http.StatusUnauthorized, Message: billingauth.UnauthenticatedMessage(err)}
+				return billingauth.Unauthenticated(err)
 			case errors.Is(err, billingauth.ErrForbidden):
-				return billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+				return billingauth.Refusal(billing.CodePermissionRequired)
 			default:
 				return err
 			}

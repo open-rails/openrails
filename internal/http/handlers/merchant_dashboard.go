@@ -73,7 +73,7 @@ func GenerateDashboardWidget(r *httprequest.Request) {
 		Prompt    string          `json:"prompt"`
 		BaseQuery json.RawMessage `json:"base_query"`
 	}
-	if err := json.NewDecoder(r.Request.Body).Decode(&body); err != nil || strings.TrimSpace(body.Prompt) == "" {
+	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.Prompt) == "" {
 		r.ErrorJSON(http.StatusBadRequest, `body must be {"prompt":"<what the widget should show>","base_query":<optional existing query to refine>}`)
 		return
 	}

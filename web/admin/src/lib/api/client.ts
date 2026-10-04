@@ -9,6 +9,8 @@ import {
 } from "@openrails/auth-ui/client"
 import type { Guard } from "@openrails/auth-ui/react"
 
+import type { OpenRailsErrorCode } from "./generated/error-codes"
+
 export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
@@ -46,7 +48,7 @@ export function getBootstrap(): BootstrapConfig {
   return bootstrapConfig
 }
 
-// The merchant every request is made as (X-OpenRails-Merchant), kept for the
+// The merchant every request is made as (OpenRails-Merchant), kept for the
 // tab like the session.
 const MERCHANT_KEY = "openrails.admin.merchant"
 
@@ -74,11 +76,11 @@ export function bindStepUp(guard: Guard | null) {
   stepUp = guard ?? unguarded
 }
 
-// Stripe-shaped error envelope (internal/api).
+// Stripe-shaped error envelope (internal/api); codes are billing.ErrorCodes.
 export interface ApiErrorBody {
   error?: {
     type?: string
-    code?: string
+    code?: OpenRailsErrorCode
     message?: string
     param?: string
     metadata?: Record<string, unknown>
@@ -88,7 +90,7 @@ export interface ApiErrorBody {
 export class ApiError extends Error {
   status: number
   type?: string
-  code?: string
+  code?: OpenRailsErrorCode
   param?: string
   metadata?: Record<string, unknown>
 
@@ -148,7 +150,7 @@ async function send<T>(path: string, opts: RequestOptions): Promise<T> {
   const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers["Content-Type"] = "application/json"
   const merchant = selectedMerchant()
-  if (merchant) headers["X-OpenRails-Merchant"] = merchant
+  if (merchant) headers["OpenRails-Merchant"] = merchant
   const res = await session.authFetch(
     buildURL(getBootstrap().api_base_url, path, opts.query),
     {

@@ -3,49 +3,38 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
+	"sync"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// Error types matching Stripe's error taxonomy
+// Error envelope types (billing.ErrorType*).
 const (
-	// ErrorTypeInvalidRequest is for errors when the request has invalid parameters
-	ErrorTypeInvalidRequest = "invalid_request_error"
-	// ErrorTypeAuthentication is for errors with authentication (missing/invalid token)
-	ErrorTypeAuthentication = "authentication_error"
-	// ErrorTypeAuthorization is for errors when authenticated but not authorized
-	ErrorTypeAuthorization = "authorization_error"
-	// ErrorTypeAPI is for internal server errors
-	ErrorTypeAPI = "api_error"
-	// ErrorTypeCard is for card-related errors (declined, expired, etc.)
-	ErrorTypeCard = "card_error"
-	// ErrorTypeRateLimit is for rate limiting errors
-	ErrorTypeRateLimit = "rate_limit_error"
+	ErrorTypeInvalidRequest = billing.ErrorTypeInvalidRequest
+	ErrorTypeAuthentication = billing.ErrorTypeAuthentication
+	ErrorTypeAuthorization  = billing.ErrorTypeAuthorization
+	ErrorTypeAPI            = billing.ErrorTypeAPI
+	ErrorTypeCard           = billing.ErrorTypeCard
+	ErrorTypeRateLimit      = billing.ErrorTypeRateLimit
 )
 
-// Common error codes
+// Generic error codes (billing.Code*).
 const (
-	// Request validation errors
-	CodeInvalidParam         = "invalid_param"
-	CodeResourceNotFound     = "resource_not_found"
-	CodeResourceConflict     = "resource_conflict"
-	CodeIdempotencyKeyReused = "idempotency_key_reused"
-
-	// Authentication/authorization errors
-	CodeAuthRequired         = "authentication_required"
-	CodeResourceAccessDenied = "resource_access_denied"
-
-	// Payment/card errors
-	CodeInsufficientFunds   = "insufficient_funds"
-	CodeInsufficientCredits = "insufficient_credits"
-	CodePaymentFailed       = "payment_failed"
-
-	// Rate limiting
-	CodeRateLimitExceeded = "rate_limit_exceeded"
-
-	// Internal errors
-	CodeInternalError      = "internal_error"
-	CodeServiceUnavailable = "service_unavailable"
+	CodeInvalidParam         = billing.CodeInvalidParam
+	CodeResourceNotFound     = billing.CodeResourceNotFound
+	CodeResourceConflict     = billing.CodeResourceConflict
+	CodeIdempotencyKeyReused = billing.CodeIdempotencyKeyReused
+	CodeAuthRequired         = billing.CodeAuthenticationRequired
+	CodeResourceAccessDenied = billing.CodeResourceAccessDenied
+	CodeInsufficientFunds    = billing.CodeInsufficientFunds
+	CodeInsufficientCredits  = billing.CodeInsufficientCredits
+	CodePaymentFailed        = billing.CodePaymentFailed
+	CodeRateLimitExceeded    = billing.CodeRateLimitExceeded
+	CodeInternalError        = billing.CodeInternalError
+	CodeServiceUnavailable   = billing.CodeServiceUnavailable
 )
 
 // ErrorDetails contains the detailed error information (nested under "error" key)
@@ -77,6 +66,7 @@ func (e *APIError) Error() string {
 
 // ToResponse converts an APIError to an ErrorResponse for JSON serialization
 func (e *APIError) ToResponse() ErrorResponse {
+	observe(e.HTTPStatus, e.Code)
 	return ErrorResponse{
 		Error: ErrorDetails{
 			Type:      e.Type,
@@ -89,8 +79,23 @@ func (e *APIError) ToResponse() ErrorResponse {
 	}
 }
 
-// SimpleErrorResponse creates a Stripe-style error response from an HTTP status code and message.
-// The error type and code are inferred from the status code.
+// Coded is the refusal for a registered code: the registry fixes its status
+// and type. An empty message answers the code's meaning. New refusals are
+// built here; an unregistered code is a programming error and answers 500.
+func Coded(code, message string) *APIError {
+	info, ok := billing.LookupErrorCode(code)
+	if !ok {
+		observe(0, code)
+		return NewAPIError(http.StatusInternalServerError, ErrorTypeAPI, CodeInternalError, "internal error")
+	}
+	if message == "" {
+		message = info.Meaning
+	}
+	return &APIError{HTTPStatus: info.Status, Type: info.Type, Code: code, Message: message}
+}
+
+// SimpleErrorResponse answers a status with its generic code. Handlers that
+// know why they refuse use Coded instead.
 func SimpleErrorResponse(httpStatus int, message string) ErrorResponse {
 	errType, code := inferErrorTypeAndCode(httpStatus)
 	return ErrorResponse{
@@ -108,7 +113,16 @@ func ErrorTypeForStatus(httpStatus int) string {
 	return errType
 }
 
-// inferErrorTypeAndCode determines the error type and code from an HTTP status code
+// TypeForCode is a code's registered envelope type, or its status's category
+// for a code a host hook supplied.
+func TypeForCode(httpStatus int, code string) string {
+	if info, ok := billing.LookupErrorCode(code); ok {
+		return info.Type
+	}
+	return ErrorTypeForStatus(httpStatus)
+}
+
+// inferErrorTypeAndCode is the generic type and code of an HTTP status.
 func inferErrorTypeAndCode(httpStatus int) (errType string, code string) {
 	switch httpStatus {
 	case http.StatusBadRequest:
@@ -166,4 +180,39 @@ func (e *APIError) WithMetadata(metadata map[string]any) *APIError {
 // ConflictError creates an error for resource conflicts.
 func ConflictError(message string) *APIError {
 	return NewAPIError(http.StatusConflict, ErrorTypeInvalidRequest, CodeResourceConflict, message)
+}
+
+// violations are the answered codes billing's registry does not hold, by code.
+var violations sync.Map
+
+// observe records a code answered outside the registry: unregistered, or
+// under another status than the registry's. It is logged once; the e2e suites
+// fail on any (CodeViolations).
+func observe(status int, code string) {
+	if code == "" {
+		return
+	}
+	problem := ""
+	switch info, ok := billing.LookupErrorCode(code); {
+	case !ok:
+		problem = "error code " + code + " is not registered in billing.ErrorCodes"
+	case status != 0 && info.Status != status:
+		problem = fmt.Sprintf("error code %s answered %d; billing.ErrorCodes registers %d", code, status, info.Status)
+	default:
+		return
+	}
+	if _, seen := violations.LoadOrStore(problem, struct{}{}); !seen {
+		log.Error(problem)
+	}
+}
+
+// CodeViolations lists every code this process answered outside the registry.
+func CodeViolations() []string {
+	var out []string
+	violations.Range(func(key, _ any) bool {
+		out = append(out, key.(string))
+		return true
+	})
+	sort.Strings(out)
+	return out
 }

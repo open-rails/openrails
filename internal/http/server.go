@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -303,6 +304,12 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if err := s.registerAdminConsoleRoutes(mux); err != nil {
 		return nil, err
 	}
+
+	// A request that names its merchant has it resolved before its route
+	// authorizes, on the served handler and on the exported table alike.
+	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+		return merchanttarget.Resolve(ctx, r, s.runtime.Merchants, s.runtime.ConfiguredMerchant(), "")
+	})
 
 	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies())
 	s.publicHandler = s.wrapPublicHandler(mux.Handler())

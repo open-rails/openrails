@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -78,22 +77,19 @@ func MerchantCreate(svc MerchantCreator) func(*httprequest.Request) {
 }
 
 func merchantCreateError(r *httprequest.Request, err error) {
-	refuse := func(status int, code, message string) {
-		r.APIError(api.NewAPIError(status, api.ErrorTypeInvalidRequest, code, message))
-	}
 	switch {
 	case errors.Is(err, merchants.ErrInvalidName):
-		refuse(http.StatusBadRequest, "invalid_name", err.Error())
+		r.ErrorCode("invalid_name", err.Error())
 	case errors.Is(err, billing.ErrMerchantNameTaken):
-		refuse(http.StatusConflict, "name_taken", "that merchant name is taken")
+		r.ErrorCode("name_taken", "that merchant name is taken")
 	case errors.Is(err, billing.ErrMerchantSlugReserved):
-		refuse(http.StatusConflict, "name_reserved", "that merchant name is reserved")
+		r.ErrorCode("name_reserved", "that merchant name is reserved")
 	case errors.Is(err, billing.ErrMerchantCreationEmailUnverified):
-		refuse(http.StatusForbidden, "email_unverified", billing.ErrMerchantCreationEmailUnverified.Error())
+		r.ErrorCode("email_unverified", billing.ErrMerchantCreationEmailUnverified.Error())
 	case errors.Is(err, billing.ErrMerchantCreationPaymentMethodRequired):
-		refuse(http.StatusPaymentRequired, "payment_method_required", billing.ErrMerchantCreationPaymentMethodRequired.Error())
+		r.ErrorCode(billing.CodeMerchantCreationPaymentMethodRequired, billing.ErrMerchantCreationPaymentMethodRequired.Error())
 	case errors.Is(err, billing.ErrMerchantCreationRefused):
-		refuse(http.StatusForbidden, "creation_refused", "merchant creation refused")
+		r.ErrorCode("creation_refused", "merchant creation refused")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "merchant creation failed")
 	}

@@ -101,7 +101,7 @@ func call(t *testing.T, handler http.Handler, token, method, path, selector stri
 	r.Header.Set("Authorization", "Bearer "+token)
 	r.Header.Set("Content-Type", "application/json")
 	if selector != "" {
-		r.Header.Set("X-OpenRails-Merchant", selector)
+		r.Header.Set("OpenRails-Merchant", selector)
 	}
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)

@@ -81,7 +81,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				req, err := http.NewRequestWithContext(ctx, method, server.URL+"/v1/merchant/team"+path, data)
 				require.NoError(t, err)
 				req.Header.Set("Authorization", "Bearer "+token)
-				req.Header.Set("X-OpenRails-Merchant", slug)
+				req.Header.Set("OpenRails-Merchant", slug)
 				req.Header.Set("Content-Type", "application/json")
 				res, err := http.DefaultClient.Do(req)
 				require.NoError(t, err)

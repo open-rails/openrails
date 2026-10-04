@@ -121,34 +121,33 @@ func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			if resolver == nil {
-				r.AbortJSON(http.StatusInternalServerError, "delegated authentication not configured")
+				r.AbortCode(billing.CodeInternalError, "delegated authentication not configured")
 				return
 			}
 			token := requestAuthorizationToken(r.Request)
 			if token == "" {
-				r.AbortJSON(http.StatusUnauthorized, "delegated bearer token required")
+				r.AbortCode(billing.CodeAuthenticationRequired, "delegated bearer token required")
 				return
 			}
 			resolved, err := resolver.ResolveDelegated(r.Request)
 			if err != nil {
 				switch {
 				case errors.Is(err, auth.ErrExpired):
-					r.AbortJSON(http.StatusUnauthorized, "delegated_token_expired")
+					r.AbortCode(billing.CodeDelegatedTokenExpired, "")
 				case errors.Is(err, auth.ErrRevoked):
-					r.AbortJSON(http.StatusUnauthorized, "delegated_token_revoked")
+					r.AbortCode(billing.CodeDelegatedTokenRevoked, "")
 				case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved),
 					errors.Is(err, credential.ErrDelegatedIssuerUnknown):
-					r.AbortJSON(http.StatusForbidden, "delegated_merchant_unresolved")
+					r.AbortCode(billing.CodeDelegatedMerchantUnresolved, "")
 				case errors.Is(err, auth.ErrSenderProofRequired):
-					r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
-					r.AbortJSON(http.StatusUnauthorized, "sender_proof_required")
+					r.AbortGate(billingauth.Refusal(billing.CodeSenderProofRequired))
 				case errors.Is(err, credential.ErrDelegatedUnavailable):
-					r.AbortJSON(http.StatusServiceUnavailable, "delegated_verification_unavailable")
+					r.AbortCode(billing.CodeDelegatedVerificationUnavailable, "")
 				case errors.Is(err, credential.ErrDelegatedNotConfigured):
-					r.AbortJSON(http.StatusInternalServerError, "delegated authentication not configured")
+					r.AbortCode(billing.CodeInternalError, "delegated authentication not configured")
 				default:
 					log.WithError(err).Warn("delegated token resolution failed")
-					r.AbortJSON(http.StatusUnauthorized, "delegated_token_invalid")
+					r.AbortCode(billing.CodeDelegatedTokenInvalid, "")
 				}
 				return
 			}
@@ -169,22 +168,22 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) router
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			if authn == nil {
-				r.AbortJSON(http.StatusInternalServerError, "delegated authentication not configured")
+				r.AbortCode(billing.CodeInternalError, "delegated authentication not configured")
 				return
 			}
 			principal, err := authn.AuthenticateDelegated(r.Request.Context(), r.Request)
 			if err != nil {
 				var gate billingauth.GateError
 				if errors.As(err, &gate) && gate.Status >= 400 && gate.Status <= 599 {
-					r.AbortJSON(gate.Status, gate.Message)
+					r.AbortGate(gate)
 					return
 				}
-				r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
+				r.AbortGate(billingauth.Unauthenticated(err))
 				return
 			}
 			resolved, verr := credential.ResolvedDelegatedFromHostPrincipal(principal)
 			if verr != nil {
-				r.AbortJSON(http.StatusUnauthorized, "delegated_principal_invalid")
+				r.AbortCode(billing.CodeDelegatedPrincipalInvalid, "")
 				return
 			}
 			if !bindDelegated(r, resolved, CredentialHostDelegatedUser, principal.CredentialClass) {
@@ -251,11 +250,11 @@ func PayerScopedRequired() router.Middleware {
 		return func(r *request.Request) {
 			principal, ok := PrincipalFromRequest(r)
 			if !ok {
-				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
+				r.AbortCode(billing.CodeAuthenticationRequired, "bearer principal required")
 				return
 			}
 			if principal.InvokerScoped() {
-				r.AbortJSON(http.StatusForbidden, "invoker_scoped_principal")
+				r.AbortCode(billing.CodeInvokerScopedPrincipal, "")
 				return
 			}
 			next(r)
@@ -271,7 +270,7 @@ func RequirePermission(perm string) router.Middleware {
 		return func(r *request.Request) {
 			principal, ok := PrincipalFromRequest(r)
 			if !ok {
-				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
+				r.AbortCode(billing.CodeAuthenticationRequired, "bearer principal required")
 				return
 			}
 			if authority, native := nativeTreasuryFromRequest(r); native {
@@ -281,7 +280,7 @@ func RequirePermission(perm string) router.Middleware {
 				return
 			}
 			if !principal.Can(r.Request.Context(), perm) {
-				r.AbortJSON(http.StatusForbidden, "permission_required")
+				r.AbortCode(billing.CodePermissionRequired, "")
 				return
 			}
 			next(r)
@@ -383,11 +382,11 @@ func CustomerScopeRequired() router.Middleware {
 		return func(r *request.Request) {
 			resolved, ok := DelegatedFromRequest(r)
 			if !ok {
-				r.AbortJSON(http.StatusUnauthorized, "delegated principal required")
+				r.AbortCode(billing.CodeAuthenticationRequired, "delegated principal required")
 				return
 			}
 			if resolved.MerchantID.IsZero() {
-				r.AbortJSON(http.StatusUnauthorized, "delegated principal invalid")
+				r.AbortCode(billing.CodeDelegatedPrincipalInvalid, "")
 				return
 			}
 			var payer *TreasuryPayer
@@ -397,7 +396,7 @@ func CustomerScopeRequired() router.Middleware {
 				payer, ok = ResolveTreasuryPayer(r.Param("customer_id"), resolved)
 			}
 			if !ok {
-				r.AbortJSON(http.StatusForbidden, "customer_scope_mismatch")
+				r.AbortCode(billing.CodeCustomerScopeMismatch, "")
 				return
 			}
 			user := billingauth.UserContext{
