@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-func ownsInitialMembership(in gen.BillingRailIntent, user string, price uuid.UUID, fingerprint string, sessionID *uuid.UUID) error {
+func ownsInitialMembership(in gen.BillingProviderIntent, user string, price uuid.UUID, fingerprint string, sessionID *uuid.UUID) error {
 	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func ownsInitialMembership(in gen.BillingRailIntent, user string, price uuid.UUI
 	return nil
 }
 
-func initialMembershipReplayParams(in gen.BillingRailIntent) intents.EnqueueParams {
+func initialMembershipReplayParams(in gen.BillingProviderIntent) intents.EnqueueParams {
 	return intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, IntentType: in.IntentType, PriceID: in.PriceID, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: in.NextAttemptAt, Origin: intents.Origin(in.Origin)}
 }
 
@@ -64,7 +64,7 @@ func (s *CheckoutService) replayInitialMembership(ctx context.Context, req *Chec
 	if s.Intents == nil {
 		return nil, true, errors.New("enrollment executor unavailable")
 	}
-	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.BillingRailIntent) error {
+	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.BillingProviderIntent) error {
 		return ownsInitialMembership(in, user.ID, p.Terms.PriceID, fingerprint, nil)
 	})
 	if err != nil {
@@ -74,8 +74,8 @@ func (s *CheckoutService) replayInitialMembership(ctx context.Context, req *Chec
 	return response, true, err
 }
 
-func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *CheckoutRequest, user *UserIdentity, priceID uuid.UUID, method *models.PaymentMethod, target railTarget, key string) (gen.BillingRailIntent, error) {
-	var in gen.BillingRailIntent
+func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *CheckoutRequest, user *UserIdentity, priceID uuid.UUID, method *models.PaymentMethod, target railTarget, key string) (gen.BillingProviderIntent, error) {
+	var in gen.BillingProviderIntent
 	if method == nil || s.PurchaseService == nil || target.Scope == nil {
 		return in, errors.New("initial enrollment requires a saved instrument and provider account")
 	}

@@ -60,7 +60,7 @@ func TestCheckoutRailStateContracts(t *testing.T) {
 	}
 	const session = `"12345678-1234-4234-8234-123456789012"`
 	for _, raw := range []string{session, `"checkout_attempt:12345678-1234-4234-8234-123456789012"`, `"bad"`, `null`, `true`, `{}`} {
-		err := validateJSON("rail_intents.initial_membership.payload", `{"checkout_attempt_id":`+raw+`}`)
+		err := validateJSON("provider_intents.initial_membership.payload", `{"checkout_attempt_id":`+raw+`}`)
 		if (err == nil) != (raw == session) {
 			t.Errorf("session binding %s: %v", raw, err)
 		}
@@ -85,7 +85,7 @@ func TestRetainedIntentsNeedQualifiedEvidence(t *testing.T) {
 		{"refund with unqualified evidence", "nmi_refund", "succeeded", "null", `{"payment_id":"` + testMerchant + `"}`},
 		{"unsupported type with payload", "ccbill_cancel", "succeeded", `{"reason":"x"}`, `null`},
 	} {
-		cases = append(cases, rowCase{tc.name, "rail_intents", map[string]string{"intent_type": tc.typ, "status": tc.status, "payload": tc.payload, "result_evidence": tc.evidence}, false})
+		cases = append(cases, rowCase{tc.name, "provider_intents", map[string]string{"intent_type": tc.typ, "status": tc.status, "payload": tc.payload, "result_evidence": tc.evidence}, false})
 	}
 	checkRows(t, cases)
 }
@@ -142,8 +142,8 @@ func TestCollectionKeysAreBoundIdentities(t *testing.T) {
 	customer := func() map[string]string { return collectionIntent(t, "customer", "user", payer.String(), customerKey) }
 	merchant := func() map[string]string { return collectionIntent(t, "merchant", "admin", "", retryKey) }
 	cases := []rowCase{
-		{"customer key", "rail_intents", customer(), true},
-		{"merchant retry key", "rail_intents", merchant(), true},
+		{"customer key", "provider_intents", customer(), true},
+		{"merchant retry key", "provider_intents", merchant(), true},
 	}
 	for name, tc := range map[string]struct {
 		base   func() map[string]string
@@ -171,19 +171,19 @@ func TestCollectionKeysAreBoundIdentities(t *testing.T) {
 	} {
 		m := tc.base()
 		m[tc.field] = tc.mutate(m[tc.field])
-		cases = append(cases, rowCase{name, "rail_intents", m, false})
+		cases = append(cases, rowCase{name, "provider_intents", m, false})
 	}
 	// The key is exempt only in its own column.
 	leaked := customer()
 	leaked["origin_reason"] = customerKey
-	cases = append(cases, rowCase{"key in ordinary text", "rail_intents", leaked, false})
+	cases = append(cases, rowCase{"key in ordinary text", "provider_intents", leaked, false})
 	checkRows(t, cases)
 
 	resolved := `{"transaction_id":"sale-original","operator_resolution":{"actor":"operator","reason":"confirmed exact provider receipt","resolved_at":"2026-09-18T00:00:00Z","provider_reference":"sale-original"}}`
-	if err := validateJSON("rail_intents.invoice_collection.result_evidence", resolved); err != nil {
+	if err := validateJSON("provider_intents.invoice_collection.result_evidence", resolved); err != nil {
 		t.Fatalf("operator resolution evidence must be retained verbatim: %v", err)
 	}
-	if validateJSON("rail_intents.invoice_collection.result_evidence", `{"operator_resolution":{"actor":"operator","raw_provider_body":{}}}`) == nil {
+	if validateJSON("provider_intents.invoice_collection.result_evidence", `{"operator_resolution":{"actor":"operator","raw_provider_body":{}}}`) == nil {
 		t.Fatal("accepted raw operator evidence")
 	}
 }

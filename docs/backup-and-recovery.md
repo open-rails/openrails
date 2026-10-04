@@ -85,7 +85,7 @@ solely through the transfer insert trigger.
 - `ledger_transfers`, `ledger_accounts` — the double-entry ledger
 - `grants` — the grant log entitlements are derived from
 - `subscription_status_transitions`
-- `rail_intents` — the record of every external write attempted
+- `provider_intents` — the record of every external write attempted
 - webhook dedup records — rolling these back invites reprocessing events as new
 
 Selectively reverting any of these corrupts the audit trail rather than repairing it. A restore

@@ -15,7 +15,6 @@ import {
   getSubscription,
   getUsageMeter,
   getUnreadCount,
-  dryRunCheckoutRouting,
   listApiKeys,
   listCatalogDrift,
   listCustomerPaymentMethods,
@@ -24,7 +23,9 @@ import {
   listFindings,
   listNotifications,
   listPaymentAttempts,
-  listPaymentProviders,
+  listPSPs,
+  listRails,
+  previewPSPRouting,
   listPayments,
   listPrices,
   listProducts,
@@ -340,8 +341,7 @@ export const adminQueries = {
   checkoutRouting: (priceId: string) =>
     queryOptions({
       queryKey: [...queryKeys.catalog(), "prices", priceId, "routing"],
-      queryFn: ({ signal }) =>
-        dryRunCheckoutRouting({ price_id: priceId }, signal),
+      queryFn: ({ signal }) => previewPSPRouting({ price_id: priceId }, signal),
       enabled: Boolean(priceId),
       meta: { errorAction: "Check checkout readiness" },
     }),
@@ -403,11 +403,18 @@ export const adminQueries = {
       queryFn: ({ signal }) => getMerchantSettings(signal),
       meta: queryErrorMeta(errorAction),
     }),
-  paymentProviders: () =>
+  psps: () =>
     queryOptions({
-      queryKey: [...queryKeys.settings(), "payment-providers"],
-      queryFn: ({ signal }) => listPaymentProviders(signal),
-      meta: { errorAction: "Load payment providers" },
+      queryKey: [...queryKeys.settings(), "psps"],
+      queryFn: ({ signal }) => listPSPs(signal),
+      meta: { errorAction: "Load PSPs" },
+    }),
+  rails: () =>
+    queryOptions({
+      queryKey: [...queryKeys.settings(), "rails"],
+      queryFn: ({ signal }) => listRails(signal),
+      staleTime: Infinity,
+      meta: { errorAction: "Load rails" },
     }),
   apiKeys: () =>
     queryOptions({

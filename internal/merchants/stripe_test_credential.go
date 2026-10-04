@@ -44,7 +44,7 @@ func stripeBalanceCheck(ctx context.Context, secretKey string, clients *stripeap
 		return nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("%w: stripe key rejected (%d)", ErrPaymentProviderCredentialsRejected, resp.StatusCode)
+		return fmt.Errorf("%w: stripe key rejected (%d)", ErrPSPCredentialsRejected, resp.StatusCode)
 	}
 	return fmt.Errorf("merchants: stripe balance check failed (%d)", resp.StatusCode)
 }
@@ -55,10 +55,10 @@ func stripeBalanceCheck(ctx context.Context, secretKey string, clients *stripeap
 func stripeAccountCheck(ctx context.Context, key, environment, accountID string, clients *stripeapi.Factory) error {
 	key = strings.TrimSpace(key)
 	if environment != "test" && environment != "live" {
-		return fmt.Errorf("%w: invalid Stripe credential environment", ErrPaymentProviderCredentialsRejected)
+		return fmt.Errorf("%w: invalid Stripe credential environment", ErrPSPCredentialsRejected)
 	}
 	if !strings.HasPrefix(key, "sk_"+environment+"_") && !strings.HasPrefix(key, "rk_"+environment+"_") {
-		return fmt.Errorf("%w: Stripe key does not match credential environment", ErrPaymentProviderCredentialsRejected)
+		return fmt.Errorf("%w: Stripe key does not match credential environment", ErrPSPCredentialsRejected)
 	}
 	client := clients.ReadOnlyClient(providerCredentialProbeTimeout)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -74,7 +74,7 @@ func stripeAccountCheck(ctx context.Context, key, environment, accountID string,
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("%w: Stripe identity verification denied", ErrPaymentProviderCredentialsRejected)
+			return fmt.Errorf("%w: Stripe identity verification denied", ErrPSPCredentialsRejected)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return fmt.Errorf("%w: Stripe identity verification failed (%d)", ErrSecretBackendUnavailable, resp.StatusCode)
@@ -94,7 +94,7 @@ func stripeAccountCheck(ctx context.Context, key, environment, accountID string,
 		return err
 	}
 	if account.Object != "account" || account.ID != accountID || !strings.HasPrefix(account.ID, "acct_") {
-		return fmt.Errorf("%w: Stripe credential account does not match declared account", ErrPaymentProviderCredentialsRejected)
+		return fmt.Errorf("%w: Stripe credential account does not match declared account", ErrPSPCredentialsRejected)
 	}
 	var balance struct {
 		Object   string `json:"object"`
@@ -104,7 +104,7 @@ func stripeAccountCheck(ctx context.Context, key, environment, accountID string,
 		return err
 	}
 	if balance.Object != "balance" || balance.LiveMode == nil || *balance.LiveMode != (environment == "live") {
-		return fmt.Errorf("%w: Stripe credential environment does not match declared environment", ErrPaymentProviderCredentialsRejected)
+		return fmt.Errorf("%w: Stripe credential environment does not match declared environment", ErrPSPCredentialsRejected)
 	}
 	return nil
 }

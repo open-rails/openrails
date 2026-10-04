@@ -122,7 +122,7 @@ func (r *PGDestructiveRunRecorder) StampIntents(ctx context.Context, runID, subs
 	if err != nil {
 		return 0, err
 	}
-	n, err := r.DB.Gen(ctx).StampRailIntentsForRun(ctx, gen.StampRailIntentsForRunParams{
+	n, err := r.DB.Gen(ctx).StampProviderIntentsForRun(ctx, gen.StampProviderIntentsForRunParams{
 		RunID: runID, MerchantID: mid, SubscriptionID: subscriptionID, Since: since,
 	})
 	if err != nil {
@@ -270,13 +270,13 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 	}
 	res.EnforcementDisarmed = true
 
-	var manifest []gen.ListRailIntentsForRunRow
+	var manifest []gen.ListProviderIntentsForRunRow
 	if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		tq := gen.New(tx)
 		now := time.Now().UTC()
 
 		// --- step 2: supersede the unfired intents, FIRST ---------------------
-		superseded, e := tq.SupersedeUnfiredRailIntentsForRun(ctx, gen.SupersedeUnfiredRailIntentsForRunParams{
+		superseded, e := tq.SupersedeUnfiredProviderIntentsForRun(ctx, gen.SupersedeUnfiredProviderIntentsForRunParams{
 			MerchantID: mid, RunID: runID, Reason: supersededByReverseReason,
 		})
 		if e != nil {
@@ -315,7 +315,7 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 
 		// The manifest is read INSIDE the transaction, after the supersede, so
 		// every status in it is final with respect to this reversal.
-		if manifest, e = tq.ListRailIntentsForRun(ctx, gen.ListRailIntentsForRunParams{MerchantID: mid, RunID: runID}); e != nil {
+		if manifest, e = tq.ListProviderIntentsForRun(ctx, gen.ListProviderIntentsForRunParams{MerchantID: mid, RunID: runID}); e != nil {
 			return fmt.Errorf("read intent divergence manifest: %w", e)
 		}
 		if _, e = tq.MarkDestructiveRunReversed(ctx, gen.MarkDestructiveRunReversedParams{

@@ -102,7 +102,7 @@ export type ApplyProduct = {
   rate_cards?: RateCard[] | null
 }
 
-export type ArchivePaymentProviderAccountRequest = {
+export type ArchivePSPParams = {
   allow_last?: boolean
 }
 
@@ -383,30 +383,6 @@ export type CheckoutPaymentOptions = {
   expiry_date?: string
 }
 
-export type CheckoutRoutingCandidateResponse = {
-  selector: string
-  rail?: string
-  skip?: string
-}
-
-export type CheckoutRoutingDryRunRequest = {
-  price_id?: string
-  price_key?: string
-  country?: string
-  selector?: string
-}
-
-export type CheckoutRoutingDryRunResponse = {
-  object: string
-  policy: string
-  rule?: number
-  selected?: string
-  rail?: string
-  mode?: string
-  candidates: CheckoutRoutingCandidateResponse[] | null
-  routing_reason?: unknown
-}
-
 export type CheckoutRoutingMatch = {
   currency?: string
   product?: string
@@ -577,6 +553,15 @@ export type CreateOffChannelPaymentParams = {
   discount_code?: string
   discount_reason?: string
   discount_metadata?: Record<string, unknown>
+}
+
+export type CreatePSPParams = {
+  operation_id?: string
+  key?: string
+  rail?: "ccbill" | "nmi" | "solana" | "stripe"
+  account_id?: string
+  settings?: Record<string, unknown> | null
+  credentials?: Record<string, string> | null
 }
 
 export type CreatePaymentMethodParams = {
@@ -1337,6 +1322,28 @@ export type OrderTerm = {
   dir?: string
 }
 
+export type PSP = {
+  id: string
+  key: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  environment: string
+  account_id: string
+  archived: boolean
+  archived_at: string | null
+  open_obligations: number
+  settings: Record<string, unknown> | null
+  credentials: Record<string, PSPCredential> | null
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export type PSPCredential = {
+  configured: boolean
+  validated_at: string | null
+  rotation_version: number
+}
+
 export type PSPLinkState = {
   status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
   ids: Record<string, string> | null
@@ -1349,6 +1356,32 @@ export type PSPLinkState = {
 export type PSPRef = {
   id?: string
   key?: string
+}
+
+export type PSPRefresh = {
+  status: string
+  job_id: string
+}
+
+export type PSPRoutingCandidate = {
+  psp: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  skip: string | null
+}
+
+export type PSPRoutingPreview = {
+  policy: string
+  rule: number | null
+  psp: string | null
+  rail: "ccbill" | "nmi" | "solana" | "stripe" | null
+  mode: string | null
+  candidates: PSPRoutingCandidate[] | null
+}
+
+export type PSPRoutingPreviewParams = {
+  price_id?: string
+  country?: string
+  psp?: string
 }
 
 export type PackagePrice = {
@@ -1756,31 +1789,6 @@ export type ProviderBillingRecord = {
   time_billed_ms?: string
 }
 
-export type ProviderCutover = {
-  id: string
-  merchant_id: string
-  subscription_id: string
-  source_psp_id: string
-  target_psp_id: string
-  target_payment_method_id: string
-  target_subscription_id: string
-  anchor: string
-  status: string
-  stage: string
-  reason: string
-}
-
-export type ProviderCutoverRequest = {
-  target_payment_method_id?: string
-  expected_source_psp_id?: string
-  expected_target_psp_id?: string
-}
-
-export type ProviderRefresh = {
-  status: string
-  job_id: string
-}
-
 export type PurchaseReview = {
   id: string
   status: string
@@ -1824,6 +1832,13 @@ export type QueueGauges = {
   episodes: EpisodeTotals
   open_by_severity: Record<string, number> | null
   total_open: number
+}
+
+export type RailDefinition = {
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  display_name: string
+  credential_keys: string[] | null
+  setting_keys: string[] | null
 }
 
 export type RangeOut = {
@@ -2294,6 +2309,14 @@ export type TrustLevelParams = {
   trust_level?: string
 }
 
+export type UpdatePSPParams = {
+  operation_id?: string
+  expected_revision?: number
+  settings?: Record<string, unknown> | null
+  credentials?: Record<string, string> | null
+  retire_webhook_overlap?: boolean
+}
+
 export type UpdatePriceParams = {
   key?: string | null
   archived?: boolean | null
@@ -2311,17 +2334,6 @@ export type UpdateProductParams = {
 
 export type UpdateSubscriptionPaymentMethodParams = {
   payment_method_id?: string
-}
-
-export type UpsertPaymentProviderParams = {
-  operation_id?: string
-  expected_revision?: number | null
-  enabled?: boolean | null
-  account_id?: string
-  public_config?: Record<string, string> | null
-  credentials?: Record<string, string> | null
-  retire_webhook_overlap?: boolean
-  environment?: string
 }
 
 export type Usage = {

@@ -203,13 +203,12 @@ func IsNativeSOLMint(tokenMint string) bool {
 // Units is the authoritative amount; Amount is its display rendering. Only the
 // RATES are floats — every amount here is an integer.
 type TokenQuote struct {
-	Units           uint64           // base units to transfer (authoritative)
-	Amount          string           // display only: Units at the token's decimals
-	TokenPriceUSD   float64          // rate
-	FXRate          float64          // rate
-	FXCurrency      string           // the quoted price's currency
-	AmountUSDMicros moneyutil.Micros // FX-converted price, ceilinged to whole micros
-	QuotedAt        time.Time
+	Units         uint64  // base units to transfer (authoritative)
+	Amount        string  // display only: Units at the token's decimals
+	TokenPriceUSD float64 // rate
+	FXRate        float64 // rate
+	FXCurrency    string  // the quoted price's currency
+	QuotedAt      time.Time
 }
 
 type TokenPriceProvider interface {
@@ -302,34 +301,12 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 		return nil, err
 	}
 
-	amountUSDMicros, err := microsAtRate(amountMicros, fxRate)
-	if err != nil {
-		return nil, err
-	}
-
 	return &TokenQuote{
-		Units:           tokenUnits,
-		Amount:          FormatBaseUnits(tokenUnits, decimals),
-		TokenPriceUSD:   tokenPriceUSD,
-		FXRate:          fxRate,
-		FXCurrency:      currency,
-		AmountUSDMicros: amountUSDMicros,
-		QuotedAt:        quotedAt,
+		Units:         tokenUnits,
+		Amount:        FormatBaseUnits(tokenUnits, decimals),
+		TokenPriceUSD: tokenPriceUSD,
+		FXRate:        fxRate,
+		FXCurrency:    currency,
+		QuotedAt:      quotedAt,
 	}, nil
-}
-
-// microsAtRate applies an FX rate to a micros amount exactly, ceilinged to whole
-// micros (audit value; the charge itself is computed from the unrounded rate).
-func microsAtRate(micros moneyutil.Micros, rate float64) (moneyutil.Micros, error) {
-	r, err := ratFromRate(rate, "fx rate")
-	if err != nil {
-		return 0, err
-	}
-	q := new(big.Rat).SetInt64(int64(micros))
-	q.Mul(q, r)
-	n := ceilRat(q)
-	if !n.IsInt64() {
-		return 0, fmt.Errorf("fx-converted amount %s overflows micros", n.String())
-	}
-	return moneyutil.Micros(n.Int64()), nil
 }

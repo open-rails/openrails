@@ -139,7 +139,7 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 	}
 
 	out := PublicPSPConfig{
-		PSPID:       scope.ID.String(),
+		PSPID:       billing.PSPID(scope.ID),
 		Key:         key,
 		Rail:        rail,
 		Custodian:   models.CustodianPSP,
@@ -269,8 +269,8 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id billing.MerchantID,
 					"psp":         scope.Key,
 				}).Warn("public checkout config: PSP credentials could not be checked; listed as temporarily unavailable")
 				cfg, _, _ := PublicPSPConfigFor(scope, custodian)
-				if cfg.PSPID == "" {
-					cfg.PSPID, cfg.Rail, cfg.Key = scope.ID.String(), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
+				if cfg.PSPID.IsZero() {
+					cfg.PSPID, cfg.Rail, cfg.Key = billing.PSPID(scope.ID), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
 				}
 				cfg.Config = nil
 				cfg.Status, cfg.RetryAfter = billing.CheckoutPSPTemporarilyUnavailable, checkoutRetryAfterSeconds

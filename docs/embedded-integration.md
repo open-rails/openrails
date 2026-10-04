@@ -223,8 +223,8 @@ its identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{.
 during setup.
 
 `SecretBackend` selects only credential custody. Snapshot values stay in memory;
-managed provider credentials are published through `Client.PaymentProviders` with
-an operation ID and expected account revision. `HTTP.Merchant` publishes
+managed PSP credentials are published through `Client.CreatePSP`/`UpdatePSP`
+with an operation ID and the expected PSP revision. `HTTP.Merchant` publishes
 these routes with the rest of the merchant API, each gated by its permission.
 
 **Declared catalog**: a host whose `catalog.yaml` is the truth sets

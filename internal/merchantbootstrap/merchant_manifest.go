@@ -33,7 +33,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/internal/providerqualification"
 )
 
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
@@ -476,7 +475,6 @@ type ManifestProviderIdentityResolver interface {
 type ManifestProviderIdentity struct {
 	AccountID   string
 	DisplayName *string
-	Evidence    map[string]any
 }
 
 func (o MerchantManifestReconcileOptions) HasMutations() bool {
@@ -1259,22 +1257,14 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		if err != nil {
 			return err
 		}
-		var evidence map[string]json.RawMessage
-		if len(row.Evidence) > 0 {
-			if err := json.Unmarshal(row.Evidence, &evidence); err != nil {
-				return err
-			}
-		}
-		var custody string
-		if raw := evidence["credential_custody"]; len(raw) > 0 {
-			if err := json.Unmarshal(raw, &custody); err != nil {
-				return err
-			}
+		custody := ""
+		if row.CredentialCustody != nil {
+			custody = *row.CredentialCustody
 		}
 		if custody != "" && custody != "snapshot" {
 			return fmt.Errorf("provider credential custody differs from the selected snapshot; explicit custody migration is required")
 		}
-		if custody == "" && len(evidence["credential_versions"]) > 0 && string(evidence["credential_versions"]) != "{}" {
+		if custody == "" && len(row.CredentialVersions) > 0 && string(row.CredentialVersions) != "{}" {
 			return fmt.Errorf("published managed credentials cannot be replaced by a startup snapshot")
 		}
 		return nil
@@ -1336,24 +1326,30 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	if found && !opts.Overwrite {
 		return nil
 	}
-	displayName := identity.DisplayName
+	key := ""
+	if identity.DisplayName != nil {
+		key = strings.TrimSpace(*identity.DisplayName)
+	}
 	if n := strings.TrimSpace(localKey); n != "" {
-		displayName = &n
+		key = n
 	}
-	evidence := identity.Evidence
-	if evidence == nil {
-		evidence = map[string]any{"source": "merchant_config_manifest"}
+	key = strings.ToLower(key)
+	if key == "" {
+		return fmt.Errorf("PSP %s:%s needs a key", rail, accountID)
 	}
-	evidence["credential_custody"] = "snapshot"
-	if signerEvidence != nil {
-		evidence["signer"] = signerEvidence
+	settings := account.Settings
+	if settings == nil {
+		settings = map[string]any{}
 	}
-	if len(account.Settings) > 0 {
-		evidence["settings"] = account.Settings
-	}
-	evidenceJSON, err := json.Marshal(evidence)
+	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
-		return fmt.Errorf("encode PSP evidence: %w", err)
+		return fmt.Errorf("encode PSP settings: %w", err)
+	}
+	var signerJSON []byte
+	if signerEvidence != nil {
+		if signerJSON, err = json.Marshal(signerEvidence); err != nil {
+			return fmt.Errorf("encode PSP signer: %w", err)
+		}
 	}
 	// #650: a PSP belongs to exactly one merchant. Fail with a clear
 	// error if another merchant already owns this identity, rather than letting the
@@ -1366,44 +1362,24 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		// #662: derive the id from the global natural key and store the SAME
 		// normalized (rail, environment, account_id) it is hashed from.
 		railAcctID, nRail, nEnv, nAccount := merchants.PSPNaturalKey(rail, environment, accountID)
-		qualifiedRow, readErr := database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: merchantID.UUID(), ID: railAcctID})
-		if errors.Is(readErr, pgx.ErrNoRows) {
-			qualifiedRow = gen.BillingPsp{ID: railAcctID, Rail: nRail, Environment: nEnv}
-		} else if readErr != nil {
-			return readErr
-		}
-		evidenceJSON, err = providerqualification.BindManifest(qualifiedRow, evidenceJSON, func(version int) (string, error) {
-			name, err := merchants.PSPSecretName(nRail, nEnv, nAccount, "security_key")
-			if err != nil {
-				return "", err
-			}
-			secret, err := merchants.ReadSecretRef(ctx, secretStore, merchantID, merchants.SecretRef{Name: name, MinVersion: version})
-			return secret.Value, err
-		})
-		if err != nil {
-			return fmt.Errorf("PSP cutover qualification: %w", err)
-		}
 		if !opts.Overwrite {
-			key := ""
-			if displayName != nil {
-				key = *displayName
-			}
-			if err := database.Gen(ctx).InsertSnapshotPSP(ctx, gen.InsertSnapshotPSPParams{ID: railAcctID, MerchantID: merchantID.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount, Key: key, Archived: account.Archived, Evidence: evidenceJSON, CustodianID: custodianID}); err != nil {
+			if err := database.Gen(ctx).InsertSnapshotPSP(ctx, gen.InsertSnapshotPSPParams{ID: railAcctID, MerchantID: merchantID.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount, Key: key, Archived: account.Archived, Settings: settingsJSON, Signer: signerJSON, CustodianID: custodianID}); err != nil {
 				return err
 			}
 			_, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{MerchantID: merchantID.UUID(), Rail: nRail, Environment: &nEnv, AccountID: nAccount})
 			return err
 		}
-		_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
+		_, err := database.Gen(ctx).UpsertManifestPSP(ctx, gen.UpsertManifestPSPParams{
 			ID:          railAcctID,
 			MerchantID:  merchantID.UUID(),
+			Key:         key,
 			Rail:        nRail,
-			Environment: &nEnv,
+			Environment: nEnv,
 			AccountID:   nAccount,
-			Key:         displayName,
-			Archived:    &account.Archived,
-			Evidence:    evidenceJSON,
+			Archived:    account.Archived,
 			CustodianID: custodianID,
+			Settings:    settingsJSON,
+			Signer:      signerJSON,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert PSP %s:%s: %w", rail, accountID, err)
@@ -1594,15 +1570,10 @@ type DefaultManifestProviderIdentityResolver struct{}
 
 func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
 	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
-		return ManifestProviderIdentity{
-			AccountID: accountID,
-			Evidence:  map[string]any{"source": "merchant_config_manifest.account_id"},
-		}, nil
+		return ManifestProviderIdentity{AccountID: accountID}, nil
 	}
 	if rail == string(models.RailSolana) {
-		return ManifestProviderIdentity{
-			Evidence: map[string]any{"source": "merchant_config_manifest.signer"},
-		}, nil
+		return ManifestProviderIdentity{}, nil
 	}
 	// Auto-discovery via live credentials was removed (#592): every rail must
 	// declare account_id in the manifest.

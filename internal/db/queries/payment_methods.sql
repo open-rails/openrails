@@ -390,7 +390,7 @@ SELECT EXISTS (
 SELECT p.id FROM billing.psps p
 JOIN billing.custodians c ON c.merchant_id = p.merchant_id AND c.id = p.custodian_id AND c.environment = p.environment
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.rail = sqlc.arg(rail)::text
-  AND p.custodian_id = sqlc.arg(custodian_id)::uuid AND NOT p.archived AND p.replaced_at IS NULL
+  AND p.custodian_id = sqlc.arg(custodian_id)::uuid AND NOT p.archived
 ORDER BY p.created_at, p.id
 LIMIT 2;
 

@@ -19,7 +19,7 @@ type StripeEngineServiceResolver interface {
 
 // StripeEngineParams derives all provider inputs from the accepted operation.
 // A caller cannot substitute the current card, price or customer during recovery.
-func StripeEngineParams(in gen.BillingRailIntent) (subscriptions.StripeEnginePaymentParams, error) {
+func StripeEngineParams(in gen.BillingProviderIntent) (subscriptions.StripeEnginePaymentParams, error) {
 	var params subscriptions.StripeEnginePaymentParams
 	if in.Rail != "stripe" || in.PspID == nil {
 		return params, errors.New("operation is not Stripe engine payment")
@@ -81,7 +81,7 @@ func StripeEngineParams(in gen.BillingRailIntent) (subscriptions.StripeEnginePay
 
 // ReadStripeEngineReceipt qualifies provider readback; a submitted candidate or
 // browser completion redirect can never create a payment/entitlement by itself.
-func ReadStripeEngineReceipt(ctx context.Context, in gen.BillingRailIntent, service *subscriptions.StripeService, reference string) (CollectedReceipt, bool, error) {
+func ReadStripeEngineReceipt(ctx context.Context, in gen.BillingProviderIntent, service *subscriptions.StripeService, reference string) (CollectedReceipt, bool, error) {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return CollectedReceipt{}, false, err

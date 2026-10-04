@@ -54,7 +54,7 @@ func resolveActiveSolanaPSP(ctx context.Context, database *db.DB, cfg *config.Co
 	if accountID == "" {
 		return activeSolanaPSP{}, false, fmt.Errorf("solana: active PSP has empty account_id")
 	}
-	recipient := strings.TrimSpace(solanaPSPSettings(row.Evidence)["recipient_wallet"])
+	recipient := strings.TrimSpace(solanaPSPSettings(row.Settings)["recipient_wallet"])
 	if recipient == "" {
 		recipient = accountID
 	}
@@ -72,14 +72,12 @@ func ResolveRecipientWallet(ctx context.Context, database *db.DB, cfg *config.Co
 }
 
 func solanaPSPSettings(raw []byte) map[string]string {
-	var evidence struct {
-		Settings map[string]any `json:"settings"`
-	}
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil || len(evidence.Settings) == 0 {
+	var settings map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &settings) != nil || len(settings) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(evidence.Settings))
-	for key, value := range evidence.Settings {
+	out := make(map[string]string, len(settings))
+	for key, value := range settings {
 		if s := strings.TrimSpace(fmt.Sprint(value)); s != "" {
 			out[key] = s
 		}

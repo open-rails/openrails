@@ -45,7 +45,7 @@ type InvoiceCollectionRetryResult struct {
 	Invoice   *models.Invoice
 	Attempt   models.InvoicePaymentAttempt
 	Replayed  bool
-	Operation gen.BillingRailIntent
+	Operation gen.BillingProviderIntent
 }
 
 // ListInvoicePayments is one page of a payer's invoice's payments, newest
@@ -379,7 +379,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			return err
 		}
 		if opts.operationKey != "" {
-			prior, err := q.GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: tid.UUID(), IdempotencyKey: opts.operationKey})
+			prior, err := q.GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: tid.UUID(), IdempotencyKey: opts.operationKey})
 			switch {
 			case err == nil:
 				frozen, err := intents.DecodeInvoiceCollectionPayload(prior)
@@ -399,7 +399,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			if !opts.manual {
 				return nil
 			}
-			live, err := q.GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: tid.UUID(), ID: *invoice.CollectionIntentID})
+			live, err := q.GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: tid.UUID(), ID: *invoice.CollectionIntentID})
 			if err == nil && live.Status == intents.StatusUnknownNeedsVerify {
 				return ErrInvoiceRetryOutcomeUnknown
 			}
@@ -439,7 +439,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		providerCustomerRef := ""
 		if normalizeRail(method.Rail) == "stripe" {
-			providerCustomerRef, err = q.GetRailCustomerAccountIDForPSP(ctx, gen.GetRailCustomerAccountIDForPSPParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Rail: "stripe", PspID: psp})
+			providerCustomerRef, err = q.GetPSPCustomerRef(ctx, gen.GetPSPCustomerRefParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), PspID: psp})
 			if err != nil {
 				return fmt.Errorf("freeze Stripe customer on accepted account: %w", err)
 			}

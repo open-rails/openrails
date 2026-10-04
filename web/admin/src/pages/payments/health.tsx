@@ -69,14 +69,12 @@ const metrics = adminQueries.widgetMetrics
 
 export function PaymentHealthPage() {
   const [params, setParams] = useSearchParams()
-  const providers = useQuery(adminQueries.paymentProviders()).data?.data
+  const psps = useQuery(adminQueries.psps()).data?.data
   const pspId = params.get("psp_id") ?? ""
-  const provider = providers?.find((p) => p.id === pspId)
+  const psp = psps?.find((p) => p.id === pspId)
   const scope: Scope = {
     owner: params.get("owner") ?? "",
-    psp: provider
-      ? { id: provider.id, account: provider.account_id }
-      : undefined,
+    psp: psp ? { id: psp.id } : undefined,
     last: params.get("last") ?? "30d",
   }
   const set = (key: string, value: string) => {
@@ -85,11 +83,10 @@ export function PaymentHealthPage() {
     else p.delete(key)
     setParams(p)
   }
-  const pspOfAccount = (account: string) =>
-    providers?.find((p) => p.account_id === account)?.id
-  const nmi = provider
-    ? provider.rail === "nmi"
-    : Boolean(providers?.some((p) => p.rail === "nmi"))
+  const pspKey = (id: string) => psps?.find((p) => p.id === id)?.key ?? id
+  const nmi = psp
+    ? psp.rail === "nmi"
+    : Boolean(psps?.some((p) => p.rail === "nmi"))
 
   return (
     <div className="flex flex-col gap-4">
@@ -109,9 +106,9 @@ export function PaymentHealthPage() {
             value={pspId}
             options={[
               { value: "", label: "All PSPs" },
-              ...(providers ?? []).map((p) => ({
+              ...(psps ?? []).map((p) => ({
                 value: p.id,
-                label: `${p.rail} · ${p.account_id}`,
+                label: `${p.key} · ${p.rail}`,
               })),
             ]}
             onChange={(v) => set("psp_id", v)}
@@ -140,8 +137,8 @@ export function PaymentHealthPage() {
       <Checks scope={scope} />
       <Recovery scope={scope} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Missed scope={scope} pspOfAccount={pspOfAccount} />
-        <Coverage scope={scope} pspOfAccount={pspOfAccount} />
+        <Missed scope={scope} pspKey={pspKey} />
+        <Coverage scope={scope} pspKey={pspKey} />
       </div>
       {nmi && <NMIHistory scope={scope} />}
     </div>
@@ -581,10 +578,10 @@ function CurveTable({
 
 function Missed({
   scope,
-  pspOfAccount,
+  pspKey,
 }: {
   scope: Scope
-  pspOfAccount: (account: string) => string | undefined
+  pspKey: (id: string) => string
 }) {
   const { data, isPending } = useQuery(metrics(missedQuery(scope)))
   const rows = missedRows(data)
@@ -605,9 +602,9 @@ function Missed({
           </TableHeader>
           <TableBody>
             {rows.map((r) => (
-              <TableRow key={`${r.reason}|${r.account}`}>
+              <TableRow key={`${r.reason}|${r.psp}`}>
                 <TableCell>{r.reason}</TableCell>
-                <TableCell className="text-xs">{r.account}</TableCell>
+                <TableCell className="text-xs">{pspKey(r.psp)}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   <Link
                     className="hover:underline"
@@ -616,7 +613,7 @@ function Missed({
                       { first_outcome: ["missed"], miss_reason: [r.reason] },
                       scope,
                       data?.range,
-                      pspOfAccount(r.account)
+                      r.psp || undefined
                     )}
                   >
                     {r.count}
@@ -633,20 +630,20 @@ function Missed({
 
 function Coverage({
   scope,
-  pspOfAccount,
+  pspKey,
 }: {
   scope: Scope
-  pspOfAccount: (account: string) => string | undefined
+  pspKey: (id: string) => string
 }) {
   const { data, isPending } = useQuery(metrics(coverageQuery(scope)))
   const rows = coverageRows(data)
-  const link = (account: string, via: string) =>
+  const link = (psp: string, via: string) =>
     listURL(
       "attempts",
       { source: ["provider_schedule"], observed_via: [via] },
       scope,
       data?.range,
-      pspOfAccount(account)
+      psp || undefined
     )
   return (
     <Panel title="Provider charges seen by webhook">
@@ -666,12 +663,12 @@ function Coverage({
           </TableHeader>
           <TableBody>
             {rows.map((r) => (
-              <TableRow key={r.account}>
-                <TableCell className="text-xs">{r.account}</TableCell>
+              <TableRow key={r.psp}>
+                <TableCell className="text-xs">{pspKey(r.psp)}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   <Link
                     className="hover:underline"
-                    to={link(r.account, "webhook")}
+                    to={link(r.psp, "webhook")}
                   >
                     {r.webhook}
                   </Link>
@@ -679,7 +676,7 @@ function Coverage({
                 <TableCell className="text-right tabular-nums">
                   <Link
                     className="hover:underline"
-                    to={link(r.account, "pull")}
+                    to={link(r.psp, "pull")}
                   >
                     {r.pull}
                   </Link>

@@ -42,17 +42,17 @@ func (p *StripeWebhookPublication) Load(ctx context.Context) (StripeWebhookCrede
 		return StripeWebhookCredentialState{}, err
 	}
 	if p.row.Archived {
-		return StripeWebhookCredentialState{}, ErrPaymentProviderAccountNotFound
+		return StripeWebhookCredentialState{}, ErrPSPNotFound
 	}
 	creds, ok, err := s.LoadStripeCredentialsForAccount(ctx, p.merchant, p.account)
 	if err != nil {
 		return StripeWebhookCredentialState{}, err
 	}
 	if !ok {
-		return StripeWebhookCredentialState{}, ErrPaymentProviderAccountNotFound
+		return StripeWebhookCredentialState{}, ErrPSPNotFound
 	}
 	p.loaded = true
-	return StripeWebhookCredentialState{SecretKey: creds.SecretKey, CurrentSecret: creds.WebhookSigningSecret, PreviousSecret: creds.WebhookSigningPrevious, EndpointID: unmarshalProviderEvidence(p.row.Evidence).WebhookEndpointID, Writable: CanStageCredentials(s.secrets)}, nil
+	return StripeWebhookCredentialState{SecretKey: creds.SecretKey, CurrentSecret: creds.WebhookSigningSecret, PreviousSecret: creds.WebhookSigningPrevious, EndpointID: credentialState(p.row).WebhookEndpointID, Writable: CanStageCredentials(s.secrets)}, nil
 }
 func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret string) error {
 	if !p.loaded || strings.TrimSpace(endpoint) == "" || strings.TrimSpace(secret) == "" {
@@ -66,8 +66,8 @@ func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret
 		return err
 	}
 	names, keys := map[string]string{name: secret}, map[string]string{name: "webhook_signing_secret"}
-	if _, published := CredentialRefs(p.row.Evidence)["webhook_signing_secret"]; !published {
-		ref, err := PSPSecretRef("stripe", p.service.providerEnvironment, p.account, p.row.Evidence, "webhook_signing_secret")
+	if _, published := credentialState(p.row).Refs["webhook_signing_secret"]; !published {
+		ref, err := PSPSecretRef(p.row, "webhook_signing_secret")
 		if err != nil {
 			return err
 		}
@@ -89,21 +89,22 @@ func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret
 // RetireOverlap is called only after qualified provider endpoint retirement.
 // Historical secret material remains; the published verifier reference is retired.
 func (p *StripeWebhookPublication) RetireOverlap(ctx context.Context) error {
-	if !p.loaded || unmarshalProviderEvidence(p.row.Evidence).WebhookEndpointID == "" {
+	endpoint := credentialState(p.row).WebhookEndpointID
+	if !p.loaded || endpoint == "" {
 		return fmt.Errorf("managed webhook retirement requires published endpoint identity")
 	}
-	return p.publish(ctx, unmarshalProviderEvidence(p.row.Evidence).WebhookEndpointID, nil, nil, true)
+	return p.publish(ctx, endpoint, nil, nil, true)
 }
 func (p *StripeWebhookPublication) publish(ctx context.Context, endpoint string, names, keys map[string]string, retire bool) error {
 	if !CanStageCredentials(p.service.secrets) {
 		return credentialWriteRefusal(p.service.secrets)
 	}
-	evidence := unmarshalProviderEvidence(p.row.Evidence)
 	operation := uuid.NewSHA1(p.merchant.UUID(), []byte("stripe-webhook/"+p.service.providerEnvironment+"/"+p.account+"/"+endpoint))
 	if retire {
-		operation = uuid.NewSHA1(operation, []byte(fmt.Sprintf("retire/%d", evidence.Revision)))
+		operation = uuid.NewSHA1(operation, []byte(fmt.Sprintf("retire/%d", p.row.Revision)))
 	}
-	row, err := p.service.publishProviderCredentials(ctx, p.merchant, "stripe", p.service.providerEnvironment, p.account, !p.row.Archived, UpsertPaymentProviderConfigRequest{OperationID: operation, ExpectedRevision: &evidence.Revision, AccountID: p.account}, names, keys, evidence.CredentialsValidated, p.row.LastVerifiedAt, credentialTransitionPublication{WebhookEndpointID: endpoint, RetireWebhookOverlap: retire, OverlapFor: MaxWebhookSecretOverlap})
+	validatedAt := p.row.CredentialsValidatedAt
+	row, err := p.service.publishProviderCredentials(ctx, p.merchant, "stripe", p.service.providerEnvironment, p.account, pspPublication{OperationID: operation, ExpectedRevision: p.row.Revision}, names, keys, validatedAt != nil, validatedAt, webhookPublication{WebhookEndpointID: endpoint, RetireWebhookOverlap: retire, OverlapFor: MaxWebhookSecretOverlap})
 	if err == nil {
 		p.row = row
 	}

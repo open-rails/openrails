@@ -262,7 +262,7 @@ WHERE f.merchant_id = $1::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
   AND f.status IN ('reconcile_required', 'requires_review')
   AND NOT EXISTS (
-      SELECT 1 FROM billing.rail_intents pi
+      SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
         AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= $2::timestamptz)
@@ -279,7 +279,7 @@ type AutoResolveRecoveredStuckIntentFindingsParams struct {
 // life.provider_intent.stuck findings recover subject-first: an open finding
 // whose intent no longer meets the stuck criteria (executed, superseded, or
 // re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
-// detection (ListStuckRailIntents) exactly — edit together.
+// detection (ListStuckProviderIntents) exactly — edit together.
 func (q *Queries) AutoResolveRecoveredStuckIntentFindings(ctx context.Context, arg AutoResolveRecoveredStuckIntentFindingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, autoResolveRecoveredStuckIntentFindings, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
 	if err != nil {
@@ -316,7 +316,7 @@ SET status = 'fixed',
 WHERE ctid IN (
     SELECT f.ctid FROM billing.reconciliation_findings f
     WHERE f.merchant_id = $1::uuid
-      AND f.evidence->>'provider' = $2
+      AND f.psp_id = $2::uuid
       AND f.status IN ('reconcile_required', 'requires_review')
       AND f.last_seen_run <> $3
       AND f.finding_type = ANY ($4::text[])
@@ -326,7 +326,7 @@ WHERE ctid IN (
 
 type AutoResolveVanishedReconciliationFindingsParams struct {
 	MerchantID   uuid.UUID
-	Provider     *string
+	PspID        uuid.UUID
 	RunID        *uuid.UUID
 	FindingTypes []string
 	RowLimit     int32
@@ -340,7 +340,7 @@ type AutoResolveVanishedReconciliationFindingsParams struct {
 func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context, arg AutoResolveVanishedReconciliationFindingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings,
 		arg.MerchantID,
-		arg.Provider,
+		arg.PspID,
 		arg.RunID,
 		arg.FindingTypes,
 		arg.RowLimit,
@@ -587,7 +587,7 @@ func (q *Queries) CountSubscriptionFunnel(ctx context.Context, arg CountSubscrip
 const countUnknownOperations = `-- name: CountUnknownOperations :one
 SELECT count(*)::bigint AS open_count,
        COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(created_at))), 0)::bigint AS oldest_age_seconds
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id = $2::uuid
   AND status = 'unknown_needs_verify'
 `
@@ -923,7 +923,7 @@ func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDoma
 }
 
 const listAbandonedProviderIntents = `-- name: ListAbandonedProviderIntents :many
-SELECT id, intent_type, status, rail FROM billing.rail_intents
+SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
   AND (
@@ -975,19 +975,20 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 	return items, nil
 }
 
-const listActionableReconciliationFindingsByProvider = `-- name: ListActionableReconciliationFindingsByProvider :many
+const listActionablePullFindingsForPSP = `-- name: ListActionablePullFindingsForPSP :many
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
-WHERE reconciliation_findings.merchant_id = $2::uuid AND evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+  AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key
 `
 
-type ListActionableReconciliationFindingsByProviderParams struct {
-	Evidence   *string
+type ListActionablePullFindingsForPSPParams struct {
 	MerchantID uuid.UUID
+	PspID      uuid.UUID
 }
 
-func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Context, arg ListActionableReconciliationFindingsByProviderParams) ([]BillingReconciliationFinding, error) {
-	rows, err := q.db.Query(ctx, listActionableReconciliationFindingsByProvider, arg.Evidence, arg.MerchantID)
+func (q *Queries) ListActionablePullFindingsForPSP(ctx context.Context, arg ListActionablePullFindingsForPSPParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listActionablePullFindingsForPSP, arg.MerchantID, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -2689,7 +2690,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot, scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
-       EXISTS (SELECT 1 FROM billing.rail_intents ri
+       EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
@@ -3127,16 +3128,18 @@ const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
-    first_seen_run, last_seen_run
+    first_seen_run, last_seen_run, psp_id, rail
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7::jsonb,
     CASE WHEN $5::text = 'auto_fixed' THEN now() ELSE NULL END,
     CASE WHEN $5::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
-    $8, $8
+    $8, $8, $9::uuid,
+    -- A pull finding carries its PSP's rail (the psps FK checks they agree).
+    COALESCE((SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid), '')
 )
-ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
         WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored'
@@ -3186,6 +3189,7 @@ type UpsertReconciliationFindingParams struct {
 	RecommendedAction *string
 	Evidence          []byte
 	RunID             *uuid.UUID
+	PspID             *uuid.UUID
 }
 
 // ============================================================================
@@ -3205,6 +3209,7 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		arg.RecommendedAction,
 		arg.Evidence,
 		arg.RunID,
+		arg.PspID,
 	)
 	var i BillingReconciliationFinding
 	err := row.Scan(

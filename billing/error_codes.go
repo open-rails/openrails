@@ -233,9 +233,6 @@ var errorCodes = []ErrorCode{
 	{"reprice_cross_product", 422, invalid, "The target price must be on the same product."},
 	{"reprice_inactive_price", 422, invalid, "The target price must be active."},
 	{"reprice_notice_window_violation", 422, invalid, "effective_at is inside the merchant's notice window for a price increase."},
-	{"provider_cutover_unavailable", 503, fault, "Provider cutover is not available in this deployment."},
-	{"provider_cutover_unqualified", 409, invalid, "Both PSPs need explicit cutover qualification."},
-	{"provider_cutover_conflict", 409, invalid, "The cutover conflicts with the subscription's current state."},
 
 	// Invoices and collection.
 	{CodeInvoiceActionNotAllowed, 409, invalid, "The invoice's status does not allow this action."},
@@ -306,10 +303,11 @@ var errorCodes = []ErrorCode{
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Merchant configuration and PSPs.
-	{"payment_provider_not_found", 404, invalid, "The merchant has no PSP configured for this rail."},
-	{"payment_provider_credentials_rejected", 400, invalid, "The payment provider rejected the credentials."},
-	{"provider_account_last_active", 409, invalid, "The PSP is the rail's last active account and still has live subscriptions."},
-	{"provider_accounts_ambiguous", 409, invalid, "The rail has several active PSPs; address one."},
+	{"psp_not_found", 404, invalid, "The PSP does not exist."},
+	{"psp_exists", 409, invalid, "The account is already a PSP, of this merchant or another; update it instead."},
+	{"psp_key_taken", 409, invalid, "Another live PSP holds the key."},
+	{"psp_credentials_rejected", 400, invalid, "The provider rejected the credentials."},
+	{"psp_last_active", 409, invalid, "The PSP is the last active one on its rail; pass allow_last to archive it."},
 	{"psp_claim_requires_proof", 403, authz, "Claiming a provider account needs credentials that prove control of it."},
 	{"credential_custody_transition_required", 409, invalid, "Credential custody differs from the published backend."},
 	{"credential_operation_conflict", 409, invalid, "The credential operation conflicts with the published revision."},

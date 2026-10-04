@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -161,33 +160,4 @@ func ApproveSolanaSigner(ctx context.Context, a *app.App, merchantID billing.Mer
 		return fmt.Errorf("openrails: this engine cannot approve Solana signers")
 	}
 	return a.Runtime.ApproveSolanaSigner(ctx, merchantID, key)
-}
-
-// TransitionProviderCredentials moves one account's credential custody from
-// source to target, two owned engines. It preserves source material. A target
-// snapshot must already hold every current and overlap credential under its
-// stable CredentialSnapshotID, and every later restart must supply it.
-func TransitionProviderCredentials(ctx context.Context, target, source *app.App, id billing.MerchantID, rail string, params merchants.CredentialTransitionRequest) (*billing.PaymentProviderConfig, error) {
-	for _, a := range []*app.App{target, source} {
-		if err := initialized(a); err != nil {
-			return nil, err
-		}
-		if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() && bound != id {
-			return nil, fmt.Errorf("credential transition merchant differs from the engine binding")
-		}
-		if a.Runtime.Merchants == nil {
-			return nil, fmt.Errorf("credential transition requires initialized merchant services")
-		}
-	}
-	if id.IsZero() {
-		return nil, fmt.Errorf("credential transition requires a merchant")
-	}
-	if config.ExpectedProviderEnvironment(config.IsTestMode(target.Config)) != config.ExpectedProviderEnvironment(config.IsTestMode(source.Config)) {
-		return nil, fmt.Errorf("credential transition requires matching provider environments")
-	}
-	result, err := target.Runtime.Merchants.TransitionProviderCredentials(ctx, id, rail, params, source.Runtime.Merchants.Secrets())
-	if err != nil {
-		return nil, err
-	}
-	return &result, nil
 }

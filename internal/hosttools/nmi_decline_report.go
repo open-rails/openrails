@@ -80,7 +80,7 @@ func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
 				return err
 			}
 			if provider != reconcile.ProviderNMI {
-				return fmt.Errorf("--provider-account %s is a %s account, not NMI", opts.PSP, provider)
+				return fmt.Errorf("--psp %s is a %s account, not NMI", opts.PSP, provider)
 			}
 			pins[provider] = binding.AccountID
 		}

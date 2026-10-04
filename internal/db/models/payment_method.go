@@ -32,7 +32,7 @@ type PaymentMethod struct {
 	// our usage — OpenRails deliberately mints ONE vault customer PER CARD, so a
 	// person with N cards is N unrelated NMI vault ids. NMI has no person-level
 	// remote identity in our model; the person is the local customer_id UUID.
-	RailCustomerRef string `json:"-"` // customer-scope handle (NMI customer_vault_id — per-card by policy, see #682; "" for Stripe — see rail_customer_accounts)
+	RailCustomerRef string `json:"-"` // customer-scope handle (NMI customer_vault_id — per-card by policy, see #682; "" for Stripe — see psp_customers)
 	RailMethodRef   string `json:"-"` // instrument-scope handle (NMI billing_id — legacy imports only; Stripe pm_, Spreedly/HyperSwitch token)
 
 	// Stored-credential (CIT/MIT) replay references (#297), one per card-network

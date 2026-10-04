@@ -414,7 +414,7 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 		in.Advertise(options)
 	}
 	for _, option := range options {
-		if !checkoutsession.Drivable(option.Driver) || option.PSPID == "" {
+		if !checkoutsession.Drivable(option.Driver) || option.PSPID.IsZero() {
 			continue
 		}
 		raw := make([]byte, 18)
@@ -497,8 +497,7 @@ func hostedSavedMethods(ctx context.Context, rt *app.Runtime, session checkoutse
 	}
 	for _, method := range page.Items {
 		for _, option := range cards {
-			psp, err := uuid.Parse(option.PSPID)
-			if err != nil || !strings.EqualFold(option.Rail, string(method.Rail)) || !method.ChargeableOn(psp) {
+			if option.PSPID.IsZero() || !strings.EqualFold(option.Rail, string(method.Rail)) || !method.ChargeableOn(option.PSPID.UUID()) {
 				continue
 			}
 			out = append(out, checkoutsession.CheckoutSessionSavedMethod{ID: billing.PaymentMethodID(method.ID), OptionID: option.ID, Rail: option.Rail, Card: method.Card.Details()})

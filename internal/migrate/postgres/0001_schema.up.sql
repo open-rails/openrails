@@ -320,6 +320,8 @@ BEGIN
                   'catalogs',
                   'checkout_attempts',
                   'checkout_sessions',
+                  'cost_observations',
+                  'cost_qualifications',
                   'credential_publications',
                   'custodians',
                   'custody_migrations',
@@ -361,13 +363,11 @@ BEGIN
                   'prices',
                   'product_archive_operations',
                   'products',
-                  'provider_billing_observations',
-                  'provider_billing_qualifications',
+                  'provider_intents',
+                  'provider_mutation_logs',
+                  'psp_customers',
+                  'psp_refresh_watermarks',
                   'psps',
-                  'rail_customer_accounts',
-                  'rail_intents',
-                  'rail_mutation_logs',
-                  'rail_refresh_watermarks',
                   'rebill_cycles',
                   'reconciliation_findings',
                   'reconciliation_state',
@@ -848,29 +848,47 @@ ALTER TABLE ONLY billing.custodians
 CREATE TABLE billing.psps (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
+    key text NOT NULL,
     rail text NOT NULL,
     environment text DEFAULT 'live'::text NOT NULL,
     account_id text NOT NULL,
-    key text,
-    evidence jsonb,
-    first_seen_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    last_verified_at timestamp with time zone,
-    replaced_at timestamp with time zone,
+    custodian_id uuid,
+    settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    signer jsonb,
+    credential_custody text,
+    credential_refs jsonb DEFAULT '{}'::jsonb NOT NULL,
+    credential_versions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    retired_credentials text[] DEFAULT '{}'::text[] NOT NULL,
+    credentials_validated_at timestamp with time zone,
+    webhook_endpoint_id text,
+    webhook_overlap_expires_at timestamp with time zone,
+    pending_signer_public_key text,
+    revision bigint DEFAULT 0 NOT NULL,
+    archived boolean DEFAULT false NOT NULL,
+    archived_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    archived boolean DEFAULT false NOT NULL,
-    custodian_id uuid,
-    pending_signer_public_key text,
+    CONSTRAINT psps_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text]))),
     CONSTRAINT psps_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text]))),
-    CONSTRAINT psps_nonempty CHECK (((btrim(rail) <> ''::text) AND (btrim(environment) <> ''::text) AND (btrim(account_id) <> ''::text)))
+    CONSTRAINT psps_nonempty CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text))),
+    CONSTRAINT psps_archived_at_check CHECK ((archived = (archived_at IS NOT NULL)))
 );
-COMMENT ON TABLE billing.psps IS 'Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.';
-COMMENT ON COLUMN billing.psps.rail IS 'Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.';
-COMMENT ON COLUMN billing.psps.environment IS 'Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.';
-COMMENT ON COLUMN billing.psps.account_id IS 'Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.';
-COMMENT ON COLUMN billing.psps.key IS 'The PSP''s manifest key (e.g. mobius) — the vocabulary catalog psp_links and checkout speak.';
-COMMENT ON COLUMN billing.psps.archived IS 'Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.';
-COMMENT ON COLUMN billing.psps.custodian_id IS 'The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant''s custodian.';
+COMMENT ON TABLE billing.psps IS 'Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail. The rail vocabulary lives here only; every table that stores rail beside psp_id references (merchant_id, id, rail).';
+COMMENT ON COLUMN billing.psps.key IS 'The merchant''s name for the PSP (e.g. mobius): the value price psp_links and checkout''s payment.rail name it by. Unique among the merchant''s live PSPs in an environment.';
+COMMENT ON COLUMN billing.psps.environment IS 'Provider environment: live or test, derived from the deployment''s posture.';
+COMMENT ON COLUMN billing.psps.account_id IS 'Operator-declared account identity on the rail (Stripe acct_, NMI gateway id, CCBill account-subaccount, Solana signer address).';
+COMMENT ON COLUMN billing.psps.custodian_id IS 'The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault).';
+COMMENT ON COLUMN billing.psps.settings IS 'Declared non-secret values, including the public keys a browser uses (publishable_key, tokenization_key).';
+COMMENT ON COLUMN billing.psps.signer IS 'Solana signer declaration: {mode, key}. NULL on other rails.';
+COMMENT ON COLUMN billing.psps.credential_custody IS 'The secret backend holding the published credentials; snapshot for credentials a manifest supplies at startup.';
+COMMENT ON COLUMN billing.psps.credential_refs IS 'Published secret references per credential key: {name, min_version, custody}. Never secret values.';
+COMMENT ON COLUMN billing.psps.credential_versions IS 'Rotation watermarks per credential key: a reader holding an older cached version goes back to the backend.';
+COMMENT ON COLUMN billing.psps.retired_credentials IS 'Credential keys retired from service (an overlapping webhook secret ended early).';
+COMMENT ON COLUMN billing.psps.credentials_validated_at IS 'When the provider last accepted the stored credentials; NULL when never checked.';
+COMMENT ON COLUMN billing.psps.webhook_endpoint_id IS 'The provider webhook endpoint OpenRails manages for this PSP.';
+COMMENT ON COLUMN billing.psps.webhook_overlap_expires_at IS 'Until when the rotated-out webhook signing secret is still accepted.';
+COMMENT ON COLUMN billing.psps.revision IS 'Configuration revision: every settings, credential or archive change increments it; writers name the revision they read.';
+COMMENT ON COLUMN billing.psps.archived IS 'Drain-only lifecycle flag. An archived PSP takes no new work and stays addressable for existing obligations and inbound events.';
 
 ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_pkey PRIMARY KEY (merchant_id, id);
@@ -878,40 +896,40 @@ ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_merchant_id_id_rail_key UNIQUE (merchant_id, id, rail);
 
 CREATE INDEX idx_psps_custodian ON billing.psps USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
-CREATE INDEX idx_psps_new_work ON billing.psps USING btree (merchant_id, rail, environment, created_at DESC, id DESC) WHERE (archived = false);
+CREATE INDEX idx_psps_merchant_environment ON billing.psps USING btree (merchant_id, environment, archived, rail, created_at DESC, id DESC);
 CREATE UNIQUE INDEX uq_psps_identity ON billing.psps USING btree (rail, environment, account_id);
+CREATE UNIQUE INDEX psps_live_key_key ON billing.psps USING btree (merchant_id, environment, lower(key)) WHERE (NOT archived);
 
 ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
-CREATE TABLE billing.rail_customer_accounts (
+CREATE TABLE billing.psp_customers (
     id uuid DEFAULT uuidv7() NOT NULL,
-    rail text NOT NULL,
-    account_id text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    psp_id uuid NOT NULL
+    psp_id uuid NOT NULL,
+    remote_customer_ref text NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT psp_customers_remote_customer_ref_check CHECK ((btrim(remote_customer_ref) <> ''::text))
 );
-COMMENT ON TABLE billing.rail_customer_accounts IS 'Customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings.';
-COMMENT ON COLUMN billing.rail_customer_accounts.psp_id IS 'PSP whose remote customer object this row maps. Required.';
+COMMENT ON TABLE billing.psp_customers IS 'A customer''s customer object at one PSP. Two PSPs on one rail hold independent mappings.';
+COMMENT ON COLUMN billing.psp_customers.remote_customer_ref IS 'The PSP''s own customer id (Stripe cus_). Unique only within the PSP that minted it.';
 
-ALTER TABLE ONLY billing.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_pkey PRIMARY KEY (merchant_id, id);
+ALTER TABLE ONLY billing.psp_customers
+    ADD CONSTRAINT psp_customers_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_rail_customer_accounts_psp ON billing.rail_customer_accounts USING btree (merchant_id, psp_id);
-CREATE UNIQUE INDEX uq_rail_customer_accounts_customer_psp ON billing.rail_customer_accounts USING btree (merchant_id, customer_id, rail, psp_id);
-CREATE UNIQUE INDEX uq_rail_customer_accounts_psp_account ON billing.rail_customer_accounts USING btree (merchant_id, rail, psp_id, account_id);
+CREATE UNIQUE INDEX psp_customers_merchant_id_customer_id_psp_id_key ON billing.psp_customers USING btree (merchant_id, customer_id, psp_id);
+CREATE UNIQUE INDEX psp_customers_merchant_id_psp_id_remote_customer_ref_key ON billing.psp_customers USING btree (merchant_id, psp_id, remote_customer_ref);
 
-ALTER TABLE ONLY billing.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
-ALTER TABLE ONLY billing.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.psp_customers
+    ADD CONSTRAINT psp_customers_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
+ALTER TABLE ONLY billing.psp_customers
+    ADD CONSTRAINT psp_customers_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.psp_customers
+    ADD CONSTRAINT psp_customers_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 -- ---------------------------------------------------------------------------
 -- Catalog
@@ -1026,7 +1044,7 @@ BEGIN
           AND s.deleted_at IS NULL
           AND s.status IN ('active', 'pending', 'past_due', 'awaiting_method', 'unverified')
           AND (s.scheduled_price_id IS NOT NULL OR EXISTS (
-                SELECT 1 FROM billing.rail_intents i
+                SELECT 1 FROM billing.provider_intents i
                 WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                   AND i.intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
                   AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')))
@@ -1326,23 +1344,6 @@ CREATE TRIGGER immutable_catalog_application_receipt BEFORE UPDATE OR DELETE ON 
 -- Payment methods
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION billing.guard_provider_cutover_card() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
- IF TG_OP = 'UPDATE' AND (to_jsonb(NEW) - 'updated_at') = (to_jsonb(OLD) - 'updated_at') THEN
-   RETURN NEW;
- END IF;
- IF EXISTS(SELECT 1 FROM billing.rail_intents i
-   WHERE i.merchant_id=OLD.merchant_id AND i.intent_type='nmi_provider_cutover'
-   AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired')
-   AND (i.payload->'request'->>'target_payment_method_id'=OLD.id::text
-        OR i.payload->>'source_payment_method_id'=OLD.id::text)) THEN
-   RAISE EXCEPTION 'payment method has an unresolved provider cutover' USING ERRCODE='55000';
- END IF;
- IF TG_OP='DELETE' THEN RETURN OLD; END IF;
- RETURN NEW;
-END $$;
-
 CREATE TABLE billing.payment_methods (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1383,7 +1384,7 @@ CREATE TABLE billing.payment_methods (
 COMMENT ON TABLE billing.payment_methods IS 'A customer''s stored payment instrument.';
 COMMENT ON COLUMN billing.payment_methods.rail IS 'Rail the instrument is charged on: nmi or stripe.';
 COMMENT ON COLUMN billing.payment_methods.psp_id IS 'The PSP that holds the instrument when custodian = psp. NULL for a card a third-party custodian holds: routing picks the PSP for each charge.';
-COMMENT ON COLUMN billing.payment_methods.rail_customer_ref IS 'Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in rail_customer_accounts (Stripe).';
+COMMENT ON COLUMN billing.payment_methods.rail_customer_ref IS 'Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in psp_customers (Stripe).';
 COMMENT ON COLUMN billing.payment_methods.rail_method_ref IS 'Instrument-scope handle: NMI billing_id, Stripe pm_, or the custodian token.';
 COMMENT ON COLUMN billing.payment_methods.stored_credential_recurring_ref IS 'Replay reference of the recurring card-network agreement (NMI: the transactionid of its initial customer-initiated charge). Empty until captured; written once.';
 COMMENT ON COLUMN billing.payment_methods.stored_credential_unscheduled_ref IS 'Replay reference of the unscheduled card-network agreement. Empty until captured; written once.';
@@ -1423,10 +1424,7 @@ ALTER TABLE ONLY billing.payment_methods
 ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES billing.custodians(merchant_id, id, kind) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.payment_methods
-    ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
-
-CREATE TRIGGER guard_provider_cutover_card BEFORE UPDATE OR DELETE ON billing.payment_methods
-FOR EACH ROW EXECUTE FUNCTION billing.guard_provider_cutover_card();
+    ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 
 CREATE TABLE billing.payment_method_updates (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1603,33 +1601,6 @@ BEGIN
 END;
 $$;
 
--- An unresolved account cutover owns the subscription and both cards.
--- These fences cover all local writers, including lifecycle and custody remap,
--- while provider steps commit their receipts in independent transactions.
-CREATE FUNCTION billing.guard_provider_cutover_subscription() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE op record;
-BEGIN
- FOR op IN SELECT * FROM billing.rail_intents
-   WHERE merchant_id=OLD.merchant_id AND subscription_id=OLD.id
-     AND intent_type='nmi_provider_cutover'
-     AND status NOT IN ('succeeded','failed_terminal','superseded','expired')
- LOOP
-   IF TG_OP='UPDATE'
-      AND op.result_evidence->>'source_canceled'='true'
-      AND op.result_evidence->>'target_active'='true'
-      AND NEW.psp_id=(op.payload->'request'->>'expected_target_psp_id')::uuid
-      AND NEW.payment_method_id=(op.payload->'request'->>'target_payment_method_id')::uuid
-      AND NEW.rail_subscription_id=op.result_evidence->'target'->>'id'
-      AND (to_jsonb(NEW)-ARRAY['psp_id','payment_method_id','rail_subscription_id','updated_at'])
-         =(to_jsonb(OLD)-ARRAY['psp_id','payment_method_id','rail_subscription_id','updated_at'])
-   THEN RETURN NEW; END IF;
-   RAISE EXCEPTION 'subscription has an unresolved provider cutover' USING ERRCODE='55000';
- END LOOP;
- IF TG_OP='DELETE' THEN RETURN OLD; END IF;
- RETURN NEW;
-END $$;
-
 CREATE TABLE billing.subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid,
@@ -1712,7 +1683,7 @@ CREATE INDEX idx_subscriptions_product_id ON billing.subscriptions USING btree (
 CREATE INDEX idx_subscriptions_psp ON billing.subscriptions USING btree (merchant_id, psp_id);
 CREATE INDEX idx_subscriptions_rail_subscription ON billing.subscriptions USING btree (rail, rail_subscription_id);
 CREATE INDEX idx_subscriptions_status ON billing.subscriptions USING btree (status);
-CREATE UNIQUE INDEX uq_subscriptions_merchant_psp_subscription_id ON billing.subscriptions USING btree (merchant_id, rail, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_subscriptions_merchant_psp_subscription_id ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
 CREATE INDEX idx_subscriptions_engine_due_global ON billing.subscriptions (current_period_ends_at,merchant_id) WHERE collection_policy='engine' AND status IN ('active','past_due') AND deleted_at IS NULL;
 CREATE UNIQUE INDEX uq_subscriptions_customer_product_lifecycle ON billing.subscriptions USING btree (merchant_id, customer_id, product_id)
     WHERE status IN ('active', 'pending', 'past_due', 'awaiting_method') AND deleted_at IS NULL;
@@ -1739,13 +1710,11 @@ ALTER TABLE ONLY billing.subscriptions
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id);
 ALTER TABLE ONLY billing.subscriptions
-    ADD CONSTRAINT subscriptions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT subscriptions_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (merchant_id, scheduled_price_id) REFERENCES billing.prices(merchant_id, id);
 
 CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_set_tier_group();
-CREATE TRIGGER guard_provider_cutover_subscription BEFORE UPDATE OR DELETE ON billing.subscriptions
-FOR EACH ROW EXECUTE FUNCTION billing.guard_provider_cutover_subscription();
 CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy
  ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.preserve_subscription_collection_policy();
 CREATE CONSTRAINT TRIGGER trg_subscriptions_track_unverified AFTER INSERT OR UPDATE OF status ON billing.subscriptions
@@ -2019,7 +1988,7 @@ CREATE INDEX idx_payments_rail ON billing.payments USING btree (rail);
 CREATE INDEX idx_payments_refunded_payment_id ON billing.payments USING btree (merchant_id, refunded_payment_id) WHERE (refunded_payment_id IS NOT NULL);
 CREATE INDEX idx_payments_subscription_id ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_payments_merchant_offrail_transaction ON billing.payments USING btree (merchant_id, rail, transaction_id) WHERE ((psp_id IS NULL) AND (deleted_at IS NULL));
-CREATE UNIQUE INDEX uq_payments_merchant_psp_transaction ON billing.payments USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((psp_id IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_payments_merchant_psp_transaction ON billing.payments USING btree (merchant_id, psp_id, transaction_id) WHERE ((psp_id IS NOT NULL) AND (deleted_at IS NULL));
 
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -2030,7 +1999,7 @@ ALTER TABLE ONLY billing.payments
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
 ALTER TABLE ONLY billing.payments
-    ADD CONSTRAINT payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT payments_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, refunded_payment_id) REFERENCES billing.payments(merchant_id, customer_id, currency, id);
 ALTER TABLE ONLY billing.payments
@@ -2086,8 +2055,8 @@ CREATE INDEX idx_checkout_attempts_payment_id ON billing.checkout_attempts USING
 CREATE INDEX idx_checkout_attempts_psp ON billing.checkout_attempts USING btree (merchant_id, psp_id);
 CREATE INDEX idx_checkout_attempts_subscription_id ON billing.checkout_attempts USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE INDEX ix_checkout_attempts_expirable ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((expires_at IS NOT NULL) AND (deleted_at IS NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text])));
-CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_reference ON billing.checkout_attempts USING btree (merchant_id, rail, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
-CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_transaction ON billing.checkout_attempts USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_reference ON billing.checkout_attempts USING btree (merchant_id, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_transaction ON billing.checkout_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
 CREATE INDEX checkout_attempts_price_id_idx ON billing.checkout_attempts USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_checkout_attempts_solana_signature ON billing.checkout_attempts USING btree (transaction_id)
 WHERE rail = 'solana' AND transaction_id IS NOT NULL AND deleted_at IS NULL;
@@ -2103,7 +2072,7 @@ ALTER TABLE ONLY billing.checkout_attempts
 ALTER TABLE ONLY billing.checkout_attempts
     ADD CONSTRAINT checkout_attempts_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
 ALTER TABLE ONLY billing.checkout_attempts
-    ADD CONSTRAINT checkout_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT checkout_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.checkout_attempts
     ADD CONSTRAINT checkout_attempts_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id);
 
@@ -2215,7 +2184,7 @@ CREATE TABLE billing.rebill_cycles (
     CONSTRAINT rebill_cycles_pkey PRIMARY KEY (merchant_id, id),
     CONSTRAINT rebill_cycles_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT rebill_cycles_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
-    CONSTRAINT rebill_cycles_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT rebill_cycles_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT,
     CONSTRAINT chk_rebill_cycles_owner CHECK (owner IN ('engine', 'nmi_schedule', 'provider')),
     CONSTRAINT chk_rebill_cycles_amount CHECK (amount >= 0),
     CONSTRAINT chk_rebill_cycles_currency CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
@@ -2260,7 +2229,7 @@ CREATE TABLE billing.payment_attempts (
     subscription_id uuid,
     payment_method_id uuid,
     payment_id uuid,
-    rail_intent_id uuid,
+    provider_intent_id uuid,
     step text DEFAULT '' NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_id uuid,
@@ -2271,7 +2240,7 @@ CREATE TABLE billing.payment_attempts (
     CONSTRAINT payment_attempts_pkey PRIMARY KEY (merchant_id, id),
     CONSTRAINT payment_attempts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT payment_attempts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
-    CONSTRAINT payment_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT payment_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT,
     CONSTRAINT chk_payment_attempts_kind CHECK (kind IN ('verify', 'initial', 'upgrade', 'rebill', 'dunning_retry', 'customer_retry', 'invoice')),
     CONSTRAINT chk_payment_attempts_owner CHECK (owner IN ('engine', 'nmi_schedule', 'provider', 'none')),
     CONSTRAINT chk_payment_attempts_card_entry CHECK (card_entry IN ('new', 'saved')),
@@ -2295,7 +2264,7 @@ COMMENT ON COLUMN billing.payment_attempts.issuer_code IS 'The issuer''s raw ans
 COMMENT ON COLUMN billing.payment_attempts.enriched_at IS 'When the row was filled from the PSP''s transaction read; NULL rows are read by the enrichment pass.';
 
 CREATE UNIQUE INDEX uq_payment_attempts_transaction ON billing.payment_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE transaction_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_payment_attempts_operation_step ON billing.payment_attempts USING btree (merchant_id, rail_intent_id, step) WHERE rail_intent_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_payment_attempts_operation_step ON billing.payment_attempts USING btree (merchant_id, provider_intent_id, step) WHERE provider_intent_id IS NOT NULL;
 CREATE INDEX idx_payment_attempts_time ON billing.payment_attempts USING btree (merchant_id, attempted_at);
 CREATE INDEX idx_payment_attempts_checkout ON billing.payment_attempts USING btree (merchant_id, customer_id, checkout_target, attempted_at) WHERE checkout_target IS NOT NULL;
 CREATE INDEX idx_payment_attempts_cycle ON billing.payment_attempts USING btree (merchant_id, cycle_id) WHERE cycle_id IS NOT NULL;
@@ -2940,20 +2909,20 @@ ALTER TABLE ONLY billing.operation_authorizations
 CREATE TRIGGER immutable_operation_authorization_facts BEFORE UPDATE OR DELETE ON billing.operation_authorizations
 FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','terminal_reference','released_at','settled_at','settlement_cost_amount','settlement_amount','settlement_body_bytes','settlement_body_digest');
 
-CREATE TABLE billing.provider_billing_qualifications (
+CREATE TABLE billing.cost_qualifications (
     merchant_id uuid NOT NULL,
     operation_id text NOT NULL,
     provider text NOT NULL,
     provider_resource_id text NOT NULL,
-    provider_lifetime_start timestamp with time zone CONSTRAINT provider_billing_qualification_provider_lifetime_start_not_null NOT NULL,
+    provider_lifetime_start timestamp with time zone NOT NULL,
     provider_lifetime_end timestamp with time zone NOT NULL,
     provider_absent_at timestamp with time zone NOT NULL,
-    provider_absence_reference text CONSTRAINT provider_billing_qualificat_provider_absence_reference_not_null NOT NULL,
+    provider_absence_reference text NOT NULL,
     billing_stop_reference text NOT NULL,
     windows_closed_at timestamp with time zone NOT NULL,
-    windows_closed_reference text CONSTRAINT provider_billing_qualificatio_windows_closed_reference_not_null NOT NULL,
-    lifecycle_evidence_bytes bytea CONSTRAINT provider_billing_qualificatio_lifecycle_evidence_bytes_not_null NOT NULL,
-    lifecycle_evidence_digest bytea CONSTRAINT provider_billing_qualificati_lifecycle_evidence_digest_not_null NOT NULL,
+    windows_closed_reference text NOT NULL,
+    lifecycle_evidence_bytes bytea NOT NULL,
+    lifecycle_evidence_digest bytea NOT NULL,
     quiescence_seconds bigint NOT NULL,
     state text DEFAULT 'pending'::text NOT NULL,
     reason text DEFAULT 'awaiting_equal_observation'::text NOT NULL,
@@ -2963,25 +2932,25 @@ CREATE TABLE billing.provider_billing_qualifications (
     qualified_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT provider_billing_qualification_evidence_shape CHECK ((((octet_length(lifecycle_evidence_bytes) >= 1) AND (octet_length(lifecycle_evidence_bytes) <= 65536)) AND (octet_length(lifecycle_evidence_digest) = 32) AND (lifecycle_evidence_digest = sha256(lifecycle_evidence_bytes)))),
-    CONSTRAINT provider_billing_qualification_lifetime_shape CHECK (((provider_lifetime_end > provider_lifetime_start) AND (provider_absent_at >= provider_lifetime_end) AND (windows_closed_at >= provider_lifetime_end))),
-    CONSTRAINT provider_billing_qualification_policy_shape CHECK ((quiescence_seconds > 0)),
-    CONSTRAINT provider_billing_qualification_provider_shape CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (octet_length(provider) <= 255) AND (provider_resource_id <> ''::text) AND (provider_resource_id = btrim(provider_resource_id)) AND (octet_length(provider_resource_id) <= 255))),
-    CONSTRAINT provider_billing_qualification_reference_shape CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024))),
-    CONSTRAINT provider_billing_qualification_state_shape CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_cost_amount IS NOT NULL) AND (qualified_cost_amount >= 0) AND (qualified_at IS NOT NULL)))))
+    CONSTRAINT cost_qualification_evidence_shape CHECK ((((octet_length(lifecycle_evidence_bytes) >= 1) AND (octet_length(lifecycle_evidence_bytes) <= 65536)) AND (octet_length(lifecycle_evidence_digest) = 32) AND (lifecycle_evidence_digest = sha256(lifecycle_evidence_bytes)))),
+    CONSTRAINT cost_qualification_lifetime_shape CHECK (((provider_lifetime_end > provider_lifetime_start) AND (provider_absent_at >= provider_lifetime_end) AND (windows_closed_at >= provider_lifetime_end))),
+    CONSTRAINT cost_qualification_policy_shape CHECK ((quiescence_seconds > 0)),
+    CONSTRAINT cost_qualification_provider_shape CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (octet_length(provider) <= 255) AND (provider_resource_id <> ''::text) AND (provider_resource_id = btrim(provider_resource_id)) AND (octet_length(provider_resource_id) <= 255))),
+    CONSTRAINT cost_qualification_reference_shape CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024))),
+    CONSTRAINT cost_qualification_state_shape CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_cost_amount IS NOT NULL) AND (qualified_cost_amount >= 0) AND (qualified_at IS NOT NULL)))))
 );
-COMMENT ON TABLE billing.provider_billing_qualifications IS 'OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.';
+COMMENT ON TABLE billing.cost_qualifications IS 'OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.';
 
-ALTER TABLE ONLY billing.provider_billing_qualifications
-    ADD CONSTRAINT provider_billing_qualifications_pkey PRIMARY KEY (merchant_id, operation_id);
+ALTER TABLE ONLY billing.cost_qualifications
+    ADD CONSTRAINT cost_qualifications_pkey PRIMARY KEY (merchant_id, operation_id);
 
-ALTER TABLE ONLY billing.provider_billing_qualifications
-    ADD CONSTRAINT provider_billing_qualification_operation_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.cost_qualifications
+    ADD CONSTRAINT cost_qualification_operation_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT;
 
-CREATE TRIGGER immutable_provider_qualification_facts BEFORE UPDATE OR DELETE ON billing.provider_billing_qualifications
+CREATE TRIGGER immutable_cost_qualification_facts BEFORE UPDATE OR DELETE ON billing.cost_qualifications
 FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','reason','baseline_observation_id','qualified_observation_id','qualified_cost_amount','qualified_at','updated_at');
 
-CREATE TABLE billing.provider_billing_observations (
+CREATE TABLE billing.cost_observations (
     merchant_id uuid NOT NULL,
     operation_id text NOT NULL,
     observation_id text NOT NULL,
@@ -2999,54 +2968,30 @@ CREATE TABLE billing.provider_billing_observations (
     covers_lifetime boolean NOT NULL,
     qualification_reason text NOT NULL,
     observed_at timestamp with time zone NOT NULL,
-    CONSTRAINT provider_billing_observation_id_shape CHECK (((observation_id <> ''::text) AND (observation_id = btrim(observation_id)) AND (octet_length(observation_id) <= 255))),
-    CONSTRAINT provider_billing_observation_normalized_shape CHECK ((((refusal_kind IS NULL) AND raw_body_available AND (octet_length(raw_body_bytes) > 0) AND (normalized_records_bytes IS NOT NULL) AND (octet_length(normalized_records_bytes) > 0) AND (octet_length(normalized_records_bytes) <= 786432) AND (normalized_records_digest IS NOT NULL) AND (octet_length(normalized_records_digest) = 32) AND (normalized_records_digest = sha256(normalized_records_bytes)) AND (cost_amount IS NOT NULL)) OR ((refusal_kind IS NOT NULL) AND (refusal_kind <> ''::text) AND (refusal_kind = btrim(refusal_kind)) AND (octet_length(refusal_kind) <= 255) AND (normalized_records_bytes IS NULL) AND (normalized_records_digest IS NULL) AND (cost_amount IS NULL) AND (NOT has_negative_record) AND (NOT covers_lifetime) AND (qualification_reason = 'provider_evidence_refused'::text) AND (((refusal_kind = ANY (ARRAY['schema_ambiguity'::text, 'submicro_amount'::text, 'amount_overflow'::text])) AND raw_body_available AND (octet_length(raw_body_bytes) > 0)) OR ((refusal_kind = 'response_too_large'::text) AND (NOT raw_body_available) AND (octet_length(raw_body_bytes) = 0)))))),
-    CONSTRAINT provider_billing_observation_query_shape CHECK (((normalized_query <> ''::text) AND (normalized_query = btrim(normalized_query)) AND (octet_length(normalized_query) <= 8192) AND (query_end > query_start))),
-    CONSTRAINT provider_billing_observation_raw_shape CHECK (((octet_length(raw_body_bytes) <= 786432) AND (octet_length(raw_body_digest) = 32) AND (raw_body_digest = sha256(raw_body_bytes)) AND (raw_body_available OR (octet_length(raw_body_bytes) = 0)))),
-    CONSTRAINT provider_billing_observation_reason_shape CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))
+    CONSTRAINT cost_observation_id_shape CHECK (((observation_id <> ''::text) AND (observation_id = btrim(observation_id)) AND (octet_length(observation_id) <= 255))),
+    CONSTRAINT cost_observation_normalized_shape CHECK ((((refusal_kind IS NULL) AND raw_body_available AND (octet_length(raw_body_bytes) > 0) AND (normalized_records_bytes IS NOT NULL) AND (octet_length(normalized_records_bytes) > 0) AND (octet_length(normalized_records_bytes) <= 786432) AND (normalized_records_digest IS NOT NULL) AND (octet_length(normalized_records_digest) = 32) AND (normalized_records_digest = sha256(normalized_records_bytes)) AND (cost_amount IS NOT NULL)) OR ((refusal_kind IS NOT NULL) AND (refusal_kind <> ''::text) AND (refusal_kind = btrim(refusal_kind)) AND (octet_length(refusal_kind) <= 255) AND (normalized_records_bytes IS NULL) AND (normalized_records_digest IS NULL) AND (cost_amount IS NULL) AND (NOT has_negative_record) AND (NOT covers_lifetime) AND (qualification_reason = 'provider_evidence_refused'::text) AND (((refusal_kind = ANY (ARRAY['schema_ambiguity'::text, 'submicro_amount'::text, 'amount_overflow'::text])) AND raw_body_available AND (octet_length(raw_body_bytes) > 0)) OR ((refusal_kind = 'response_too_large'::text) AND (NOT raw_body_available) AND (octet_length(raw_body_bytes) = 0)))))),
+    CONSTRAINT cost_observation_query_shape CHECK (((normalized_query <> ''::text) AND (normalized_query = btrim(normalized_query)) AND (octet_length(normalized_query) <= 8192) AND (query_end > query_start))),
+    CONSTRAINT cost_observation_raw_shape CHECK (((octet_length(raw_body_bytes) <= 786432) AND (octet_length(raw_body_digest) = 32) AND (raw_body_digest = sha256(raw_body_bytes)) AND (raw_body_available OR (octet_length(raw_body_bytes) = 0)))),
+    CONSTRAINT cost_observation_reason_shape CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))
 );
-COMMENT ON TABLE billing.provider_billing_observations IS 'Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.';
+COMMENT ON TABLE billing.cost_observations IS 'Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.';
 
-ALTER TABLE ONLY billing.provider_billing_observations
-    ADD CONSTRAINT provider_billing_observations_pkey PRIMARY KEY (merchant_id, operation_id, observation_id);
+ALTER TABLE ONLY billing.cost_observations
+    ADD CONSTRAINT cost_observations_pkey PRIMARY KEY (merchant_id, operation_id, observation_id);
 
-CREATE INDEX idx_provider_billing_observations_operation_time ON billing.provider_billing_observations USING btree (merchant_id, operation_id, observed_at DESC);
+CREATE INDEX idx_cost_observations_operation_time ON billing.cost_observations USING btree (merchant_id, operation_id, observed_at DESC);
 
-ALTER TABLE ONLY billing.provider_billing_observations
-    ADD CONSTRAINT provider_billing_observation_qualification_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.provider_billing_qualifications(merchant_id, operation_id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.cost_observations
+    ADD CONSTRAINT cost_observation_qualification_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.cost_qualifications(merchant_id, operation_id) ON DELETE RESTRICT;
 
-CREATE TRIGGER immutable_provider_billing_observations BEFORE UPDATE OR DELETE ON billing.provider_billing_observations
+CREATE TRIGGER immutable_cost_observations BEFORE UPDATE OR DELETE ON billing.cost_observations
 FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
 -- ---------------------------------------------------------------------------
 -- Provider operations
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION billing.guard_provider_cutover_intent() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
- IF NEW.intent_type IN ('nmi_vault_delete','nmi_payment_method_update') THEN
-   PERFORM 1 FROM billing.payment_methods WHERE merchant_id=NEW.merchant_id AND id=(NEW.payload->>'payment_method_id')::uuid FOR UPDATE;
-   IF EXISTS(SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=NEW.merchant_id AND i.intent_type='nmi_provider_cutover'
-      AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired')
-      AND (i.payload->'request'->>'target_payment_method_id'=NEW.payload->>'payment_method_id' OR i.payload->>'source_payment_method_id'=NEW.payload->>'payment_method_id')) THEN
-     RAISE EXCEPTION 'payment method has an unresolved provider cutover' USING ERRCODE='55000';
-   END IF;
- END IF;
- IF NEW.subscription_id IS NOT NULL THEN
-   PERFORM 1 FROM billing.subscriptions WHERE id=NEW.subscription_id AND merchant_id=NEW.merchant_id FOR UPDATE;
-   IF EXISTS(SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=NEW.merchant_id
-     AND i.subscription_id=NEW.subscription_id AND i.id<>NEW.id
-     AND i.idempotency_key<>NEW.idempotency_key
-     AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired')
-     AND (i.intent_type='nmi_provider_cutover' OR NEW.intent_type='nmi_provider_cutover')) THEN
-     RAISE EXCEPTION 'subscription has an unresolved provider operation' USING ERRCODE='55000';
-   END IF;
- END IF;
- RETURN NEW;
-END $$;
-
-CREATE TABLE billing.rail_intents (
+CREATE TABLE billing.provider_intents (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -3073,80 +3018,77 @@ CREATE TABLE billing.rail_intents (
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     custodian_id uuid,
-    CONSTRAINT chk_rail_intents_executed CHECK (((status <> 'succeeded'::text) OR (executed_at IS NOT NULL))),
-    CONSTRAINT chk_rail_intents_origin CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text]))),
-    CONSTRAINT chk_rail_intents_status CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text]))),
-    CONSTRAINT rail_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
+    CONSTRAINT chk_provider_intents_executed CHECK (((status <> 'succeeded'::text) OR (executed_at IS NOT NULL))),
+    CONSTRAINT chk_provider_intents_origin CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text]))),
+    CONSTRAINT chk_provider_intents_status CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text]))),
+    CONSTRAINT provider_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
 );
-COMMENT ON TABLE billing.rail_intents IS 'Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
-COMMENT ON COLUMN billing.rail_intents.rail IS 'Rail the mutation targets (e.g. ''nmi'', ''stripe'').';
-COMMENT ON COLUMN billing.rail_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff), for example nmi_delete_subscription or manual_rebill.';
-COMMENT ON COLUMN billing.rail_intents.idempotency_key IS 'Deterministic identity of the logical intent within the merchant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
-COMMENT ON COLUMN billing.rail_intents.claimed_until IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
-COMMENT ON COLUMN billing.rail_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
-COMMENT ON COLUMN billing.rail_intents.actor IS 'Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).';
-COMMENT ON COLUMN billing.rail_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
-COMMENT ON COLUMN billing.rail_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
-COMMENT ON COLUMN billing.rail_intents.result_evidence IS 'How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).';
-COMMENT ON COLUMN billing.rail_intents.psp_id IS 'PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (rail_intents_addressed).';
-COMMENT ON COLUMN billing.rail_intents.destructive_run_id IS 'The destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.';
-COMMENT ON COLUMN billing.rail_intents.custodian_id IS 'The custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant''s custodian.';
+COMMENT ON TABLE billing.provider_intents IS 'Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
+COMMENT ON COLUMN billing.provider_intents.rail IS 'Rail the mutation targets (e.g. ''nmi'', ''stripe'').';
+COMMENT ON COLUMN billing.provider_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff), for example nmi_delete_subscription or manual_rebill.';
+COMMENT ON COLUMN billing.provider_intents.idempotency_key IS 'Deterministic identity of the logical intent within the merchant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
+COMMENT ON COLUMN billing.provider_intents.claimed_until IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
+COMMENT ON COLUMN billing.provider_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
+COMMENT ON COLUMN billing.provider_intents.actor IS 'Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).';
+COMMENT ON COLUMN billing.provider_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
+COMMENT ON COLUMN billing.provider_intents.expires_at IS 'End of the relevance window: past this instant the intent expires with a finding instead of firing stale (NULL = relevance governed solely by the type''s relevance check).';
+COMMENT ON COLUMN billing.provider_intents.result_evidence IS 'How the terminal status was established (e.g. {"verified_absent": true} for a delete confirmed by a provider read).';
+COMMENT ON COLUMN billing.provider_intents.psp_id IS 'PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (provider_intents_addressed).';
+COMMENT ON COLUMN billing.provider_intents.destructive_run_id IS 'The destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.';
+COMMENT ON COLUMN billing.provider_intents.custodian_id IS 'The custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant''s custodian.';
 
-ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_pkey PRIMARY KEY (merchant_id, id);
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_rail_intents_actor_created ON billing.rail_intents USING btree (actor, created_at) WHERE (actor IS NOT NULL);
-CREATE INDEX idx_rail_intents_created ON billing.rail_intents USING btree (created_at);
-CREATE INDEX idx_rail_intents_custodian ON billing.rail_intents USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
+CREATE INDEX idx_provider_intents_actor_created ON billing.provider_intents USING btree (actor, created_at) WHERE (actor IS NOT NULL);
+CREATE INDEX idx_provider_intents_created ON billing.provider_intents USING btree (created_at);
+CREATE INDEX idx_provider_intents_custodian ON billing.provider_intents USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
 -- Exact handle lookup serves both pending exclusion and permanent erasure history.
-CREATE INDEX idx_rail_intents_custodian_method_delete ON billing.rail_intents
+CREATE INDEX idx_provider_intents_custodian_method_delete ON billing.provider_intents
     (merchant_id, custodian_id, (payload->'instrument'->>'rail_method_ref'))
     WHERE intent_type='hyperswitch_method_delete';
-CREATE INDEX idx_rail_intents_native_vault_delete ON billing.rail_intents
+CREATE INDEX idx_provider_intents_native_vault_delete ON billing.provider_intents
     (merchant_id, psp_id, (payload->>'rail_customer_ref'))
     WHERE intent_type='nmi_vault_delete';
-CREATE INDEX idx_rail_intents_destructive_actor_window ON billing.rail_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]));
-CREATE INDEX idx_rail_intents_destructive_run ON billing.rail_intents USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_rail_intents_due ON billing.rail_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
-CREATE INDEX idx_rail_intents_merchant_destructive_window ON billing.rail_intents USING btree (merchant_id, origin, created_at, intent_type);
-CREATE INDEX idx_rail_intents_psp ON billing.rail_intents USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
-CREATE INDEX idx_rail_intents_subscription ON billing.rail_intents USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
+CREATE INDEX idx_provider_intents_destructive_actor_window ON billing.provider_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]));
+CREATE INDEX idx_provider_intents_destructive_run ON billing.provider_intents USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+CREATE INDEX idx_provider_intents_due ON billing.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
+CREATE INDEX idx_provider_intents_merchant_destructive_window ON billing.provider_intents USING btree (merchant_id, origin, created_at, intent_type);
+CREATE INDEX idx_provider_intents_psp ON billing.provider_intents USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
+CREATE INDEX idx_provider_intents_subscription ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 -- Initial membership identity is frozen in terms, including failed attempts
 -- with no subscription row. Paid agreement lookup must not scan the whole book.
-CREATE INDEX idx_rail_intents_initial_membership_history ON billing.rail_intents
+CREATE INDEX idx_provider_intents_initial_membership_history ON billing.provider_intents
     (merchant_id, ((payload->'terms')->>'subscription_id'))
     WHERE intent_type='initial_membership' AND status='succeeded';
-CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON billing.rail_intents USING btree (merchant_id, idempotency_key);
-CREATE UNIQUE INDEX uq_rail_intents_open_subscription_collection ON billing.rail_intents (merchant_id, subscription_id)
+CREATE UNIQUE INDEX uq_provider_intents_merchant_idempotency_key ON billing.provider_intents USING btree (merchant_id, idempotency_key);
+CREATE UNIQUE INDEX uq_provider_intents_open_subscription_collection ON billing.provider_intents (merchant_id, subscription_id)
 WHERE intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
-CREATE UNIQUE INDEX uq_rail_intents_subscription_collection_slot
-ON billing.rail_intents (merchant_id, subscription_id, (payload->>'previous_period_end'), (payload->>'attempt'))
+CREATE UNIQUE INDEX uq_provider_intents_subscription_collection_slot
+ON billing.provider_intents (merchant_id, subscription_id, (payload->>'previous_period_end'), (payload->>'attempt'))
 WHERE intent_type = 'subscription_collection';
-CREATE UNIQUE INDEX uq_rail_intents_open_manual_rebill ON billing.rail_intents (merchant_id, subscription_id)
+CREATE UNIQUE INDEX uq_provider_intents_open_manual_rebill ON billing.provider_intents (merchant_id, subscription_id)
 WHERE intent_type = 'manual_rebill' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
-CREATE UNIQUE INDEX uq_rail_intents_tier_change_subscription ON billing.rail_intents(merchant_id, subscription_id)
+CREATE UNIQUE INDEX uq_provider_intents_tier_change_subscription ON billing.provider_intents(merchant_id, subscription_id)
 WHERE intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
   AND subscription_id IS NOT NULL
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
-ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 
-CREATE TRIGGER guard_provider_cutover_intent BEFORE INSERT OR UPDATE OF status ON billing.rail_intents
-FOR EACH ROW EXECUTE FUNCTION billing.guard_provider_cutover_intent();
-
-CREATE TABLE billing.rail_mutation_logs (
+CREATE TABLE billing.provider_mutation_logs (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
     psp_id uuid,
-    rail_intent_id uuid,
+    provider_intent_id uuid,
     intent_type text,
     idempotency_key text,
     attempt integer DEFAULT 0 NOT NULL,
@@ -3155,121 +3097,127 @@ CREATE TABLE billing.rail_mutation_logs (
     evidence jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     custodian_id uuid,
-    CONSTRAINT rail_mutation_logs_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL))),
-    CONSTRAINT rail_mutation_logs_phase_check CHECK ((phase = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
+    CONSTRAINT provider_mutation_logs_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL))),
+    CONSTRAINT provider_mutation_logs_phase_check CHECK ((phase = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
 );
-COMMENT ON TABLE billing.rail_mutation_logs IS 'Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.';
-COMMENT ON COLUMN billing.rail_mutation_logs.psp_id IS 'PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (rail_mutation_logs_addressed).';
-COMMENT ON COLUMN billing.rail_mutation_logs.phase IS 'Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.';
-COMMENT ON COLUMN billing.rail_mutation_logs.evidence IS 'Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.';
-COMMENT ON COLUMN billing.rail_mutation_logs.custodian_id IS 'The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.';
+COMMENT ON TABLE billing.provider_mutation_logs IS 'Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.';
+COMMENT ON COLUMN billing.provider_mutation_logs.psp_id IS 'PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed).';
+COMMENT ON COLUMN billing.provider_mutation_logs.phase IS 'Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.';
+COMMENT ON COLUMN billing.provider_mutation_logs.evidence IS 'Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.';
+COMMENT ON COLUMN billing.provider_mutation_logs.custodian_id IS 'The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.';
 
-ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_pkey PRIMARY KEY (merchant_id, id);
+ALTER TABLE ONLY billing.provider_mutation_logs
+    ADD CONSTRAINT provider_mutation_logs_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_rail_mutation_logs_custodian ON billing.rail_mutation_logs USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
-CREATE INDEX idx_rail_mutation_logs_merchant_created ON billing.rail_mutation_logs USING btree (merchant_id, created_at DESC);
-CREATE INDEX idx_rail_mutation_logs_psp ON billing.rail_mutation_logs USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
-CREATE INDEX idx_rail_mutation_logs_rail_intent ON billing.rail_mutation_logs USING btree (merchant_id, rail_intent_id) WHERE (rail_intent_id IS NOT NULL);
-CREATE INDEX idx_rail_mutation_logs_rail_phase ON billing.rail_mutation_logs USING btree (rail, phase, created_at DESC);
+CREATE INDEX idx_provider_mutation_logs_custodian ON billing.provider_mutation_logs USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
+CREATE INDEX idx_provider_mutation_logs_merchant_created ON billing.provider_mutation_logs USING btree (merchant_id, created_at DESC);
+CREATE INDEX idx_provider_mutation_logs_psp ON billing.provider_mutation_logs USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
+CREATE INDEX idx_provider_mutation_logs_provider_intent ON billing.provider_mutation_logs USING btree (merchant_id, provider_intent_id) WHERE (provider_intent_id IS NOT NULL);
+CREATE INDEX idx_provider_mutation_logs_rail_phase ON billing.provider_mutation_logs USING btree (rail, phase, created_at DESC);
 
-ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_rail_intent_fk FOREIGN KEY (merchant_id, rail_intent_id) REFERENCES billing.rail_intents(merchant_id, id) ON DELETE SET NULL (rail_intent_id);
+ALTER TABLE ONLY billing.provider_mutation_logs
+    ADD CONSTRAINT provider_mutation_logs_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_mutation_logs
+    ADD CONSTRAINT provider_mutation_logs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_mutation_logs
+    ADD CONSTRAINT provider_mutation_logs_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_mutation_logs
+    ADD CONSTRAINT provider_mutation_logs_provider_intent_fk FOREIGN KEY (merchant_id, provider_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE SET NULL (provider_intent_id);
 
-CREATE TRIGGER immutable_rail_mutation_log_content BEFORE UPDATE ON billing.rail_mutation_logs
+CREATE TRIGGER immutable_provider_mutation_log_content BEFORE UPDATE ON billing.provider_mutation_logs
 FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
-CREATE TABLE billing.rail_refresh_watermarks (
-    id uuid DEFAULT uuidv7() NOT NULL,
+CREATE TABLE billing.psp_refresh_watermarks (
     merchant_id uuid NOT NULL,
-    rail text NOT NULL,
     psp_id uuid NOT NULL,
     event_domain text NOT NULL,
     watermark_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT rail_refresh_watermarks_event_domain_check CHECK ((event_domain = ANY (ARRAY['events'::text]))),
-    CONSTRAINT rail_refresh_watermarks_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text])))
+    CONSTRAINT psp_refresh_watermarks_event_domain_check CHECK ((event_domain = ANY (ARRAY['events'::text])))
 );
-COMMENT ON TABLE billing.rail_refresh_watermarks IS 'Durable Provider Refresh watermarks: the exclusive lower bound for the next bounded event window, per (merchant, rail, PSP, domain). A failed or partial provider read simply never advances watermark_at — the failure itself is recorded by the job, not here.';
-COMMENT ON COLUMN billing.rail_refresh_watermarks.psp_id IS 'The PSP whose event stream this cursor bounds. Required: a pull arms from exactly one PSP, and a watermark shared across PSPs skips the events of every PSP but the one that advanced it.';
-COMMENT ON COLUMN billing.rail_refresh_watermarks.event_domain IS 'Refresh domain. events currently covers provider transaction/subscription event windows.';
-COMMENT ON COLUMN billing.rail_refresh_watermarks.watermark_at IS 'Exclusive lower bound for the next successful bounded provider event refresh window.';
+COMMENT ON TABLE billing.psp_refresh_watermarks IS 'PSP refresh cursors: the exclusive lower bound of the next bounded event window, per (merchant, PSP, domain). A failed or partial provider read never advances watermark_at.';
+COMMENT ON COLUMN billing.psp_refresh_watermarks.event_domain IS 'Refresh domain. events covers provider transaction/subscription event windows.';
 
-ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_identity_key UNIQUE (merchant_id, rail, psp_id, event_domain);
-ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_pkey PRIMARY KEY (merchant_id, id);
+ALTER TABLE ONLY billing.psp_refresh_watermarks
+    ADD CONSTRAINT psp_refresh_watermarks_pkey PRIMARY KEY (merchant_id, psp_id, event_domain);
 
-CREATE INDEX idx_rail_refresh_watermarks_psp ON billing.rail_refresh_watermarks USING btree (merchant_id, psp_id);
-CREATE INDEX idx_rail_refresh_watermarks_rail ON billing.rail_refresh_watermarks USING btree (rail, event_domain, watermark_at);
-
-ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.psp_refresh_watermarks
+    ADD CONSTRAINT psp_refresh_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.psp_refresh_watermarks
+    ADD CONSTRAINT psp_refresh_watermarks_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.webhook_events (
     merchant_id uuid NOT NULL,
+    psp_id uuid,
+    custodian_id uuid,
     op text NOT NULL,
     event_id text NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    completed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    completed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT webhook_events_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
 );
-COMMENT ON TABLE billing.webhook_events IS 'Webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.';
-COMMENT ON COLUMN billing.webhook_events.op IS 'Dedup operation key, webhook.<rail>.<event_type> — matches the Redis key derivation.';
+COMMENT ON TABLE billing.webhook_events IS 'webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied.';
+COMMENT ON COLUMN billing.webhook_events.op IS 'webhook.<source>.<event_type>.';
 
 ALTER TABLE ONLY billing.webhook_events
-    ADD CONSTRAINT webhook_events_pkey PRIMARY KEY (merchant_id, op, event_id);
+    ADD CONSTRAINT webhook_events_merchant_id_psp_id_custodian_id_op_event_id_key UNIQUE NULLS NOT DISTINCT (merchant_id, psp_id, custodian_id, op, event_id);
 
-CREATE INDEX idx_webhook_events_completed_at ON billing.webhook_events USING btree (completed_at);
 CREATE INDEX ix_webhook_events_retention ON billing.webhook_events USING btree (merchant_id, completed_at);
 
 ALTER TABLE ONLY billing.webhook_events
     ADD CONSTRAINT webhook_events_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.webhook_events
+    ADD CONSTRAINT webhook_events_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.webhook_events
+    ADD CONSTRAINT webhook_events_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TRIGGER immutable_webhook_event_content BEFORE UPDATE ON billing.webhook_events
 FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
 CREATE TABLE billing.webhook_health (
     merchant_id uuid NOT NULL,
-    rail text NOT NULL,
+    psp_id uuid,
+    custodian_id uuid,
     last_accepted_at timestamp with time zone,
     last_pull_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT webhook_health_rail_nonempty CHECK ((btrim(rail) <> ''::text))
+    CONSTRAINT webhook_health_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
 );
-COMMENT ON TABLE billing.webhook_health IS 'Per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.';
-COMMENT ON COLUMN billing.webhook_health.last_accepted_at IS 'Last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).';
+COMMENT ON TABLE billing.webhook_health IS 'inbound-webhook health per event source (a PSP, or a custodian): accepted and pull watermarks. last_accepted_at is stamped only by verified webhooks; last_pull_at is the PSP refresh watermark the drift gate uses.';
+COMMENT ON COLUMN billing.webhook_health.last_accepted_at IS 'Last verified webhook from the source; silence age is measured from here (or created_at when nothing was ever accepted).';
 
 ALTER TABLE ONLY billing.webhook_health
-    ADD CONSTRAINT webhook_health_pkey PRIMARY KEY (merchant_id, rail);
+    ADD CONSTRAINT webhook_health_merchant_id_psp_id_custodian_id_key UNIQUE NULLS NOT DISTINCT (merchant_id, psp_id, custodian_id);
 
 ALTER TABLE ONLY billing.webhook_health
     ADD CONSTRAINT webhook_health_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.webhook_health
+    ADD CONSTRAINT webhook_health_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.webhook_health
+    ADD CONSTRAINT webhook_health_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.webhook_health_daily (
     merchant_id uuid NOT NULL,
-    rail text NOT NULL,
+    psp_id uuid,
+    custodian_id uuid,
     day_at timestamp with time zone NOT NULL,
     rejected bigint DEFAULT 0 NOT NULL,
     drift bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT webhook_health_daily_rail_nonempty CHECK ((btrim(rail) <> ''::text))
+    CONSTRAINT webhook_health_daily_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
 );
-COMMENT ON TABLE billing.webhook_health_daily IS 'UTC-day webhook counter buckets backing the webhook_rejects / webhook_drift_events windowed metrics.';
+COMMENT ON TABLE billing.webhook_health_daily IS 'UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics.';
 
 ALTER TABLE ONLY billing.webhook_health_daily
-    ADD CONSTRAINT webhook_health_daily_pkey PRIMARY KEY (merchant_id, rail, day_at);
+    ADD CONSTRAINT webhook_health_daily_merchant_id_psp_id_custodian_id_day_at_key UNIQUE NULLS NOT DISTINCT (merchant_id, psp_id, custodian_id, day_at);
 
 ALTER TABLE ONLY billing.webhook_health_daily
     ADD CONSTRAINT webhook_health_daily_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.webhook_health_daily
+    ADD CONSTRAINT webhook_health_daily_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.webhook_health_daily
+    ADD CONSTRAINT webhook_health_daily_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.account_updater_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3404,7 +3352,7 @@ COMMENT ON COLUMN billing.invoices.line_items IS 'Immutable as-billed statement 
 COMMENT ON COLUMN billing.invoices.po_number IS 'Purchase-order reference snapshotted from the payer invoice profile at finalize.';
 COMMENT ON COLUMN billing.invoices.tax IS 'Tax document fields (tax id, jurisdiction, rates) snapshotted from the payer invoice profile at finalize. Host-defined shape.';
 COMMENT ON COLUMN billing.invoices.billing_contacts IS 'Billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.';
-COMMENT ON COLUMN billing.invoices.collection_intent_id IS 'The live invoice_collection operation (rail_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation''s terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.';
+COMMENT ON COLUMN billing.invoices.collection_intent_id IS 'The live invoice_collection operation (provider_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation''s terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.';
 
 ALTER TABLE ONLY billing.invoices
     ADD CONSTRAINT invoices_pkey PRIMARY KEY (merchant_id, id);
@@ -3423,7 +3371,7 @@ ALTER TABLE ONLY billing.invoices
 ALTER TABLE ONLY billing.invoices
     ADD CONSTRAINT invoices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.invoices
-    ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES billing.rail_intents(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.invoice_items (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3510,7 +3458,7 @@ ALTER TABLE ONLY billing.invoice_payments
 ALTER TABLE ONLY billing.invoice_payments
     ADD CONSTRAINT invoice_payments_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id);
 ALTER TABLE ONLY billing.invoice_payments
-    ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 
 -- ---------------------------------------------------------------------------
 -- Notifications and host events
@@ -3645,9 +3593,10 @@ CREATE TABLE billing.reconciliation_findings (
          AND (finding_type = 'catalog.field_drift' OR finding_type LIKE 'catalog.%_in_' || rail)
          AND first_seen_run IS NULL AND last_seen_run IS NULL
          AND subject_key = jsonb_build_array(psp_id::text,openrails_resource_type,coalesce(openrails_resource_id,''),coalesce(external_resource_id,''),coalesce(field,''))::text)
-        OR (finding_type NOT LIKE 'catalog.%' AND rail='' AND psp_id IS NULL AND openrails_resource_type=''
+        OR (finding_type NOT LIKE 'catalog.%' AND openrails_resource_type=''
          AND openrails_resource_id IS NULL AND external_resource_id IS NULL AND field IS NULL
-         AND openrails_value IS NULL AND external_value IS NULL)
+         AND openrails_value IS NULL AND external_value IS NULL
+         AND ((rail='' AND psp_id IS NULL) OR (finding_type LIKE 'pull.%' AND rail<>'' AND psp_id IS NOT NULL)))
     ),
     CONSTRAINT chk_reconciliation_findings_resolution CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text])))),
     CONSTRAINT chk_reconciliation_findings_resolved_fields CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL)))),
@@ -3655,9 +3604,9 @@ CREATE TABLE billing.reconciliation_findings (
     CONSTRAINT chk_reconciliation_findings_status CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text]))),
     CONSTRAINT chk_reconciliation_findings_type CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
 );
-COMMENT ON TABLE billing.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.';
+COMMENT ON TABLE billing.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.';
 COMMENT ON COLUMN billing.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or customer uuid depending on the check.';
-COMMENT ON COLUMN billing.reconciliation_findings.psp_id IS 'Catalog findings only: the immutable PSP account whose catalog was compared. Part of the identity; absence can be proven only by a complete read of this account.';
+COMMENT ON COLUMN billing.reconciliation_findings.psp_id IS 'Catalog and pull.* findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.';
 COMMENT ON COLUMN billing.reconciliation_findings.first_seen_run IS 'Reconciliation run that first observed this finding; NULL when raised outside a run (e.g. the intents volume breaker).';
 COMMENT ON COLUMN billing.reconciliation_findings.operator_notes IS 'Operator-entered notes attached when a finding is fixed or ignored manually.';
 COMMENT ON COLUMN billing.reconciliation_findings.evidence IS 'Machine-readable finding evidence. Optional nested keys: provider, local, remote, intent, resolution.';
@@ -3671,7 +3620,7 @@ ALTER TABLE ONLY billing.reconciliation_findings
 CREATE INDEX idx_reconciliation_findings_actionable ON billing.reconciliation_findings USING btree (finding_type) WHERE (status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text]));
 CREATE INDEX idx_reconciliation_findings_low_severity_pending_digest ON billing.reconciliation_findings USING btree (merchant_id) WHERE ((status = 'requires_review'::text) AND (severity = 'low'::text) AND (notified_at IS NULL));
 CREATE INDEX idx_reconciliation_findings_requires_review ON billing.reconciliation_findings USING btree (last_seen_at DESC) WHERE (status = 'requires_review'::text);
-CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON billing.reconciliation_findings USING btree (merchant_id, finding_type, subject_key);
+CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON billing.reconciliation_findings USING btree (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT;
 CREATE INDEX idx_reconciliation_findings_open_catalog ON billing.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text));
 CREATE INDEX reconciliation_findings_first_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, first_seen_run) WHERE (first_seen_run IS NOT NULL);
 CREATE INDEX reconciliation_findings_last_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, last_seen_run) WHERE (last_seen_run IS NOT NULL);

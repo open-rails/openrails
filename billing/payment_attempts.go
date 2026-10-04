@@ -38,12 +38,11 @@ type PaymentAttempt struct {
 	TokenType     string       `json:"token_type"`
 	TransactionID string       `json:"transaction_id"`
 	Rail          string       `json:"rail"`
-	// PSPID is the provider account's plain UUID.
-	PSPID       string     `json:"psp_id"`
-	CustomerID  CustomerID `json:"customer_id"`
-	Amount      int64      `json:"amount,string"`
-	Currency    string     `json:"currency"`
-	AttemptedAt time.Time  `json:"attempted_at"`
+	PSPID         PSPID        `json:"psp_id"`
+	CustomerID    CustomerID   `json:"customer_id"`
+	Amount        int64        `json:"amount,string"`
+	Currency      string       `json:"currency"`
+	AttemptedAt   time.Time    `json:"attempted_at"`
 	// CheckoutID groups one buyer's attempts on one target (a price or
 	// card_save, CheckoutTarget) until it is approved.
 	CheckoutID      string           `json:"checkout_id"`
@@ -62,11 +61,12 @@ type ListPaymentAttemptsParams struct {
 	Page                                                   PageRequest
 	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
 	Source, ObservedVia, AVSResult, CVVResult              []string
-	// PSPID, CustomerID and CheckoutID are plain UUIDs.
-	PSPID, CustomerID, CheckoutID string
-	SubscriptionID                SubscriptionID
-	CycleID                       RebillCycleID
-	Since, Until                  time.Time
+	PSPID                                                  PSPID
+	// CustomerID and CheckoutID are plain UUIDs.
+	CustomerID, CheckoutID string
+	SubscriptionID         SubscriptionID
+	CycleID                RebillCycleID
+	Since, Until           time.Time
 }
 
 // RebillCycle is one paid period that came due (#1111) and what its attempts
@@ -77,7 +77,7 @@ type RebillCycle struct {
 	ID             RebillCycleID  `json:"id"`
 	SubscriptionID SubscriptionID `json:"subscription_id"`
 	CustomerID     CustomerID     `json:"customer_id"`
-	PSPID          string         `json:"psp_id"`
+	PSPID          PSPID          `json:"psp_id"`
 	Rail           string         `json:"rail"`
 	Owner          string         `json:"owner"`
 	DueAt          time.Time      `json:"due_at"`
@@ -104,8 +104,7 @@ type RebillCycle struct {
 type ListRebillCyclesParams struct {
 	Page                                     PageRequest
 	Owner, FirstOutcome, MissReason, Outcome []string
-	// PSPID is the provider account's plain UUID.
-	PSPID              string
-	SubscriptionID     SubscriptionID
-	DueSince, DueUntil time.Time
+	PSPID                                    PSPID
+	SubscriptionID                           SubscriptionID
+	DueSince, DueUntil                       time.Time
 }

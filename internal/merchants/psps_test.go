@@ -2,7 +2,6 @@ package merchants
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,58 +19,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPaymentProviderDefinitions(t *testing.T) {
+func TestRailDefinitions(t *testing.T) {
 	// or#879/or#880: custody is not a rail and its key is not an NMI credential;
 	// solana's signer is operator-only, so no merchant-visible slots.
-	require.Equal(t, []PaymentProviderDefinition{
-		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}},
-		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}},
-		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}},
-		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}},
-	}, PaymentProviderDefinitions())
+	require.Equal(t, []billing.RailDefinition{
+		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}, SettingKeys: []string{"tokenization_key"}},
+		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}, SettingKeys: []string{}},
+		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}, SettingKeys: []string{"publishable_key"}},
+		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}, SettingKeys: []string{}},
+	}, RailDefinitions())
 }
 
-func TestPaymentProviderConfigProjection(t *testing.T) {
+func TestPSPView(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	name := func(rail, account, key string) string {
-		n, err := PSPSecretName(rail, "live", account, key)
-		require.NoError(t, err)
-		return n
-	}
-	configured := func(names ...string) (out []MerchantSecretStatus) {
-		for _, n := range names {
-			out = append(out, MerchantSecretStatus{Name: n, Configured: true})
+	configured := func(keys ...string) (out []MerchantSecretStatus) {
+		for _, key := range keys {
+			out = append(out, MerchantSecretStatus{Key: key, Configured: true})
 		}
 		return out
 	}
 
-	got := paymentProviderConfigFromRow(gen.BillingPsp{
-		Rail: "stripe", Environment: "live", AccountID: "acct_123", LastVerifiedAt: &now,
-		Evidence: []byte(`{"public_config":{"publishable_key":"pk_live_123"},"credentials_validated":true,"credential_versions":{"secret_key":3}}`),
-	}, configured(name("stripe", "acct_123", "secret_key"), name("stripe", "acct_123", "webhook_signing_secret")))
-	require.Equal(t, map[string]string{"publishable_key": "pk_live_123"}, got.PublicConfig)
-	require.Equal(t, &now, got.LastVerifiedAt)
-	require.Equal(t, PaymentProviderCredentialStatus{Configured: true, LastValidatedAt: &now, RotationVersion: 3}, got.Credentials["secret_key"])
+	got := pspView(gen.BillingPsp{
+		Key: "main", Rail: "stripe", Environment: "live", AccountID: "acct_123", CredentialsValidatedAt: &now,
+		Settings: []byte(`{"publishable_key":"pk_live_123"}`), CredentialVersions: []byte(`{"secret_key":3}`), Revision: 4,
+	}, configured("secret_key", "webhook_signing_secret"), 2)
+	require.Equal(t, map[string]any{"publishable_key": "pk_live_123"}, got.Settings)
+	require.Equal(t, billing.PSPCredential{Configured: true, ValidatedAt: &now, RotationVersion: 3}, got.Credentials["secret_key"])
 	require.True(t, got.Credentials["webhook_signing_secret"].Configured)
-	require.Nil(t, got.Credentials["webhook_signing_secret"].LastValidatedAt, "format-only secrets carry no live validation")
+	require.Nil(t, got.Credentials["webhook_signing_secret"].ValidatedAt, "format-only secrets carry no live validation")
 	require.False(t, got.Credentials["webhook_signing_secret_thin"].Configured)
+	require.Equal(t, int64(2), got.OpenObligations)
+	require.Equal(t, int64(4), got.Revision)
 
-	// A verification timestamp without probe evidence, or without the probed
-	// credential still configured, is hidden.
-	for _, tc := range []struct {
-		evidence string
-		statuses []MerchantSecretStatus
-	}{
-		{``, configured(name("nmi", "gw", "security_key"))},
-		{`{"credentials_validated":true}`, nil},
-		{`{"credentials_validated":true}`, configured(name("nmi", "gw", "webhook_signing_secret"))},
-	} {
-		got := paymentProviderConfigFromRow(gen.BillingPsp{Rail: "nmi", Environment: "live", AccountID: "gw", LastVerifiedAt: &now, Evidence: []byte(tc.evidence)}, tc.statuses)
-		require.Nil(t, got.LastVerifiedAt, tc.evidence)
-		require.Nil(t, got.Credentials["security_key"].LastValidatedAt, tc.evidence)
+	// A validation time without the checked credential still configured is
+	// hidden.
+	for _, statuses := range [][]MerchantSecretStatus{nil, configured("webhook_signing_secret")} {
+		got := pspView(gen.BillingPsp{Rail: "nmi", Environment: "live", AccountID: "gw", CredentialsValidatedAt: &now}, statuses, 0)
+		require.Nil(t, got.Credentials["security_key"].ValidatedAt)
 	}
-	retired := paymentProviderConfigFromRow(gen.BillingPsp{Rail: "nmi", Environment: "live", AccountID: "gw", Evidence: []byte(`{"retired_credentials":{"security_key":true}}`)}, configured(name("nmi", "gw", "security_key")))
-	require.False(t, retired.Credentials["security_key"].Configured, "a retired credential is never shown as configured")
+	require.NotNil(t, pspView(gen.BillingPsp{Rail: "nmi", AccountID: "gw", CredentialsValidatedAt: &now}, configured("security_key"), 0).Credentials["security_key"].ValidatedAt)
 
 	// CCBill validation proves the DataLink pair, never the webhook salt.
 	for key, want := range map[string]bool{"datalink_username": true, "datalink_password": true, "salt": false} {
@@ -80,19 +66,14 @@ func TestPaymentProviderConfigProjection(t *testing.T) {
 	require.Nil(t, credentialValidatedAt("solana", "private_key", &now))
 }
 
-func TestProviderEvidenceMergesAndFloorsNeverRegress(t *testing.T) {
-	// The manifest also writes evidence; an API write must merge, not replace.
-	out, err := marshalProviderEvidence([]byte(`{"settings":{"tokenization_key":"tk"},"source":"manifest","credentials_validated":true}`), map[string]string{"publishable_key": "pk"}, false, map[string]int{"secret_key": 2})
-	require.NoError(t, err)
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(out, &doc))
-	require.Equal(t, map[string]any{
-		"settings": map[string]any{"tokenization_key": "tk"}, "source": "manifest",
-		"public_config": map[string]any{"publishable_key": "pk"}, "credential_versions": map[string]any{"secret_key": float64(2)},
-	}, doc)
-	out, err = marshalProviderEvidence(nil, nil, false, nil)
-	require.NoError(t, err)
-	require.Nil(t, out)
+func TestPSPSettingsAndFloors(t *testing.T) {
+	// An API write overlays the stored settings; an empty value removes a key.
+	require.Equal(t, map[string]any{"tokenization_key": "tk", "publishable_key": "pk"},
+		mergeSettings(map[string]any{"tokenization_key": "tk", "card_entry": "browser"}, map[string]any{"publishable_key": "pk", "card_entry": ""}))
+	require.NoError(t, validatePSPSettings("stripe", map[string]any{"publishable_key": "pk_test_1"}, nil))
+	require.Error(t, validatePSPSettings("stripe", map[string]any{"tokenization_key": "tk"}, nil), "a setting of another rail")
+	require.Error(t, validatePSPSettings("stripe", map[string]any{"publishable_key": "sk_test_1"}, nil))
+	require.Error(t, validatePSPSettings("nmi", map[string]any{"tokenization_key": "same"}, map[string]string{"security_key": "same"}), "a credential stored as a setting")
 
 	require.Equal(t, map[string]int{"secret_key": 5, "webhook_signing_secret": 2}, mergeCredentialVersions(
 		map[string]int{"Secret_Key": 5, "webhook_signing_secret": 1, "bogus": 0},
@@ -100,10 +81,9 @@ func TestProviderEvidenceMergesAndFloorsNeverRegress(t *testing.T) {
 	))
 	require.Nil(t, mergeCredentialVersions(nil, map[string]int{"x": 0}))
 
-	// Declared settings win; API public_config only fills gaps.
-	require.Equal(t, map[string]any{"tokenization_key": "declared", "publishable_key": "pk_test_api"},
-		pspSettings([]byte(`{"settings":{"tokenization_key":"declared"},"public_config":{"tokenization_key":"api","publishable_key":"pk_test_api"}}`)))
-	require.Nil(t, pspSettings([]byte(`{"source":"x"}`)))
+	state := credentialState(gen.BillingPsp{RetiredCredentials: []string{"Security_Key"}, CredentialRefs: []byte(`{"secret_key":{"name":"n","version":1}}`)})
+	require.True(t, state.Retired["security_key"])
+	require.Equal(t, 1, state.Refs["secret_key"].MinVersion)
 }
 
 func TestProbeNMIAndCCBillCredentials(t *testing.T) {

@@ -203,7 +203,7 @@ const CACHE_KEYS = (): Record<string, QueryKey> => ({
   attempts: queryKeys.attempts(), cycles: queryKeys.cycles(),
   catalog: queryKeys.catalog(), drift: queryKeys.catalogDrift(),
   meters: queryKeys.usageMeters(), meter: queryKeys.usageMeter("tokens"),
-  settings: queryKeys.settings(), providers: [...queryKeys.settings(), "payment-providers"],
+  settings: queryKeys.settings(), psps: [...queryKeys.settings(), "psps"],
   team: queryKeys.team(), alerts: queryKeys.alerts(), ops: queryKeys.ops(),
   dashboard: queryKeys.dashboard(), notifications: queryKeys.notifications(),
 })

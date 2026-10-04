@@ -116,7 +116,10 @@ const (
 // persistence. SubjectKey is the stable identity within (provider, type) —
 // design decision 1 — so re-runs update rather than duplicate.
 type Finding struct {
-	Provider          Provider
+	Provider Provider
+	// PSPID is the PSP whose read raised a pull.* finding; part of its
+	// identity.
+	PSPID             uuid.UUID
 	Type              FindingType
 	SubjectKey        string
 	Severity          Severity

@@ -34,7 +34,7 @@ import (
 // (DestructiveIntentTypes) — never a private copy.
 //
 // Constants, NEVER config: a knob an attacker can raise is not a safeguard. The
-// counter is the durable rail_intents ledger itself (#674) — every destructive
+// counter is the durable provider_intents ledger itself (#674) — every destructive
 // op posts a row BEFORE it executes, so the rolling-hour count already exists as
 // queryable durable state; there is no parallel Redis counter to flush, evict,
 // or lose on restart, and the gate + the op SHARE FATE (Postgres-down ⇒ the op

@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
-	var row gen.BillingRailIntent
+func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
+	var row gen.BillingProviderIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil || mid.UUID() != p.MerchantID {
 		return row, errors.New("sale merchant does not match context")

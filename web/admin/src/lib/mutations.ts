@@ -20,7 +20,8 @@ import {
   createProduct,
   createWebhook,
   rotateWebhookURL,
-  archivePaymentProviderAccount,
+  archivePSP,
+  createPSP,
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
@@ -38,7 +39,7 @@ import {
   putMerchantSettings,
   putDefaultUsageRateCard,
   putCustomerUsageRateOverride,
-  putPaymentProvider,
+  updatePSP,
   putUsageMeter,
   previewRepriceBatch,
   previewSubscriptionTierChange,
@@ -63,7 +64,8 @@ import {
   type ProductRequest,
   type UsageMeterRequest,
   type SubscriptionFilters,
-  type UpsertProviderRequest,
+  type CreatePSPRequest,
+  type UpdatePSPRequest,
   type WebhookRequest,
 } from "@/lib/api/endpoints"
 import {
@@ -775,49 +777,41 @@ export const adminMutations = {
       onSuccess: invalidateExactOnSuccess(queryClient, keys.settings()),
     })
   },
-  savePaymentProvider: (queryClient: QueryClient) => {
+  createPSP: (queryClient: QueryClient) => {
     const merchant = selectedMerchant()
     const keys = merchantQueryKeys()
     return mutationOptions({
-      mutationKey: [...keys.settings(), "payment-providers", "save"],
+      mutationKey: [...keys.settings(), "psps", "create"],
       retry: false,
       gcTime: 0,
-      mutationFn: ({
-        rail,
-        provider,
-      }: {
-        rail: string
-        provider: UpsertProviderRequest
-      }) => {
-        if (selectedMerchant() !== merchant)
-          throw new Error(
-            "Merchant changed; reopen this provider form before saving"
-          )
-        return putPaymentProvider(rail, provider)
+      mutationFn: (psp: CreatePSPRequest) => {
+        if (selectedMerchant() !== merchant) throw new Error("Merchant changed; reopen this form before saving")
+        return createPSP(psp)
       },
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.settings(),
-        "payment-providers",
-      ]),
+      onSuccess: invalidateExactOnSuccess(queryClient, [...keys.settings(), "psps"]),
     })
   },
-  archivePaymentProvider: (queryClient: QueryClient) => {
+  updatePSP: (queryClient: QueryClient) => {
+    const merchant = selectedMerchant()
     const keys = merchantQueryKeys()
     return mutationOptions({
-      mutationKey: [...keys.settings(), "payment-providers", "archive"],
-      mutationFn: ({
-        rail,
-        id,
-        allowLast,
-      }: {
-        rail: string
-        id: string
-        allowLast?: boolean
-      }) => archivePaymentProviderAccount(rail, id, allowLast),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.settings(),
-        "payment-providers",
-      ]),
+      mutationKey: [...keys.settings(), "psps", "update"],
+      retry: false,
+      gcTime: 0,
+      mutationFn: ({ id, psp }: { id: string; psp: UpdatePSPRequest }) => {
+        if (selectedMerchant() !== merchant) throw new Error("Merchant changed; reopen this form before saving")
+        return updatePSP(id, psp)
+      },
+      onSuccess: invalidateExactOnSuccess(queryClient, [...keys.settings(), "psps"]),
+    })
+  },
+  archivePSP: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "psps", "archive"],
+      mutationFn: ({ id, allowLast }: { id: string; allowLast?: boolean }) =>
+        archivePSP(id, allowLast),
+      onSuccess: invalidateExactOnSuccess(queryClient, [...keys.settings(), "psps"]),
     })
   },
   createApiKey: (queryClient: QueryClient) => {

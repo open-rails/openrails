@@ -13,7 +13,7 @@ import (
 func TestRequiresRecentSignIn(t *testing.T) {
 	for perm, want := range map[string]bool{
 		billing.MerchantCustomerSettingsUpdate: true, billing.MerchantPaymentsRefund: true,
-		billing.MerchantPaymentProvidersUpdate: true, billing.MerchantCatalogUpdate: true,
+		billing.MerchantPSPsUpdate: true, billing.MerchantCatalogUpdate: true,
 		billing.MerchantCreditsGrant: true, billing.MerchantBillingImport: true,
 		billing.MerchantBillingExport: true, billing.MerchantCredentialsManage: true,
 		billing.MerchantMembersManage: true, billing.MerchantAccessGrantPermanent: true,

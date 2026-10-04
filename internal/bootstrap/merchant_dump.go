@@ -198,9 +198,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	var accounts []gen.BillingPsp
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
-		accounts, lerr = database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
-			MerchantID: mid.UUID(),
-		})
+		accounts, lerr = database.Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
 		return lerr
 	}); err != nil {
 		return nil, fmt.Errorf("list PSPs: %w", err)
@@ -211,10 +209,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 	mt.PSPs = map[string]PSPConfig{}
 	for _, a := range accounts {
-		localKey := ""
-		if a.Key != nil {
-			localKey = strings.TrimSpace(*a.Key)
-		}
+		localKey := strings.TrimSpace(a.Key)
 		if localKey == "" {
 			localKey = pspDumpKey(a.Rail, a.Environment, a.AccountID)
 		}
@@ -227,10 +222,10 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		if a.CustodianID != nil {
 			account.Custodian = custodianKeyByID[*a.CustodianID]
 		}
-		if signer := pspSignerFromEvidence(a.Evidence); signer != nil {
+		if signer := pspSignerFromRow(a.Signer); signer != nil {
 			account.Signer = signer
 		}
-		if settings := pspSettingsFromEvidence(a.Evidence); len(settings) > 0 {
+		if settings := pspSettingsFromRow(a.Settings); len(settings) > 0 {
 			account.Settings = settings
 		}
 		key := pspSecretGroupKey(a.Rail, a.Environment, a.AccountID)
@@ -243,34 +238,27 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{slug: mt}}, nil
 }
 
-func pspSignerFromEvidence(raw []byte) *PSPSignerConfig {
-	var evidence struct {
-		Signer struct {
-			Mode string `json:"mode"`
-			Key  string `json:"key"`
-		} `json:"signer"`
+func pspSignerFromRow(raw []byte) *PSPSignerConfig {
+	var signer struct {
+		Mode string `json:"mode"`
+		Key  string `json:"key"`
 	}
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
+	if len(raw) == 0 || json.Unmarshal(raw, &signer) != nil {
 		return nil
 	}
-	mode := strings.TrimSpace(evidence.Signer.Mode)
+	mode := strings.TrimSpace(signer.Mode)
 	if mode == "" || mode == "local_keypair" {
 		return nil
 	}
-	return &PSPSignerConfig{
-		Mode: mode,
-		Key:  strings.TrimSpace(evidence.Signer.Key),
-	}
+	return &PSPSignerConfig{Mode: mode, Key: strings.TrimSpace(signer.Key)}
 }
 
-func pspSettingsFromEvidence(raw []byte) map[string]any {
-	var evidence struct {
-		Settings map[string]any `json:"settings"`
-	}
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil || len(evidence.Settings) == 0 {
+func pspSettingsFromRow(raw []byte) map[string]any {
+	var settings map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &settings) != nil || len(settings) == 0 {
 		return nil
 	}
-	return evidence.Settings
+	return settings
 }
 
 // MarshalMerchantManifest renders a config manifest to YAML, the canonical dump output.

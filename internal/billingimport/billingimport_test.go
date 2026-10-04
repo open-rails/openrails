@@ -134,14 +134,14 @@ func testResolver(fallback PSPRef, rows ...gen.BillingPsp) *pspResolver {
 	r := &pspResolver{byID: map[uuid.UUID]gen.BillingPsp{}, byKey: map[string]gen.BillingPsp{}, fallback: fallback}
 	for _, p := range rows {
 		r.byID[p.ID] = p
-		r.byKey[pspKeyIndex(p.Rail, *p.Key)] = p
-		r.known = append(r.known, p.Rail+"/"+*p.Key)
+		r.byKey[pspKeyIndex(p.Rail, p.Key)] = p
+		r.known = append(r.known, p.Rail+"/"+p.Key)
 	}
 	return r
 }
 
 func psp(rail, key string) gen.BillingPsp {
-	return gen.BillingPsp{ID: uuid.New(), Rail: rail, Key: &key}
+	return gen.BillingPsp{ID: uuid.New(), Rail: rail, Key: key}
 }
 
 // or#893: every provider row is attributed to a PSP the merchant owns on the same

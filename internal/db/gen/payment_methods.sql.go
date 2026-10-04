@@ -306,7 +306,7 @@ func (q *Queries) DeletePaymentMethod(ctx context.Context, arg DeletePaymentMeth
 }
 
 const getCollectionCustodianAccountsForShare = `-- name: GetCollectionCustodianAccountsForShare :one
-SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, p.pending_signer_public_key, c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at
+SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.custodian_id, p.settings, p.signer, p.credential_custody, p.credential_refs, p.credential_versions, p.retired_credentials, p.credentials_validated_at, p.webhook_endpoint_id, p.webhook_overlap_expires_at, p.pending_signer_public_key, p.revision, p.archived, p.archived_at, p.created_at, p.updated_at, c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at
 FROM billing.psps p
 JOIN billing.custodians c ON c.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
@@ -334,19 +334,26 @@ func (q *Queries) GetCollectionCustodianAccountsForShare(ctx context.Context, ar
 	err := row.Scan(
 		&i.BillingPsp.ID,
 		&i.BillingPsp.MerchantID,
+		&i.BillingPsp.Key,
 		&i.BillingPsp.Rail,
 		&i.BillingPsp.Environment,
 		&i.BillingPsp.AccountID,
-		&i.BillingPsp.Key,
-		&i.BillingPsp.Evidence,
-		&i.BillingPsp.FirstSeenAt,
-		&i.BillingPsp.LastVerifiedAt,
-		&i.BillingPsp.ReplacedAt,
+		&i.BillingPsp.CustodianID,
+		&i.BillingPsp.Settings,
+		&i.BillingPsp.Signer,
+		&i.BillingPsp.CredentialCustody,
+		&i.BillingPsp.CredentialRefs,
+		&i.BillingPsp.CredentialVersions,
+		&i.BillingPsp.RetiredCredentials,
+		&i.BillingPsp.CredentialsValidatedAt,
+		&i.BillingPsp.WebhookEndpointID,
+		&i.BillingPsp.WebhookOverlapExpiresAt,
+		&i.BillingPsp.PendingSignerPublicKey,
+		&i.BillingPsp.Revision,
+		&i.BillingPsp.Archived,
+		&i.BillingPsp.ArchivedAt,
 		&i.BillingPsp.CreatedAt,
 		&i.BillingPsp.UpdatedAt,
-		&i.BillingPsp.Archived,
-		&i.BillingPsp.CustodianID,
-		&i.BillingPsp.PendingSignerPublicKey,
 		&i.BillingCustodian.ID,
 		&i.BillingCustodian.MerchantID,
 		&i.BillingCustodian.Key,
@@ -791,7 +798,7 @@ const listCustodianRoutePSPs = `-- name: ListCustodianRoutePSPs :many
 SELECT p.id FROM billing.psps p
 JOIN billing.custodians c ON c.merchant_id = p.merchant_id AND c.id = p.custodian_id AND c.environment = p.environment
 WHERE p.merchant_id = $1::uuid AND p.rail = $2::text
-  AND p.custodian_id = $3::uuid AND NOT p.archived AND p.replaced_at IS NULL
+  AND p.custodian_id = $3::uuid AND NOT p.archived
 ORDER BY p.created_at, p.id
 LIMIT 2
 `

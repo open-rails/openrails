@@ -32,7 +32,6 @@ import type {
 } from "./generated/wire"
 import type {
   AdminSubscription,
-  CheckoutRoutingDecision,
   CustomerBillingProfile,
   Finding,
   FindingsListResponse,
@@ -41,8 +40,9 @@ import type {
   MerchantSettings,
   MerchantWebhook,
   MintedAPIKey,
-  PaymentProviderConfig,
-  PaymentProviderDefinition,
+  PSP,
+  PSPRoutingPreview,
+  RailDefinition,
   RawEntitlement,
   RawProductAccessGrant,
   RepairAlert,
@@ -665,62 +665,63 @@ export const getMerchantSettings = (signal?: AbortSignal) =>
 export const putMerchantSettings = (body: MerchantSettings) =>
   api<{ message: string }>("/merchant/settings", { method: "PUT", body })
 
-export const listPaymentProviders = (signal?: AbortSignal) =>
-  api<{
-    data: PaymentProviderConfig[]
-    provider_definitions: PaymentProviderDefinition[]
-  }>("/merchant/payment-providers", { signal })
+// A merchant has a handful of PSPs: one page holds them all.
+export const listPSPs = (signal?: AbortSignal) =>
+  api<ListPage<PSP>>("/merchant/psps?limit=500", { signal })
 
-// #882: no `environment` — it is derived from the deployment's test_mode.
-export interface UpsertProviderRequest {
+export const listRails = (signal?: AbortSignal) =>
+  api<ListPage<RailDefinition>>("/merchant/rails", { signal })
+
+// Credentials are write-only and checked with the provider before anything
+// is stored. operation_id makes a retried submission return the first result.
+export interface CreatePSPRequest {
   operation_id: string
-  expected_revision: number
+  key: string
+  rail: string
   account_id: string
-  public_config?: Record<string, string>
+  settings?: Record<string, string>
   credentials?: Record<string, string>
 }
 
-export const putPaymentProvider = (rail: string, body: UpsertProviderRequest) =>
-  api<{ payment_provider: PaymentProviderConfig }>(
-    `/merchant/payment-providers/${rail}`,
-    {
-      method: "PUT",
-      body,
-    }
-  )
+export const createPSP = (body: CreatePSPRequest) =>
+  api<PSP>("/merchant/psps", { method: "POST", body })
 
-// dryRunCheckoutRouting (or#288) explains which PSP a checkout for this price
-// would land on and why each other candidate was passed over. Read-only: it
-// runs the production decision path without creating a session.
-export const dryRunCheckoutRouting = (
-  body: {
-    price_id: string
-    country?: string
-    selector?: string
-  },
+// expected_revision is the PSP revision the form read; a PSP changed since
+// is refused.
+export interface UpdatePSPRequest {
+  operation_id: string
+  expected_revision: number
+  settings?: Record<string, string>
+  credentials?: Record<string, string>
+}
+
+export const updatePSP = (id: string, body: UpdatePSPRequest) =>
+  api<PSP>(`/merchant/psps/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body,
+  })
+
+// previewPSPRouting (or#288) explains which PSP a checkout for this price
+// would use and why each other PSP was passed over. Read-only: it runs the
+// production decision path without creating a session.
+export const previewPSPRouting = (
+  body: { price_id: string; country?: string; psp?: string },
   signal?: AbortSignal
 ) =>
-  api<CheckoutRoutingDecision>("/merchant/payment-providers/routing/dry-run", {
+  api<PSPRoutingPreview>("/merchant/psps/routing-preview", {
     method: "POST",
     body,
     signal,
   })
 
-// archivePaymentProviderAccount (#655) archives exactly this account by its
-// immutable id, without contacting the provider. The rail's last active
-// account is refused (409 provider_account_last_active) unless allowLast.
-export const archivePaymentProviderAccount = (
-  rail: string,
-  id: string,
-  allowLast = false
-) =>
-  api<{ payment_provider: PaymentProviderConfig }>(
-    `/merchant/payment-providers/${rail}/accounts/${id}/archive`,
-    {
-      method: "POST",
-      body: allowLast ? { allow_last: true } : {},
-    }
-  )
+// archivePSP (#655) archives exactly this PSP without contacting the
+// provider. The rail's last active PSP is refused (409 psp_last_active)
+// unless allowLast.
+export const archivePSP = (id: string, allowLast = false) =>
+  api<PSP>(`/merchant/psps/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
+    body: allowLast ? { allow_last: true } : {},
+  })
 
 // --- API keys (#757) ---
 

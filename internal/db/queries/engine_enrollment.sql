@@ -10,7 +10,7 @@ WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.customer_id=sqlc.arg(custo
 ORDER BY s.id LIMIT 1;
 
 -- name: GetConflictingInitialEnrollmentOperation :one
-SELECT i.* FROM billing.rail_intents i
+SELECT i.* FROM billing.provider_intents i
 JOIN billing.products accepted ON accepted.merchant_id=i.merchant_id AND accepted.id=sqlc.arg(product_id)::uuid
 JOIN billing.products existing ON existing.merchant_id=i.merchant_id AND existing.id::text=i.payload->'terms'->>'product_id'
 WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.intent_type='initial_membership'

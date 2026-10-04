@@ -42,7 +42,7 @@ func NMIDeleteIdempotencyKey(subscriptionID, pspID uuid.UUID, reference string) 
 	return fmt.Sprintf("%s:%s:%s:%x", TypeNMIDeleteSubscription, subscriptionID, pspID, digest)
 }
 
-func acceptedNMIDeleteTarget(in gen.BillingRailIntent) (NMIDeletePayload, error) {
+func acceptedNMIDeleteTarget(in gen.BillingProviderIntent) (NMIDeletePayload, error) {
 	var target NMIDeletePayload
 	if in.SubscriptionID == nil || in.PspID == nil || *in.PspID == uuid.Nil {
 		return target, fmt.Errorf("NMI delete has no accepted subscription/provider address")
@@ -98,7 +98,7 @@ func (h *NMIDeleteHandler) now() time.Time {
 // still canceled with a pending deferred delete. This re-check at execution
 // time is the AUTHORITATIVE resume guard (a missed advisory supersede on
 // resume cannot cause an erroneous delete), mirroring the retired worker.
-func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
+func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -112,7 +112,7 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Billin
 	return StillRelevant(), nil
 }
 
-func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
+func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	if _, err := acceptedNMIDeleteTarget(intent); err != nil {
 		return Parked(err.Error())
 	}
@@ -181,7 +181,7 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.BillingRailIn
 // Verify resolves an ambiguous delete by reading the provider: absent means
 // the delete (whenever it happened) is done; present means it definitely has
 // not happened and the executor may retry.
-func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
+func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		return Ambiguous("load subscription: " + err.Error())
@@ -204,7 +204,7 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.BillingRailInt
 	return Retryable("subscription still present at provider; delete verified not executed")
 }
 
-func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.BillingRailIntent) (*models.Subscription, error) {
+func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.BillingProviderIntent) (*models.Subscription, error) {
 	target, err := acceptedNMIDeleteTarget(intent)
 	if err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.Bill
 // finalize clears the DeletionScheduledAt read model: the cancellation is now
 // destructive (no longer resumable). Idempotent — a cleared marker is left
 // alone.
-func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.BillingRailIntent) error {
+func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.BillingProviderIntent) error {
 	target, err := acceptedNMIDeleteTarget(intent)
 	if err != nil {
 		return err

@@ -68,7 +68,7 @@ type EnqueueParams struct {
 	PspID uuid.UUID
 	// CustodianID addresses the write to a custodian instead (or#795's batch
 	// account updater uploads one token batch to a custodian that backs many
-	// PSPs, so no single psp_id names it). Exactly the rail_intents_addressed
+	// PSPs, so no single psp_id names it). Exactly the provider_intents_addressed
 	// constraint: one of the two must be set.
 	CustodianID    uuid.UUID
 	Payload        any
@@ -86,13 +86,13 @@ type EnqueueParams struct {
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
-func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
+func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
 	scope, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.BillingRailIntent{}, err
+		return gen.BillingProviderIntent{}, err
 	}
 	if scope.UUID() != p.MerchantID {
-		return gen.BillingRailIntent{}, errors.New("intent merchant does not match context")
+		return gen.BillingProviderIntent{}, errors.New("intent merchant does not match context")
 	}
 	if p.IntentType == subscriptions.TypeInitialMembership {
 		return s.enqueueInitialMembership(ctx, p)
@@ -104,7 +104,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 		return s.enqueueNMIMethodDelete(ctx, p)
 	}
 	if p.IntentType == TypeHyperSwitchMethodDelete {
-		return gen.BillingRailIntent{}, errors.New("custodian deletion requires owned method admission")
+		return gen.BillingProviderIntent{}, errors.New("custodian deletion requires owned method admission")
 	}
 	if p.IntentType == "nmi_sale" {
 		return s.enqueueSale(ctx, p)
@@ -113,17 +113,17 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 		return s.enqueue(ctx, p)
 	}
 	if p.SubscriptionID == nil {
-		return gen.BillingRailIntent{}, errors.New("recurring operation requires a subscription")
+		return gen.BillingProviderIntent{}, errors.New("recurring operation requires a subscription")
 	}
 	var engineCustomer uuid.UUID
 	if p.IntentType == subscriptions.TypeSubscriptionCollection {
 		observed, err := subscriptions.NewSubscriptionRepo(s.db).GetByID(ctx, *p.SubscriptionID)
 		if err != nil {
-			return gen.BillingRailIntent{}, err
+			return gen.BillingProviderIntent{}, err
 		}
 		engineCustomer = observed.CustomerID
 	}
-	var row gen.BillingRailIntent
+	var row gen.BillingProviderIntent
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
 		if engineCustomer != uuid.Nil {
@@ -233,7 +233,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 				return err
 			}
 		} else {
-			_, err := d.Gen(ctx).GetLiveTierChangeRailIntent(ctx, gen.GetLiveTierChangeRailIntentParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+			_, err := d.Gen(ctx).GetLiveTierChangeProviderIntent(ctx, gen.GetLiveTierChangeProviderIntentParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
 			if err == nil {
 				return subscriptions.ErrRebillTermsCommitted
 			}
@@ -285,16 +285,16 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 	return row, err
 }
 
-func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
+func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
 	if p.IntentType == TypeNMIPaymentMethodDelete || p.IntentType == TypeHyperSwitchMethodDelete {
 		if err := validatePaymentMethodDeleteAuthority(ctx, p); err != nil {
-			return gen.BillingRailIntent{}, err
+			return gen.BillingProviderIntent{}, err
 		}
 	}
 	if p.IntentType == "" || p.IdempotencyKey == "" {
-		return gen.BillingRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
+		return gen.BillingProviderIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
-	// or#893/or#795 (rail_intents_addressed): the intent names the account it
+	// or#893/or#795 (provider_intents_addressed): the intent names the account it
 	// will execute against — a PSP, or a custodian for the writes addressed to
 	// one. An explicit value wins; otherwise the PSP the caller already routed
 	// to and pinned on ctx (checkout's stampPSP, the webhook plane) is the
@@ -306,7 +306,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
 		psp, err := db.RequirePSPID(ctx)
 		if err != nil {
-			return gen.BillingRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
+			return gen.BillingProviderIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
 		}
 		p.PspID = psp
 	}
@@ -314,7 +314,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 	if p.Payload != nil {
 		b, err := json.Marshal(p.Payload)
 		if err != nil {
-			return gen.BillingRailIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
+			return gen.BillingProviderIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
 		}
 		payload = b
 	}
@@ -339,7 +339,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 			IntentType: p.IntentType,
 			Origin:     p.Origin,
 		}, time.Now().UTC()); err != nil {
-			return gen.BillingRailIntent{}, err
+			return gen.BillingProviderIntent{}, err
 		}
 	}
 
@@ -349,10 +349,10 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIn
 	}
 	// psp_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
-	var row gen.BillingRailIntent
+	var row gen.BillingProviderIntent
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
+		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
 			MerchantID:     p.MerchantID,
 			Rail:           p.Provider,
 			IntentType:     p.IntentType,
@@ -389,7 +389,7 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 	if scopeErr != nil {
 		return 0, scopeErr
 	}
-	return s.db.Gen(ctx).SupersedeRailIntentsBySubject(ctx, gen.SupersedeRailIntentsBySubjectParams{
+	return s.db.Gen(ctx).SupersedeProviderIntentsBySubject(ctx, gen.SupersedeProviderIntentsBySubjectParams{
 		MerchantID:     scopeMerchantID.UUID(),
 		IntentType:     intentType,
 		SubscriptionID: &subscriptionID,
@@ -400,12 +400,12 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 // ClaimByID leases ONE specific intent for the synchronous execute path.
 // ok=false means the row is not claimable (terminal, expired, or leased by a
 // live executor) — the caller inspects the canonical row instead.
-func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingRailIntent, bool, error) {
+func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
-		return gen.BillingRailIntent{}, false, scopeErr
+		return gen.BillingProviderIntent{}, false, scopeErr
 	}
-	row, err := s.db.Gen(ctx).ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
+	row, err := s.db.Gen(ctx).ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id,
 		Now:        now.UTC(),
@@ -413,20 +413,20 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.BillingRailIntent{}, false, nil
+			return gen.BillingProviderIntent{}, false, nil
 		}
-		return gen.BillingRailIntent{}, false, err
+		return gen.BillingProviderIntent{}, false, err
 	}
 	return row, true, nil
 }
 
 // Get returns the intent row by id.
-func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, error) {
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
-		return gen.BillingRailIntent{}, scopeErr
+		return gen.BillingProviderIntent{}, scopeErr
 	}
-	return s.db.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
+	return s.db.Gen(ctx).GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 }
 
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
@@ -435,7 +435,7 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, e
 // merchant's intents. Under the since-removed RLS a bare-context claim leased
 // ZERO intents — silently, with no error — which is how the entire outbound
 // provider-mutation plane came to be inert while its tests passed.
-func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingRailIntent, error) {
+func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
@@ -443,7 +443,7 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	if err := s.db.AssertMerchantScope(ctx, "intent executor claim"); err != nil {
 		return nil, err
 	}
-	return s.db.Gen(ctx).ClaimDueRailIntents(ctx, gen.ClaimDueRailIntentsParams{
+	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
 		MerchantID: scopeMerchantID.UUID(),
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -464,7 +464,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 	if scopeErr != nil {
 		return false, scopeErr
 	}
-	n, err := s.db.Gen(ctx).RenewRailIntentClaim(ctx, gen.RenewRailIntentClaimParams{
+	n, err := s.db.Gen(ctx).RenewProviderIntentClaim(ctx, gen.RenewProviderIntentClaimParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, Status: status, Attempts: attempts, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})
@@ -476,7 +476,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
 // merchant-pin requirement as ClaimDue (or#862).
-func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingRailIntent, error) {
+func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
@@ -484,7 +484,7 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 	if err := s.db.AssertMerchantScope(ctx, "intent verifier claim"); err != nil {
 		return nil, err
 	}
-	return s.db.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
+	return s.db.Gen(ctx).ClaimDueVerifyProviderIntents(ctx, gen.ClaimDueVerifyProviderIntentsParams{
 		MerchantID: scopeMerchantID.UUID(),
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -494,20 +494,20 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 
 // ClaimUnknownByID leases one unknown operation for operator resolution.
 // ok=false means it is not unknown or another worker holds its lease.
-func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingRailIntent, bool, error) {
+func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
-		return gen.BillingRailIntent{}, false, scopeErr
+		return gen.BillingProviderIntent{}, false, scopeErr
 	}
-	row, err := s.db.Gen(ctx).ClaimUnknownRailIntentByID(ctx, gen.ClaimUnknownRailIntentByIDParams{
+	row, err := s.db.Gen(ctx).ClaimUnknownProviderIntentByID(ctx, gen.ClaimUnknownProviderIntentByIDParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.BillingRailIntent{}, false, nil
+		return gen.BillingProviderIntent{}, false, nil
 	}
 	if err != nil {
-		return gen.BillingRailIntent{}, false, err
+		return gen.BillingProviderIntent{}, false, err
 	}
 	return row, true, nil
 }
@@ -520,7 +520,7 @@ func (s *Store) ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, er
 		return false, scopeErr
 	}
 	rows, err := s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
-		next, err := txs.db.Gen(ctx).ReleaseUnknownRailIntentClaim(ctx, gen.ReleaseUnknownRailIntentClaimParams{MerchantID: scopeMerchantID.UUID(), ID: id})
+		next, err := txs.db.Gen(ctx).ReleaseUnknownProviderIntentClaim(ctx, gen.ReleaseUnknownProviderIntentClaimParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, time.Time{}, nil
 		}
@@ -543,7 +543,7 @@ func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	if scopeErr != nil {
 		return 0, scopeErr
 	}
-	return s.db.Gen(ctx).ExpireOverdueRailIntents(ctx, gen.ExpireOverdueRailIntentsParams{
+	return s.db.Gen(ctx).ExpireOverdueProviderIntents(ctx, gen.ExpireOverdueProviderIntentsParams{
 		MerchantID:       scopeMerchantID.UUID(),
 		Now:              now.UTC(),
 		BreakerHeldTypes: DestructiveIntentTypes(),
@@ -567,7 +567,7 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return oneTerminal(s.db.Gen(ctx).MarkRailIntentSucceeded(ctx, gen.MarkRailIntentSucceededParams{
+	return oneTerminal(s.db.Gen(ctx).MarkProviderIntentSucceeded(ctx, gen.MarkProviderIntentSucceededParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, Now: now.UTC(), ResultEvidence: ev,
 	}))
@@ -578,7 +578,7 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 // result_evidence (internal/river/jobs_dunning.go: transaction_id for the
 // lifecycle repair, response_code for hard/soft decline classification; the
 // admin operations view also surfaces transaction_id). Everything else is
-// forensic and was already durably logged to rail_mutation_logs before the
+// forensic and was already durably logged to provider_mutation_logs before the
 // success transition, so it is safe to drop from the intent row — UNLESS the handler asks to
 // keep its evidence (PrunePolicy), which the catalog archive/sunset handlers do
 // because internal/service/catalog_extras.go renders their verification booleans.
@@ -599,9 +599,6 @@ var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 // The WHERE status='succeeded' guard makes this a no-op on anything not (still)
 // succeeded. Best-effort by design: a prune failure leaves the full row in
 // place, which is correct — just larger — and never weakens the dedupe.
-//
-// Cutover tombstones retain accepted terms, step receipts and append-only account
-// continuity history even if a caller supplies a weaker handler prune policy.
 func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error {
 	if err := refuseCustodyKeys(evidence); err != nil {
 		return err
@@ -617,7 +614,7 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	if keepEvidence {
 		// Drop the payload only; leave result_evidence intact for the handler's
 		// post-success readers.
-		return q.PruneSucceededRailIntentPayload(ctx, gen.PruneSucceededRailIntentPayloadParams{ID: id, MerchantID: mid.UUID()})
+		return q.PruneSucceededProviderIntentPayload(ctx, gen.PruneSucceededProviderIntentPayloadParams{ID: id, MerchantID: mid.UUID()})
 	}
 	var ev []byte
 	if slim := slimEvidence(evidence); len(slim) > 0 {
@@ -628,9 +625,9 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		ev = b
 	}
 	if keepPayload {
-		return q.PruneSucceededRailIntentEvidence(ctx, gen.PruneSucceededRailIntentEvidenceParams{ID: id, MerchantID: mid.UUID(), Evidence: ev})
+		return q.PruneSucceededProviderIntentEvidence(ctx, gen.PruneSucceededProviderIntentEvidenceParams{ID: id, MerchantID: mid.UUID(), Evidence: ev})
 	}
-	return q.PruneSucceededRailIntent(ctx, gen.PruneSucceededRailIntentParams{ID: id, MerchantID: mid.UUID(), Evidence: ev})
+	return q.PruneSucceededProviderIntent(ctx, gen.PruneSucceededProviderIntentParams{ID: id, MerchantID: mid.UUID(), Evidence: ev})
 }
 
 // PruneTerminalPayload removes a short-lived credential from a terminal
@@ -640,7 +637,7 @@ func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("intents: prune terminal intent: %w", err)
 	}
-	return s.db.Gen(ctx).PruneTerminalRailIntentPayload(ctx, gen.PruneTerminalRailIntentPayloadParams{ID: id, MerchantID: mid.UUID()})
+	return s.db.Gen(ctx).PruneTerminalProviderIntentPayload(ctx, gen.PruneTerminalProviderIntentPayloadParams{ID: id, MerchantID: mid.UUID()})
 }
 
 // slimEvidence keeps only pruneEvidenceKeys (when present) off a succeeded
@@ -685,7 +682,7 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 	if err != nil {
 		return fmt.Errorf("intents: record progress: %w", err)
 	}
-	return s.db.Gen(ctx).RecordRailIntentProgress(ctx, gen.RecordRailIntentProgressParams{ID: id, MerchantID: mid.UUID(), Progress: b})
+	return s.db.Gen(ctx).RecordProviderIntentProgress(ctx, gen.RecordProviderIntentProgressParams{ID: id, MerchantID: mid.UUID(), Progress: b})
 }
 
 // RecordProgressIfAbsent writes one write-ahead progress marker atomically.
@@ -713,7 +710,7 @@ func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key st
 	if err != nil {
 		return false, fmt.Errorf("intents: record progress: %w", err)
 	}
-	n, err := s.db.Gen(ctx).RecordRailIntentProgressIfAbsent(ctx, gen.RecordRailIntentProgressIfAbsentParams{ID: id, MerchantID: mid.UUID(), Key: key, Value: b})
+	n, err := s.db.Gen(ctx).RecordProviderIntentProgressIfAbsent(ctx, gen.RecordProviderIntentProgressIfAbsentParams{ID: id, MerchantID: mid.UUID(), Key: key, Value: b})
 	if err != nil {
 		return false, err
 	}
@@ -726,7 +723,7 @@ func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttem
 		return scopeErr
 	}
 	rows, err := s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
-		rows, err := txs.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
+		rows, err := txs.db.Gen(ctx).MarkProviderIntentFailedRetryable(ctx, gen.MarkProviderIntentFailedRetryableParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 		})
 		return rows, nextAttemptAt, err
@@ -758,7 +755,7 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 		return scopeErr
 	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
-		rows, err := txs.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
+		rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 		})
 		return rows, nextAttemptAt, err
@@ -785,7 +782,7 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return oneTerminal(s.db.Gen(ctx).MarkRailIntentFailedTerminal(ctx, gen.MarkRailIntentFailedTerminalParams{
+	return oneTerminal(s.db.Gen(ctx).MarkProviderIntentFailedTerminal(ctx, gen.MarkProviderIntentFailedTerminalParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, Reason: &reason, ResultEvidence: ev,
 	}))
@@ -797,7 +794,7 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 		return scopeErr
 	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
-		rows, err := txs.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
+		rows, err := txs.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 		})
 		if err != nil || rows != 0 {
@@ -827,7 +824,7 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 		}
 		if _, submitted := evidence[key]; key != "" && submitted {
 			// The live-state predicate still protects a concurrently sealed outcome.
-			rows, err := txs.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
+			rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
 				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 			})
 			return rows, nextAttemptAt, err
@@ -841,7 +838,7 @@ func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string)
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.db.Gen(ctx).MarkRailIntentSuperseded(ctx, gen.MarkRailIntentSupersededParams{
+	return one(s.db.Gen(ctx).MarkProviderIntentSuperseded(ctx, gen.MarkProviderIntentSupersededParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, Reason: &reason,
 	}))
@@ -880,20 +877,20 @@ func uuidPtrOrNil(id uuid.UUID) *uuid.UUID {
 }
 
 // GetByIdempotencyKey reads the immutable operation for a request replay.
-func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.BillingRailIntent, error) {
+func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.BillingProviderIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.BillingRailIntent{}, err
+		return gen.BillingProviderIntent{}, err
 	}
-	return s.db.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
+	return s.db.Gen(ctx).GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
 }
 
 // LiveTierChange returns the unresolved tier change (NMI upgrade, Stripe tier
 // change or engine upgrade) that owns the subscription; db.IsNotFound when none does.
-func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (gen.BillingRailIntent, error) {
+func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (gen.BillingProviderIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.BillingRailIntent{}, err
+		return gen.BillingProviderIntent{}, err
 	}
-	return s.db.Gen(ctx).GetLiveTierChangeRailIntent(ctx, gen.GetLiveTierChangeRailIntentParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
+	return s.db.Gen(ctx).GetLiveTierChangeProviderIntent(ctx, gen.GetLiveTierChangeProviderIntentParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
 }

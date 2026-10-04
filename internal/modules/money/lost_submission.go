@@ -26,7 +26,7 @@ const FindingSubmissionUnresolved = "life.submission.unresolved"
 // only when the vault shows no transaction at all since the fence, since any
 // charge there, under any order, may be this one. The operation is then armed
 // for one gated resend under the same order (Stripe: idempotency key).
-func (h *SubscriptionCollectionHandler) lostSubmission(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
+func (h *SubscriptionCollectionHandler) lostSubmission(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
 	history, err := intents.LoadSubmissionHistory(in)
 	if err != nil {
 		return h.unresolved(ctx, in, p, err.Error())
@@ -55,7 +55,7 @@ func (h *SubscriptionCollectionHandler) lostSubmission(ctx context.Context, in g
 }
 
 // vaultActivity is why the vault read does not prove absence, or "".
-func (h *SubscriptionCollectionHandler) vaultActivity(ctx context.Context, in gen.BillingRailIntent, history intents.SubmissionHistory) string {
+func (h *SubscriptionCollectionHandler) vaultActivity(ctx context.Context, in gen.BillingProviderIntent, history intents.SubmissionHistory) string {
 	txns, err := intents.ReadNMIVaultTransactions(ctx, in, h.Resolver, history.Window())
 	if err != nil {
 		return "vault read is inconclusive: " + err.Error()
@@ -74,7 +74,7 @@ const duplicateLookback = 24 * time.Hour
 // obligation's order: the matching charge is another order's or not yet
 // visible, so the operation stays unknown and is never resent. The finding
 // names the vault's matching charges for the operator.
-func (h *SubscriptionCollectionHandler) duplicateUnresolved(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, refused time.Time) intents.Outcome {
+func (h *SubscriptionCollectionHandler) duplicateUnresolved(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, refused time.Time) intents.Outcome {
 	txns, err := intents.ReadNMIVaultTransactions(ctx, in, h.Resolver, refused.Add(-duplicateLookback))
 	if err != nil {
 		return h.unresolved(ctx, in, p, "NMI refused the charge as a duplicate and the vault read is inconclusive: "+err.Error())
@@ -96,7 +96,7 @@ func (h *SubscriptionCollectionHandler) duplicateUnresolved(ctx context.Context,
 }
 
 // armedResend returns the resend attempt the operation is armed for, or 0.
-func armedResend(in gen.BillingRailIntent) int {
+func armedResend(in gen.BillingProviderIntent) int {
 	history, err := intents.LoadSubmissionHistory(in)
 	if err != nil || history.Armed != history.Resends+1 {
 		return 0
@@ -108,7 +108,7 @@ func armedResend(in gen.BillingRailIntent) int {
 // an armed resend; anything but a clean absence returns to verification. The
 // resend carries dup_seconds back to the original fence, so NMI refuses it if
 // the original charged but was not yet searchable.
-func (h *SubscriptionCollectionHandler) resendLostNMISubmission(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
+func (h *SubscriptionCollectionHandler) resendLostNMISubmission(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
 	attempt := armedResend(in)
 	if attempt == 0 || p.Instrument.CustodianHeld() {
 		return h.Verify(ctx, in)
@@ -152,7 +152,7 @@ func (h *SubscriptionCollectionHandler) resendLostNMISubmission(ctx context.Cont
 
 // closeChangedResend ends an operation whose obligation changed while its
 // lost submission waited: the provider showed nothing, so nothing executed.
-func (h *SubscriptionCollectionHandler) closeChangedResend(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, attempt int, cause error) intents.Outcome {
+func (h *SubscriptionCollectionHandler) closeChangedResend(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, attempt int, cause error) intents.Outcome {
 	if !errors.Is(cause, errEngineObligationChanged) && !errors.Is(cause, charge.ErrInstrumentChanged) {
 		return intents.Parked("fence engine resend: " + cause.Error())
 	}
@@ -165,7 +165,7 @@ func (h *SubscriptionCollectionHandler) closeChangedResend(ctx context.Context, 
 
 // unresolved keeps the operation unknown. Once the settle delay has passed it
 // is also a standing operator finding, closed when the operation completes.
-func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, reason string) intents.Outcome {
+func (h *SubscriptionCollectionHandler) unresolved(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, reason string) intents.Outcome {
 	if history, err := intents.LoadSubmissionHistory(in); err != nil || history.Settled(h.now()) {
 		evidence, _ := json.Marshal(map[string]any{"operation_id": in.ID, "subscription_id": p.Renewal.SubscriptionID, "rail": in.Rail, "order_reference": p.OrderReference, "reason": reason})
 		action := fmt.Sprintf("a submitted renewal charge for subscription %s cannot be settled from the provider (%s). No further charge is sent while this stands; confirm the charge at the provider and resolve the operation", p.Renewal.SubscriptionID, reason)

@@ -19,8 +19,8 @@
 -- Frozen-payload tier changes (nmi_upgrade, stripe_tier_change) are never
 -- refreshed: a same-key race must not replace the frozen commercial decision.
 -- Always RETURNs the canonical row for the key.
--- name: EnqueueRailIntent :one
-INSERT INTO billing.rail_intents (
+-- name: EnqueueProviderIntent :one
+INSERT INTO billing.provider_intents (
     merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     actor, expires_at, psp_id, custodian_id
@@ -34,44 +34,44 @@ INSERT INTO billing.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN 'pending'
-        ELSE billing.rail_intents.status
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN 'pending'
+        ELSE billing.provider_intents.status
     END,
     next_attempt_at = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
-        ELSE billing.rail_intents.next_attempt_at
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
+        ELSE billing.provider_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.payload
-        ELSE billing.rail_intents.payload
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.payload
+        ELSE billing.provider_intents.payload
     END,
     psp_id = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
-        ELSE billing.rail_intents.psp_id
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.psp_id
+        ELSE billing.provider_intents.psp_id
     END,
     origin = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.origin
-        ELSE billing.rail_intents.origin
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin
+        ELSE billing.provider_intents.origin
     END,
     origin_reason = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
-        ELSE billing.rail_intents.origin_reason
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.origin_reason
+        ELSE billing.provider_intents.origin_reason
     END,
     actor = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.actor
-        ELSE billing.rail_intents.actor
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.actor
+        ELSE billing.provider_intents.actor
     END,
     expires_at = CASE
-        WHEN billing.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.rail_intents.status IN ('superseded', 'expired') OR (billing.rail_intents.status = 'pending' AND billing.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
-        ELSE billing.rail_intents.expires_at
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.expires_at
+        ELSE billing.provider_intents.expires_at
     END,
     attempts = CASE
-        WHEN billing.rail_intents.status IN ('superseded', 'expired') THEN 0
-        ELSE billing.rail_intents.attempts
+        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
+        ELSE billing.provider_intents.attempts
     END,
     last_failure_reason = CASE
-        WHEN billing.rail_intents.status IN ('superseded', 'expired') THEN NULL
-        ELSE billing.rail_intents.last_failure_reason
+        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
+        ELSE billing.provider_intents.last_failure_reason
     END,
     updated_at = now()
 RETURNING *;
@@ -83,12 +83,12 @@ RETURNING *;
 -- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 -- (crashed executor; per-type semantics make the reclaim safe). Never claims
 -- past the relevance window — those rows are swept by
--- ExpireOverdueRailIntents. Abandoned in-flight attempts are still claimed
+-- ExpireOverdueProviderIntents. Abandoned in-flight attempts are still claimed
 -- after their deadline so possible submissions can be reconciled.
--- name: ClaimDueRailIntents :many
+-- name: ClaimDueProviderIntents :many
 WITH due AS (
-    SELECT id FROM billing.rail_intents
-    WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (
+    SELECT id FROM billing.provider_intents
+    WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
           )
@@ -97,7 +97,7 @@ WITH due AS (
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
 )
-UPDATE billing.rail_intents pi
+UPDATE billing.provider_intents pi
 SET status = 'in_flight',
     claimed_until = sqlc.arg(lease_until)::timestamptz,
     attempts = pi.attempts + 1,
@@ -112,8 +112,8 @@ RETURNING pi.*;
 -- next_attempt_at — the interactive caller asked for the attempt NOW — but
 -- honors the relevance window and existing leases; anything not claimable here
 -- is drained by the scheduled executor instead.
--- name: ClaimRailIntentByID :one
-UPDATE billing.rail_intents pi
+-- name: ClaimProviderIntentByID :one
+UPDATE billing.provider_intents pi
 SET status = 'in_flight',
     claimed_until = sqlc.arg(lease_until)::timestamptz,
     attempts = pi.attempts + 1,
@@ -129,17 +129,17 @@ RETURNING pi.*;
 -- Claims due unknown_needs_verify intents for the verifier. Status stays
 -- unknown_needs_verify (verification is a read, not an attempt — attempts is
 -- not bumped); the lease alone prevents double-verification.
--- name: ClaimDueVerifyRailIntents :many
+-- name: ClaimDueVerifyProviderIntents :many
 WITH due AS (
-    SELECT id FROM billing.rail_intents
-    WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'unknown_needs_verify'
+    SELECT id FROM billing.provider_intents
+    WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'unknown_needs_verify'
       AND next_attempt_at <= sqlc.arg(now)::timestamptz
       AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
 )
-UPDATE billing.rail_intents pi
+UPDATE billing.provider_intents pi
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
 FROM due
@@ -149,22 +149,22 @@ RETURNING pi.*;
 -- Claims ONE unknown operation for operator resolution. Like the verifier
 -- claim, status and attempts are unchanged; the lease excludes a concurrent
 -- verifier or resolver.
--- name: ClaimUnknownRailIntentByID :one
-UPDATE billing.rail_intents
+-- name: ClaimUnknownProviderIntentByID :one
+UPDATE billing.provider_intents
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
   AND status = 'unknown_needs_verify'
   AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
 RETURNING *;
 
 -- Releases a resolver lease after rejected evidence, leaving the operation
 -- exactly as it was.
--- name: ReleaseUnknownRailIntentClaim :one
-UPDATE billing.rail_intents
+-- name: ReleaseUnknownProviderIntentClaim :one
+UPDATE billing.provider_intents
 SET claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'unknown_needs_verify'
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'unknown_needs_verify'
   AND claimed_until IS NOT NULL
 RETURNING next_attempt_at;
 
@@ -174,11 +174,11 @@ RETURNING next_attempt_at;
 -- once the lease has lapsed — by then another executor may hold the row, and a
 -- late beat must not steal it back. Only the claim's own (status, attempts)
 -- fencing token renews. Returns rows affected (0 = lost).
--- name: RenewRailIntentClaim :execrows
-UPDATE billing.rail_intents
+-- name: RenewProviderIntentClaim :execrows
+UPDATE billing.provider_intents
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
   AND status = sqlc.arg(status)::text
   AND attempts = sqlc.arg(attempts)::int
   AND claimed_until IS NOT NULL
@@ -187,8 +187,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
 -- =====================================================================
 -- Outcome transitions (always release the lease)
 -- =====================================================================
--- name: MarkRailIntentSucceeded :execrows
-UPDATE billing.rail_intents
+-- name: MarkProviderIntentSucceeded :execrows
+UPDATE billing.provider_intents
 SET status = 'succeeded',
     executed_at = sqlc.arg(now)::timestamptz,
     result_evidence = CASE
@@ -205,17 +205,17 @@ SET status = 'succeeded',
     last_failure_reason = NULL,
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection');
 
--- name: MarkRailIntentFailedRetryable :execrows
-UPDATE billing.rail_intents
+-- name: MarkProviderIntentFailedRetryable :execrows
+UPDATE billing.provider_intents
 SET status = 'failed_retryable',
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at'
            AND NOT (intent_type = 'subscription_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'resend_armed'))
   AND NOT (intent_type = 'nmi_sale' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
@@ -223,8 +223,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
 
 -- Ambiguous outcome (or a verify that stayed inconclusive): park for the
 -- verifier, scheduled at next_attempt_at.
--- name: MarkRailIntentUnknown :execrows
-UPDATE billing.rail_intents
+-- name: MarkProviderIntentUnknown :execrows
+UPDATE billing.provider_intents
 SET status = 'unknown_needs_verify',
     result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
       || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
@@ -232,10 +232,10 @@ SET status = 'unknown_needs_verify',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 
--- name: MarkRailIntentFailedTerminal :execrows
-UPDATE billing.rail_intents
+-- name: MarkProviderIntentFailedTerminal :execrows
+UPDATE billing.provider_intents
 SET status = 'failed_terminal',
     last_failure_reason = sqlc.arg(reason),
     result_evidence = CASE
@@ -251,34 +251,34 @@ SET status = 'failed_terminal',
     END,
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection');
 
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason
 -- recorded and the claim's attempts bump undone — a park is not a failure and
 -- must not escalate backoff.
--- name: ParkRailIntent :execrows
-UPDATE billing.rail_intents
+-- name: ParkProviderIntent :execrows
+UPDATE billing.provider_intents
 SET status = 'pending',
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'in_flight'
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'in_flight'
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
   AND (intent_type <> 'initial_membership' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'initial_submitted'));
 
--- name: MarkRailIntentSuperseded :execrows
-UPDATE billing.rail_intents
+-- name: MarkProviderIntentSuperseded :execrows
+UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
 
@@ -289,12 +289,12 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
 -- resume superseding the pending deferred delete). in_flight rows are left to
 -- their executor: its per-type relevance check re-verifies before acting, so
 -- a racing supersede is advisory there.
--- name: SupersedeRailIntentsBySubject :execrows
-UPDATE billing.rail_intents
+-- name: SupersedeProviderIntentsBySubject :execrows
+UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(intent_type)
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(intent_type)
   AND subscription_id = sqlc.arg(subscription_id)
   AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0))
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
@@ -303,8 +303,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = s
 -- #679: destructive intents held by the volume breaker (an OPEN
 -- life.provider_intent.held_bulk finding for their merchant) never expire out
 -- of the ledger while held — the operator's resolution decides their fate.
--- name: ExpireOverdueRailIntents :execrows
-UPDATE billing.rail_intents pi
+-- name: ExpireOverdueProviderIntents :execrows
+UPDATE billing.provider_intents pi
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
@@ -335,28 +335,28 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retr
 -- cutoff (2h — a healthy verifier resolves unknowns in minutes; an in_flight
 -- lease outliving hours means a dead executor). Read-only; runs tenant-scoped
 -- on the engine's tenant-pinned connection.
--- name: ListStuckRailIntents :many
-SELECT * FROM billing.rail_intents
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
+-- name: ListStuckProviderIntents :many
+SELECT * FROM billing.provider_intents
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ) ORDER BY created_at, id;
 
 -- =====================================================================
 -- Reads
 -- =====================================================================
--- name: GetRailIntent :one
-SELECT * FROM billing.rail_intents WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+-- name: GetProviderIntent :one
+SELECT * FROM billing.provider_intents WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
--- name: CountRailIntents :one
-SELECT count(*) FROM billing.rail_intents
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+-- name: CountProviderIntents :one
+SELECT count(*) FROM billing.provider_intents
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid);
 
--- name: ListRailIntents :many
-SELECT * FROM billing.rail_intents
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+-- name: ListProviderIntents :many
+SELECT * FROM billing.provider_intents
+WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
@@ -371,8 +371,8 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- (unknown_needs_verify / failed_*) count by their last transition. in_flight
 -- rows are deliberately EXCLUDED — the batch claim marks whole batches
 -- in_flight before anything executes, and parks (pending) were never attempted.
--- name: CountDestructiveRailIntentsExecutedSince :one
-SELECT count(*) FROM billing.rail_intents
+-- name: CountDestructiveProviderIntentsExecutedSince :one
+SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type = ANY (sqlc.arg(intent_types)::text[])
   AND (
@@ -381,9 +381,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
             AND updated_at >= sqlc.arg(since)::timestamptz)
         -- admitted by the breaker and executing now
         OR (status = 'in_flight' AND EXISTS (
-              SELECT 1 FROM billing.rail_mutation_logs l
-              WHERE l.merchant_id = rail_intents.merchant_id AND l.rail_intent_id = rail_intents.id
-                AND l.phase = 'attempting' AND l.attempt = rail_intents.attempts))
+              SELECT 1 FROM billing.provider_mutation_logs l
+              WHERE l.merchant_id = provider_intents.merchant_id AND l.provider_intent_id = provider_intents.id
+                AND l.phase = 'attempting' AND l.attempt = provider_intents.attempts))
       );
 
 -- name: LockDestructiveBreaker :exec
@@ -408,7 +408,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- =====================================================================
 -- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
 -- =====================================================================
--- The durable rail_intents ledger is the counter: every destructive user/admin
+-- The durable provider_intents ledger is the counter: every destructive user/admin
 -- operation posts a row before it executes, so a rolling-window count over
 -- created_at is the burst gauge, stopping a burst at the producer.
 
@@ -417,7 +417,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- this leg must see.
 -- name: CountDestructiveIntentsByActorSince :one
 SELECT count(*)::bigint
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE actor = sqlc.arg(actor)::text
   AND origin IN ('user', 'admin')
   AND intent_type = ANY(sqlc.arg(intent_types)::text[])
@@ -428,35 +428,35 @@ WHERE actor = sqlc.arg(actor)::text
 -- wall. They are separate windows over disjoint origin sets.
 -- name: CountDestructiveIntentsForMerchantSince :one
 SELECT count(*)::bigint
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND origin = ANY(sqlc.arg(origins)::text[])
   AND intent_type = ANY(sqlc.arg(intent_types)::text[])
   AND created_at >= sqlc.arg(since)::timestamptz;
 
--- name: GetRailIntentByIdempotencyKey :one
-SELECT * FROM billing.rail_intents
+-- name: GetProviderIntentByIdempotencyKey :one
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
 
 -- The one unresolved tier change that owns a subscription
--- (uq_rail_intents_tier_change_subscription).
--- name: GetLiveTierChangeRailIntent :one
-SELECT * FROM billing.rail_intents
+-- (uq_provider_intents_tier_change_subscription).
+-- name: GetLiveTierChangeProviderIntent :one
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
--- name: LockRailIntentForCollectionCompletion :one
+-- name: LockProviderIntentForCollectionCompletion :one
 -- Call after acquiring the domain's payer/invoice locks, matching admission's
 -- invoice-before-operation order.
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('invoice_collection', 'manual_rebill', 'subscription_collection')
 FOR UPDATE;
 
--- name: CompleteRailIntentCollection :execrows
+-- name: CompleteProviderIntentCollection :execrows
 -- The caller owns the row lock and commits this transition with local effects.
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status = sqlc.arg(status)::text,
     result_evidence = sqlc.arg(evidence)::jsonb,
     last_failure_reason = NULLIF(sqlc.arg(reason)::text, ''),
@@ -467,10 +467,10 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('invoice_collection', 'manual_rebill', 'subscription_collection')
   AND status IN ('in_flight', 'unknown_needs_verify');
 
--- name: RetainRailIntentQualifiedEvidence :execrows
+-- name: RetainProviderIntentQualifiedEvidence :execrows
 -- Custody binds immutable provider facts to the accepted operation. A repeated
 -- identical receipt succeeds; a conflicting receipt or terminal row never changes.
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
         || jsonb_build_object(sqlc.arg(evidence_key)::text, sqlc.arg(receipt)::jsonb),
     updated_at = now()
@@ -498,9 +498,9 @@ WHERE id = sqlc.arg(id)::uuid
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? sqlc.arg(evidence_key)::text)
        OR result_evidence->sqlc.arg(evidence_key)::text = sqlc.arg(receipt)::jsonb);
 
--- name: RetainRailIntentCollectionCandidate :execrows
+-- name: RetainProviderIntentCollectionCandidate :execrows
 -- A possible provider reference is a candidate only; it never proves payment.
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
         || jsonb_build_object('collection_candidate', sqlc.arg(candidate)::jsonb),
     updated_at = now()
@@ -516,7 +516,7 @@ WHERE id = sqlc.arg(id)::uuid
 -- name: GetUnresolvedManualRebill :one
 -- Admission already owns the subscription lock. An unresolved charge retains
 -- ownership even when another lifecycle observer has moved its period/status.
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type = 'manual_rebill'
@@ -527,7 +527,7 @@ LIMIT 1;
 -- name: GetLatestManualRebillForPeriod :one
 -- Accepted operation ordinals and counted financial declines are distinct: a
 -- superseded pre-send attempt must not burn a dunning failure or reuse its key.
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type = 'manual_rebill'
@@ -535,8 +535,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY (payload->>'attempt')::integer DESC, id DESC
 LIMIT 1;
 
--- name: RetainRailIntentRebillPreparation :execrows
-UPDATE billing.rail_intents
+-- name: RetainProviderIntentRebillPreparation :execrows
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('rebill_preparation', sqlc.arg(preparation)::jsonb),
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
@@ -546,10 +546,10 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'rebill_preparation')
        OR result_evidence->'rebill_preparation' = sqlc.arg(preparation)::jsonb);
 
--- name: ArmRailIntentResend :execrows
+-- name: ArmProviderIntentResend :execrows
 -- A submitted engine collection whose provider read shows no transaction
 -- after the settle delay is armed for one gated resend of the same operation.
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('resend_armed', sqlc.arg(attempt)::int),
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
@@ -559,8 +559,8 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['qualified_receipt', 'rebill_decline', 'stripe_recurring_decline', 'qualified_invoice_nonexecution'])
   AND COALESCE((result_evidence->>'resend_armed')::int, 0) < sqlc.arg(attempt)::int;
 
--- name: RetainRailIntentRebillDecline :execrows
-UPDATE billing.rail_intents
+-- name: RetainProviderIntentRebillDecline :execrows
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('rebill_decline', sqlc.arg(decline)::jsonb),
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
@@ -579,7 +579,7 @@ SELECT sqlc.embed(i), p.id AS covered_payment_id, p.customer_id AS paid_customer
        p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, p.price_id AS paid_price_id,
        p.amount AS paid_amount, p.currency AS paid_currency
 FROM billing.payments p
-JOIN billing.rail_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
+JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
   AND i.subscription_id=p.subscription_id AND i.intent_type='manual_rebill'
   AND (i.result_evidence->>'transaction_id'=p.transaction_id
        OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
@@ -600,7 +600,7 @@ SELECT EXISTS (
    AND p.status='completed' AND p.deleted_at IS NULL
    AND p.purchased_at>=sqlc.arg(period_start)::timestamptz
    AND NOT EXISTS (
-     SELECT 1 FROM billing.rail_intents i
+     SELECT 1 FROM billing.provider_intents i
      WHERE i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
        AND i.subscription_id=p.subscription_id AND i.intent_type='manual_rebill'
        AND (i.result_evidence->>'transaction_id'=p.transaction_id
@@ -611,7 +611,7 @@ SELECT EXISTS (
 -- Resume undoes only the current provider target's unsent cancellation. A
 -- previous binding may retain an independent historical deletion obligation.
 -- name: SupersedePendingNMIDelete :execrows
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
   AND idempotency_key=sqlc.arg(idempotency_key)::text
@@ -623,7 +623,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid
 -- quotes do not lock future price changes. Call under the subscription lock.
 -- name: ListRebillTermOwners :many
 SELECT i.*
-FROM billing.rail_intents i
+FROM billing.provider_intents i
 JOIN billing.subscriptions s ON s.id=i.subscription_id AND s.merchant_id=i.merchant_id
 WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid
   AND i.subscription_id=sqlc.arg(subscription_id)::uuid
@@ -642,14 +642,14 @@ WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid
   );
 
 -- The subscription/domain lock precedes the operation lock, as at admission.
--- name: LockRailIntentForTierCompletion :one
-SELECT * FROM billing.rail_intents
+-- name: LockProviderIntentForTierCompletion :one
+SELECT * FROM billing.provider_intents
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('nmi_upgrade','stripe_tier_change')
 FOR UPDATE;
 
 -- name: CompleteTierChangeOutcome :execrows
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status=sqlc.arg(status)::text,
     result_evidence=sqlc.arg(evidence)::jsonb,
     last_failure_reason=CASE WHEN sqlc.arg(status)::text='succeeded' THEN NULL ELSE sqlc.narg(reason)::text END,
@@ -660,20 +660,20 @@ WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND status IN ('in_flight','unknown_needs_verify');
 
 -- name: GetUnresolvedSaleForCustomerProduct :one
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
   AND payload->>'user_id'=sqlc.arg(customer_id)::text
   AND payload->>'product_id'=sqlc.arg(product_id)::text
   AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
 ORDER BY created_at LIMIT 1;
 
--- name: LockRailIntentForSaleCompletion :one
-SELECT * FROM billing.rail_intents
+-- name: LockProviderIntentForSaleCompletion :one
+SELECT * FROM billing.provider_intents
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
 FOR UPDATE;
 
 -- name: CompleteSaleOutcome :execrows
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status=sqlc.arg(status)::text, result_evidence=sqlc.arg(evidence)::jsonb,
     last_failure_reason=sqlc.narg(reason)::text, executed_at=sqlc.arg(now)::timestamptz,
     claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
@@ -681,33 +681,33 @@ WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type='nmi_sale' AND status IN ('in_flight','unknown_needs_verify');
 
 -- name: ListRetainedSalesForArchive :many
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
 
 -- name: GetUnresolvedInitialEnrollmentForCustomerProduct :one
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
   AND payload->'terms'->>'customer_id'=sqlc.arg(customer_id)::text
   AND payload->'terms'->>'product_id'=sqlc.arg(product_id)::text
   AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
 ORDER BY created_at LIMIT 1;
 
--- name: LockRailIntentForInitialEnrollmentCompletion :one
-SELECT * FROM billing.rail_intents
+-- name: LockProviderIntentForInitialEnrollmentCompletion :one
+SELECT * FROM billing.provider_intents
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
 FOR UPDATE;
 
 -- name: CompleteInitialEnrollmentOutcome :execrows
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status=sqlc.arg(status)::text, result_evidence=sqlc.arg(evidence)::jsonb,
     last_failure_reason=sqlc.narg(reason)::text, executed_at=sqlc.arg(now)::timestamptz,
     claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type='initial_membership' AND status IN ('in_flight','unknown_needs_verify');
 -- name: GetUnresolvedSubscriptionCollection :one
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type = 'subscription_collection'
@@ -715,7 +715,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at, id LIMIT 1;
 
 -- name: GetLatestSubscriptionCollectionForPeriod :one
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type = 'subscription_collection'
@@ -723,19 +723,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY (payload->>'attempt')::integer DESC, id DESC LIMIT 1;
 
 -- name: ListRetainedInitialEnrollmentsForArchive :many
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
 
 -- name: ListInitialEnrollmentsForMembership :many
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='initial_membership'
   AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
 ORDER BY id LIMIT 2;
 
 -- name: ListRetainedSubscriptionCollectionsForArchive :many
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='subscription_collection'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
@@ -743,7 +743,7 @@ ORDER BY id LIMIT sqlc.arg(page_size)::int;
 -- name: ListPaidEngineAgreementsAtBoundary :many
 -- Select by obligation identity and boundary, not mutable catalog/account
 -- filters: an ambiguous or mismatched retained owner must fail qualification.
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
   AND ((intent_type='initial_membership'
         AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
@@ -752,8 +752,8 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
         AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
 ORDER BY id LIMIT 2;
--- name: ExpireRailIntentByID :execrows
-UPDATE billing.rail_intents pi
+-- name: ExpireProviderIntentByID :execrows
+UPDATE billing.provider_intents pi
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
@@ -776,8 +776,8 @@ WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uui
   AND pi.intent_type <> 'subscription_collection';
 
 
--- name: RecoverAbandonedRailIntentByID :execrows
-UPDATE billing.rail_intents
+-- name: RecoverAbandonedProviderIntentByID :execrows
+UPDATE billing.provider_intents
 SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = sqlc.arg(now)::timestamptz,
     last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
@@ -785,8 +785,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 
 -- A qualified provider notification may advance a readback, never a write or
 -- another executor's live lease. Admission and retry authorization are untouched.
--- name: AdvanceRailIntentVerification :execrows
-UPDATE billing.rail_intents
+-- name: AdvanceProviderIntentVerification :execrows
+UPDATE billing.provider_intents
 SET next_attempt_at = LEAST(next_attempt_at, sqlc.arg(now)::timestamptz), updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status = 'unknown_needs_verify';
@@ -798,52 +798,52 @@ SELECT pg_try_advisory_lock(hashtextextended('openrails.provider_refresh:' || sq
 -- name: UnlockProviderRefresh :exec
 SELECT pg_advisory_unlock(hashtextextended('openrails.provider_refresh:' || sqlc.arg(merchant_id)::uuid::text, 0));
 
--- Succeeded-intent slimming (PruneSucceeded). Qualified receipts/enrollments,
--- cutover tombstones and collections keep their payload and evidence.
--- name: PruneSucceededRailIntentPayload :exec
-UPDATE billing.rail_intents
+-- Succeeded-intent slimming (PruneSucceeded). Qualified receipts/enrollments
+-- and collections keep their payload and evidence.
+-- name: PruneSucceededProviderIntentPayload :exec
+UPDATE billing.provider_intents
 SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
-  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND intent_type <> 'subscription_collection'
   AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
 
--- name: PruneSucceededRailIntentEvidence :exec
-UPDATE billing.rail_intents
+-- name: PruneSucceededProviderIntentEvidence :exec
+UPDATE billing.provider_intents
 SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt'
         THEN COALESCE(sqlc.narg(evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence -> 'qualified_receipt')
         ELSE sqlc.narg(evidence)::jsonb END,
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
-  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND intent_type <> 'subscription_collection'
   AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
 
--- name: PruneSucceededRailIntent :exec
-UPDATE billing.rail_intents
+-- name: PruneSucceededProviderIntent :exec
+UPDATE billing.provider_intents
 SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END,
     result_evidence = CASE WHEN result_evidence ? 'qualified_receipt'
         THEN COALESCE(sqlc.narg(evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence -> 'qualified_receipt')
         ELSE sqlc.narg(evidence)::jsonb END,
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
-  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND intent_type <> 'subscription_collection'
   AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
 
--- name: PruneTerminalRailIntentPayload :exec
-UPDATE billing.rail_intents
+-- name: PruneTerminalProviderIntentPayload :exec
+UPDATE billing.provider_intents
 SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'failed_terminal'
-  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND intent_type <> 'subscription_collection'
   AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
 
--- name: RecordRailIntentProgress :exec
-UPDATE billing.rail_intents
+-- name: RecordProviderIntentProgress :exec
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || sqlc.arg(progress)::jsonb, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
 -- Write-once: a present key is never overwritten.
--- name: RecordRailIntentProgressIfAbsent :execrows
-UPDATE billing.rail_intents
+-- name: RecordProviderIntentProgressIfAbsent :execrows
+UPDATE billing.provider_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object(sqlc.arg(key)::text, sqlc.arg(value)::jsonb),
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
@@ -852,16 +852,16 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.arg(key)::text <> 'initial_submitted'
        OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'));
 
--- name: RailIntentClaimHeld :one
+-- name: ProviderIntentClaimHeld :one
 SELECT EXISTS (
-    SELECT 1 FROM billing.rail_intents
+    SELECT 1 FROM billing.provider_intents
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
       AND status = sqlc.arg(status)::text AND attempts = sqlc.arg(attempts)::int
       AND claimed_until > sqlc.arg(held_until)::timestamptz
 );
 
--- name: GetLatestRailIntentIDForSubscription :one
-SELECT id FROM billing.rail_intents
+-- name: GetLatestProviderIntentIDForSubscription :one
+SELECT id FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(intent_type)::text
   AND subscription_id = sqlc.arg(subscription_id)::uuid
 ORDER BY created_at DESC, id DESC

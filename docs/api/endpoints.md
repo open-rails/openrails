@@ -377,10 +377,6 @@ and counts its reprices by status now.
 | GET | `/v1/merchant/reprices` | `merchant:subscriptions:read` | Reprices, newest first (`?subscription_id=&reprice_batch_id=&status=`) |
 | GET | `/v1/merchant/reprices/{id}` | `merchant:subscriptions:read` | One reprice |
 | POST | `/v1/merchant/reprices/{id}/cancel` | `merchant:subscriptions:update` | Cancel a scheduled reprice; answers the reprice |
-| POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | `merchant:subscriptions:read` | Validate per-user account cutover |
-| POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:update` | Execute or resume the original durable cutover |
-| GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:read` | Read cutover by idempotency_key |
-| POST | `/v1/merchant/provider-refresh` | `merchant:subscriptions:update` | Run the merchant's provider refresh now; `202 {status: queued\|already_running, job_id}`. `Client.RefreshProviders` |
 
 ### Catalog (`/v1/merchant/catalog`)
 
@@ -442,30 +438,32 @@ PSP links.
 | POST | `/v1/merchant/catalog/copilot/confirm` | Record that a copilot draft was applied |
 | — | `/v1/catalog/products…`, `/v1/catalog/prices…`, `/v1/catalog/offers/lookup` | A creator's own catalog: the product, price and offer routes above |
 
-### Payment providers (`/v1/merchant/payment-providers`)
+### PSPs (`/v1/merchant/psps`)
 
-Reads: `merchant:payment-providers:read`; writes: `merchant:payment-providers:update`
-Host-owned credential mode omits all provider mutation routes. In API-owned
-credential mode, create/update requires a writable secret backend; archive
-routes remain available with a read-only secret backend. Reads and routing
-dry runs remain mounted in both source modes.
+A PSP is one merchant account on a rail (`mobius` and `paykings` are two PSPs on
+`nmi`). Reads: `merchant:psps:read`; writes: `merchant:psps:update`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/merchant/payment-providers` | List configured providers |
-| GET | `/v1/merchant/payment-providers/{provider}` | One provider's config (redacted) |
-| PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets. Live-probes the supplied or stored credentials before writing, including `{"account_id","enabled":false}` — it cannot archive an account whose provider is dark |
-| POST | `/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive` | Archive exactly this account by its immutable `id`. No provider call, credentials kept, idempotent; optional body `{"allow_last": true}` |
-| DELETE | `/v1/merchant/payment-providers/{provider}` | Archive the rail's single active account (no provider call). More than one active: `409 provider_accounts_ambiguous` — use the per-account archive |
-| POST | `/v1/merchant/payment-providers/routing/dry-run` | Explain which PSP a checkout would get, and why every other candidate was skipped. Read permission — creates nothing (or#288) |
+| GET | `/v1/merchant/psps` | List PSPs (`rail`, `archived` filters; cursor paged) |
+| POST | `/v1/merchant/psps` | Arm a PSP: `{operation_id, key, rail, account_id, settings, credentials}`. Credentials are checked with the provider before anything is stored |
+| GET | `/v1/merchant/psps/{psp_id}` | One PSP; credential state, never values |
+| PATCH | `/v1/merchant/psps/{psp_id}` | Change settings or rotate credentials, naming the `expected_revision` read |
+| POST | `/v1/merchant/psps/{psp_id}/archive` | Archive; no provider call, credentials kept, idempotent. Optional `{"allow_last": true}` |
+| POST | `/v1/merchant/psps/routing-preview` | Which PSP a checkout for `price_id` would get, and why each other was skipped. Creates nothing |
+| POST | `/v1/merchant/psps/refresh` | Queue a pull of provider truth (`merchant:subscriptions:update`) |
+| GET | `/v1/merchant/rails` | Rails a PSP can be armed on, with their credential and setting keys |
 
-Archive is not deletion (#655): the row, its `id`, credentials and history
-remain, existing obligations and inbound webhooks keep resolving to it, and
-new checkout selects only active accounts. Archiving the rail's last active
-account answers `409 provider_account_last_active` (metadata: `psp_id`)
-unless `allow_last` is `true`; new checkout on that rail is then refused until
-another account is armed. Both archives are lifecycle writes: in API-owned credential mode they stay
-mounted when the secret backend is read-only.
+`key` is the merchant's name for the PSP, unique among its live PSPs in an
+environment; price `psp_links` name PSPs by it. Credential writes need a
+writable secret backend (`credential_source_read_only`,
+`credential_store_read_only` otherwise); settings changes and archive do not.
+
+Archive is not deletion: the row, its `id`, credentials and history remain, and
+existing subscriptions, operations and inbound webhooks keep resolving to it
+until they drain (`open_obligations`). New checkout selects only active PSPs.
+Archiving the last active PSP on a rail answers `409 psp_last_active` unless
+`allow_last` is `true`.
 
 ### Metrics, dashboard, webhooks, notifications
 

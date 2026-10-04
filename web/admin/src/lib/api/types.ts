@@ -156,10 +156,9 @@ export type UsageAggregation =
 export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
 
-// CheckoutRoutingSkip mirrors the or#288 skip vocabulary
-// (internal/db/models/checkout_session.go). "" / absent = the candidate is
-// eligible.
-export type CheckoutRoutingSkip =
+// PSPRoutingSkip mirrors the or#288 skip vocabulary
+// (internal/db/models/checkout_session.go). null = the PSP is eligible.
+export type PSPRoutingSkip =
   | "unknown_selector"
   | "ambiguous_selector"
   | "not_armed"
@@ -170,24 +169,22 @@ export type CheckoutRoutingSkip =
   | "service_unavailable"
   | "resolve_failed"
 
-export interface CheckoutRoutingCandidate {
-  selector: string
-  rail?: string
-  skip?: CheckoutRoutingSkip
+export interface PSPRoutingCandidate {
+  psp: string
+  rail: Rail
+  skip: PSPRoutingSkip | null
 }
 
-// CheckoutRoutingDecision is POST /merchant/payment-providers/routing/dry-run
-// (or#288): which PSP a checkout for this price would land on, and why every
-// other candidate did not. Read-only — it creates nothing.
-export interface CheckoutRoutingDecision {
-  object: "checkout_routing_decision"
+// PSPRoutingPreview is POST /merchant/psps/routing-preview (or#288): which
+// PSP a checkout for this price would use, and why every other PSP was passed
+// over. Read-only — it creates nothing.
+export interface PSPRoutingPreview {
   policy: string
-  rule?: number
-  selected?: string
-  rail?: string
-  mode?: string
-  candidates: CheckoutRoutingCandidate[]
-  routing_reason?: unknown
+  rule: number | null
+  psp: string | null
+  rail: Rail | null
+  mode: string | null
+  candidates: PSPRoutingCandidate[]
 }
 
 // --- Price repricing / migration ---
@@ -395,38 +392,40 @@ export interface MerchantSettings {
   reprice_notice_window_days?: number
 }
 
-export interface PaymentProviderConfig {
-  configuration_revision?: number
-  id: string
+// PSP is one merchant account on a rail (GET /merchant/psps). Credential
+// values are never returned.
+export interface PSP {
+  id: string // psp_...
+  key: string
   rail: Rail
   environment: string
   account_id: string
   archived: boolean
-  drained: boolean
+  archived_at: string | null
+  // An archived PSP with none is drained.
   open_obligations: number
-  public_config?: Record<string, string>
-  // rotation_version (or#812) is the cross-node cutover watermark: the secret
-  // version this credential reached at its last rotation through this API.
-  // Absent/0 = never rotated here (manifest-armed, or pre-or#812).
+  settings: Record<string, unknown>
+  // rotation_version (or#812) is the cross-node cutover watermark: how many
+  // times the credential was rotated through the API.
   credentials: Record<
     string,
     {
       configured: boolean
-      last_validated_at?: string
-      rotation_version?: number
+      validated_at: string | null
+      rotation_version: number
     }
   >
-  first_seen_at: string
-  last_validated_at?: string
-  replaced_at?: string
+  revision: number
   created_at: string
   updated_at: string
 }
 
-export interface PaymentProviderDefinition {
+// RailDefinition is a rail a PSP can be armed on (GET /merchant/rails).
+export interface RailDefinition {
   rail: Rail
   display_name: string
   credential_keys: string[]
+  setting_keys: string[]
 }
 
 // --- API keys (#757) ---

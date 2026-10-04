@@ -26,7 +26,6 @@ import (
 type Client struct {
 	// engine is the in-process engine behind New; nil for NewRemote.
 	engine                *engine.Engine
-	PaymentProviders      *PaymentProviderClient
 	MerchantConfiguration *MerchantConfigurationClient
 	baseURL               string
 	merchantID            billing.MerchantID

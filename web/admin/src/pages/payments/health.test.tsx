@@ -89,15 +89,15 @@ describe("queries", () => {
       expect(t.query(all)).toEqual(tile("rebill-first-failure").query(all))
   })
 
-  it("scopes every query to the owner and PSP account", () => {
+  it("scopes every query to the owner and PSP", () => {
     const scope: Scope = {
       owner: "nmi_schedule",
-      psp: { id: "psp-1", account: "acct-1" },
+      psp: { id: "psp_1" },
       last: "7d",
     }
     for (const [name, q] of Object.entries(builders(scope))) {
       expect(q.filters?.owner, name).toEqual(["nmi_schedule"])
-      expect(q.filters?.rail_account, name).toEqual(["acct-1"])
+      expect(q.filters?.psp, name).toEqual(["psp_1"])
     }
     expect(tile("missed").query(scope).range).toEqual({ last: "7d" })
     expect(trendQueries(scope).rebill.range).toEqual({ last: "12w" })
@@ -189,12 +189,12 @@ describe("shaping", () => {
     const coverage: MetricsResult = {
       ...result("coverage"),
       rows: [
-        ["acct-1", "webhook", 3],
-        ["acct-1", "pull", 1],
+        ["psp_1", "webhook", 3],
+        ["psp_1", "pull", 1],
       ],
     }
     expect(coverageRows(coverage)).toEqual([
-      { account: "acct-1", webhook: 3, pull: 1, coverage: 0.75 },
+      { psp: "psp_1", webhook: 3, pull: 1, coverage: 0.75 },
     ])
   })
 })
@@ -205,7 +205,7 @@ describe("drill-down", () => {
     const url = listURL(
       "attempts",
       tile("new-card-decline").listFilters,
-      { owner: "engine", psp: { id: "psp-1", account: "acct-1" }, last: "30d" },
+      { owner: "engine", psp: { id: "psp_1" }, last: "30d" },
       range
     )
     const params = new URL(url, "http://console").searchParams
@@ -220,7 +220,7 @@ describe("drill-down", () => {
       card_entry: "new",
       category: "card_data,issuer_soft,issuer_hard,gateway_rule,system_error,unknown",
       owner: "engine",
-      psp_id: "psp-1",
+      psp_id: "psp_1",
       since: range.from,
       until: range.to,
       limit: "50",
@@ -247,9 +247,9 @@ describe("drill-down", () => {
 
   it("renders the tiles and reasons with their links", () => {
     const queries = client()
-    queries.setQueryData(adminQueries.paymentProviders().queryKey, {
+    queries.setQueryData(adminQueries.psps().queryKey, {
       data: [],
-      provider_definitions: [],
+      next_cursor: null,
     })
     const built = builders(all)
     for (const [name, { result }] of Object.entries(captured))

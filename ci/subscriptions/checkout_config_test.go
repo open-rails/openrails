@@ -17,7 +17,7 @@ func TestCheckoutConfigDegradesOnePSP(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.psps
-		SET evidence = jsonb_set(coalesce(evidence, '{}'::jsonb), '{settings,endpoint_deployment}', '"bogus"')
+		SET settings = jsonb_set(settings, '{endpoint_deployment}', '"bogus"')
 		WHERE rail = 'nmi'`))
 	require.NoError(t, err)
 

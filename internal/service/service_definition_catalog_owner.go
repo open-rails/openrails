@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/catalogscope"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
@@ -32,16 +31,16 @@ func (s *Service) creatorProviderKeys(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("merchant database is required for creator collection policy")
 	}
 	environment := s.catalogProviderEnvironment()
-	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
+	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
 	if err != nil {
 		return nil, fmt.Errorf("load creator collection policy: %w", err)
 	}
 	keys := make(map[string]struct{})
 	for _, row := range rows {
-		if row.Archived || row.Environment != environment || row.Key == nil {
+		if row.Archived || row.Environment != environment {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(*row.Key))
+		key := strings.ToLower(strings.TrimSpace(row.Key))
 		if key != "" {
 			keys[key] = struct{}{}
 		}

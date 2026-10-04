@@ -97,12 +97,14 @@ const cases: Case[] = [
     "PUT /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
   ["removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),
     "DELETE /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"]],
-  ["updates settings without dropping the provider list", (c, g) => g(M.updateMerchantSettings(c), { profile: { display_name: "Acme" } }),
+  ["updates settings without dropping the PSP list", (c, g) => g(M.updateMerchantSettings(c), { profile: { display_name: "Acme" } }),
     "PUT /merchant/settings", ["settings"]],
-  ["saves provider credentials", (c, g) => g(M.savePaymentProvider(c), { rail: "nmi", provider: { account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 } }),
-    "PUT /merchant/payment-providers/nmi", ["providers"], { account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 }],
-  ["archives one provider account by id", (c, g) => g(M.archivePaymentProvider(c), { rail: "nmi", id: "psp_1", allowLast: true }),
-    "POST /merchant/payment-providers/nmi/accounts/psp_1/archive", ["providers"], { allow_last: true }],
+  ["adds a PSP", (c, g) => g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }),
+    "POST /merchant/psps", ["psps"], { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }],
+  ["rotates PSP credentials", (c, g) => g(M.updatePSP(c), { id: "psp_1", psp: { operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 } }),
+    "PATCH /merchant/psps/psp_1", ["psps"], { operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 }],
+  ["archives one PSP by id", (c, g) => g(M.archivePSP(c), { id: "psp_1", allowLast: true }),
+    "POST /merchant/psps/psp_1/archive", ["psps"], { allow_last: true }],
   ["sets a customer credit limit at the int64 boundary", (_c, g) => g(M.setCreditLimit(), creditLimit),
     "PUT /merchant/customers/cus_1/credit-limit", [], { currency: "USD", amount: MAX_INT64 }],
 ]
@@ -122,14 +124,17 @@ it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   const queryClient = client()
   const seeded = [...seedCache(queryClient, "merchant-a"), ...seedCache(queryClient, "merchant-b")]
   selectMerchant("merchant-a")
-  if (_name === "saves provider credentials") {
-    routes["PUT /merchant/payment-providers/nmi"] = () => {
-      selectMerchant("merchant-b") // switch after the scoped request was dispatched
+  // A PSP write refuses to dispatch once the merchant changed; the switch
+  // comes after the scoped request instead.
+  const pspWrite = { "adds a PSP": "POST /merchant/psps", "rotates PSP credentials": "PATCH /merchant/psps/psp_1" }[_name]
+  if (pspWrite) {
+    routes[pspWrite] = () => {
+      selectMerchant("merchant-b")
       return {}
     }
   }
   await run(queryClient, (options, input) => {
-    if (_name !== "saves provider credentials") selectMerchant("merchant-b")
+    if (!pspWrite) selectMerchant("merchant-b")
     return exec(queryClient, options, input)
   })
   expect(calls(requests)).toEqual(typeof expected === "string" ? [expected] : expected)

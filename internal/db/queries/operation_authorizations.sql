@@ -59,7 +59,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND state = 'open'
   AND NOT EXISTS (
       SELECT 1
-      FROM billing.provider_billing_qualifications qualification
+      FROM billing.cost_qualifications qualification
       WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
         AND qualification.operation_id = billing.operation_authorizations.operation_id
   )

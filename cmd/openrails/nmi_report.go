@@ -32,7 +32,7 @@ func newNMICmd() *cobra.Command {
 		},
 	}
 	report.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
-	report.Flags().StringVar(&psp, "provider-account", "", "NMI PSP UUID (default: the merchant's armed NMI account)")
+	report.Flags().StringVar(&psp, "psp", "", "NMI PSP UUID (default: the merchant's armed NMI account)")
 	report.Flags().StringVar(&since, "since", "", "Window start, RFC3339 or YYYY-MM-DD (required)")
 	report.Flags().StringVar(&until, "until", "", "Window end (default: now)")
 	report.Flags().StringVar(&format, "format", "table", "Output format: table, json")

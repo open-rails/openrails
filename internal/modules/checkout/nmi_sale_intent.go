@@ -51,7 +51,7 @@ func (h *NMISaleIntentHandler) Type() string                         { return pa
 func (h *NMISaleIntentHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 func (h *NMISaleIntentHandler) PrunePolicy() (bool, bool)            { return true, true }
 func (h *NMISaleIntentHandler) CommitsTerminalOutcome() bool         { return true }
-func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
+func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 func (h *NMISaleIntentHandler) database() *db.DB {
@@ -61,7 +61,7 @@ func (h *NMISaleIntentHandler) database() *db.DB {
 	return h.Sale.RailPaymentMethodService.DB
 }
 
-func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	if h.database() == nil || h.Sale.PurchaseService == nil {
 		return intents.Parked("checkout sale service not wired")
 	}
@@ -145,7 +145,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingRailIn
 
 // fenceSale re-checks the accepted instrument and takes the write-once
 // submission fence. Only the fence winner may send money.
-func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingRailIntent, p payments.NMISalePayload) (intents.Outcome, bool) {
+func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) (intents.Outcome, bool) {
 	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		method, err := h.database().NewWithPgxTx(tx).Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
 		if err != nil {
@@ -169,7 +169,7 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingRail
 	return intents.Outcome{}, true
 }
 
-func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.BillingRailIntent, p payments.NMISalePayload) intents.Outcome {
+func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) intents.Outcome {
 	if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
 		return intents.Parked("Stripe sale writes unavailable")
 	}
@@ -182,7 +182,7 @@ func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.Bil
 	return h.submitStripeSale(ctx, in)
 }
 
-func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	if h.database() == nil || h.Sale.PurchaseService == nil {
 		return intents.Ambiguous("sale recovery service is unavailable")
 	}
@@ -223,7 +223,7 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.BillingRailInt
 	return h.collect(ctx, current, client, intents.EvidenceString(current, "transaction_id"))
 }
 
-func (h *NMISaleIntentHandler) collect(ctx context.Context, in gen.BillingRailIntent, client *nmi.NMIClient, reference string) intents.Outcome {
+func (h *NMISaleIntentHandler) collect(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient, reference string) intents.Outcome {
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, reference)
 	if err != nil || !found {
 		return intents.Ambiguous("sale has no qualified exact payment receipt")
@@ -235,7 +235,7 @@ func (h *NMISaleIntentHandler) collect(ctx context.Context, in gen.BillingRailIn
 	return h.complete(ctx, in, &receipt, intents.Succeeded(nil))
 }
 
-func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	if h.database() == nil || h.Sale.PurchaseService == nil {
 		return intents.Outcome{}, intents.RejectResolution("sale recovery service is unavailable")
 	}
@@ -283,7 +283,7 @@ func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingRailIn
 	return h.complete(ctx, in, &receipt, intents.Succeeded(nil)), nil
 }
 
-func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingRailIntent, receipt *intents.CollectedReceipt, outcome intents.Outcome) intents.Outcome {
+func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProviderIntent, receipt *intents.CollectedReceipt, outcome intents.Outcome) intents.Outcome {
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -297,7 +297,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingRailI
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: customer}); err != nil {
 			return err
 		}
-		current, err := d.Gen(ctx).LockRailIntentForSaleCompletion(ctx, gen.LockRailIntentForSaleCompletionParams{MerchantID: in.MerchantID, ID: in.ID})
+		current, err := d.Gen(ctx).LockProviderIntentForSaleCompletion(ctx, gen.LockProviderIntentForSaleCompletionParams{MerchantID: in.MerchantID, ID: in.ID})
 		if err != nil {
 			return err
 		}
@@ -439,10 +439,10 @@ func saleResultEvidence(evidence map[string]any) map[string]any {
 
 // recordSaleAttempt records the sale's answer (#1110) in its completion
 // transaction.
-func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p payments.NMISalePayload, customer uuid.UUID, a attempts.Attempt, at time.Time) error {
+func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
 	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
-	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
 	a.TokenType = charge.TokenTypePSPToken
 	return attempts.Record(ctx, d.Gen(ctx), a)
 }

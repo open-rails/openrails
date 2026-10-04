@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,22 +22,12 @@ import (
 // their complete references with metadata in one SQL transaction. Unpublished
 // candidates survive interruption and are recoverable by the caller's operation
 // ID. Neither receipts nor SQL publication state contain credential values.
-func (s *Service) publishProviderCredentials(ctx context.Context, id billing.MerchantID, rail, environment, account string, enabled bool, req UpsertPaymentProviderConfigRequest, names, keys map[string]string, validated bool, verifiedAt *time.Time, transitionSource ...credentialTransitionPublication) (gen.BillingPsp, error) {
-	transitionFrom := ""
-	var publication credentialTransitionPublication
-	var snapshotRefs map[string]SecretRef
-	if len(transitionSource) > 0 {
-		publication = transitionSource[0]
-		transitionFrom = publication.From
-		snapshotRefs = transitionSource[0].SnapshotRefs
-	}
-	if req.OperationID == uuid.Nil || req.ExpectedRevision == nil || *req.ExpectedRevision < 0 {
+func (s *Service) publishProviderCredentials(ctx context.Context, id billing.MerchantID, rail, environment, account string, req pspPublication, names, keys map[string]string, validated bool, verifiedAt *time.Time, publication webhookPublication) (gen.BillingPsp, error) {
+	if req.OperationID == uuid.Nil || req.ExpectedRevision < 0 {
 		return gen.BillingPsp{}, apperr.Invalidf("operation_id and nonnegative expected_revision are required")
 	}
-	if len(names) > 0 {
-		if !CanStageCredentials(s.secrets) && snapshotRefs == nil {
-			return gen.BillingPsp{}, credentialWriteRefusal(s.secrets)
-		}
+	if len(names) > 0 && !CanStageCredentials(s.secrets) {
+		return gen.BillingPsp{}, credentialWriteRefusal(s.secrets)
 	}
 	custody := SecretCustodyIdentity(s.secrets)
 	if custody == "" {
@@ -47,7 +38,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 		normalizedKeys = append(normalizedKeys, key)
 	}
 	sort.Strings(normalizedKeys)
-	metadata, err := credentialPublicationMetadata(enabled, req.PublicConfig, normalizedKeys, transitionFrom, custody, publication.WebhookEndpointID, publication.RetireWebhookOverlap)
+	metadata, err := credentialPublicationMetadata(req.Key, req.Settings, normalizedKeys, custody, publication.WebhookEndpointID, publication.RetireWebhookOverlap)
 	if err != nil {
 		return gen.BillingPsp{}, err
 	}
@@ -61,7 +52,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 		if err := AssertPSPUnowned(ctx, q, id.UUID(), rail, environment, account); err != nil {
 			return err
 		}
-		err := q.CreateCredentialPublication(ctx, gen.CreateCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID, Rail: rail, Environment: environment, AccountID: account, ExpectedRevision: *req.ExpectedRevision, RequestMetadata: metadata})
+		err := q.CreateCredentialPublication(ctx, gen.CreateCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID, Rail: rail, Environment: environment, AccountID: account, ExpectedRevision: req.ExpectedRevision, RequestMetadata: metadata})
 		if err != nil {
 			return err
 		}
@@ -77,7 +68,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 		storedMetadata, _ = json.Marshal(doc)
 		_ = json.Unmarshal(metadata, &doc)
 		canonical, _ := json.Marshal(doc)
-		if stored.Rail != rail || stored.Environment != environment || stored.AccountID != account || stored.ExpectedRevision != *req.ExpectedRevision || !bytes.Equal(storedMetadata, canonical) {
+		if stored.Rail != rail || stored.Environment != environment || stored.AccountID != account || stored.ExpectedRevision != req.ExpectedRevision || !bytes.Equal(storedMetadata, canonical) {
 			return ErrCredentialOperationConflict
 		}
 		return nil
@@ -92,22 +83,6 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 	}
 	sort.Strings(sorted)
 	for _, name := range sorted {
-		if snapshotRefs != nil {
-			key := NormalizeCredentialVersionKey(keys[name])
-			ref, ok := snapshotRefs[key]
-			if !ok {
-				return gen.BillingPsp{}, ErrSecretNotFound
-			}
-			secret, err := ReadSecretRef(ctx, s.secrets, id, ref)
-			if err != nil {
-				return gen.BillingPsp{}, err
-			}
-			if secret.Value != names[name] {
-				return gen.BillingPsp{}, ErrCredentialOperationConflict
-			}
-			refs[key] = ref
-			continue
-		}
 		candidate := "credential_candidates/" + req.OperationID.String() + "/" + name
 		sec, err := stageSecret(ctx, s.secrets, id, candidate, names[name])
 		if err != nil {
@@ -138,33 +113,31 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 		if len(receipt) > 0 {
 			return json.Unmarshal(receipt, &result)
 		}
-		identity, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, account)
-		existing, err := q.LockPSPForCredentialPublication(ctx, gen.LockPSPForCredentialPublicationParams{MerchantID: id.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount})
+		_, lockRail, lockEnv, lockAccount := PSPNaturalKey(rail, environment, account)
+		existing, err := q.LockPSPForCredentialPublication(ctx, gen.LockPSPForCredentialPublicationParams{MerchantID: id.UUID(), Rail: lockRail, Environment: lockEnv, AccountID: lockAccount})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if req.Enabled == nil && existing.ID != uuid.Nil {
-			enabled = !existing.Archived
-		}
-		evidence := unmarshalProviderEvidence(existing.Evidence)
-		if evidence.CredentialCustody != "" && evidence.CredentialCustody != custody && evidence.CredentialCustody != transitionFrom {
+		state := credentialState(existing)
+		if state.Custody != "" && state.Custody != custody {
 			return ErrCredentialCustodyTransitionRequired
 		}
-		if evidence.Revision != *req.ExpectedRevision {
+		if state.Revision != req.ExpectedRevision {
 			return ErrCredentialOperationConflict
 		}
-		if len(req.PublicConfig) == 0 {
-			req.PublicConfig = evidence.PublicConfig
+		key := existing.Key
+		if existing.ID == uuid.Nil {
+			key = strings.ToLower(strings.TrimSpace(req.Key))
+			if key == "" {
+				return apperr.Invalidf("a new PSP needs a key")
+			}
 		}
-		if !validated && evidence.CredentialsValidated {
-			validated = true
-			verifiedAt = existing.LastVerifiedAt
+		settings := mergeSettings(rowSettings(existing), req.Settings)
+		if !validated {
+			verifiedAt = existing.CredentialsValidatedAt
 		}
-		merged := CredentialRefs(existing.Evidence)
-		if merged == nil {
-			merged = map[string]SecretRef{}
-		}
-		versions := mergeCredentialVersions(evidence.CredentialVersions, nil)
+		merged := state.Refs
+		versions := mergeCredentialVersions(state.Versions, nil)
 		if versions == nil {
 			versions = map[string]int{}
 		}
@@ -173,7 +146,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 		// bounded overlap; a supplied previous secret is accepted only from the
 		// managed endpoint rollover. Retirement ends the overlap at once.
 		overlapUntil := time.Time{}
-		if transitionFrom == "" && hasWebhookOverlap(rail) {
+		if hasWebhookOverlap(rail) {
 			if _, supplied := refs["webhook_signing_secret_previous"]; supplied && publication.WebhookEndpointID == "" {
 				return apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied")
 			}
@@ -194,14 +167,11 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 					overlapUntil = s.now().Add(publication.OverlapFor)
 				}
 			} else if !publication.RetireWebhookOverlap {
-				overlapUntil = webhookOverlapExpiry(existing.Evidence)
+				overlapUntil = webhookOverlapExpiry(existing)
 			}
 		}
 
-		retired := evidence.RetiredCredentials
-		if retired == nil {
-			retired = map[string]bool{}
-		}
+		retired := state.Retired
 		if publication.RetireWebhookOverlap {
 			delete(merged, "webhook_signing_secret_previous")
 			retired["webhook_signing_secret_previous"] = true
@@ -220,8 +190,8 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 				return err
 			}
 			unchanged := false
-			if existing.ID != uuid.Nil && transitionFrom == "" && !retired[key] {
-				previous, err := PSPSecretRef(rail, environment, account, existing.Evidence, key)
+			if existing.ID != uuid.Nil && !retired[key] {
+				previous, err := PSPSecretRef(existing, key)
 				if err != nil {
 					return err
 				}
@@ -240,51 +210,49 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 				generation++
 			}
 			// Keep retired-slot generations: later reuse must never reset its
-			// epoch. Custody transitions advance even when values are equal.
+			// epoch.
 			versions[key] = generation
 			delete(retired, key)
 			merged[key] = ref
 		}
-		raw, err := marshalProviderEvidence(existing.Evidence, req.PublicConfig, validated, versions)
-		if err != nil {
-			return err
-		}
-		doc := map[string]any{}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &doc); err != nil {
-				return err
-			}
-		}
-		doc["credential_custody"] = custody
-		if transitionFrom != "" {
-			doc["credential_custody_transition"] = map[string]any{"operation_id": req.OperationID, "from": transitionFrom, "to": custody}
-		}
-		doc["credential_refs"] = merged
-		doc["retired_credentials"] = retired
-		delete(doc, "webhook_overlap_expires_at")
-		if !overlapUntil.IsZero() {
-			doc["webhook_overlap_expires_at"] = overlapUntil.UTC().Format(time.RFC3339)
-		}
+		endpoint := existing.WebhookEndpointID
 		if publication.WebhookEndpointID != "" {
-			doc["webhook_endpoint_id"] = publication.WebhookEndpointID
-		} else if _, changed := refs["webhook_signing_secret"]; changed && transitionFrom == "" {
+			endpoint = &publication.WebhookEndpointID
+		} else if _, changed := refs["webhook_signing_secret"]; changed {
 			// An ordinary supplied signing key carries no proof that the old
 			// provider endpoint uses it. Only qualified creation binds an ID.
-			delete(doc, "webhook_endpoint_id")
+			endpoint = nil
 		}
-		doc["configuration_revision"] = evidence.Revision + 1
-		raw, err = json.Marshal(doc)
+		var overlap *time.Time
+		if !overlapUntil.IsZero() {
+			until := overlapUntil.UTC()
+			overlap = &until
+		}
+		settingsJSON, err := json.Marshal(settings)
 		if err != nil {
 			return err
 		}
-		key := existing.Key
-		if key == nil {
-			key = &nRail
-		}
-		archived := !enabled
-		result, err = q.UpsertPSP(ctx, gen.UpsertPSPParams{ID: identity, Key: key, MerchantID: id.UUID(), Rail: nRail, Environment: &nEnv, AccountID: nAccount, Archived: &archived, Evidence: raw, LastVerifiedAt: verifiedAt})
+		refsJSON, err := json.Marshal(merged)
 		if err != nil {
 			return err
+		}
+		versionsJSON, err := json.Marshal(versions)
+		if err != nil {
+			return err
+		}
+		identity, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, account)
+		if existing.ID != uuid.Nil {
+			identity = existing.ID
+		}
+		result, err = q.PublishPSP(ctx, gen.PublishPSPParams{
+			ID: identity, MerchantID: id.UUID(), Key: key, Rail: nRail, Environment: nEnv, AccountID: nAccount,
+			Settings: settingsJSON, CredentialCustody: &custody,
+			CredentialRefs: refsJSON, CredentialVersions: versionsJSON, RetiredCredentials: retiredList(retired),
+			CredentialsValidatedAt: verifiedAt, WebhookEndpointID: endpoint, WebhookOverlapExpiresAt: overlap,
+			Revision: state.Revision + 1,
+		})
+		if err != nil {
+			return mapPSPWriteError(err)
 		}
 		receipt, err = json.Marshal(result)
 		if err != nil {
@@ -296,31 +264,30 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 	return result, err
 }
 
-type credentialTransitionPublication struct {
+// webhookPublication carries a managed webhook endpoint's facts into a
+// publication.
+type webhookPublication struct {
 	WebhookEndpointID    string
 	RetireWebhookOverlap bool
 	// OverlapFor overrides the configured overlap (managed endpoint rollover).
-	OverlapFor   time.Duration
-	From         string
-	SnapshotRefs map[string]SecretRef
+	OverlapFor time.Duration
 }
 
-func credentialPublicationMetadata(enabled bool, public map[string]string, keys []string, source, custody, endpoint string, retire bool) ([]byte, error) {
+func credentialPublicationMetadata(key string, settings map[string]any, keys []string, custody, endpoint string, retire bool) ([]byte, error) {
 	return json.Marshal(struct {
-		Enabled              bool
-		PublicConfig         map[string]string
+		Key                  string
+		Settings             map[string]any
 		Keys                 []string
-		TransitionFrom       string
 		TargetCustody        string
 		WebhookEndpointID    string
 		RetireWebhookOverlap bool
-	}{enabled, public, keys, source, custody, endpoint, retire})
+	}{strings.ToLower(strings.TrimSpace(key)), settings, keys, custody, endpoint, retire})
 }
 
 // replayProviderCredentialPublication checks committed custody before any provider
 // probe. Secret equality is checked privately against immutable references;
 // neither payload values nor their hashes are stored in SQL receipts.
-func (s *Service) replayProviderCredentialPublication(ctx context.Context, id billing.MerchantID, rail, environment, account string, req UpsertPaymentProviderConfigRequest) (gen.BillingPsp, bool, error) {
+func (s *Service) replayProviderCredentialPublication(ctx context.Context, id billing.MerchantID, rail, environment, account string, req pspPublication) (gen.BillingPsp, bool, error) {
 	var row gen.BillingPsp
 	var metadata, receipt []byte
 	var storedRail, storedEnv, storedAccount string
@@ -347,13 +314,13 @@ func (s *Service) replayProviderCredentialPublication(ctx context.Context, id bi
 	if len(receipt) == 0 {
 		return row, false, nil
 	}
-	if storedRail != rail || storedEnv != environment || storedAccount != account || revision != *req.ExpectedRevision {
+	if storedRail != rail || storedEnv != environment || storedAccount != account || revision != req.ExpectedRevision {
 		return row, true, ErrCredentialOperationConflict
 	}
 	if err := json.Unmarshal(receipt, &row); err != nil {
 		return row, true, ErrSecretBackendUnavailable
 	}
-	if unmarshalProviderEvidence(row.Evidence).CredentialCustody != SecretCustodyIdentity(s.secrets) {
+	if credentialState(row).Custody != SecretCustodyIdentity(s.secrets) {
 		return row, true, ErrCredentialCustodyTransitionRequired
 	}
 	keys := make([]string, 0, len(req.Credentials))
@@ -363,7 +330,7 @@ func (s *Service) replayProviderCredentialPublication(ctx context.Context, id bi
 			return row, true, err
 		}
 		keys = append(keys, key)
-		ref, err := PSPSecretRef(rail, environment, account, row.Evidence, key)
+		ref, err := PSPSecretRef(row, key)
 		if err != nil {
 			return row, true, err
 		}
@@ -376,11 +343,7 @@ func (s *Service) replayProviderCredentialPublication(ctx context.Context, id bi
 		}
 	}
 	sort.Strings(keys)
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-	desired, err := credentialPublicationMetadata(enabled, req.PublicConfig, keys, "", SecretCustodyIdentity(s.secrets), "", false)
+	desired, err := credentialPublicationMetadata(req.Key, req.Settings, keys, SecretCustodyIdentity(s.secrets), "", req.RetireWebhookOverlap)
 	if err != nil {
 		return row, true, err
 	}

@@ -3,36 +3,43 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
-	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// pspsRoutes is a merchant's payment service providers, and the callbacks
-// those providers send.
-var pspsRoutes = []Route{
-	{Method: GET, Path: "/v1/merchant/payment-providers", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPaymentProvidersRead,
-		Query: params(text("environment"), text("provider"), text("status")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("credential_custody_transition_required", "invalid_param", "provider_account_last_active", "provider_accounts_ambiguous", "resource_not_found", "service_unavailable"), Handler: h(handlers.MerchantListPaymentProviders)},
-	// or#288 routing dry run: which PSP a checkout would get, and why. The
-	// answer is a projection of the PSP catalog, so it takes the same read.
-	{Method: POST, Path: "/v1/merchant/payment-providers/routing/dry-run", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPaymentProvidersRead,
-		Request: handlers.CheckoutRoutingDryRunRequest{}, Responses: []Reply{{200, handlers.CheckoutRoutingDryRunResponse{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param"), Handler: h(handlers.MerchantDryRunCheckoutRouting)},
-	{Method: GET, Path: "/v1/merchant/payment-providers/{provider}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPaymentProvidersRead,
-		Query: params(text("environment")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("credential_custody_transition_required", "invalid_param", "payment_provider_not_found", "provider_account_last_active", "provider_accounts_ambiguous", "resource_not_found", "service_unavailable"), Handler: h(handlers.MerchantGetPaymentProvider)},
-	// Metadata updates remain available with a read-only credential backend.
-	// The service rejects write-only credentials when custody cannot retain them.
-	{Method: PUT, Path: "/v1/merchant/payment-providers/{provider}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPaymentProvidersUpdate,
-		Request: merchants.UpsertPaymentProviderConfigRequest{}, Responses: []Reply{{200, Untyped{}}}, Errors: codes("credential_custody_transition_required", "credential_operation_conflict", "credential_source_read_only", "credential_store_read_only", "invalid_param", "payment_provider_credentials_rejected", "provider_account_last_active", "provider_accounts_ambiguous", "psp_claim_requires_proof", "resource_not_found", "service_unavailable"), Handler: h(handlers.MerchantPutPaymentProvider)},
-	// Lifecycle archives (#655/#656) write only the PSP row, never a secret,
-	// never the provider: a terminated account is archivable from any
-	// deployment.
-	{Method: DELETE, Path: "/v1/merchant/payment-providers/{provider}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPaymentProvidersUpdate,
-		Query: params(text("environment")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("credential_custody_transition_required", "invalid_param", "payment_provider_not_found", "provider_account_last_active", "provider_accounts_ambiguous", "resource_not_found", "service_unavailable"), Handler: h(handlers.MerchantDeletePaymentProvider)},
-	{Method: POST, Path: "/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPaymentProvidersUpdate,
-		Request: merchants.ArchivePaymentProviderAccountRequest{}, Responses: []Reply{{200, Untyped{}}}, Errors: codes("credential_custody_transition_required", "invalid_param", "provider_account_last_active", "provider_accounts_ambiguous", "resource_not_found", "service_unavailable"), Handler: h(handlers.MerchantArchivePaymentProviderAccount)},
+// pspWriteErrors are the refusals of a PSP write, beside the route's own.
+func pspWriteErrors(own ...string) []string {
+	return codes(append(own, "credential_custody_transition_required", "credential_operation_conflict", "credential_source_read_only", "credential_store_read_only", "invalid_param", "psp_credentials_rejected", "service_unavailable")...)
+}
 
-	// The canonical callback surface. The configured provider identity
-	// resolves its merchant in the runtime environment; runtime bindings and
-	// signatures remain mandatory. {provider} is a rail, never a
-	// merchant-specific PSP label. The body is the provider's own payload.
-	{Method: POST, Path: "/v1/webhooks/{provider}/{account_id}", Group: Webhooks, Auth: AuthProvider, NoConn: true,
+// pspsRoutes is a merchant's PSPs (accounts on rails), the rails they can be
+// armed on, and the callbacks providers send.
+var pspsRoutes = []Route{
+	{Method: GET, Path: "/v1/merchant/psps", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+		Query: params(queryOf(handlers.PSPListQuery{}), integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
+	{Method: POST, Path: "/v1/merchant/psps", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
+	{Method: GET, Path: "/v1/merchant/psps/{psp_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+		Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.GetPSP)},
+	// Credentials rotate here; settings changes work with a read-only
+	// credential backend.
+	{Method: PATCH, Path: "/v1/merchant/psps/{psp_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+		Request: billing.UpdatePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: pspWriteErrors("psp_not_found"), Handler: h(handlers.UpdatePSP)},
+	// Archiving writes only the PSP row, never a secret, never the provider:
+	// a terminated account archives from any deployment.
+	{Method: POST, Path: "/v1/merchant/psps/{psp_id}/archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+		Request: billing.ArchivePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_last_active", "psp_not_found", "service_unavailable"), Handler: h(handlers.ArchivePSP)},
+	// or#288: which PSP a checkout would get, and why. A projection of the
+	// PSP catalog, so it takes the same read.
+	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+		Request: billing.PSPRoutingPreviewParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
+	// A refresh rewrites the subscription mirrors from provider truth.
+	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
+		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},
+	{Method: GET, Path: "/v1/merchant/rails", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+		Responses: []Reply{{200, billing.ListPage[billing.RailDefinition]{}}}, Handler: h(handlers.ListRails)},
+
+	// The provider callback surface. The provider's account identity resolves
+	// its merchant; runtime bindings and signatures remain mandatory. The body
+	// is the provider's own payload.
+	{Method: POST, Path: "/v1/webhooks/{rail}/{account_id}", Group: Webhooks, Auth: AuthProvider, NoConn: true,
 		Query: params(text("eventType")), Request: Untyped{}, Responses: []Reply{{200, Untyped{}}}, Errors: codes("authentication_required", "credential_custody_transition_required", "invalid_param", "resource_access_denied", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
 }

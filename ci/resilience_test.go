@@ -337,14 +337,16 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	// cannot clear a pending change: only the approval does.
 	database := engine.Graph(second).Runtime.DB
 	require.NoError(t, database.RunInMerchantScope(t.Context(), mid, "overwrite", func(ctx context.Context) error {
-		rail := "solana"
-		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID(), Rail: &rail})
+		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
 		if err != nil {
 			return err
 		}
 		for _, row := range rows {
-			_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{ID: row.ID, MerchantID: row.MerchantID, Rail: row.Rail, Environment: &row.Environment,
-				AccountID: row.AccountID, Key: row.Key, Archived: &row.Archived, Evidence: []byte(`{"source":"merchant_config_manifest","signer":{"mode":"vault_transit","key":"` + transitKey + `"}}`), CustodianID: row.CustodianID})
+			if row.Rail != "solana" {
+				continue
+			}
+			_, err := database.Gen(ctx).UpsertManifestPSP(ctx, gen.UpsertManifestPSPParams{ID: row.ID, MerchantID: row.MerchantID, Key: row.Key, Rail: row.Rail, Environment: row.Environment,
+				AccountID: row.AccountID, Archived: row.Archived, Settings: row.Settings, Signer: []byte(`{"mode":"vault_transit","key":"` + transitKey + `"}`), CustodianID: row.CustodianID})
 			if err != nil {
 				return err
 			}

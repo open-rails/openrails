@@ -507,6 +507,9 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	applyByID := map[uuid.UUID]*Finding{}
 	for i := range findings {
 		f := &findings[i]
+		if strings.HasPrefix(string(f.Type), "pull.") {
+			f.PSPID = binding.ID
+		}
 		rec, err := e.Store.UpsertFinding(ctx, runID, *f)
 		if err != nil {
 			return rep, records, planned, appliedChanges, fmt.Errorf("persist finding %s/%s: %w", f.Type, f.SubjectKey, err)
@@ -603,7 +606,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 				if serr != nil {
 					rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: %v", f.Type, f.SubjectKey, serr))
 				}
-				runAffected["rail_intents"] += n
+				runAffected["provider_intents"] += n
 			}
 			appliedChanges = append(appliedChanges, mutationRecordsForFinding(provider, rec.ID, f, evidence, "applied")...)
 			log.WithFields(log.Fields{
@@ -638,7 +641,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 
 	// Auto-resolve: state-roster findings absent from this completed run
 	// vanished on their own (design decision 1)...
-	resolved, err := e.Store.AutoResolveVanished(ctx, provider, runID, stateRosterFindingTypes)
+	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, stateRosterFindingTypes)
 	if err != nil {
 		return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
 	}
@@ -647,7 +650,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// ...while transaction-window findings (PS-4/5/6) only auto-resolve when
 	// this run's window re-covered the transaction and it no longer diffed.
 	coveredSince, coveredUntil := e.coveredWindow(provider, params, now)
-	actionable, err := e.Store.ListActionableFindingsByProvider(ctx, provider)
+	actionable, err := e.Store.ListActionablePullFindings(ctx, binding.ID)
 	if err != nil {
 		return rep, records, planned, appliedChanges, fmt.Errorf("list actionable findings: %w", err)
 	}

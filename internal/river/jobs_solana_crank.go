@@ -474,7 +474,7 @@ func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.S
 		Kind: attempts.RebillKind(false, plan.retryAttempts), Owner: attempts.OwnerOf(plan.policy),
 		Answer: decline.Evidence{Code: code, Text: text}, Amount: plan.fiatAmount, Currency: plan.currency, At: w.now(),
 		SubscriptionID: &row.SubscriptionID, Cycle: &attempts.Cycle{SubscriptionID: row.SubscriptionID, DueAt: *plan.periodEnd},
-		RailIntentID: intent, Step: "pull",
+		ProviderIntentID: intent, Step: "pull",
 	}); err != nil {
 		return err
 	}

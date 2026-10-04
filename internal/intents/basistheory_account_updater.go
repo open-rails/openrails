@@ -105,7 +105,7 @@ func (h *AccountUpdaterBatchHandler) now() time.Time {
 	return time.Now().UTC()
 }
 
-func decodeAccountUpdaterBatchPayload(intent gen.BillingRailIntent) (AccountUpdaterBatchPayload, error) {
+func decodeAccountUpdaterBatchPayload(intent gen.BillingProviderIntent) (AccountUpdaterBatchPayload, error) {
 	var p AccountUpdaterBatchPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("account updater batch intent has no payload")
@@ -121,7 +121,7 @@ func decodeAccountUpdaterBatchPayload(intent gen.BillingRailIntent) (AccountUpda
 
 // CheckRelevance: the submit applies while its batch is still pending. A batch
 // already submitted, completed or abandoned has moved past this intent.
-func (h *AccountUpdaterBatchHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
+func (h *AccountUpdaterBatchHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
@@ -139,7 +139,7 @@ func (h *AccountUpdaterBatchHandler) CheckRelevance(ctx context.Context, intent 
 	return StillRelevant(), nil
 }
 
-func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
+func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -239,7 +239,7 @@ func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.Bil
 // to resolve: the create is idempotent per intent key and the upload is a
 // repeatable write of identical bytes, so every failure above is Retryable and
 // this never runs in practice.
-func (h *AccountUpdaterBatchHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
+func (h *AccountUpdaterBatchHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())

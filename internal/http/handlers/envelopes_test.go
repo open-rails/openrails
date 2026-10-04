@@ -68,7 +68,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 	writers := map[string]func(*httprequest.Request, error){
 		"catalog":  writeCatalogError,
 		"reprice":  writeRepriceError,
-		"provider": writeMerchantProviderError,
+		"psp":      writePSPError,
 		"metering": writeMeteringError,
 		"refusal":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "request failed") },
 		"checkout": func(r *httprequest.Request, err error) {
@@ -108,9 +108,11 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"reprice", &subscriptions.RepriceConstraintError{Sentinel: subscriptions.ErrRepriceNoticeWindowViolation}, want{422, "reprice_notice_window_violation", ""}},
 		{"reprice", &subscriptions.RepriceConstraintError{Sentinel: subscriptions.ErrRepriceAlreadyScheduled}, want{409, "reprice_already_scheduled", ""}},
 		{"reprice", subscriptions.ErrRepriceNotScheduled, want{409, "reprice_not_scheduled", ""}},
-		{"provider", apperr.Invalidf("merchants: unsupported payment rail %q", "abacus"), want{400, api.CodeInvalidParam, ""}},
-		{"provider", fmt.Errorf("%w: stripe key rejected (401)", merchants.ErrPaymentProviderCredentialsRejected), want{400, "payment_provider_credentials_rejected", ""}},
-		{"provider", merchants.ErrPaymentProviderNotFound, want{404, "payment_provider_not_found", ""}},
+		{"psp", apperr.Invalidf("unknown rail %q", "abacus").WithParam("rail"), want{400, api.CodeInvalidParam, "rail"}},
+		{"psp", fmt.Errorf("%w: stripe key rejected (401)", merchants.ErrPSPCredentialsRejected), want{400, "psp_credentials_rejected", ""}},
+		{"psp", merchants.ErrPSPNotFound, want{404, "psp_not_found", ""}},
+		{"psp", merchants.ErrPSPKeyTaken, want{409, "psp_key_taken", ""}},
+		{"psp", &merchants.LastActivePSPError{}, want{409, "psp_last_active", ""}},
 		{"metering", billingservice.ErrUsageMeterNotFound, want{404, "usage_meter_not_found", ""}},
 		{"metering", billingservice.ErrDefaultRateCardNotFound, want{404, "default_rate_card_not_found", ""}},
 		{"metering", billingservice.ErrRateCardProductNotFound, want{404, "rate_card_product_not_found", ""}},

@@ -10,7 +10,6 @@ package merchants
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -20,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/custodians"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -361,36 +361,10 @@ func (s PSPScope) SecretRef(key string) (SecretRef, error) {
 	return SecretRef{Name: name, MinVersion: s.CredentialVersions[NormalizeCredentialVersionKey(key)]}, nil
 }
 
-// PSPSecretRef builds a scoped SecretRef straight from a PSP row's identity and
-// its evidence document — for the paths that hold the raw row rather than a
-// resolved PSPScope.
-func PSPSecretRef(rail, environment, accountID string, evidence []byte, key string) (SecretRef, error) {
-	if unmarshalProviderEvidence(evidence).RetiredCredentials[NormalizeCredentialVersionKey(key)] {
-		return SecretRef{Retired: true}, nil
-	}
-	if ref, ok := CredentialRefs(evidence)[NormalizeCredentialVersionKey(key)]; ok {
-		return validatePublishedRef(rail, environment, accountID, key, ref)
-	}
-	name, err := PSPSecretName(rail, environment, accountID, key)
-	if err != nil {
-		return SecretRef{}, err
-	}
-	return SecretRef{Name: name, MinVersion: CredentialVersions(evidence)[NormalizeCredentialVersionKey(key)]}, nil
-}
-
-// CredentialVersions reads the or#812 rotation watermarks out of a PSP row's
-// evidence document.
-func CredentialVersions(evidence []byte) map[string]int {
-	if len(evidence) == 0 {
-		return nil
-	}
-	var doc struct {
-		CredentialVersions map[string]int `json:"credential_versions"`
-	}
-	if json.Unmarshal(evidence, &doc) != nil {
-		return nil
-	}
-	return doc.CredentialVersions
+// PSPSecretRef is the published reference of one credential of a PSP row, for
+// the paths that hold the row rather than a resolved PSPScope.
+func PSPSecretRef(row gen.BillingPsp, key string) (SecretRef, error) {
+	return pspScopeFromRow(row).secretRef(key)
 }
 
 // NormalizeCredentialVersionKey is the canonical form credential-version keys
@@ -491,15 +465,6 @@ type PSPIdentityScopeResolver interface {
 }
 
 // CredentialRefs returns the exact immutable candidate selected by publication.
-func CredentialRefs(evidence []byte) map[string]SecretRef {
-	var doc struct {
-		Refs map[string]SecretRef `json:"credential_refs"`
-	}
-	if json.Unmarshal(evidence, &doc) != nil {
-		return nil
-	}
-	return doc.Refs
-}
 func validatePublishedRef(rail, environment, accountID, key string, ref SecretRef) (SecretRef, error) {
 	canonical, err := PSPSecretName(rail, environment, accountID, key)
 	if err != nil {

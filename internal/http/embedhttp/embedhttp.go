@@ -209,7 +209,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	// route set on this combined handler that belongs to the permissive-CORS
 	// browser tier. Empty (matches nothing) when RouteSetCheckout isn't
 	// selected, so PermissiveCORSHTTP is a pure no-op for a merchant-admin/
-	// catalog/payment-providers/merchant-API/webhooks-only mount.
+	// catalog/PSP/merchant-API/webhooks-only mount.
 	browserRoutes := make(map[string]bool)
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
 	if routeSets[RouteSetCheckout] {
@@ -256,7 +256,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			middleware.SecurityHeadersHTTP(),
 			// #765: static permissive CORS on exactly the checkout patterns
 			// registered into browserTier above — `*` from any origin, no
-			// credentials, nothing on merchant-admin/catalog/payment-providers/
+			// credentials, nothing on merchant-admin/catalog/psps/
 			// merchant-API/webhooks.
 			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }),
 			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),

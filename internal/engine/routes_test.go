@@ -132,7 +132,7 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/pay/v1/me/balance", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/me/checkout-sessions", http.StatusUnauthorized},
-		{http.MethodPut, "/api/pay/v1/merchant/payment-providers/stripe", http.StatusUnauthorized},
+		{http.MethodPost, "/api/pay/v1/merchant/psps", http.StatusUnauthorized},
 		{http.MethodOptions, "/api/pay/v1/me/balance", http.StatusNoContent},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 	} {
@@ -256,7 +256,7 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 		require.Equal(t, tc.status, rec.Code, rec.Body.String())
 	}
 	require.Equal(t, map[string]int{"portal": 2, "platform": 2}, calls)
-	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/merchant/payment-providers", platform + "/checkout-sessions", platform + "/payment-methods"} {
+	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/merchant/psps", platform + "/checkout-sessions", platform + "/payment-methods"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay"+path, "").Code, path)
 	}
 	routes, err := rt.Routes()

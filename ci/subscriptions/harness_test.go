@@ -170,7 +170,7 @@ type world struct {
 	jobs   *river.Client[pgx.Tx]
 	server *httptest.Server
 	client map[topology]*openrails.Client
-	psp    map[string]string
+	psp    map[string]billing.PSPID
 	// psps is the merchant's provider declaration, as its manifest states it.
 	psps map[string]openrails.PSPConfig
 
@@ -331,13 +331,13 @@ func (w *world) start() {
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
 	config, err := local.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
 	require.NoError(t, err)
-	w.psp = map[string]string{}
+	w.psp = map[string]billing.PSPID{}
 	for _, psp := range config.PSPs {
 		w.psp[psp.Rail] = psp.PSPID
 	}
 	for _, rail := range []string{"stripe", "nmi"} {
 		if _, declared := psps[rail]; declared {
-			require.NotEmpty(t, w.psp[rail], "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.Unexpected())
+			require.False(t, w.psp[rail].IsZero(), "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.Unexpected())
 		}
 	}
 }
@@ -388,7 +388,7 @@ func (w *world) kill() {
 	}
 	rows.Close()
 	var intents []intentRow
-	rows, err = w.pool.Query(ctx, `SELECT id::text, status, claimed_until FROM `+schema+`.rail_intents WHERE status = 'in_flight'`)
+	rows, err = w.pool.Query(ctx, `SELECT id::text, status, claimed_until FROM `+schema+`.provider_intents WHERE status = 'in_flight'`)
 	require.NoError(w.t, err)
 	for rows.Next() {
 		var r intentRow
@@ -401,7 +401,7 @@ func (w *world) kill() {
 	_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.river_job SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '10 minutes' WHERE id = ANY($1)`, jobIDs)
 	require.NoError(w.t, err)
 	for _, r := range intents {
-		_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.rail_intents SET status = $2, claimed_until = $3 WHERE id = $1::uuid`, r.id, r.status, r.claimed)
+		_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.provider_intents SET status = $2, claimed_until = $3 WHERE id = $1::uuid`, r.id, r.status, r.claimed)
 		require.NoError(w.t, err)
 	}
 }
@@ -465,7 +465,7 @@ func (w *world) dumpJobs() {
 	for _, j := range page.Jobs {
 		w.t.Logf("job %d %s %s sched=%s attempted=%v attempt=%d args=%s errs=%v", j.ID, j.Kind, j.State, j.ScheduledAt.Format(time.RFC3339), j.AttemptedAt, j.Attempt, j.EncodedArgs, j.Errors)
 	}
-	rows, err := w.pool.Query(context.Background(), `SELECT intent_type, status, coalesce(last_failure_reason,''), coalesce(result_evidence::text,''), claimed_until FROM `+pgx.Identifier{w.schema}.Sanitize()+`.rail_intents`)
+	rows, err := w.pool.Query(context.Background(), `SELECT intent_type, status, coalesce(last_failure_reason,''), coalesce(result_evidence::text,''), claimed_until FROM `+pgx.Identifier{w.schema}.Sanitize()+`.provider_intents`)
 	if err == nil {
 		for rows.Next() {
 			var typ, status, reason, evidence string

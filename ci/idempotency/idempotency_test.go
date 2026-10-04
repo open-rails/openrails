@@ -49,7 +49,12 @@ type env struct {
 	schema   string
 	replicas [2]replica
 	merchant uuid.UUID
+	psp      uuid.UUID
 }
+
+// claimKey is the claim operation ProcessWebhook takes for op: the truth op
+// with the event's source.
+func (e *env) claimKey(op string) string { return op + ".psp." + e.psp.String() }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
@@ -68,6 +73,7 @@ func newEnv(t *testing.T) *env {
 	})
 	require.NoError(t, openrails.Migrate(t.Context(), admin, openrails.Config{Schema: e.schema, River: openrails.RiverHostOwned}))
 	e.merchant = e.newMerchant()
+	require.NoError(t, admin.QueryRow(t.Context(), e.q(`INSERT INTO billing.psps (merchant_id, key, rail, account_id) VALUES ($1, 'main', 'stripe', $2) RETURNING id`), e.merchant, "acct_"+uuid.NewString()[:8]).Scan(&e.psp))
 	for i := range e.replicas {
 		config, err := pgxpool.ParseConfig(dsn)
 		require.NoError(t, err)
@@ -111,7 +117,9 @@ func (e *env) storeWith(i int, ttl, lease time.Duration) *idempotency.Store {
 
 func (e *env) store(i int) *idempotency.Store { return e.storeWith(i, ttl, lease) }
 
-func (e *env) ctx() context.Context { return e.ctxFor(e.merchant) }
+// ctx is the merchant's request context with its PSP pinned, as the webhook
+// plane pins the PSP that sent an event.
+func (e *env) ctx() context.Context { return db.WithPSPID(e.ctxFor(e.merchant), e.psp) }
 
 func (e *env) ctxFor(id uuid.UUID) context.Context {
 	return merchant.WithID(e.t.Context(), billing.MerchantID(id))
@@ -485,15 +493,15 @@ func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	// A replica dies after committing the effects and the webhook_events mark
 	// in the handler's transaction, before completing its claim.
 	op := fmt.Sprintf("webhook.%s.%s", source, "payment_intent.succeeded")
-	dead, _, err := e.store(0).Begin(e.ctx(), op, "evt_crash")
+	dead, _, err := e.store(0).Begin(e.ctx(), e.claimKey(op), "evt_crash")
 	require.NoError(t, err)
 	require.NotNil(t, dead)
-	e.exec(`INSERT INTO billing.webhook_events (merchant_id, op, event_id) VALUES ($1, $2, 'evt_crash')`, e.merchant, op)
-	e.lapse(op, "evt_crash")
+	e.exec(`INSERT INTO billing.webhook_events (merchant_id, psp_id, op, event_id) VALUES ($1, $2, $3, 'evt_crash')`, e.merchant, e.psp, op)
+	e.lapse(e.claimKey(op), "evt_crash")
 	var crashed atomic.Int32
 	require.NoError(t, deliver(1, "evt_crash", func(context.Context) error { crashed.Add(1); return nil }))
 	require.Zero(t, crashed.Load(), "the applied fact wins over the reclaimed delivery")
-	rec, err := e.store(1).Get(e.ctx(), op, "evt_crash")
+	rec, err := e.store(1).Get(e.ctx(), e.claimKey(op), "evt_crash")
 	require.NoError(t, err)
 	require.Equal(t, idempotency.StatusSucceeded, rec.Status)
 }
@@ -523,7 +531,7 @@ func TestWebhookOwnerLosingItsLeaseNeverApplies(t *testing.T) {
 		})
 	}()
 	<-inside
-	e.lapse(op, "evt_lapse")
+	e.lapse(e.claimKey(op), "evt_lapse")
 	require.NoError(t, dedup[1].ProcessWebhook(e.ctx(), "evt_lapse", "charge.refunded", source, func(ctx context.Context) error {
 		return apply(ctx, e.replicas[1].db, "evt_lapse")
 	}))
@@ -607,7 +615,7 @@ func TestWebhookDuplicatesLeaveRenewalsAlone(t *testing.T) {
 		return held <= 4
 	}, 2*lease, 50*time.Millisecond, "waiters hold no request connection")
 	time.Sleep(lease) // past the lease: only renewals keep the owner's claim
-	rec, err := e.store(1).Watch(e.ctx(), op, "evt_hot")
+	rec, err := e.store(1).Watch(e.ctx(), e.claimKey(op), "evt_hot")
 	require.NoError(t, err)
 	require.True(t, rec.Leased, "the owner's renewals stayed on time")
 	require.LessOrEqual(t, e.replicas[0].leases.Pool().Stat().AcquireCount()-renewals, int64(10), "the lease pool served renewals only")

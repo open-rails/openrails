@@ -60,7 +60,7 @@ func newPullProviderCmd() *cobra.Command {
 	}
 	cmd.Flags().StringSliceVar(&providers, "rail", nil, "Rail(s) to pull: nmi, ccbill, stripe, solana (default: all configured)")
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "MODE-1 (#723) merchant manifest to arm credentials from (default: the conventional /etc/openrails/merchants.yaml when present)")
-	cmd.Flags().StringVar(&psp, "provider-account", "", "PSP UUID to pull explicitly (requires matching configured credentials)")
+	cmd.Flags().StringVar(&psp, "psp", "", "PSP UUID to pull explicitly (requires matching configured credentials)")
 	cmd.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")

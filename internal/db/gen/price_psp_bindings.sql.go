@@ -68,7 +68,7 @@ func (q *Queries) InsertPricePSPBinding(ctx context.Context, arg InsertPricePSPB
 }
 
 const listPricePSPBindings = `-- name: ListPricePSPBindings :many
-SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, COALESCE(p.key, p.id::text)::text AS psp_key
+SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, p.key AS psp_key
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
 WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=b.merchant_id AND owned_price.id=b.price_id AND catalog_product.catalog_id=$1::uuid)) AND b.merchant_id = $2::uuid AND (cardinality($3::uuid[]) = 0 OR b.price_id = ANY($3::uuid[]))
@@ -154,7 +154,7 @@ func (q *Queries) LockPriceForBindingUpdate(ctx context.Context, arg LockPriceFo
 }
 
 const resolvePriceBindingPSP = `-- name: ResolvePriceBindingPSP :many
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at FROM billing.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text
   AND (($3::uuid IS NOT NULL AND id = $3::uuid)
        OR ($3::uuid IS NULL AND key = $4::text))
@@ -184,19 +184,26 @@ func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBi
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
+			&i.Key,
 			&i.Rail,
 			&i.Environment,
 			&i.AccountID,
-			&i.Key,
-			&i.Evidence,
-			&i.FirstSeenAt,
-			&i.LastVerifiedAt,
-			&i.ReplacedAt,
+			&i.CustodianID,
+			&i.Settings,
+			&i.Signer,
+			&i.CredentialCustody,
+			&i.CredentialRefs,
+			&i.CredentialVersions,
+			&i.RetiredCredentials,
+			&i.CredentialsValidatedAt,
+			&i.WebhookEndpointID,
+			&i.WebhookOverlapExpiresAt,
+			&i.PendingSignerPublicKey,
+			&i.Revision,
+			&i.Archived,
+			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Archived,
-			&i.CustodianID,
-			&i.PendingSignerPublicKey,
 		); err != nil {
 			return nil, err
 		}

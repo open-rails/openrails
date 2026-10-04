@@ -6,8 +6,6 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/cardguard"
@@ -45,9 +43,7 @@ func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.Price
 	out := make([]billing.CheckoutOption, 0, len(options))
 	for _, option := range options {
 		item := billing.CheckoutOption{Selector: option.Selector, Rail: option.Rail, Mode: option.Mode}
-		if option.PSPID != uuid.Nil {
-			item.PSPID = option.PSPID.String()
-		}
+		item.PSPID = billing.PSPID(option.PSPID)
 		if option.Token != "" {
 			item.PublicConfig = map[string]string{"token_symbol": option.Token}
 		}
@@ -259,14 +255,7 @@ func checkoutCreateRequest(req billing.CreateCheckoutAttemptRequest, card *cardg
 			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutAttemptValidation)
 		}
 	}
-	var pspID uuid.UUID
-	if req.PaymentOptions.PSPID != "" {
-		parsed, err := uuid.Parse(req.PaymentOptions.PSPID)
-		if err != nil || parsed == uuid.Nil {
-			return nil, fmt.Errorf("%w: invalid psp_id", checkout.ErrCheckoutAttemptValidation)
-		}
-		pspID = parsed
-	}
+	pspID := req.PaymentOptions.PSPID.UUID()
 	priceID := ""
 	if !req.PriceID.IsZero() {
 		priceID = req.PriceID.String()

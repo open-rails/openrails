@@ -195,20 +195,20 @@ func (q *Queries) InvalidateEntitlementsFromBeforeImages(ctx context.Context, ar
 	return result.RowsAffected(), nil
 }
 
-const listRailIntentsForRun = `-- name: ListRailIntentsForRun :many
+const listProviderIntentsForRun = `-- name: ListProviderIntentsForRun :many
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
   AND destructive_run_id = $2::uuid
 ORDER BY created_at
 `
 
-type ListRailIntentsForRunParams struct {
+type ListProviderIntentsForRunParams struct {
 	MerchantID uuid.UUID
 	RunID      uuid.UUID
 }
 
-type ListRailIntentsForRunRow struct {
+type ListProviderIntentsForRunRow struct {
 	ID                uuid.UUID
 	IntentType        string
 	Status            string
@@ -222,15 +222,15 @@ type ListRailIntentsForRunRow struct {
 // final: superseded = neutralised; succeeded = it reached the provider and is
 // IRREVERSIBLE (the vault entry is gone, the remote subscription is canceled);
 // in_flight / unknown_needs_verify = ambiguous, may have reached the provider.
-func (q *Queries) ListRailIntentsForRun(ctx context.Context, arg ListRailIntentsForRunParams) ([]ListRailIntentsForRunRow, error) {
-	rows, err := q.db.Query(ctx, listRailIntentsForRun, arg.MerchantID, arg.RunID)
+func (q *Queries) ListProviderIntentsForRun(ctx context.Context, arg ListProviderIntentsForRunParams) ([]ListProviderIntentsForRunRow, error) {
+	rows, err := q.db.Query(ctx, listProviderIntentsForRun, arg.MerchantID, arg.RunID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListRailIntentsForRunRow
+	var items []ListProviderIntentsForRunRow
 	for rows.Next() {
-		var i ListRailIntentsForRunRow
+		var i ListProviderIntentsForRunRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IntentType,
@@ -360,9 +360,9 @@ func (q *Queries) RestoreSubscriptionsFromBeforeImages(ctx context.Context, arg 
 	return result.RowsAffected(), nil
 }
 
-const stampRailIntentsForRun = `-- name: StampRailIntentsForRun :execrows
+const stampProviderIntentsForRun = `-- name: StampProviderIntentsForRun :execrows
 
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET destructive_run_id = $1::uuid
 WHERE merchant_id = $2::uuid
   AND subscription_id = $3::uuid
@@ -370,7 +370,7 @@ WHERE merchant_id = $2::uuid
   AND created_at >= $4::timestamptz
 `
 
-type StampRailIntentsForRunParams struct {
+type StampProviderIntentsForRunParams struct {
 	RunID          uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
@@ -383,8 +383,8 @@ type StampRailIntentsForRunParams struct {
 // subscription's before-image, so anything newer for that subject is this
 // pass's doing; `destructive_run_id IS NULL` keeps an earlier run's intent from
 // being re-attributed. Attribution only — no status is changed here.
-func (q *Queries) StampRailIntentsForRun(ctx context.Context, arg StampRailIntentsForRunParams) (int64, error) {
-	result, err := q.db.Exec(ctx, stampRailIntentsForRun,
+func (q *Queries) StampProviderIntentsForRun(ctx context.Context, arg StampProviderIntentsForRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, stampProviderIntentsForRun,
 		arg.RunID,
 		arg.MerchantID,
 		arg.SubscriptionID,
@@ -396,8 +396,8 @@ func (q *Queries) StampRailIntentsForRun(ctx context.Context, arg StampRailInten
 	return result.RowsAffected(), nil
 }
 
-const supersedeUnfiredRailIntentsForRun = `-- name: SupersedeUnfiredRailIntentsForRun :many
-UPDATE billing.rail_intents
+const supersedeUnfiredProviderIntentsForRun = `-- name: SupersedeUnfiredProviderIntentsForRun :many
+UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = $1::text,
     claimed_until = NULL,
@@ -408,13 +408,13 @@ WHERE merchant_id = $2::uuid
 RETURNING id, intent_type, subscription_id, rail
 `
 
-type SupersedeUnfiredRailIntentsForRunParams struct {
+type SupersedeUnfiredProviderIntentsForRunParams struct {
 	Reason     string
 	MerchantID uuid.UUID
 	RunID      uuid.UUID
 }
 
-type SupersedeUnfiredRailIntentsForRunRow struct {
+type SupersedeUnfiredProviderIntentsForRunRow struct {
 	ID             uuid.UUID
 	IntentType     string
 	SubscriptionID *uuid.UUID
@@ -431,21 +431,21 @@ type SupersedeUnfiredRailIntentsForRunRow struct {
 // so neither is touched here — they are reported instead.
 //
 // The race is decided by Postgres row locks: this UPDATE and the executor's
-// claim (ClaimDueRailIntents / ClaimRailIntentByID) contend for the same row,
+// claim (ClaimDueProviderIntents / ClaimProviderIntentByID) contend for the same row,
 // and under READ COMMITTED the loser re-evaluates its WHERE against the winner's
 // committed row and matches nothing. So exactly one of {superseded, in_flight}
 // happens per intent, never both, and whichever way it goes the reverse's
 // report is truthful. The reverse also disarms the destructive-action switch
 // first, which is what stops NEW claims from starting during the reversal.
-func (q *Queries) SupersedeUnfiredRailIntentsForRun(ctx context.Context, arg SupersedeUnfiredRailIntentsForRunParams) ([]SupersedeUnfiredRailIntentsForRunRow, error) {
-	rows, err := q.db.Query(ctx, supersedeUnfiredRailIntentsForRun, arg.Reason, arg.MerchantID, arg.RunID)
+func (q *Queries) SupersedeUnfiredProviderIntentsForRun(ctx context.Context, arg SupersedeUnfiredProviderIntentsForRunParams) ([]SupersedeUnfiredProviderIntentsForRunRow, error) {
+	rows, err := q.db.Query(ctx, supersedeUnfiredProviderIntentsForRun, arg.Reason, arg.MerchantID, arg.RunID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SupersedeUnfiredRailIntentsForRunRow
+	var items []SupersedeUnfiredProviderIntentsForRunRow
 	for rows.Next() {
-		var i SupersedeUnfiredRailIntentsForRunRow
+		var i SupersedeUnfiredProviderIntentsForRunRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IntentType,

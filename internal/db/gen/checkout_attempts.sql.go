@@ -290,7 +290,7 @@ func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, mer
 
 const countInvalidEngineCheckoutReferences = `-- name: CountInvalidEngineCheckoutReferences :one
 SELECT count(*) FROM billing.checkout_attempts cs
-LEFT JOIN billing.rail_intents i ON i.merchant_id=cs.merchant_id
+LEFT JOIN billing.provider_intents i ON i.merchant_id=cs.merchant_id
  AND i.payload->>'checkout_attempt_id'=cs.id::text AND i.intent_type='initial_membership'
 WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'initial_membership_quote'
 AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
@@ -516,7 +516,7 @@ SET status = 'failed', updated_at = $1::timestamptz,
       'failure_kind', $3::text, 'failure_code', $4::text)
 WHERE cs.merchant_id = $5::uuid AND cs.id = $6::uuid
   AND cs.deleted_at IS NULL AND cs.status = 'created'
-  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i
                   WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY($7::text[]))
 `
 
@@ -669,7 +669,7 @@ func (q *Queries) GetCheckoutAttemptByReference(ctx context.Context, arg GetChec
 }
 
 const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
-SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, p.pending_signer_public_key,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
+SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.custodian_id, p.settings, p.signer, p.credential_custody, p.credential_refs, p.credential_versions, p.retired_credentials, p.credentials_validated_at, p.webhook_endpoint_id, p.webhook_overlap_expires_at, p.pending_signer_public_key, p.revision, p.archived, p.archived_at, p.created_at, p.updated_at,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
 JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
 WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
 FOR SHARE OF p,c
@@ -693,19 +693,26 @@ func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg Ge
 	err := row.Scan(
 		&i.BillingPsp.ID,
 		&i.BillingPsp.MerchantID,
+		&i.BillingPsp.Key,
 		&i.BillingPsp.Rail,
 		&i.BillingPsp.Environment,
 		&i.BillingPsp.AccountID,
-		&i.BillingPsp.Key,
-		&i.BillingPsp.Evidence,
-		&i.BillingPsp.FirstSeenAt,
-		&i.BillingPsp.LastVerifiedAt,
-		&i.BillingPsp.ReplacedAt,
+		&i.BillingPsp.CustodianID,
+		&i.BillingPsp.Settings,
+		&i.BillingPsp.Signer,
+		&i.BillingPsp.CredentialCustody,
+		&i.BillingPsp.CredentialRefs,
+		&i.BillingPsp.CredentialVersions,
+		&i.BillingPsp.RetiredCredentials,
+		&i.BillingPsp.CredentialsValidatedAt,
+		&i.BillingPsp.WebhookEndpointID,
+		&i.BillingPsp.WebhookOverlapExpiresAt,
+		&i.BillingPsp.PendingSignerPublicKey,
+		&i.BillingPsp.Revision,
+		&i.BillingPsp.Archived,
+		&i.BillingPsp.ArchivedAt,
 		&i.BillingPsp.CreatedAt,
 		&i.BillingPsp.UpdatedAt,
-		&i.BillingPsp.Archived,
-		&i.BillingPsp.CustodianID,
-		&i.BillingPsp.PendingSignerPublicKey,
 		&i.BillingCustodian.ID,
 		&i.BillingCustodian.MerchantID,
 		&i.BillingCustodian.Key,
@@ -835,7 +842,7 @@ SELECT EXISTS (
    AND (s.status IN ('created','requires_action')
      OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
    -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
+   AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
      WHERE f.merchant_id=s.merchant_id
        AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
        AND f.status IN ('failed_terminal','expired','superseded'))

@@ -98,7 +98,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 	requested := strings.TrimSpace(req.PriceID)
 	fingerprint := sha256.Sum256([]byte(strings.Join([]string{terms.CustomerID.String(), existingSub.ID.String(), newPrice.ID.String(), key}, "\x00")))
 	database := s.SubscriptionService.Database()
-	var operation gen.BillingRailIntent
+	var operation gen.BillingProviderIntent
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: terms.CustomerID}); err != nil {
@@ -132,10 +132,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 			return &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
-		label := psp.ID.String()
-		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
-			label = *psp.Key
-		}
+		label := psp.Key
 		email := ""
 		if user.Email != nil {
 			email = strings.TrimSpace(*user.Email)
@@ -152,7 +149,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		return nil, s.engineUpgradeRefusal(ctx, err, existingSub)
 	}
 	subject := tierChangeSubject{UserID: terms.CustomerID.String(), SubscriptionID: existingSub.ID, RequestedPrice: requested, PriceID: newPrice.ID}
-	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.BillingRailIntent) error { return tierChangeOwnedBy(in, subject) })
+	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.BillingProviderIntent) error { return tierChangeOwnedBy(in, subject) })
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +253,7 @@ func (s *CheckoutService) previewEngineTierChange(ctx context.Context, resp *Tie
 
 // engineUpgradeTierChangeResponse renders an engine upgrade: the replaced
 // membership while unresolved, the successor once paid.
-func engineUpgradeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeResponse, error) {
+func engineUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, error) {
 	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return nil, err

@@ -90,15 +90,15 @@ func (s share) String() string {
 	return fmt.Sprintf("%d.%d%%", tenths/10, tenths%10)
 }
 
-// shares runs [failed, total] by rail_account and owner over [from, to).
+// shares runs [failed, total] by PSP and owner over [from, to).
 func (p *lifePass) shares(ctx context.Context, failed, total string, filters map[string][]string, from, to, now time.Time) (map[healthKey]share, error) {
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{failed, total}, By: []string{"rail_account", "owner"}, Filters: filters}, from, to, now)
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{failed, total}, By: []string{"psp", "owner"}, Filters: filters}, from, to, now)
 	if err != nil {
 		return nil, err
 	}
 	out := map[healthKey]share{}
 	for _, r := range rows {
-		out[healthKey{str(r["rail_account"]), str(r["owner"])}] = share{failed: count(r[failed]), total: count(r[total])}
+		out[healthKey{str(r["psp"]), str(r["owner"])}] = share{failed: count(r[failed]), total: count(r[total])}
 	}
 	return out, nil
 }
@@ -161,7 +161,7 @@ func spikeFinding(kind string, k healthKey, cur, base share, action string) Conv
 		Type: kind, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
 		SubjectKey: k.subject(), Provider: "self",
 		Evidence: map[string]any{
-			"rail_account": k.account, "owner": k.owner, "window_hours": int(spikeWindow.Hours()),
+			"psp": k.account, "owner": k.owner, "window_hours": int(spikeWindow.Hours()),
 			"failed": cur.failed, "count": cur.total, "rate": cur.String(),
 			"baseline_days": int(baselineWindow.Hours()) / 24, "baseline_failed": base.failed, "baseline_count": base.total, "baseline_rate": base.String(),
 		},
@@ -173,13 +173,13 @@ func spikeFinding(kind string, k healthKey, cur, base share, action string) Conv
 // 20), or any answer about our own credentials, which is critical.
 func (p *lifePass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	from := now.Add(-systemErrorWindow)
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"rail_account", "owner", "category"}}, from, now, now)
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "category"}}, from, now, now)
 	if err != nil {
 		return nil, err
 	}
 	errs := map[healthKey]share{}
 	for _, r := range rows {
-		k := healthKey{str(r["rail_account"]), str(r["owner"])}
+		k := healthKey{str(r["psp"]), str(r["owner"])}
 		s := errs[k]
 		s.total += count(r["attempts"])
 		if r["category"] == string(decline.SystemError) {
@@ -187,14 +187,14 @@ func (p *lifePass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeF
 		}
 		errs[k] = s
 	}
-	rows, err = p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"rail_account", "owner", "response_code"},
+	rows, err = p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "response_code"},
 		Filters: map[string][]string{"rail": {"nmi"}, "response_code": credentialCodes}}, from, now, now)
 	if err != nil {
 		return nil, err
 	}
 	credentials := map[healthKey][]string{}
 	for _, r := range rows {
-		k := healthKey{str(r["rail_account"]), str(r["owner"])}
+		k := healthKey{str(r["psp"]), str(r["owner"])}
 		credentials[k] = append(credentials[k], str(r["response_code"]))
 	}
 	var out []ConvergeFinding
@@ -206,7 +206,7 @@ func (p *lifePass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeF
 		f := ConvergeFinding{
 			Type: findingSystemErrors, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
 			SubjectKey: k.subject(), Provider: "self",
-			Evidence: map[string]any{"rail_account": k.account, "owner": k.owner, "window_minutes": int(systemErrorWindow.Minutes()),
+			Evidence: map[string]any{"psp": k.account, "owner": k.owner, "window_minutes": int(systemErrorWindow.Minutes()),
 				"count": s.total, "system_errors": s.failed, "share": s.String()},
 			RecommendedAction: fmt.Sprintf("%d of the last hour's %d attempts on %s (%s) failed on a system error: check the PSP's status and our connection to it.",
 				s.failed, s.total, k.account, k.owner),
@@ -252,14 +252,14 @@ func (p *lifePass) unmappedDeclines(ctx context.Context, now time.Time) ([]Conve
 // PSP account; it resolves when webhooks resume.
 func (p *lifePass) webhookSilence(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	observed := func(from, to time.Time) (map[string]map[string]int64, error) {
-		rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"rail_account", "observed_via"},
+		rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "observed_via"},
 			Filters: map[string][]string{"source": {"provider_schedule"}}}, from, to, now)
 		if err != nil {
 			return nil, err
 		}
 		out := map[string]map[string]int64{}
 		for _, r := range rows {
-			account := str(r["rail_account"])
+			account := str(r["psp"])
 			if out[account] == nil {
 				out[account] = map[string]int64{}
 			}
@@ -289,7 +289,7 @@ func (p *lifePass) webhookSilence(ctx context.Context, now time.Time) ([]Converg
 		out = append(out, ConvergeFinding{
 			Type: findingWebhookSilence, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
 			SubjectKey: "psp:" + account, Provider: "self",
-			Evidence: map[string]any{"rail_account": account, "window_hours": int(silenceWindow.Hours()),
+			Evidence: map[string]any{"psp": account, "window_hours": int(silenceWindow.Hours()),
 				"pulled": cur["pull"], "baseline_days": int(baselineWindow.Hours()) / 24, "baseline_webhook": base["webhook"]},
 			RecommendedAction: fmt.Sprintf("%s sent no webhooks in the last 24 hours, but pulls found %d of its charges; it had sent %d in the 28 days before. Its charges and declines reach OpenRails late: check the webhook registration and signing key at the gateway.",
 				account, cur["pull"], base["webhook"]),

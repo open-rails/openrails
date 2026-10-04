@@ -29,7 +29,7 @@ type enrollmentReceipt struct {
 	Facts   nmi.EnrollmentEvidence `json:"facts"`
 }
 
-func NMIEnrollmentOrder(in gen.BillingRailIntent) string {
+func NMIEnrollmentOrder(in gen.BillingProviderIntent) string {
 	if in.IntentType == subscriptions.TypeInitialMembership {
 		p, err := subscriptions.DecodeInitialMembershipPayload(in)
 		if err != nil {
@@ -48,7 +48,7 @@ type enrollmentTerms struct {
 	PlanPayments                                           *int
 }
 
-func decodeEnrollmentTerms(in gen.BillingRailIntent) (enrollmentTerms, error) {
+func decodeEnrollmentTerms(in gen.BillingProviderIntent) (enrollmentTerms, error) {
 	if in.IntentType == subscriptions.TypeInitialMembership {
 		p, err := subscriptions.DecodeInitialMembershipPayload(in)
 		if err != nil {
@@ -65,7 +65,7 @@ func decodeEnrollmentTerms(in gen.BillingRailIntent) (enrollmentTerms, error) {
 
 func (r NMIEnrollmentReceipt) SubscriptionID() string { return r.data.Facts.Subscription.ID }
 
-func (r NMIEnrollmentReceipt) Validate(in gen.BillingRailIntent) error {
+func (r NMIEnrollmentReceipt) Validate(in gen.BillingProviderIntent) error {
 	p, err := decodeEnrollmentTerms(in)
 	if err != nil {
 		return err
@@ -113,7 +113,7 @@ func (r NMIEnrollmentReceipt) Validate(in gen.BillingRailIntent) error {
 	return nil
 }
 
-func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.BillingRailIntent, resolver NMIClientResolver, reference string) (NMIEnrollmentReceipt, bool, error) {
+func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver, reference string) (NMIEnrollmentReceipt, bool, error) {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return NMIEnrollmentReceipt{}, false, err
@@ -146,7 +146,7 @@ func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.BillingRailIntent, res
 	return receipt, true, nil
 }
 
-func LoadNMIEnrollmentReceipt(in gen.BillingRailIntent) (NMIEnrollmentReceipt, bool, error) {
+func LoadNMIEnrollmentReceipt(in gen.BillingProviderIntent) (NMIEnrollmentReceipt, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return NMIEnrollmentReceipt{}, false, nil
@@ -170,7 +170,7 @@ func LoadNMIEnrollmentReceipt(in gen.BillingRailIntent) (NMIEnrollmentReceipt, b
 	return receipt, true, receipt.Validate(in)
 }
 
-func (s *Store) RetainNMIEnrollmentReceipt(ctx context.Context, in gen.BillingRailIntent, receipt NMIEnrollmentReceipt) (NMIEnrollmentReceipt, error) {
+func (s *Store) RetainNMIEnrollmentReceipt(ctx context.Context, in gen.BillingProviderIntent, receipt NMIEnrollmentReceipt) (NMIEnrollmentReceipt, error) {
 	if err := receipt.Validate(in); err != nil {
 		return NMIEnrollmentReceipt{}, err
 	}

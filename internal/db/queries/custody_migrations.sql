@@ -18,7 +18,7 @@ FOR UPDATE;
 -- no longer describes how the charge was made. Both states clear on their own
 -- (the executor finishes, the verifier resolves), so this is a "come back
 -- later", not a failure.
-SELECT count(*)::bigint FROM billing.rail_intents ri
+SELECT count(*)::bigint FROM billing.provider_intents ri
 JOIN billing.subscriptions s ON s.id = ri.subscription_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.payment_method_id = sqlc.arg(payment_method_id)::uuid
@@ -33,7 +33,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(
 -- in_flight is mid-attempt, unknown_needs_verify was sent. Its submission,
 -- verification and operator resolution are all judged against the custody it
 -- froze; moving custody underneath would strand them on a dead instrument.
-SELECT count(*)::bigint FROM billing.rail_intents ri
+SELECT count(*)::bigint FROM billing.provider_intents ri
 WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
   AND ((CASE WHEN ri.intent_type='initial_membership' THEN ri.payload->'terms'->>'payment_method_id' ELSE ri.payload->>'payment_method_id' END) = sqlc.arg(payment_method_id)::uuid::text

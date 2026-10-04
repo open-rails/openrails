@@ -90,10 +90,10 @@ SELECT count(*) FROM billing.notifications WHERE merchant_id = $1;
 DELETE FROM billing.notifications WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsRailCustomers :one
-SELECT count(*) FROM billing.rail_customer_accounts WHERE merchant_id = $1;
+SELECT count(*) FROM billing.psp_customers WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsRailCustomers :exec
-DELETE FROM billing.rail_customer_accounts WHERE merchant_id = $1;
+DELETE FROM billing.psp_customers WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsCheckoutAttempts :one
 SELECT count(*) FROM billing.checkout_attempts WHERE merchant_id = $1;
@@ -102,16 +102,16 @@ SELECT count(*) FROM billing.checkout_attempts WHERE merchant_id = $1;
 DELETE FROM billing.checkout_attempts WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM billing.rail_mutation_logs WHERE merchant_id = $1;
+SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM billing.rail_mutation_logs WHERE merchant_id = $1;
+DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsProviderIntents :one
-SELECT count(*) FROM billing.rail_intents WHERE merchant_id = $1;
+SELECT count(*) FROM billing.provider_intents WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsProviderIntents :exec
-DELETE FROM billing.rail_intents WHERE merchant_id = $1;
+DELETE FROM billing.provider_intents WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsMoneyAccounts :one
 SELECT count(*) FROM billing.money_settings WHERE merchant_id = $1;

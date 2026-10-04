@@ -4571,242 +4571,6 @@
         ]
       }
     },
-    "/v1/merchant/subscriptions/{id}/provider-cutover": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "idempotency_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderCutoverRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:update",
-        "x-openrails-errors": [
-          "rate_limit_exceeded",
-          "rebill_terms_committed",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "idempotency_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:read",
-        "x-openrails-errors": [
-          "rate_limit_exceeded",
-          "rebill_terms_committed",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/subscriptions/{id}/provider-cutover/preview": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "idempotency_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderCutoverRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderCutover"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:read",
-        "x-openrails-errors": [
-          "rate_limit_exceeded",
-          "rebill_terms_committed",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/provider-refresh": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "responses": {
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderRefresh"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:subscriptions:update",
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/merchant/reprice-batches": {
       "post": {
         "tags": [
@@ -11430,28 +11194,35 @@
         ]
       }
     },
-    "/v1/merchant/payment-providers": {
+    "/v1/merchant/psps": {
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "environment",
+            "name": "archived",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
             }
           },
           {
-            "name": "provider",
+            "name": "limit",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "integer"
             }
           },
           {
-            "name": "status",
+            "name": "rail",
             "in": "query",
             "schema": {
               "type": "string"
@@ -11465,7 +11236,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PSP"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -11480,22 +11268,18 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payment-providers:read",
+        "x-openrails-permission": "merchant:psps:read",
         "x-openrails-errors": [
-          "credential_custody_transition_required",
+          "invalid_cursor",
           "invalid_param",
-          "provider_account_last_active",
-          "provider_accounts_ambiguous",
-          "resource_not_found",
+          "invalid_query",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
         ]
-      }
-    },
-    "/v1/merchant/payment-providers/routing/dry-run": {
+      },
       "post": {
         "tags": [
           "merchant"
@@ -11504,18 +11288,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CheckoutRoutingDryRunRequest"
+                "$ref": "#/components/schemas/CreatePSPParams"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "OK",
+          "201": {
+            "description": "Created",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckoutRoutingDryRunResponse"
+                  "$ref": "#/components/schemas/PSP"
                 }
               }
             }
@@ -11530,156 +11314,35 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payment-providers:read",
-        "x-openrails-errors": [
-          "catalog_scope_mismatch",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/payment-providers/{provider}": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "provider",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "environment",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payment-providers:read",
-        "x-openrails-errors": [
-          "credential_custody_transition_required",
-          "invalid_param",
-          "payment_provider_not_found",
-          "provider_account_last_active",
-          "provider_accounts_ambiguous",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "put": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "provider",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpsertPaymentProviderParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payment-providers:update",
+        "x-openrails-permission": "merchant:psps:update",
         "x-openrails-errors": [
           "credential_custody_transition_required",
           "credential_operation_conflict",
           "credential_source_read_only",
           "credential_store_read_only",
           "invalid_param",
-          "payment_provider_credentials_rejected",
-          "provider_account_last_active",
-          "provider_accounts_ambiguous",
           "psp_claim_requires_proof",
-          "resource_not_found",
+          "psp_credentials_rejected",
+          "psp_exists",
+          "psp_key_taken",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
         ]
-      },
-      "delete": {
+      }
+    },
+    "/v1/merchant/psps/{psp_id}": {
+      "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "provider",
+            "name": "psp_id",
             "in": "path",
             "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "environment",
-            "in": "query",
             "schema": {
               "type": "string"
             }
@@ -11691,8 +11354,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/PSP"
                 }
               }
             }
@@ -11707,36 +11369,21 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payment-providers:update",
+        "x-openrails-permission": "merchant:psps:read",
         "x-openrails-errors": [
-          "credential_custody_transition_required",
           "invalid_param",
-          "payment_provider_not_found",
-          "provider_account_last_active",
-          "provider_accounts_ambiguous",
-          "resource_not_found",
+          "psp_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
-      }
-    },
-    "/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive": {
-      "post": {
+      },
+      "patch": {
         "tags": [
           "merchant"
         ],
         "parameters": [
-          {
-            "name": "provider",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "psp_id",
             "in": "path",
@@ -11750,7 +11397,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ArchivePaymentProviderAccountRequest"
+                "$ref": "#/components/schemas/UpdatePSPParams"
               }
             }
           }
@@ -11761,8 +11408,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/PSP"
                 }
               }
             }
@@ -11777,13 +11423,15 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payment-providers:update",
+        "x-openrails-permission": "merchant:psps:update",
         "x-openrails-errors": [
           "credential_custody_transition_required",
+          "credential_operation_conflict",
+          "credential_source_read_only",
+          "credential_store_read_only",
           "invalid_param",
-          "provider_account_last_active",
-          "provider_accounts_ambiguous",
-          "resource_not_found",
+          "psp_credentials_rejected",
+          "psp_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -11792,14 +11440,204 @@
         ]
       }
     },
-    "/v1/webhooks/{provider}/{account_id}": {
+    "/v1/merchant/psps/{psp_id}/archive": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "psp_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchivePSPParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PSP"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:psps:update",
+        "x-openrails-errors": [
+          "invalid_param",
+          "psp_last_active",
+          "psp_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/psps/routing-preview": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PSPRoutingPreviewParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PSPRoutingPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:psps:read",
+        "x-openrails-errors": [
+          "catalog_scope_mismatch",
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/psps/refresh": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PSPRefresh"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:subscriptions:update",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/merchant/rails": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RailDefinition"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:psps:read",
+        "x-openrails-errors": null,
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/webhooks/{rail}/{account_id}": {
       "post": {
         "tags": [
           "webhooks"
         ],
         "parameters": [
           {
-            "name": "provider",
+            "name": "rail",
             "in": "path",
             "required": true,
             "schema": {
@@ -14789,7 +14627,7 @@
           }
         }
       },
-      "ArchivePaymentProviderAccountRequest": {
+      "ArchivePSPParams": {
         "type": "object",
         "properties": {
           "allow_last": {
@@ -16002,82 +15840,6 @@
           }
         }
       },
-      "CheckoutRoutingCandidateResponse": {
-        "type": "object",
-        "properties": {
-          "selector": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "skip": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "selector"
-        ]
-      },
-      "CheckoutRoutingDryRunRequest": {
-        "type": "object",
-        "properties": {
-          "price_id": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          }
-        }
-      },
-      "CheckoutRoutingDryRunResponse": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "policy": {
-            "type": "string"
-          },
-          "rule": {
-            "type": "integer"
-          },
-          "selected": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "candidates": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CheckoutRoutingCandidateResponse"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "routing_reason": {}
-        },
-        "required": [
-          "object",
-          "policy",
-          "candidates"
-        ]
-      },
       "CheckoutRoutingMatch": {
         "type": "object",
         "properties": {
@@ -16829,6 +16591,53 @@
           "discount_metadata": {
             "type": "object",
             "additionalProperties": {}
+          }
+        }
+      },
+      "CreatePSPParams": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credentials": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -20113,6 +19922,126 @@
           }
         }
       },
+      "PSP": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "environment": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "archived_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_obligations": {
+            "type": "integer"
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credentials": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/PSPCredential"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "rail",
+          "environment",
+          "account_id",
+          "archived",
+          "archived_at",
+          "open_obligations",
+          "settings",
+          "credentials",
+          "revision",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "PSPCredential": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "validated_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rotation_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "configured",
+          "validated_at",
+          "rotation_version"
+        ]
+      },
       "PSPLinkState": {
         "type": "object",
         "properties": {
@@ -20185,6 +20114,143 @@
             "type": "string"
           },
           "key": {
+            "type": "string"
+          }
+        }
+      },
+      "PSPRefresh": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "status",
+          "job_id"
+        ]
+      },
+      "PSPRoutingCandidate": {
+        "type": "object",
+        "properties": {
+          "psp": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "skip": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "psp",
+          "rail",
+          "skip"
+        ]
+      },
+      "PSPRoutingPreview": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "type": "string"
+          },
+          "rule": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "psp": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rail": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ccbill",
+                  "nmi",
+                  "solana",
+                  "stripe"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidates": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PSPRoutingCandidate"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy",
+          "rule",
+          "psp",
+          "rail",
+          "mode",
+          "candidates"
+        ]
+      },
+      "PSPRoutingPreviewParams": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "psp": {
             "type": "string"
           }
         }
@@ -22140,88 +22206,6 @@
           }
         }
       },
-      "ProviderCutover": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "merchant_id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "source_psp_id": {
-            "type": "string"
-          },
-          "target_psp_id": {
-            "type": "string"
-          },
-          "target_payment_method_id": {
-            "type": "string"
-          },
-          "target_subscription_id": {
-            "type": "string"
-          },
-          "anchor": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "status": {
-            "type": "string"
-          },
-          "stage": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "merchant_id",
-          "subscription_id",
-          "source_psp_id",
-          "target_psp_id",
-          "target_payment_method_id",
-          "target_subscription_id",
-          "anchor",
-          "status",
-          "stage",
-          "reason"
-        ]
-      },
-      "ProviderCutoverRequest": {
-        "type": "object",
-        "properties": {
-          "target_payment_method_id": {
-            "type": "string"
-          },
-          "expected_source_psp_id": {
-            "type": "string"
-          },
-          "expected_target_psp_id": {
-            "type": "string"
-          }
-        }
-      },
-      "ProviderRefresh": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string"
-          },
-          "job_id": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "status",
-          "job_id"
-        ]
-      },
       "PurchaseReview": {
         "type": "object",
         "properties": {
@@ -22442,6 +22426,55 @@
           "episodes",
           "open_by_severity",
           "total_open"
+        ]
+      },
+      "RailDefinition": {
+        "type": "object",
+        "properties": {
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "credential_keys": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setting_keys": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rail",
+          "display_name",
+          "credential_keys",
+          "setting_keys"
         ]
       },
       "RangeOut": {
@@ -24418,6 +24451,44 @@
           }
         }
       },
+      "UpdatePSPParams": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer"
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credentials": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retire_webhook_overlap": {
+            "type": "boolean"
+          }
+        }
+      },
       "UpdatePriceParams": {
         "type": "object",
         "properties": {
@@ -24531,69 +24602,6 @@
         "type": "object",
         "properties": {
           "payment_method_id": {
-            "type": "string"
-          }
-        }
-      },
-      "UpsertPaymentProviderParams": {
-        "type": "object",
-        "properties": {
-          "operation_id": {
-            "type": "string"
-          },
-          "expected_revision": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "enabled": {
-            "oneOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "account_id": {
-            "type": "string"
-          },
-          "public_config": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "credentials": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "retire_webhook_overlap": {
-            "type": "boolean"
-          },
-          "environment": {
             "type": "string"
           }
         }
@@ -25986,16 +25994,6 @@
       "type": "invalid_request_error",
       "meaning": "The resource is not payable now."
     },
-    "payment_provider_credentials_rejected": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The payment provider rejected the credentials."
-    },
-    "payment_provider_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The merchant has no PSP configured for this rail."
-    },
     "payment_provider_rejected": {
       "status": 502,
       "type": "api_error",
@@ -26046,16 +26044,6 @@
       "type": "invalid_request_error",
       "meaning": "The tier group cannot change while a subscription has a plan change in flight."
     },
-    "provider_account_last_active": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The PSP is the rail's last active account and still has live subscriptions."
-    },
-    "provider_accounts_ambiguous": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The rail has several active PSPs; address one."
-    },
     "provider_billing_observation_conflict": {
       "status": 409,
       "type": "invalid_request_error",
@@ -26076,21 +26064,6 @@
       "type": "invalid_request_error",
       "meaning": "Cancelling needs a destructive provider action that is not armed for this merchant."
     },
-    "provider_cutover_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The cutover conflicts with the subscription's current state."
-    },
-    "provider_cutover_unavailable": {
-      "status": 503,
-      "type": "api_error",
-      "meaning": "Provider cutover is not available in this deployment."
-    },
-    "provider_cutover_unqualified": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "Both PSPs need explicit cutover qualification."
-    },
     "provider_outcome_unknown": {
       "status": 409,
       "type": "api_error",
@@ -26100,6 +26073,31 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "Claiming a provider account needs credentials that prove control of it."
+    },
+    "psp_credentials_rejected": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The provider rejected the credentials."
+    },
+    "psp_exists": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The account is already a PSP, of this merchant or another; update it instead."
+    },
+    "psp_key_taken": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Another live PSP holds the key."
+    },
+    "psp_last_active": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The PSP is the last active one on its rail; pass allow_last to archive it."
+    },
+    "psp_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "The PSP does not exist."
     },
     "purchase_review_resolved": {
       "status": 409,

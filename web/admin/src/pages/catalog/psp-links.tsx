@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type {
-  CheckoutRoutingSkip,
+  PSPRoutingSkip,
 } from "@/lib/api/types"
 import type {
   PSPLinkState,
@@ -44,7 +44,7 @@ import { adminQueries } from "@/lib/queries"
 // SKIP_LABELS is the or#288 skip vocabulary, verbatim keys, rendered for
 // operators. Keep the keys in lockstep with
 // internal/db/models/checkout_session.go.
-const SKIP_LABELS: Record<CheckoutRoutingSkip, string> = {
+const SKIP_LABELS: Record<PSPRoutingSkip, string> = {
   unknown_selector: "That name matches no provider you have set up.",
   ambiguous_selector:
     "More than one provider on this rail is set up. Name the provider rather than the rail.",
@@ -62,7 +62,7 @@ const SKIP_LABELS: Record<CheckoutRoutingSkip, string> = {
 
 // The engine names each outcome for its own logs. These are the same outcomes
 // as a sentence you can act on.
-const SKIP_HEADLINES: Record<CheckoutRoutingSkip, string> = {
+const SKIP_HEADLINES: Record<PSPRoutingSkip, string> = {
   unknown_selector: "unknown provider",
   ambiguous_selector: "more than one match",
   not_armed: "not set up",
@@ -74,14 +74,14 @@ const SKIP_HEADLINES: Record<CheckoutRoutingSkip, string> = {
   resolve_failed: "could not be worked out",
 }
 
-function skipHeadline(skip?: string): string {
+function skipHeadline(skip?: string | null): string {
   if (!skip) return "ready"
-  return SKIP_HEADLINES[skip as CheckoutRoutingSkip] ?? skip
+  return SKIP_HEADLINES[skip as PSPRoutingSkip] ?? skip
 }
 
-function skipLabel(skip?: string) {
+function skipLabel(skip?: string | null) {
   if (!skip) return ""
-  return SKIP_LABELS[skip as CheckoutRoutingSkip] ?? skip
+  return SKIP_LABELS[skip as PSPRoutingSkip] ?? skip
 }
 
 const OK_BADGE = "bg-settled-surface text-settled"
@@ -317,10 +317,10 @@ export function CheckoutReadinessCard({ price }: { price: Price }) {
         ) : (
           <>
             <p className="text-sm">
-              {decision.selected ? (
+              {decision.psp ? (
                 <>
                   Money for this price would go to{" "}
-                  <span className="font-medium">{decision.selected}</span>
+                  <span className="font-medium">{decision.psp}</span>
                   {decision.rail && <> on {decision.rail}</>}.
                 </>
               ) : (
@@ -355,10 +355,10 @@ export function CheckoutReadinessCard({ price }: { price: Price }) {
                   </TableHeader>
                   <TableBody>
                     {decision.candidates.map((c) => (
-                      <TableRow key={c.selector}>
+                      <TableRow key={c.psp}>
                         <TableCell className="font-mono text-xs">
-                          {c.selector}
-                          {c.selector === decision.selected && (
+                          {c.psp}
+                          {c.psp === decision.psp && (
                             <Badge
                               variant="secondary"
                               className={`ml-2 ${OK_BADGE}`}

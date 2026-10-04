@@ -151,8 +151,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_method_update_unsupported` | 400 | `invalid_request_error` | This payment method cannot be updated through OpenRails. |
 | `payment_not_found` | 404 | `invalid_request_error` | The payment or payment operation does not exist. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
-| `payment_provider_credentials_rejected` | 400 | `invalid_request_error` | The payment provider rejected the credentials. |
-| `payment_provider_not_found` | 404 | `invalid_request_error` | The merchant has no PSP configured for this rail. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permanent_grant_forbidden` | 403 | `authorization_error` | A grant with no end needs merchant:access:grant-permanent. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
@@ -163,17 +161,17 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
 | `product_tier_group_conflict` | 409 | `invalid_request_error` | A customer holds live subscriptions to more than one product of the tier group. |
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
-| `provider_account_last_active` | 409 | `invalid_request_error` | The PSP is the rail's last active account and still has live subscriptions. |
-| `provider_accounts_ambiguous` | 409 | `invalid_request_error` | The rail has several active PSPs; address one. |
 | `provider_billing_observation_conflict` | 409 | `invalid_request_error` | The provider billing evidence conflicts with a recorded observation; param names it. |
 | `provider_billing_qualification_not_found` | 404 | `invalid_request_error` | The operation has no provider billing qualification. |
 | `provider_billing_qualification_refused` | 409 | `invalid_request_error` | The provider billing evidence was refused. |
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
-| `provider_cutover_conflict` | 409 | `invalid_request_error` | The cutover conflicts with the subscription's current state. |
-| `provider_cutover_unavailable` | 503 | `api_error` | Provider cutover is not available in this deployment. |
-| `provider_cutover_unqualified` | 409 | `invalid_request_error` | Both PSPs need explicit cutover qualification. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
+| `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials. |
+| `psp_exists` | 409 | `invalid_request_error` | The account is already a PSP, of this merchant or another; update it instead. |
+| `psp_key_taken` | 409 | `invalid_request_error` | Another live PSP holds the key. |
+| `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |
+| `psp_not_found` | 404 | `invalid_request_error` | The PSP does not exist. |
 | `purchase_review_resolved` | 409 | `invalid_request_error` | The purchase review was already resolved. |
 | `rate_card_currency_mismatch` | 409 | `invalid_request_error` | The rate card's currency does not match. |
 | `rate_card_has_overrides` | 409 | `invalid_request_error` | The rate card still has customer overrides. |

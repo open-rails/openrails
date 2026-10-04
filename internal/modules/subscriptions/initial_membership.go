@@ -60,7 +60,7 @@ func (p InitialMembershipPayload) DelayedStart() *time.Time {
 	return nil
 }
 
-func DecodeInitialMembershipPayload(in gen.BillingRailIntent) (InitialMembershipPayload, error) {
+func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMembershipPayload, error) {
 	var p InitialMembershipPayload
 	decoder := json.NewDecoder(bytes.NewReader(in.Payload))
 	decoder.DisallowUnknownFields()

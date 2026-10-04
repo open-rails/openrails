@@ -27,7 +27,7 @@ type NMIClientResolver interface {
 // rail state (#788 Layer C): the stamped provenance account when present,
 // else the merchant's pull scope. ok=false = no declared NMI account; err =
 // declared but not armable (fail closed — the caller parks, never charges).
-func resolveIntentNMIClient(ctx context.Context, r NMIClientResolver, intent gen.BillingRailIntent) (*nmi.NMIClient, bool, error) {
+func resolveIntentNMIClient(ctx context.Context, r NMIClientResolver, intent gen.BillingProviderIntent) (*nmi.NMIClient, bool, error) {
 	if r == nil {
 		return nil, false, errors.New("nmi client resolver is not configured")
 	}
@@ -36,7 +36,7 @@ func resolveIntentNMIClient(ctx context.Context, r NMIClientResolver, intent gen
 
 // Sealed receipt constructors verify the returned client's identity themselves;
 // a resolver's ok flag is not account provenance or proof of a non-nil client.
-func resolveReceiptNMIClient(ctx context.Context, r NMIClientResolver, intent gen.BillingRailIntent) (*nmi.NMIClient, error) {
+func resolveReceiptNMIClient(ctx context.Context, r NMIClientResolver, intent gen.BillingProviderIntent) (*nmi.NMIClient, error) {
 	if intent.MerchantID == uuid.Nil || intent.PspID == nil || *intent.PspID == uuid.Nil {
 		return nil, errors.New("receipt requires its accepted provider account")
 	}

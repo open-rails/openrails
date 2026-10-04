@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -68,7 +67,7 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 		seen[mid] = true
 		var ids []uuid.UUID
 		if err := r.DB.RunInMerchantScope(ctx, mid, "provider posture", func(mctx context.Context) error {
-			rows, err := r.DB.Gen(mctx).ListPSPsForMerchant(mctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
+			rows, err := r.DB.Gen(mctx).ListPSPsForMerchant(mctx, mid.UUID())
 			if err != nil {
 				return err
 			}

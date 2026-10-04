@@ -342,7 +342,7 @@ team, payment providers, API keys, credit limit, trust level), **Dashboard**.
   requires `llm.api_key`; without it everything else still works and the add-widget
   button explains the fix.
 - **Decline metrics** (#1116), all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
-  (`rail_account`):
+  (`psp`):
   - `attempt_failure_rate`: the new-card decline rate is `kind` in (`verify`, `initial`)
     with `card_entry=new`. It can also be grouped by `reason`, `category`, `response_code`,
     `card_bin`, `card_brand` and AVS/CVV.

@@ -51,7 +51,7 @@ type NMISalePayload struct {
 	Eligibility         string                  `json:"eligibility"`
 }
 
-func DecodeNMISalePayload(in gen.BillingRailIntent) (NMISalePayload, error) {
+func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
 	var p NMISalePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err

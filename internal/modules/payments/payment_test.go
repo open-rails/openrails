@@ -142,10 +142,10 @@ func TestDecodeNMISalePayload(t *testing.T) {
 			AccessDurationHours: &hours, OwnershipEnd: &end, Eligibility: "allowed",
 		}
 	}
-	intent := func(p NMISalePayload, mut func(*gen.BillingRailIntent)) gen.BillingRailIntent {
+	intent := func(p NMISalePayload, mut func(*gen.BillingProviderIntent)) gen.BillingProviderIntent {
 		raw, err := json.Marshal(p)
 		require.NoError(t, err)
-		in := gen.BillingRailIntent{ID: uuid.New(), MerchantID: uuid.New(), Rail: "nmi", IntentType: TypeNMISale, PspID: &psp, PriceID: &price, Payload: raw}
+		in := gen.BillingProviderIntent{ID: uuid.New(), MerchantID: uuid.New(), Rail: "nmi", IntentType: TypeNMISale, PspID: &psp, PriceID: &price, Payload: raw}
 		if mut != nil {
 			mut(&in)
 		}
@@ -161,13 +161,13 @@ func TestDecodeNMISalePayload(t *testing.T) {
 	require.NoError(t, err)
 
 	otherID := uuid.New()
-	for name, mut := range map[string]func(*gen.BillingRailIntent){
-		"wrong type":       func(in *gen.BillingRailIntent) { in.IntentType = "refund" },
-		"unsupported rail": func(in *gen.BillingRailIntent) { in.Rail = "ccbill" },
-		"other account":    func(in *gen.BillingRailIntent) { in.PspID = &otherID },
-		"other price":      func(in *gen.BillingRailIntent) { in.PriceID = &otherID },
-		"custodian set":    func(in *gen.BillingRailIntent) { in.CustodianID = &otherID },
-		"garbage payload":  func(in *gen.BillingRailIntent) { in.Payload = []byte(`{`) },
+	for name, mut := range map[string]func(*gen.BillingProviderIntent){
+		"wrong type":       func(in *gen.BillingProviderIntent) { in.IntentType = "refund" },
+		"unsupported rail": func(in *gen.BillingProviderIntent) { in.Rail = "ccbill" },
+		"other account":    func(in *gen.BillingProviderIntent) { in.PspID = &otherID },
+		"other price":      func(in *gen.BillingProviderIntent) { in.PriceID = &otherID },
+		"custodian set":    func(in *gen.BillingProviderIntent) { in.CustodianID = &otherID },
+		"garbage payload":  func(in *gen.BillingProviderIntent) { in.Payload = []byte(`{`) },
 	} {
 		_, err := DecodeNMISalePayload(intent(valid(), mut))
 		require.Error(t, err, name)
@@ -200,10 +200,10 @@ func TestDecodeNMISalePayload(t *testing.T) {
 
 	stripe := valid()
 	stripe.Provider = "stripe"
-	_, err = DecodeNMISalePayload(intent(stripe, func(in *gen.BillingRailIntent) { in.Rail = "stripe" }))
+	_, err = DecodeNMISalePayload(intent(stripe, func(in *gen.BillingProviderIntent) { in.Rail = "stripe" }))
 	require.Error(t, err, "a Stripe sale needs the exact pm_")
 	stripe.Instrument.RailMethodRef = "pm_1"
-	_, err = DecodeNMISalePayload(intent(stripe, func(in *gen.BillingRailIntent) { in.Rail = "stripe" }))
+	_, err = DecodeNMISalePayload(intent(stripe, func(in *gen.BillingProviderIntent) { in.Rail = "stripe" }))
 	require.NoError(t, err)
 
 	id := uuid.New()

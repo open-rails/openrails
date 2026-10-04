@@ -308,7 +308,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 func evaluateProviderBillingObservation(
 	ctx context.Context,
 	q *gen.Queries,
-	qual gen.BillingProviderBillingQualification,
+	qual gen.BillingCostQualification,
 	in ProviderBillingObservationInput,
 	prepared preparedProviderBillingObservation,
 	now time.Time,
@@ -526,7 +526,7 @@ func nullableDigest(prepared preparedProviderBillingObservation) []byte {
 	return prepared.normalizedRecordsDigest[:]
 }
 
-func replayProviderBillingLifecycle(row gen.BillingProviderBillingQualification, in ProviderBillingLifecycleEvidence, digest [sha256.Size]byte) error {
+func replayProviderBillingLifecycle(row gen.BillingCostQualification, in ProviderBillingLifecycleEvidence, digest [sha256.Size]byte) error {
 	checks := []struct {
 		field string
 		same  bool
@@ -551,7 +551,7 @@ func replayProviderBillingLifecycle(row gen.BillingProviderBillingQualification,
 	return nil
 }
 
-func replayProviderBillingObservation(row gen.BillingProviderBillingObservation, in ProviderBillingObservationInput, prepared preparedProviderBillingObservation) error {
+func replayProviderBillingObservation(row gen.BillingCostObservation, in ProviderBillingObservationInput, prepared preparedProviderBillingObservation) error {
 	checks := []struct {
 		field string
 		same  bool
@@ -612,7 +612,7 @@ type providerBillingSettlementObservation struct {
 	NormalizedRecordsSHA256 string `json:"normalized_records_sha256"`
 }
 
-func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.BillingProviderBillingQualification) ([]byte, error) {
+func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.BillingCostQualification) ([]byte, error) {
 	if row.BaselineObservationID == nil || row.QualifiedObservationID == nil ||
 		row.QualifiedCostAmount == nil || row.QualifiedAt == nil {
 		return nil, fmt.Errorf("eligible provider billing qualification is incomplete")
@@ -654,7 +654,7 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 	return body, nil
 }
 
-func providerBillingSettlementObservationFromRow(row gen.BillingProviderBillingObservation) providerBillingSettlementObservation {
+func providerBillingSettlementObservationFromRow(row gen.BillingCostObservation) providerBillingSettlementObservation {
 	queryDigest := sha256.Sum256([]byte(row.NormalizedQuery))
 	return providerBillingSettlementObservation{
 		ObservationID:           row.ObservationID,
@@ -666,7 +666,7 @@ func providerBillingSettlementObservationFromRow(row gen.BillingProviderBillingO
 	}
 }
 
-func providerBillingQualificationFromRow(row gen.BillingProviderBillingQualification, auth *OperationAuthorization, replayed bool) *ProviderBillingQualification {
+func providerBillingQualificationFromRow(row gen.BillingCostQualification, auth *OperationAuthorization, replayed bool) *ProviderBillingQualification {
 	var lifecycleDigest [sha256.Size]byte
 	copy(lifecycleDigest[:], row.LifecycleEvidenceDigest)
 	return &ProviderBillingQualification{
@@ -731,5 +731,5 @@ func (s *MoneyService) GetProviderBillingQualificationInTx(ctx context.Context, 
 		return nil, err
 	}
 	auth := operationAuthorizationFromRow(row.BillingOperationAuthorization, false)
-	return providerBillingQualificationFromRow(row.BillingProviderBillingQualification, auth, false), nil
+	return providerBillingQualificationFromRow(row.BillingCostQualification, auth, false), nil
 }

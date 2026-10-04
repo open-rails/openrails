@@ -35,7 +35,7 @@ func rebillPaymentAlreadyObserved(ctx context.Context, d *db.DB, merchantID uuid
 }
 
 func acceptedRebillPaymentOverlaps(row gen.ListCompletedManualRebillPaymentCoverageRow, target subscriptions.ManualRebillPayload) (bool, error) {
-	in := row.BillingRailIntent
+	in := row.BillingProviderIntent
 	accepted, err := subscriptions.DecodeManualRebillPayload(in)
 	if err != nil {
 		return false, err

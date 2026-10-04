@@ -83,9 +83,9 @@ type fakeIntentExecutor struct {
 	reason string
 }
 
-func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.EnqueueParams) (gen.BillingRailIntent, error) {
+func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.EnqueueParams) (gen.BillingProviderIntent, error) {
 	f.calls = append(f.calls, p)
-	row := gen.BillingRailIntent{ID: uuid.New(), IntentType: p.IntentType, Rail: p.Provider, Status: f.status, ResultEvidence: []byte(`{"archived":true}`)}
+	row := gen.BillingProviderIntent{ID: uuid.New(), IntentType: p.IntentType, Rail: p.Provider, Status: f.status, ResultEvidence: []byte(`{"archived":true}`)}
 	if f.reason != "" {
 		row.LastFailureReason = &f.reason
 	}

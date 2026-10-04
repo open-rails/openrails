@@ -49,7 +49,7 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID billing.Mer
 		}
 		// or#812: read at or above the rotation version floor the PSP row
 		// records, so a key rotated on another node is never served stale here.
-		ref, err := merchants.PSPSecretRef(account.Rail, account.Environment, account.AccountID, account.Evidence, "private_key")
+		ref, err := merchants.PSPSecretRef(account, "private_key")
 		if err != nil {
 			return "", err
 		}
@@ -122,7 +122,7 @@ func (s pspSigner) resolve(ctx context.Context, merchantID billing.MerchantID) (
 		if err := signerApproved(account); err != nil {
 			return nil, err
 		}
-		cfg := signerConfigFromEvidence(account.Evidence)
+		cfg := signerConfigFromRow(account)
 		switch cfg.Mode {
 		case "local_keypair":
 			return s.keypair, nil
@@ -149,7 +149,7 @@ func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID billing.M
 	if err := signerApproved(account); err != nil {
 		return nil, err
 	}
-	cfg := signerConfigFromEvidence(account.Evidence)
+	cfg := signerConfigFromRow(account)
 	switch cfg.Mode {
 	case "local_keypair":
 		return solanaint.NewKeypairSigner(secretStoreGetter{
@@ -183,14 +183,14 @@ type solanaSignerConfig struct {
 	Key  string `json:"key"`
 }
 
-func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
-	var evidence struct {
-		Signer solanaSignerConfig `json:"signer"`
+func signerConfigFromRow(row gen.BillingPsp) solanaSignerConfig {
+	var signer solanaSignerConfig
+	if len(row.Signer) > 0 {
+		_ = json.Unmarshal(row.Signer, &signer)
 	}
-	_ = json.Unmarshal(raw, &evidence)
-	evidence.Signer.Mode = strings.ToLower(strings.TrimSpace(evidence.Signer.Mode))
-	evidence.Signer.Key = strings.TrimSpace(evidence.Signer.Key)
-	return evidence.Signer
+	signer.Mode = strings.ToLower(strings.TrimSpace(signer.Mode))
+	signer.Key = strings.TrimSpace(signer.Key)
+	return signer
 }
 
 func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment string) (gen.BillingPsp, bool, error) {

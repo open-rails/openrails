@@ -779,7 +779,7 @@ SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
         AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
 FROM billing.invoice_payments a
-JOIN billing.rail_intents i ON i.merchant_id = a.merchant_id
+JOIN billing.provider_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
 LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
 WHERE a.merchant_id = $1::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
@@ -796,7 +796,7 @@ type ListEncodedInvoiceAttemptsForArchiveParams struct {
 
 type ListEncodedInvoiceAttemptsForArchiveRow struct {
 	BillingInvoicePayment BillingInvoicePayment
-	BillingRailIntent     BillingRailIntent
+	BillingProviderIntent BillingProviderIntent
 	LedgerAmount          *int64
 	LedgerMatches         bool
 }
@@ -833,32 +833,32 @@ func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg 
 			&i.BillingInvoicePayment.FailureReason,
 			&i.BillingInvoicePayment.PaymentMethodID,
 			&i.BillingInvoicePayment.IdempotencyKey,
-			&i.BillingRailIntent.ID,
-			&i.BillingRailIntent.MerchantID,
-			&i.BillingRailIntent.Rail,
-			&i.BillingRailIntent.IntentType,
-			&i.BillingRailIntent.SubscriptionID,
-			&i.BillingRailIntent.PaymentID,
-			&i.BillingRailIntent.PriceID,
-			&i.BillingRailIntent.Payload,
-			&i.BillingRailIntent.IdempotencyKey,
-			&i.BillingRailIntent.Status,
-			&i.BillingRailIntent.Attempts,
-			&i.BillingRailIntent.NextAttemptAt,
-			&i.BillingRailIntent.ClaimedUntil,
-			&i.BillingRailIntent.Origin,
-			&i.BillingRailIntent.OriginReason,
-			&i.BillingRailIntent.Actor,
-			&i.BillingRailIntent.LastFailureReason,
-			&i.BillingRailIntent.ExpiresAt,
-			&i.BillingRailIntent.ResultEvidence,
-			&i.BillingRailIntent.CreatedAt,
-			&i.BillingRailIntent.ExecutedAt,
-			&i.BillingRailIntent.UpdatedAt,
-			&i.BillingRailIntent.PspID,
-			&i.BillingRailIntent.DestructiveRunID,
-			&i.BillingRailIntent.DestructiveRunClass,
-			&i.BillingRailIntent.CustodianID,
+			&i.BillingProviderIntent.ID,
+			&i.BillingProviderIntent.MerchantID,
+			&i.BillingProviderIntent.Rail,
+			&i.BillingProviderIntent.IntentType,
+			&i.BillingProviderIntent.SubscriptionID,
+			&i.BillingProviderIntent.PaymentID,
+			&i.BillingProviderIntent.PriceID,
+			&i.BillingProviderIntent.Payload,
+			&i.BillingProviderIntent.IdempotencyKey,
+			&i.BillingProviderIntent.Status,
+			&i.BillingProviderIntent.Attempts,
+			&i.BillingProviderIntent.NextAttemptAt,
+			&i.BillingProviderIntent.ClaimedUntil,
+			&i.BillingProviderIntent.Origin,
+			&i.BillingProviderIntent.OriginReason,
+			&i.BillingProviderIntent.Actor,
+			&i.BillingProviderIntent.LastFailureReason,
+			&i.BillingProviderIntent.ExpiresAt,
+			&i.BillingProviderIntent.ResultEvidence,
+			&i.BillingProviderIntent.CreatedAt,
+			&i.BillingProviderIntent.ExecutedAt,
+			&i.BillingProviderIntent.UpdatedAt,
+			&i.BillingProviderIntent.PspID,
+			&i.BillingProviderIntent.DestructiveRunID,
+			&i.BillingProviderIntent.DestructiveRunClass,
+			&i.BillingProviderIntent.CustodianID,
 			&i.LedgerAmount,
 			&i.LedgerMatches,
 		); err != nil {

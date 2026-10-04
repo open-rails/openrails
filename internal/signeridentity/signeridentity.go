@@ -115,18 +115,16 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 	rail := "solana"
 	var out []StoredSigner
 	err = database.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
-		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: m.ID.UUID(), Rail: &rail})
+		rows, err := database.Gen(ctx).ListActivePSPsForRailEnvironment(ctx, gen.ListActivePSPsForRailEnvironmentParams{MerchantID: m.ID.UUID(), Rail: rail, Environment: environment})
 		if err != nil {
 			return err
 		}
 		for _, row := range rows {
-			var evidence struct {
-				Signer struct{ Mode, Key string } `json:"signer"`
-			}
-			if row.Archived || row.Environment != environment || json.Unmarshal(row.Evidence, &evidence) != nil {
+			var signer struct{ Mode, Key string }
+			if len(row.Signer) == 0 || json.Unmarshal(row.Signer, &signer) != nil {
 				continue
 			}
-			if evidence.Signer.Mode != "vault_transit" || evidence.Signer.Key != key {
+			if signer.Mode != "vault_transit" || signer.Key != key {
 				continue
 			}
 			if pub, err := solanago.PublicKeyFromBase58(row.AccountID); err == nil {

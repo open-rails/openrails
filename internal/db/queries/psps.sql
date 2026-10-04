@@ -1,41 +1,64 @@
 -- billing.psps: merchant-scoped PSP (payment-service-provider account) registry.
 
--- name: UpsertPSP :one
+-- name: PublishPSP :one
+-- A credential publication: the caller holds the row lock and supplies every
+-- credential column. The key is set once, on insert.
 INSERT INTO billing.psps (
-    id, merchant_id, rail, environment, account_id, key,
-    archived, evidence, last_verified_at, custodian_id
+    id, merchant_id, key, rail, environment, account_id, settings,
+    credential_custody, credential_refs,
+    credential_versions, retired_credentials, credentials_validated_at,
+    webhook_endpoint_id, webhook_overlap_expires_at, revision
 ) VALUES (
-    -- #662: the id column keeps its uuidv7() default. The production write paths
-    -- (merchant payment-provider config + manifest bootstrap) supply a
-    -- deterministic uuidv5 derived from the (rail, environment, account_id)
-    -- natural key via merchants.PSPNaturalKey, so a provider
-    -- account has one stable id across environments; any other caller (fixtures,
-    -- ad-hoc inserts) omits it (passes the zero uuid) and gets the uuidv7 default.
-    -- Mirrors the COALESCE(narg, default) idiom used for `environment` below.
-    COALESCE(NULLIF(sqlc.arg(id)::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    sqlc.arg(merchant_id)::uuid,
-    lower(sqlc.arg(rail)::text),
-    COALESCE(sqlc.narg(environment)::text, 'live'),
-    sqlc.arg(account_id)::text,
-    sqlc.narg(key),
-    COALESCE(sqlc.narg(archived)::boolean, false),
-    sqlc.narg(evidence),
-    sqlc.narg(last_verified_at)::timestamptz,
-    sqlc.narg(custodian_id)::uuid
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(key)::text,
+    lower(sqlc.arg(rail)::text), sqlc.arg(environment)::text, sqlc.arg(account_id)::text,
+    sqlc.arg(settings)::jsonb, sqlc.narg(credential_custody)::text, sqlc.arg(credential_refs)::jsonb,
+    sqlc.arg(credential_versions)::jsonb, sqlc.arg(retired_credentials)::text[],
+    sqlc.narg(credentials_validated_at)::timestamptz, sqlc.narg(webhook_endpoint_id)::text,
+    sqlc.narg(webhook_overlap_expires_at)::timestamptz, sqlc.arg(revision)::bigint
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
-    key = COALESCE(EXCLUDED.key, billing.psps.key),
+    settings = EXCLUDED.settings,
+    credential_custody = EXCLUDED.credential_custody,
+    credential_refs = EXCLUDED.credential_refs,
+    credential_versions = EXCLUDED.credential_versions,
+    retired_credentials = EXCLUDED.retired_credentials,
+    credentials_validated_at = EXCLUDED.credentials_validated_at,
+    webhook_endpoint_id = EXCLUDED.webhook_endpoint_id,
+    webhook_overlap_expires_at = EXCLUDED.webhook_overlap_expires_at,
+    revision = EXCLUDED.revision,
+    updated_at = now()
+WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
+RETURNING *;
+
+-- name: UpsertManifestPSP :one
+-- A manifest declaration overwrites the declared fields and resets credential
+-- publication state to the startup snapshot.
+INSERT INTO billing.psps (
+    id, merchant_id, key, rail, environment, account_id, archived, archived_at,
+    custodian_id, settings, signer, credential_custody
+) VALUES (
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(key)::text,
+    lower(sqlc.arg(rail)::text), sqlc.arg(environment)::text, sqlc.arg(account_id)::text,
+    sqlc.arg(archived)::boolean, CASE WHEN sqlc.arg(archived)::boolean THEN now() END,
+    sqlc.narg(custodian_id)::uuid, sqlc.arg(settings)::jsonb, sqlc.narg(signer)::jsonb, 'snapshot'
+)
+ON CONFLICT (rail, environment, account_id) DO UPDATE SET
+    key = EXCLUDED.key,
     archived = EXCLUDED.archived,
-    -- or#880: custody is DECLARATIVE — a re-apply that no longer names a
-    -- custodian must un-arm the arrangement, not leave a stale pointer that
-    -- keeps routing charges through a vault the operator stopped declaring.
+    archived_at = CASE WHEN EXCLUDED.archived THEN COALESCE(billing.psps.archived_at, now()) END,
+    -- Custody is declarative: a re-apply that no longer names a custodian
+    -- un-arms the arrangement.
     custodian_id = EXCLUDED.custodian_id,
-    replaced_at = CASE
-        WHEN EXCLUDED.archived THEN COALESCE(billing.psps.replaced_at, now())
-        ELSE NULL
-    END,
-    evidence = COALESCE(EXCLUDED.evidence, billing.psps.evidence),
-    last_verified_at = COALESCE(EXCLUDED.last_verified_at, billing.psps.last_verified_at),
+    settings = EXCLUDED.settings,
+    signer = EXCLUDED.signer,
+    credential_custody = 'snapshot',
+    credential_refs = '{}',
+    credential_versions = '{}',
+    retired_credentials = '{}',
+    credentials_validated_at = NULL,
+    webhook_endpoint_id = NULL,
+    webhook_overlap_expires_at = NULL,
+    revision = billing.psps.revision + 1,
     updated_at = now()
 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
 RETURNING *;
@@ -60,10 +83,22 @@ WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(r
 LIMIT 1;
 
 -- name: ListPSPsForMerchant :many
+-- Every PSP of the merchant, both environments and archived ones included.
 SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(rail)::text IS NULL OR rail = lower(sqlc.narg(rail)::text))
-ORDER BY rail, environment, archived, created_at, id;
+ORDER BY rail, environment, created_at, id;
+
+-- name: ListPSPs :many
+-- One page of the merchant's PSPs in its environment, newest first.
+SELECT * FROM billing.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND environment = sqlc.arg(environment)::text
+  AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
+  AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetActivePSPForNewWork :one
 -- The newest non-archived account on a rail+environment. Existing provider-bound
@@ -133,31 +168,16 @@ SELECT * FROM billing.psps
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 FOR SHARE;
 
--- name: GetPSPForQualificationUpdate :one
-SELECT * FROM billing.psps
-WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
-FOR NO KEY UPDATE;
-
--- name: SetPSPCutoverQualification :execrows
-UPDATE billing.psps
-SET evidence = CASE WHEN sqlc.narg(qualification)::jsonb IS NULL
-    THEN COALESCE(evidence, '{}'::jsonb) #- '{settings,nmi_cutover_qualification}'
-    ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{settings}',
-        COALESCE(NULLIF(evidence->'settings', 'null'::jsonb), '{}'::jsonb)
-        || jsonb_build_object('nmi_cutover_qualification', sqlc.narg(qualification)::jsonb)) END,
-    updated_at = now()
-WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid;
-
 -- Declaration supplies attribution only. A matching existing account retains
--- its original ID, alias, archive state, custody and credential evidence.
+-- its original ID, key, archive state, custody and credentials.
 -- name: DeclarePSPIdentity :one
 INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text,
         sqlc.arg(environment)::text, sqlc.arg(account_id)::text, sqlc.arg(key)::text)
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=billing.psps.id
 WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
-  AND billing.psps.key IS NOT DISTINCT FROM EXCLUDED.key
-RETURNING id;
+  AND billing.psps.key = EXCLUDED.key
+RETURNING *;
 
 -- name: SetPSPPendingSigner :execrows
 -- #1101: record the unapproved public key a changed Transit signer reports.
@@ -173,7 +193,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 UPDATE billing.psps
 SET pending_signer_public_key = NULL,
     archived = true,
-    replaced_at = COALESCE(replaced_at, now()),
+    archived_at = COALESCE(archived_at, now()),
+    revision = revision + 1,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(id)::uuid
@@ -192,9 +213,7 @@ SELECT EXISTS (
 -- name: GetActivePSPByKey :one
 SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lower(key) = lower(sqlc.arg(key)::text)
-  AND environment = sqlc.arg(environment)::text AND archived = false
-ORDER BY created_at DESC, id DESC
-LIMIT 1;
+  AND environment = sqlc.arg(environment)::text AND NOT archived;
 
 -- name: ListActivePSPsForRailEnvironment :many
 SELECT * FROM billing.psps
@@ -236,9 +255,8 @@ FOR UPDATE;
 -- name: ArchivePSP :one
 UPDATE billing.psps
 SET archived = true,
-    evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{configuration_revision}',
-        to_jsonb(COALESCE((evidence ->> 'configuration_revision')::bigint, 0) + 1)),
-    replaced_at = COALESCE(replaced_at, now()),
+    archived_at = now(),
+    revision = revision + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING *;
@@ -251,7 +269,7 @@ SELECT psp.id AS psp_id,
       + (SELECT count(*) FROM billing.payments payment
           WHERE payment.merchant_id = psp.merchant_id AND payment.psp_id = psp.id
             AND payment.status = 'pending' AND payment.deleted_at IS NULL)
-      + (SELECT count(*) FROM billing.rail_intents intent
+      + (SELECT count(*) FROM billing.provider_intents intent
           WHERE intent.merchant_id = psp.merchant_id AND intent.psp_id = psp.id
             AND intent.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify'))
        )::bigint AS open_obligations

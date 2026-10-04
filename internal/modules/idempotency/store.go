@@ -5,7 +5,7 @@
 //
 //   - This store claims (merchant, operation, key). Exactly one caller holds a
 //     processing claim; the rest see it in progress or read its stored result.
-//   - A provider call is made once by rail_intents (unique per merchant on its
+//   - A provider call is made once by provider_intents (unique per merchant on its
 //     idempotency key), whose keys derive from the request key. A request that
 //     runs twice therefore reaches the same intent, which never executes twice.
 //

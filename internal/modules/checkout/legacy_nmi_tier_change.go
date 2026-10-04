@@ -214,7 +214,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 		reason = "customer tier downgrade"
 	}
 	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, intents.EnqueueParams{MerchantID: sub.MerchantID, Provider: string(sub.Rail), PspID: sub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &sub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: reason},
-		func(row gen.BillingRailIntent) error { return tierChangeOwnedBy(row, nmiUpgradeSubject(payload)) })
+		func(row gen.BillingProviderIntent) error { return tierChangeOwnedBy(row, nmiUpgradeSubject(payload)) })
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
 		return nil, s.tierChangeInFlight(ctx, sub.ID)

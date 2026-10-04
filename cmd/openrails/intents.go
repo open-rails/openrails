@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -64,16 +63,13 @@ func newIntentsCmd() *cobra.Command {
 // provider-confirmed non-execution. Neither resends the unresolved mutation.
 func newIntentsResolveCmd() *cobra.Command {
 	var (
-		merchantSlug     string
-		intentID         string
-		step             string
-		reference        string
-		billingAnchor    string
-		requalifyAccount string
-		notExecuted      bool
-		abandon          bool
-		actor            string
-		reason           string
+		merchantSlug string
+		intentID     string
+		step         string
+		reference    string
+		notExecuted  bool
+		actor        string
+		reason       string
 	)
 	cmd := &cobra.Command{
 		Use:   "resolve",
@@ -84,24 +80,15 @@ func newIntentsResolveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("--intent must be a UUID: %w", err)
 			}
-			resolution := intents.Resolution{Step: step, ProviderReference: reference, RequalifyAccount: requalifyAccount, NotExecuted: notExecuted, Abandon: abandon, Actor: actor, Reason: reason}
-			if billingAnchor != "" {
-				resolution.BillingAnchor, err = time.Parse(time.RFC3339, billingAnchor)
-				if err != nil {
-					return fmt.Errorf("--billing-anchor must be an RFC3339 instant: %w", err)
-				}
-			}
+			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Actor: actor, Reason: reason}
 			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
 			return runIntentsResolve(c.Context(), cfg, merchantSlug, id, resolution)
 		},
 	}
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
-	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases; nmi_provider_cutover: source, target or anchor)")
+	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
-	cmd.Flags().StringVar(&billingAnchor, "billing-anchor", "", "Future first charge instant, RFC3339 whole seconds (NMI provider cutover --step anchor only)")
-	cmd.Flags().StringVar(&requalifyAccount, "requalify-account", "", "External proof reference attesting this cutover account after credential rotation (--step source or target)")
-	cmd.Flags().BoolVar(&abandon, "abandon", false, "Authorize cancellation of the exact paused NMI cutover target; source remains unchanged (--step target)")
 	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")
@@ -169,7 +156,7 @@ func newIntentsLogCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intent, "intent", "", "Provider intent id filter")
-	cmd.Flags().StringVar(&psp, "provider-account", "", "PSP id filter")
+	cmd.Flags().StringVar(&psp, "psp", "", "PSP id filter")
 	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant public name or id:<uuid> (required)")
@@ -256,9 +243,9 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 		// created_at DESC and cap at limit. For a single concrete status (or
 		// --status=all) this is exactly one round trip.
 		var total int64
-		var rows []gen.BillingRailIntent
+		var rows []gen.BillingProviderIntent
 		for _, statusFilter := range statusFilters {
-			n, err := q.CountRailIntents(ctx, gen.CountRailIntentsParams{
+			n, err := q.CountProviderIntents(ctx, gen.CountProviderIntentsParams{
 				MerchantID: merchantID.UUID(),
 				Status:     statusFilter, Rail: providerFilter, IntentType: typeFilter,
 			})
@@ -266,7 +253,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 				return fmt.Errorf("count provider intents: %w", err)
 			}
 			total += n
-			part, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
+			part, err := q.ListProviderIntents(ctx, gen.ListProviderIntentsParams{
 				MerchantID: merchantID.UUID(),
 				Status:     statusFilter, Rail: providerFilter, IntentType: typeFilter,
 				PageLimit: int64(limit), PageOffset: 0,
@@ -370,7 +357,7 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 	if raw := strings.TrimSpace(pspID); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {
-			return fmt.Errorf("invalid --provider-account %q: %w", raw, err)
+			return fmt.Errorf("invalid --psp %q: %w", raw, err)
 		}
 		accountFilter = &id
 	}
@@ -399,23 +386,23 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 		if err != nil {
 			return err
 		}
-		total, err := database.Gen(ctx).CountRailMutationLogs(ctx, gen.CountRailMutationLogsParams{
-			MerchantID:   merchantID.UUID(),
-			Rail:         providerFilter,
-			RailIntentID: intentFilter,
-			PspID:        accountFilter,
-			Phase:        phaseFilter,
+		total, err := database.Gen(ctx).CountProviderMutationLogs(ctx, gen.CountProviderMutationLogsParams{
+			MerchantID:       merchantID.UUID(),
+			Rail:             providerFilter,
+			ProviderIntentID: intentFilter,
+			PspID:            accountFilter,
+			Phase:            phaseFilter,
 		})
 		if err != nil {
 			return fmt.Errorf("count rail mutation logs: %w", err)
 		}
-		rows, err := database.Gen(ctx).ListRailMutationLogs(ctx, gen.ListRailMutationLogsParams{
-			MerchantID:   merchantID.UUID(),
-			Rail:         providerFilter,
-			RailIntentID: intentFilter,
-			PspID:        accountFilter,
-			Phase:        phaseFilter,
-			LimitRows:    int64(limit),
+		rows, err := database.Gen(ctx).ListProviderMutationLogs(ctx, gen.ListProviderMutationLogsParams{
+			MerchantID:       merchantID.UUID(),
+			Rail:             providerFilter,
+			ProviderIntentID: intentFilter,
+			PspID:            accountFilter,
+			Phase:            phaseFilter,
+			LimitRows:        int64(limit),
 		})
 		if err != nil {
 			return fmt.Errorf("list rail mutation logs: %w", err)
@@ -429,7 +416,7 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 					"merchant_id":        row.MerchantID,
 					"provider":           row.Rail,
 					"psp_id":             row.PspID,
-					"provider_intent_id": row.RailIntentID,
+					"provider_intent_id": row.ProviderIntentID,
 					"intent_type":        row.IntentType,
 					"idempotency_key":    row.IdempotencyKey,
 					"attempt":            row.Attempt,
@@ -454,8 +441,8 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 			// or#893/or#795: an intent is addressed to a PSP or to a custodian.
 			account := intentAddress(row.PspID, row.CustodianID)
 			intent := ""
-			if row.RailIntentID != nil {
-				intent = row.RailIntentID.String()
+			if row.ProviderIntentID != nil {
+				intent = row.ProviderIntentID.String()
 			}
 			intentType := ""
 			if row.IntentType != nil {

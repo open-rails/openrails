@@ -192,7 +192,7 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		plan.SubscriptionsTombstoned = c.SubscriptionsTombstoned
 	}
 
-	manifest, err := q.ListRailIntentsForRun(ctx, gen.ListRailIntentsForRunParams{MerchantID: mid, RunID: runID})
+	manifest, err := q.ListProviderIntentsForRun(ctx, gen.ListProviderIntentsForRunParams{MerchantID: mid, RunID: runID})
 	if err != nil {
 		return plan, fmt.Errorf("read intent manifest: %w", err)
 	}
@@ -275,7 +275,7 @@ func UndoRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string
 	return res, nil
 }
 
-func divergenceOf(m *gen.ListRailIntentsForRunRow, ambiguous bool) IntentDivergence {
+func divergenceOf(m *gen.ListProviderIntentsForRunRow, ambiguous bool) IntentDivergence {
 	d := IntentDivergence{
 		IntentID: m.ID, IntentType: m.IntentType, Rail: m.Rail,
 		SubscriptionID: m.SubscriptionID, Status: m.Status, ExecutedAt: m.ExecutedAt,

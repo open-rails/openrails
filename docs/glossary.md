@@ -36,7 +36,7 @@ to concrete code (enum, table, or manifest key).
 | Channel | An off-rail source for **recording** a payment that never flowed through a gateway — `models.Channel`: `admin`, `manual`. No adapter, no credentials, no PSP; stored in the same `payments.rail` column, kept distinct by the two Go enums. |
 | Armed | A rail is usable for a merchant iff it has an active PSP row, resolved per-merchant at request time through the one seam `internal/railresolve` (fail closed on `ErrRailNotArmed`). |
 | Integration | The Go client speaking a rail's external API: `internal/integrations/{nmi,stripeapi,ccbill,solana}`. All Stripe HTTP goes through `stripeapi`; all NMI HTTP through `nmi`. |
-| Provider intent | A durable outbox row (`billing.rail_intents`) posted before **every** outbound provider mutation, executed effectively-once by a scheduled runner. Outcomes: succeeded, retryable, `unknown_needs_verify` (ambiguity ⇒ verify via provider reads, never blind retry), terminal, parked. |
+| Provider intent | A durable outbox row (`billing.provider_intents`) posted before **every** outbound provider mutation, executed effectively-once by a scheduled runner. Outcomes: succeeded, retryable, `unknown_needs_verify` (ambiguity ⇒ verify via provider reads, never blind retry), terminal, parked. |
 | Processor (NMI wire) | NMI's own name for its backend acquiring processor (`processor_id`, `processor_response_text`, decline strings). External wire format — a different concept from our rail; never renamed. |
 
 ## Operating knobs

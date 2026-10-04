@@ -51,11 +51,12 @@ func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrInvalid, "a scale is never guessed")
 	// OpenRails advertises the browser driver per option (#1078); an option
 	// no browser can drive carries none.
-	option := billing.CheckoutOption{Selector: "solana", PSPID: "psp", Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
+	psp := billing.PSPID(uuid.MustParse("0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e"))
+	option := billing.CheckoutOption{Selector: "solana", PSPID: psp, Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
 	raw, err = json.Marshal(option)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"selector":"solana","psp_id":"psp","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
-	raw, err = json.Marshal(billing.CheckoutOption{Selector: "stripe", PSPID: "psp", Rail: "stripe", Mode: "subscription"})
+	require.JSONEq(t, `{"selector":"solana","psp_id":"psp_0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
+	raw, err = json.Marshal(billing.CheckoutOption{Selector: "stripe", PSPID: psp, Rail: "stripe", Mode: "subscription"})
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "driver")
 }

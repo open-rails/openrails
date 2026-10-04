@@ -1,5 +1,5 @@
 -- name: ListPricePSPBindings :many
-SELECT b.*, p.rail, COALESCE(p.key, p.id::text)::text AS psp_key
+SELECT b.*, p.rail, p.key AS psp_key
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=b.merchant_id AND owned_price.id=b.price_id AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid)) AND b.merchant_id = sqlc.arg(merchant_id)::uuid AND (cardinality(sqlc.arg(price_ids)::uuid[]) = 0 OR b.price_id = ANY(sqlc.arg(price_ids)::uuid[]))

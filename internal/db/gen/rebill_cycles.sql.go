@@ -13,7 +13,7 @@ import (
 )
 
 const countOpenSubscriptionCollections = `-- name: CountOpenSubscriptionCollections :one
-SELECT count(*) FROM billing.rail_intents
+SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
   AND intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
 `

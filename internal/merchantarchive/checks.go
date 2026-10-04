@@ -27,75 +27,78 @@ var excludedTables = map[string]string{
 	"destructive_action_switch": "deployment-wide safety switch",
 	"webhook_health":            "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
 	"card_attempt_failures":  "card-testing telemetry",
-	"payment_attempts":       "decline analytics, kept 25 months; money is payments and rail_intents",
+	"payment_attempts":       "decline analytics, kept 25 months; money is payments and provider_intents",
 	"rebill_cycles":          "rebill analytics: expected rebills, derived from subscriptions",
 	"payment_method_updates": "card-update analytics: account updater and customer card changes",
-	"idempotency_keys":       "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and rail_intents; money is rail_intents and webhook_events",
+	"idempotency_keys":       "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and provider_intents; money is provider_intents and webhook_events",
 	"dashboard_configs":      "presentation",
 	"merchant_deks":          "encryption key material", "merchant_secrets": "credentials are re-entered at destination",
 	"merchant_destructive_policy": "deployment safety policy", "merchant_webhooks": "destinations and signing-key versions are reconfigured",
 	"checkout_sessions": "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout attempt; a buyer mints a new one at the destination",
-	"notifications":     "inbox and notification delivery", "rail_mutation_logs": "operator evidence; raw bodies excluded",
-	"reconciliation_findings":         "operator observations",
-	"product_archive_operations":      "operation replay receipts; the refunds they produced are archived payments",
-	"account_updater_batches":         "unsupported provider job evidence; any rows refused",
-	"destructive_run_before_images":   "unsupported byte-exact undo history; any rows refused",
-	"operation_authorizations":        "unsupported opaque byte-exact operation evidence; any rows refused",
-	"provider_billing_qualifications": "unsupported opaque byte-exact provider evidence; any rows refused",
-	"provider_billing_observations":   "unsupported opaque byte-exact provider bodies; any rows refused",
-	"subscription_verifications":      "derived: re-detected from unverified subscriptions",
-	"nmi_bulk_checkpoints":            "transient read progress",
-	"nmi_history_months":              "decline analytics re-read from NMI, kept 25 months",
-	"nmi_history_reads":               "read progress: the destination backfills its own",
-	"solana_pay_references":           "transient Solana Pay watch state; pending references refuse the archive",
-	"solana_pay_receipts":             "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
+	"notifications":     "inbox and notification delivery", "provider_mutation_logs": "operator evidence; raw bodies excluded",
+	"reconciliation_findings":       "operator observations",
+	"product_archive_operations":    "operation replay receipts; the refunds they produced are archived payments",
+	"account_updater_batches":       "unsupported provider job evidence; any rows refused",
+	"destructive_run_before_images": "unsupported byte-exact undo history; any rows refused",
+	"operation_authorizations":      "unsupported opaque byte-exact operation evidence; any rows refused",
+	"cost_qualifications":           "unsupported opaque byte-exact provider evidence; any rows refused",
+	"cost_observations":             "unsupported opaque byte-exact provider bodies; any rows refused",
+	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
+	"nmi_bulk_checkpoints":          "transient read progress",
+	"nmi_history_months":            "decline analytics re-read from NMI, kept 25 months",
+	"nmi_history_reads":             "read progress: the destination backfills its own",
+	"solana_pay_references":         "transient Solana Pay watch state; pending references refuse the archive",
+	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
-	"credential_publications":         "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
-	"destructive_action_switch":       "singleton enabled updated_by reason updated_at",
-	"worker_state":                    "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
-	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at",
-	"merchant_slug_aliases":           "slug merchant_id expires_at created_at",
-	"merchant_api_host_claims":        "merchant_id api_host token created_at",
-	"webhook_health":                  "merchant_id rail last_accepted_at last_pull_at created_at updated_at",
-	"webhook_health_daily":            "merchant_id rail day_at rejected drift",
-	"admission_denials_hourly":        "merchant_id customer_id denial_reason hour_at denials updated_at",
-	"card_attempt_failures":           "merchant_id subject bucket_at failures",
-	"payment_attempts":                "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id rail_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at",
-	"rebill_cycles":                   "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason",
-	"payment_method_updates":          "id merchant_id payment_method_id customer_id psp_id source kind event_ref at created_at",
-	"idempotency_keys":                "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
-	"checkout_sessions":               "merchant_id id_hash customer_id price_id offer success_url origin attempt attempt_id expires_at purge_at created_at",
-	"dashboard_configs":               "merchant_id layout updated_at updated_by",
-	"merchant_deks":                   "merchant_id wrapped_dek created_at updated_at",
-	"merchant_secrets":                "merchant_id name value version created_at updated_at",
-	"merchant_destructive_policy":     "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
-	"merchant_webhooks":               "id merchant_id name destination_host secret_version format enabled created_at updated_at",
-	"notifications":                   "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at",
-	"rail_mutation_logs":              "id merchant_id rail psp_id rail_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",
-	"subscription_verifications":      "merchant_id subscription_id since reads last_read_at last_error",
-	"nmi_bulk_checkpoints":            "merchant_id psp_id since until next_page started_at",
-	"nmi_history_months":              "merchant_id psp_id month kind category reason authorizations",
-	"nmi_history_reads":               "merchant_id psp_id read_at",
-	"solana_pay_references":           "merchant_id reference checkout_attempt_id kind status settle_until watch_until next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
-	"solana_pay_receipts":             "merchant_id reference signature checkout_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
-	"product_archive_operations":      "merchant_id id idempotency_key request_sha256 product_id purchase_action purchased_since reason created_at",
-	"reconciliation_findings":         "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class",
-	"account_updater_batches":         "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
-	"destructive_run_before_images":   "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class",
-	"operation_authorizations":        "operation_id merchant_id customer_id record_owner ledger_account_id currency amount claim_reference authorization_body_bytes authorization_body_digest state terminal_reference created_at released_at settled_at settlement_cost_amount settlement_amount settlement_body_bytes settlement_body_digest",
-	"provider_billing_qualifications": "merchant_id operation_id provider provider_resource_id provider_lifetime_start provider_lifetime_end provider_absent_at provider_absence_reference billing_stop_reference windows_closed_at windows_closed_reference lifecycle_evidence_bytes lifecycle_evidence_digest quiescence_seconds state reason baseline_observation_id qualified_observation_id qualified_cost_amount qualified_at created_at updated_at",
-	"provider_billing_observations":   "merchant_id operation_id observation_id normalized_query query_start query_end raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest cost_amount has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
+	"credential_publications":       "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
+	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
+	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
+	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at",
+	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
+	"merchant_api_host_claims":      "merchant_id api_host token created_at",
+	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
+	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
+	"admission_denials_hourly":      "merchant_id customer_id denial_reason hour_at denials updated_at",
+	"card_attempt_failures":         "merchant_id subject bucket_at failures",
+	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at",
+	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason",
+	"payment_method_updates":        "id merchant_id payment_method_id customer_id psp_id source kind event_ref at created_at",
+	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
+	"checkout_sessions":             "merchant_id id_hash customer_id price_id offer success_url origin attempt attempt_id expires_at purge_at created_at",
+	"dashboard_configs":             "merchant_id layout updated_at updated_by",
+	"merchant_deks":                 "merchant_id wrapped_dek created_at updated_at",
+	"merchant_secrets":              "merchant_id name value version created_at updated_at",
+	"merchant_destructive_policy":   "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
+	"merchant_webhooks":             "id merchant_id name destination_host secret_version format enabled created_at updated_at",
+	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at",
+	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",
+	"subscription_verifications":    "merchant_id subscription_id since reads last_read_at last_error",
+	"nmi_bulk_checkpoints":          "merchant_id psp_id since until next_page started_at",
+	"nmi_history_months":            "merchant_id psp_id month kind category reason authorizations",
+	"nmi_history_reads":             "merchant_id psp_id read_at",
+	"solana_pay_references":         "merchant_id reference checkout_attempt_id kind status settle_until watch_until next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
+	"solana_pay_receipts":           "merchant_id reference signature checkout_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
+	"product_archive_operations":    "merchant_id id idempotency_key request_sha256 product_id purchase_action purchased_since reason created_at",
+	"reconciliation_findings":       "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class",
+	"account_updater_batches":       "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
+	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class",
+	"operation_authorizations":      "operation_id merchant_id customer_id record_owner ledger_account_id currency amount claim_reference authorization_body_bytes authorization_body_digest state terminal_reference created_at released_at settled_at settlement_cost_amount settlement_amount settlement_body_bytes settlement_body_digest",
+	"cost_qualifications":           "merchant_id operation_id provider provider_resource_id provider_lifetime_start provider_lifetime_end provider_absent_at provider_absence_reference billing_stop_reference windows_closed_at windows_closed_reference lifecycle_evidence_bytes lifecycle_evidence_digest quiescence_seconds state reason baseline_observation_id qualified_observation_id qualified_cost_amount qualified_at created_at updated_at",
+	"cost_observations":             "merchant_id operation_id observation_id normalized_query query_start query_end raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest cost_amount has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
 // credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
-	"custodians":        "credential_versions",
+	"custodians": "credential_versions",
+	// Credential publication state belongs to the source deployment's secret
+	// custody; credentials are re-entered at the destination.
+	"psps":              "credential_custody credential_refs credential_versions retired_credentials credentials_validated_at webhook_endpoint_id webhook_overlap_expires_at revision",
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
 	"payments":          "discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
@@ -103,7 +106,7 @@ var omittedColumns = map[string]string{
 	"entitlements":      "period destructive_run_class",
 	"usage_events":      "metadata",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
-	"rail_intents":      "destructive_run_class",
+	"provider_intents":  "destructive_run_class",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {
@@ -233,7 +236,7 @@ type rowCheck struct{ table, predicate string }
 
 // preflightChecks are states the archive cannot carry.
 var preflightChecks = []rowCheck{
-	{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
+	{"operation_authorizations", "true"}, {"cost_qualifications", "true"}, {"cost_observations", "true"},
 	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
 	{"checkout_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
@@ -243,16 +246,13 @@ var preflightChecks = []rowCheck{
 	// resolved, stays with the deployment that watches the chain (#1086).
 	{"solana_pay_references", "status='pending'"},
 	{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
-	{"rail_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
+	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
 	{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
 	{"invoices", "collection_intent_id IS NOT NULL"},
 	{"admission_operations", "state='open'"},
 	{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
-	// Credential retirement and webhook endpoint registrations belong to the
-	// source deployment, like secret references and publication revisions.
-	{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credential_refs','credential_custody','credential_custody_transition','configuration_revision','credentials_validated','retired_credentials','webhook_endpoint_id','api_key'] <> '{}'::jsonb"},
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
@@ -308,15 +308,15 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
 // restoration still refuses missing/cross-payer retained business references.
 var referenceChecks = []rowCheck{
-	{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
-          (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
-           (m.custodian='psp' AND m.psp_id=rail_intents.psp_id AND m.rail_customer_ref=rail_intents.payload->>'rail_customer_ref' AND m.rail_customer_ref<>'' AND
-            (rail_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=rail_intents.payload->>'rail_method_ref'))))`},
-	{"rail_intents", `intent_type='hyperswitch_method_delete' AND
-          (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
+	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
+          (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
+           (m.custodian='psp' AND m.psp_id=provider_intents.psp_id AND m.rail_customer_ref=provider_intents.payload->>'rail_customer_ref' AND m.rail_customer_ref<>'' AND
+            (provider_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=provider_intents.payload->>'rail_method_ref'))))`},
+	{"provider_intents", `intent_type='hyperswitch_method_delete' AND
+          (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=provider_intents.payload->>'customer_id') OR
            EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
-             (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
-              (rail_intents.payload->>'detach_only'='false' AND m.custodian_id=rail_intents.custodian_id AND m.rail_method_ref=rail_intents.payload->'instrument'->>'rail_method_ref'))))`},
+             (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
+              (provider_intents.payload->>'detach_only'='false' AND m.custodian_id=provider_intents.custodian_id AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'))))`},
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
 	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
@@ -334,11 +334,11 @@ var referenceChecks = []rowCheck{
 	 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
 	 AND a.currency=ledger_transfers.currency AND a.status='settled'))`},
 	{"invoice_payments", `idempotency_key LIKE 'invoice_collection:%'
-	 AND NOT EXISTS(SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=$1
+	 AND NOT EXISTS(SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=$1
 	 AND i.intent_type='invoice_collection' AND i.idempotency_key=invoice_payments.idempotency_key)`},
-	{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
-	 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))
-	 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.prices p WHERE p.merchant_id=$1 AND p.id=rail_intents.price_id))`},
+	{"provider_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=provider_intents.subscription_id))
+	 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=provider_intents.payment_id))
+	 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.prices p WHERE p.merchant_id=$1 AND p.id=provider_intents.price_id))`},
 }
 
 func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
@@ -395,7 +395,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 			return nil
 		}
 		for _, row := range rows {
-			a, operation := row.BillingInvoicePayment, row.BillingRailIntent
+			a, operation := row.BillingInvoicePayment, row.BillingProviderIntent
 			p, err := intents.DecodeInvoiceCollectionPayload(operation)
 			if err != nil {
 				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: err}

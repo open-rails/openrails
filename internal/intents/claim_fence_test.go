@@ -18,10 +18,10 @@ func TestRequireClaimRefusesWithoutAnExecutorClaim(t *testing.T) {
 	s := &Store{}
 	require.ErrorIs(t, s.RequireClaim(context.Background(), id, time.Now()), ErrClaimLost, "no claim")
 
-	verify, _ := withClaim(context.Background(), gen.BillingRailIntent{ID: id, Status: StatusUnknownNeedsVerify, Attempts: 3})
+	verify, _ := withClaim(context.Background(), gen.BillingProviderIntent{ID: id, Status: StatusUnknownNeedsVerify, Attempts: 3})
 	require.ErrorIs(t, s.RequireClaim(verify, id, time.Now()), ErrClaimLost, "a verification claim never charges")
 
-	exec, held := withClaim(context.Background(), gen.BillingRailIntent{ID: id, Status: StatusInFlight, Attempts: 3})
+	exec, held := withClaim(context.Background(), gen.BillingProviderIntent{ID: id, Status: StatusInFlight, Attempts: 3})
 	require.ErrorIs(t, s.RequireClaim(exec, uuid.New(), time.Now()), ErrClaimLost, "another operation")
 	held.lose()
 	require.ErrorIs(t, s.RequireClaim(exec, id, time.Now()), ErrClaimLost, "the heartbeat lost the claim")

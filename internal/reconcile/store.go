@@ -68,8 +68,10 @@ type Store interface {
 	CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error)
 	FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error
 	UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding) (FindingRecord, error)
-	ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error)
-	AutoResolveVanished(ctx context.Context, provider Provider, runID uuid.UUID, types []FindingType) (int64, error)
+	// ListActionablePullFindings and AutoResolveVanished cover the pull
+	// findings of one PSP: a pass over one PSP proves nothing about another.
+	ListActionablePullFindings(ctx context.Context, pspID uuid.UUID) ([]FindingRecord, error)
+	AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error)
 	MarkFindingVanished(ctx context.Context, id uuid.UUID) error
 	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
 	// MarkFindingNotified stamps the #787 dedupe linkage after a FindingNotifier
@@ -185,6 +187,10 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	if err != nil {
 		return FindingRecord{}, err
 	}
+	var pspID *uuid.UUID
+	if f.PSPID != uuid.Nil {
+		pspID = &f.PSPID
+	}
 	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        tid.UUID(),
 		FindingType:       string(f.Type),
@@ -194,6 +200,7 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 		RecommendedAction: action,
 		Evidence:          findingEvidence(f),
 		RunID:             &runID,
+		PspID:             pspID,
 	})
 	if err != nil {
 		return FindingRecord{}, err
@@ -201,13 +208,12 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 	return FindingRecordFromRow(row), nil
 }
 
-func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
-	providerStr := string(provider)
+func (s *PGStore) ListActionablePullFindings(ctx context.Context, pspID uuid.UUID) ([]FindingRecord, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
-	rows, err := s.DB.Gen(ctx).ListActionableReconciliationFindingsByProvider(ctx, gen.ListActionableReconciliationFindingsByProviderParams{MerchantID: scopeMerchantID.UUID(), Evidence: &providerStr})
+	rows, err := s.DB.Gen(ctx).ListActionablePullFindingsForPSP(ctx, gen.ListActionablePullFindingsForPSPParams{MerchantID: scopeMerchantID.UUID(), PspID: pspID})
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +230,7 @@ func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider
 // length of the backlog.
 const autoResolveBatch = 1000
 
-func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, runID uuid.UUID, types []FindingType) (int64, error) {
+func (s *PGStore) AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -233,12 +239,11 @@ func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, ru
 	for _, t := range types {
 		names = append(names, string(t))
 	}
-	providerStr := string(provider)
 	var total int64
 	for {
 		n, err := s.DB.Gen(ctx).AutoResolveVanishedReconciliationFindings(ctx, gen.AutoResolveVanishedReconciliationFindingsParams{
 			MerchantID:   tid.UUID(),
-			Provider:     &providerStr,
+			PspID:        pspID,
 			RunID:        &runID,
 			FindingTypes: names,
 			RowLimit:     autoResolveBatch,

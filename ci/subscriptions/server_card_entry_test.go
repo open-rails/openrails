@@ -77,7 +77,7 @@ func (w *world) cardVaults(action string) []url.Values {
 
 func (w *world) intentStatuses(intentType string) []string {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT status FROM billing.rail_intents WHERE intent_type = $1 ORDER BY created_at, id`), intentType)
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT status FROM billing.provider_intents WHERE intent_type = $1 ORDER BY created_at, id`), intentType)
 	require.NoError(w.t, err)
 	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(w.t, err)

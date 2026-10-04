@@ -44,16 +44,16 @@ func OperationTerminal(status string) bool {
 // PrepareDispatch touches only this operation. Expiration retains every existing
 // submission/hold guard. A lost executor lease becomes an unknown result, never
 // an execute retry: the provider may already have accepted the mutation.
-func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time) (gen.BillingRailIntent, error) {
+func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time) (gen.BillingProviderIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.BillingRailIntent{}, err
+		return gen.BillingProviderIntent{}, err
 	}
-	if _, err := s.db.Gen(ctx).RecoverAbandonedRailIntentByID(ctx, gen.RecoverAbandonedRailIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now}); err != nil {
-		return gen.BillingRailIntent{}, err
+	if _, err := s.db.Gen(ctx).RecoverAbandonedProviderIntentByID(ctx, gen.RecoverAbandonedProviderIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now}); err != nil {
+		return gen.BillingProviderIntent{}, err
 	}
-	if _, err := s.db.Gen(ctx).ExpireRailIntentByID(ctx, gen.ExpireRailIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now, BreakerHeldTypes: DestructiveIntentTypes()}); err != nil {
-		return gen.BillingRailIntent{}, err
+	if _, err := s.db.Gen(ctx).ExpireProviderIntentByID(ctx, gen.ExpireProviderIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now, BreakerHeldTypes: DestructiveIntentTypes()}); err != nil {
+		return gen.BillingProviderIntent{}, err
 	}
 	return s.Get(ctx, id)
 }
@@ -72,7 +72,7 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 		if row.Status != StatusUnknownNeedsVerify && row.Status != StatusInFlight {
 			return nil
 		}
-		if _, err := s.db.NewWithPgxTx(tx).Gen(ctx).AdvanceRailIntentVerification(ctx, gen.AdvanceRailIntentVerificationParams{MerchantID: row.MerchantID, ID: row.ID, Now: now}); err != nil {
+		if _, err := s.db.NewWithPgxTx(tx).Gen(ctx).AdvanceProviderIntentVerification(ctx, gen.AdvanceProviderIntentVerificationParams{MerchantID: row.MerchantID, ID: row.ID, Now: now}); err != nil {
 			return err
 		}
 		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(now))

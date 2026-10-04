@@ -193,7 +193,7 @@ const insertPurchaseReview = `-- name: InsertPurchaseReview :exec
 INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
 VALUES ($1::uuid, $2::text, $3::text, 'medium', 'requires_review',
         $4::text, $5::jsonb)
-ON CONFLICT (merchant_id, finding_type, subject_key) DO NOTHING
+ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO NOTHING
 `
 
 type InsertPurchaseReviewParams struct {

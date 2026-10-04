@@ -11,7 +11,7 @@ type PaymentMethod struct {
 	ID             PaymentMethodID     `json:"id"`
 	CustomerID     CustomerID          `json:"customer_id"`
 	Rail           string              `json:"rail"`
-	PSPID          *string             `json:"psp_id"`
+	PSPID          *PSPID              `json:"psp_id"`
 	Card           *CardDetails        `json:"card"`
 	BillingDetails *BillingDetails     `json:"billing_details"`
 	Health         PaymentMethodHealth `json:"health"`
@@ -92,7 +92,7 @@ type CardDetails struct {
 // server, the card itself (Card). OpenRails reads the saved card's display
 // facts from the provider.
 type CreatePaymentMethodParams struct {
-	PSPID          string          `json:"psp_id"`
+	PSPID          PSPID           `json:"psp_id"`
 	PaymentToken   string          `json:"payment_token,omitempty"`
 	Card           *Card           `json:"card,omitempty"`
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`

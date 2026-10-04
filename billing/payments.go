@@ -56,7 +56,7 @@ type Payment struct {
 	Product           *ProductSummary `json:"product"`
 	Channel           PaymentChannel  `json:"channel"`
 	Rail              *string         `json:"rail"`
-	PSPID             *string         `json:"psp_id"`
+	PSPID             *PSPID          `json:"psp_id"`
 	TransactionID     string          `json:"transaction_id"`
 	Card              *CardDetails    `json:"card"`
 	Failure           *PaymentFailure `json:"failure"`

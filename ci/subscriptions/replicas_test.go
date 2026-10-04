@@ -79,9 +79,9 @@ func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
 		if attempt >= 0 {
 			payload = fmt.Sprintf("jsonb_set(payload, '{attempt}', '%d'::jsonb)", attempt)
 		}
-		_, err := f.base.pool.Exec(t.Context(), f.q(`INSERT INTO billing.rail_intents (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, origin, psp_id)
+		_, err := f.base.pool.Exec(t.Context(), f.q(`INSERT INTO billing.provider_intents (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, origin, psp_id)
 			SELECT merchant_id, rail, intent_type, subscription_id, price_id, `+payload+`, idempotency_key || ':' || gen_random_uuid()::text, $2, origin, psp_id
-			FROM billing.rail_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' AND status = 'succeeded'`), subUUID(e.sub), status)
+			FROM billing.provider_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' AND status = 'succeeded'`), subUUID(e.sub), status)
 		return err
 	}
 	refused := func(err error, constraint string) {
@@ -91,10 +91,10 @@ func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
 		require.Equal(t, "23505", pgErr.Code)
 		require.Equal(t, constraint, pgErr.ConstraintName)
 	}
-	refused(clone(-1, "failed_terminal"), "uq_rail_intents_subscription_collection_slot")
+	refused(clone(-1, "failed_terminal"), "uq_provider_intents_subscription_collection_slot")
 	require.NoError(t, clone(98, "pending"))
-	refused(clone(99, "pending"), "uq_rail_intents_open_subscription_collection")
-	_, err := f.base.pool.Exec(t.Context(), f.q(`DELETE FROM billing.rail_intents WHERE subscription_id = $1 AND status = 'pending'`), subUUID(e.sub))
+	refused(clone(99, "pending"), "uq_provider_intents_open_subscription_collection")
+	_, err := f.base.pool.Exec(t.Context(), f.q(`DELETE FROM billing.provider_intents WHERE subscription_id = $1 AND status = 'pending'`), subUUID(e.sub))
 	require.NoError(t, err)
 }
 

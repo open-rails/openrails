@@ -156,9 +156,16 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		return
 	}
 	if provider == subscriptions.RailCCBill {
+		// Pin the routed PSP first, so a refused source counts against it.
+		if r.State.Merchants != nil {
+			pspID, found, err := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
+			if !bindResolvedWebhookPSP(r, pspID, found, err) {
+				return
+			}
+		}
 		clientIP := r.ClientIP()
 		if !ccbillWebhookIPAllowed(r, clientIP) {
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailCCBill)
+			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.ErrorJSON(http.StatusForbidden, "Unauthorized webhook source")
 			return
 		}
@@ -220,7 +227,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		case errors.Is(err, webhookutil.ErrWebhookSignatureRequired),
 			errors.Is(err, webhookutil.ErrWebhookSignatureMissing),
 			errors.Is(err, webhookutil.ErrWebhookSignatureInvalid):
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
+			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		default:
 			r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
@@ -232,7 +239,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	// {data:{object}} shape so dispatch only ever sees snapshot-style events.
 	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body, r.State.StripeClients); herr != nil {
 		if errors.Is(herr, errStripeWebhookAccountMismatch) {
-			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
+			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "webhook_account_mismatch", "Webhook account does not match payload"))
 			return
 		}
@@ -247,7 +254,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 			return
 		}
 	}
-	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
+	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return
@@ -510,10 +517,10 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		switch {
 		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
 			errors.Is(err, webhookutil.ErrNMIWebhookSignatureMissing):
-			r.State.WebhookHealth.Rejected(r.Request.Context(), string(models.RailNMI))
+			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.ErrorJSON(http.StatusUnauthorized, "Missing webhook signature")
 		case errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid):
-			r.State.WebhookHealth.Rejected(r.Request.Context(), string(models.RailNMI))
+			r.State.WebhookHealth.Rejected(r.Request.Context())
 			r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		case errors.Is(err, webhookutil.ErrWebhookPayloadInvalid):
 			r.ErrorJSON(http.StatusBadRequest, "Invalid JSON data")
@@ -528,7 +535,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		r.ErrorJSON(http.StatusBadRequest, "Webhook account does not match payload")
 		return false
 	}
-	r.State.WebhookHealth.Accepted(r.Request.Context(), prepared.Rail)
+	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
@@ -628,7 +635,7 @@ func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (web
 
 func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP string, prepared webhookutil.Prepared, accountID string) bool {
 	// CCBill has no HMAC: IP-allowlisted + well-formed IS its verified-accepted.
-	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailCCBill)
+	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false
@@ -744,7 +751,7 @@ func ccbillWebhookAccountID(body []byte) string {
 // rename when the segment is a retired alias (or#893). The rail segment is the
 // gateway kind; a PSP is named by :account_id or the payload's account identity.
 func canonicalWebhookRail(r *httprequest.Request) (string, bool) {
-	provider, err := webhookutil.CanonicalRail(r.Param("provider"))
+	provider, err := webhookutil.CanonicalRail(r.Param("rail"))
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return "", false

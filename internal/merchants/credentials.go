@@ -2,9 +2,9 @@ package merchants
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -205,15 +205,16 @@ type pspSecretScope struct {
 	signerChange        string
 }
 
-// applyEvidence unpacks the PSP row's evidence document: the manifest-supplied
-// settings and the or#812 credential-version floors. Every scope resolver goes
-// through it so no read path can silently skip the rotation watermark.
-func (s *pspSecretScope) applyEvidence(raw []byte) {
-	s.settings = pspSettings(raw)
-	s.credentialVersions = CredentialVersions(raw)
-	s.credentialRefs = CredentialRefs(raw)
-	s.retiredCredentials = unmarshalProviderEvidence(raw).RetiredCredentials
-	s.webhookOverlapUntil = webhookOverlapExpiry(raw)
+// applyRow unpacks the PSP row's settings and credential state, including
+// the or#812 credential-version floors. Every scope resolver goes through it
+// so no read path can silently skip the rotation watermark.
+func (s *pspSecretScope) applyRow(row gen.BillingPsp) {
+	state := credentialState(row)
+	s.settings = rowSettings(row)
+	s.credentialVersions = state.Versions
+	s.credentialRefs = state.Refs
+	s.retiredCredentials = state.Retired
+	s.webhookOverlapUntil = state.WebhookOverlapUntil
 }
 
 func (s pspSecretScope) secretName(key string) (string, error) {
@@ -376,21 +377,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id billing.MerchantI
 	if err != nil {
 		return pspSecretScope{}, false, fmt.Errorf("load active PSP %s/%s: %w", rail, environment, err)
 	}
-	scope := pspSecretScope{
-		id:          row.ID,
-		rail:        row.Rail,
-		environment: row.Environment,
-		accountID:   row.AccountID,
-		custodianID: row.CustodianID,
-	}
-	scope.applyEvidence(row.Evidence)
-	if row.Key != nil {
-		scope.key = strings.TrimSpace(*row.Key)
-	}
-	if row.PendingSignerPublicKey != nil {
-		scope.signerChange = *row.PendingSignerPublicKey
-	}
-	return scope, true, nil
+	return pspScopeFromRow(row), true, nil
 }
 
 // PSPKeyArchived reports whether key names an ARCHIVED account for this
@@ -522,30 +509,6 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id billing.Merc
 		return pspSecretScope{}, false, fmt.Errorf("load PSP %s/%s: %w", rail, accountID, err)
 	}
 	return pspScopeFromRow(row), true, nil
-}
-
-// pspSettings reads declared settings; public values published through the
-// provider-config API (public_config) fill keys the declaration left unset.
-func pspSettings(raw []byte) map[string]any {
-	var evidence struct {
-		Settings     map[string]any    `json:"settings"`
-		PublicConfig map[string]string `json:"public_config"`
-	}
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
-		return nil
-	}
-	for key, value := range evidence.PublicConfig {
-		if _, ok := evidence.Settings[key]; !ok && value != "" {
-			if evidence.Settings == nil {
-				evidence.Settings = map[string]any{}
-			}
-			evidence.Settings[key] = value
-		}
-	}
-	if len(evidence.Settings) == 0 {
-		return nil
-	}
-	return evidence.Settings
 }
 
 // PullPSPScope resolves the PSP the PULL plane
@@ -721,7 +684,7 @@ type PSPIdentity struct {
 // are globally unique to one merchant (#650) and are never shared or moved; the
 // upsert rejects a cross-merchant claim, but with an opaque no-rows /
 // unique-violation error — this names the conflict instead.
-var ErrPSPOwnedByAnotherMerchant = errors.New("PSP is already owned by another merchant")
+var ErrPSPOwnedByAnotherMerchant = apperr.New(http.StatusConflict, "psp_exists", "PSP is already owned by another merchant")
 
 // PSPNaturalKey canonicalizes a PSP's GLOBAL
 // natural key (rail, environment, account_id) and derives its deterministic id
@@ -981,11 +944,8 @@ func PSPScopeFromRow(row gen.BillingPsp) PSPScope {
 }
 
 func pspScopeFromRow(row gen.BillingPsp) pspSecretScope {
-	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, custodianID: row.CustodianID}
-	if row.Key != nil {
-		scope.key = *row.Key
-	}
-	scope.applyEvidence(row.Evidence)
+	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, key: row.Key, custodianID: row.CustodianID}
+	scope.applyRow(row)
 	if row.PendingSignerPublicKey != nil {
 		scope.signerChange = *row.PendingSignerPublicKey
 	}

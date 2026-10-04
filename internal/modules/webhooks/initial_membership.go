@@ -92,7 +92,7 @@ func (s *NMIConvergeService) activateAcceptedInitialPayment(ctx context.Context,
 	return true, s.activateInitialPhaseTx(ctx, in, p, schedule.SubscriptionID(), paid.TransactionID, probe.SuccessAt)
 }
 
-func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.BillingRailIntent, p subscriptions.InitialMembershipPayload, providerRef, transaction string, purchasedAt time.Time) error {
+func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.InitialMembershipPayload, providerRef, transaction string, purchasedAt time.Time) error {
 	var notices []*models.NotificationQueue
 	ctx = db.WithPSPID(ctx, p.Terms.PSPID)
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

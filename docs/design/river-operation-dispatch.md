@@ -1,6 +1,6 @@
 # Financial operation dispatch
 
-Admission writes the accepted `rail_intents` row and inserts a typed River job in
+Admission writes the accepted `provider_intents` row and inserts a typed River job in
 one PostgreSQL transaction. The job carries merchant and operation IDs only.
 `InsertTx` uses the caller's transaction, including nested savepoints; the runtime
 supplies the host-composed client and its actual River schema. Missing composition

@@ -15,7 +15,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- retained decision blocks a stale pre-delete capture read even after commit.
 SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
        COALESCE(bool_or(status='succeeded' AND payload->>'detach_only' IS DISTINCT FROM 'true'),false)::boolean AS erased
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
   AND custodian_id=sqlc.arg(custodian_id)::uuid
   AND intent_type='hyperswitch_method_delete'
@@ -39,13 +39,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 FOR SHARE;
 
 -- name: LockCustodianMethodDelete :one
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type = 'hyperswitch_method_delete'
 FOR UPDATE;
 
 -- name: CompleteCustodianMethodDelete :execrows
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
     claimed_until = NULL, executed_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz, last_failure_reason = NULL
@@ -54,7 +54,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: ListMethodDeletesForArchive :many
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
   AND idempotency_key IN ('hyperswitch_method_delete:' || sqlc.arg(payment_method_id)::uuid::text,
                           'nmi_vault_delete:' || sqlc.arg(payment_method_id)::uuid::text)
@@ -62,7 +62,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
                   WHERE m.merchant_id=sqlc.arg(merchant_id)::uuid AND m.id=sqlc.arg(payment_method_id)::uuid);
 
 -- name: LockNativeMethodDelete :one
-SELECT * FROM billing.rail_intents
+SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type = 'nmi_vault_delete'
 FOR UPDATE;
@@ -71,7 +71,7 @@ FOR UPDATE;
 SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
        COALESCE(bool_or(status='succeeded' AND
          (payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR payload->>'rail_method_ref'=sqlc.arg(method_ref)::text)),false)::boolean AS erased
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
   AND intent_type='nmi_vault_delete' AND payload->>'rail_customer_ref'=sqlc.arg(customer_ref)::text;
 

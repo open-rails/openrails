@@ -139,9 +139,8 @@ observes; the set is bounded by the merchant's catalog and PSPs.
 **DEBT (or#837).** Everything else in the DEBT section. These are real:
 
 - *Deployment-wide or merchant-wide scans with no LIMIT* — the Solana converge
-  scans, the reconciliation findings scans, `ListStuckRailIntents`,
-  `ListWebhookExpectedRails`, `ListInvoicePayers` and
-  `ListChargeableOpenInvoices`.
+  scans, the reconciliation findings scans, `ListStuckProviderIntents`,
+  `ListInvoicePayers` and `ListChargeableOpenInvoices`.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`,
   `ListPaymentMethodsByRails` and `ListRecordedSubscriptionCharges`. The
   caller's list is bounded but each element's row set is not.
