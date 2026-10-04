@@ -35,7 +35,7 @@ func engineOwned(withMethod bool) subOpt {
 }
 
 // Resumable is the single gate for the handler, worker and DTO: reversible
-// rail AND cancelled AND paid period still open; engine subscriptions only
+// rail AND canceled AND paid period still open; engine subscriptions only
 // undo an ordinary user cancel that still has a card.
 func TestCancelModeAndResumable(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -50,20 +50,20 @@ func TestCancelModeAndResumable(t *testing.T) {
 	}{
 		{"nil", nil, CancelModeDestructive, false, false},
 		{"stripe active", sub(models.RailStripe, models.StatusActive, endsAt(future)), CancelModeReversible, false, false},
-		{"stripe cancelled mid-period", sub(models.RailStripe, models.StatusCancelled, endsAt(future)), CancelModeReversible, true, true},
-		{"stripe cancelled period over", sub(models.RailStripe, models.StatusCancelled, endsAt(past)), CancelModeReversible, false, false},
-		{"stripe cancelled period unknown", sub(models.RailStripe, models.StatusCancelled), CancelModeReversible, false, false},
-		{"ccbill cancelled (#696 no resume)", sub(models.RailCCBill, models.StatusCancelled, endsAt(future)), CancelModeDestructive, false, true},
-		{"solana", sub(models.RailSolana, models.StatusCancelled, endsAt(future)), CancelModeDestructive, false, true},
+		{"stripe canceled mid-period", sub(models.RailStripe, models.StatusCanceled, endsAt(future)), CancelModeReversible, true, true},
+		{"stripe canceled period over", sub(models.RailStripe, models.StatusCanceled, endsAt(past)), CancelModeReversible, false, false},
+		{"stripe canceled period unknown", sub(models.RailStripe, models.StatusCanceled), CancelModeReversible, false, false},
+		{"ccbill canceled (#696 no resume)", sub(models.RailCCBill, models.StatusCanceled, endsAt(future)), CancelModeDestructive, false, true},
+		{"solana", sub(models.RailSolana, models.StatusCanceled, endsAt(future)), CancelModeDestructive, false, true},
 		{"nmi active", sub(models.RailNMI, models.StatusActive, endsAt(future)), CancelModeDestructive, false, false},
-		{"nmi delete pending", sub(models.RailNMI, models.StatusCancelled, endsAt(future), pending), CancelModeReversible, true, true},
-		{"nmi delete executed", sub(models.RailNMI, models.StatusCancelled, endsAt(future)), CancelModeDestructive, false, true},
-		{"nmi delete pending, period over", sub(models.RailNMI, models.StatusCancelled, endsAt(past), pending), CancelModeDestructive, false, false},
-		{"engine user cancel", sub(models.RailNMI, models.StatusCancelled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeUser)), CancelModeReversible, true, true},
-		{"engine user cancel without card", sub(models.RailNMI, models.StatusCancelled, endsAt(future), engineOwned(false), cancelType(models.CancelTypeUser)), CancelModeReversible, false, true},
-		{"engine merchant cancel", sub(models.RailStripe, models.StatusCancelled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeMerchant)), CancelModeReversible, false, true},
-		{"engine chargeback", sub(models.RailStripe, models.StatusCancelled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeChargeback)), CancelModeReversible, false, true},
-		{"engine cancel type unknown", sub(models.RailStripe, models.StatusCancelled, endsAt(future), engineOwned(true)), CancelModeReversible, false, true},
+		{"nmi delete pending", sub(models.RailNMI, models.StatusCanceled, endsAt(future), pending), CancelModeReversible, true, true},
+		{"nmi delete executed", sub(models.RailNMI, models.StatusCanceled, endsAt(future)), CancelModeDestructive, false, true},
+		{"nmi delete pending, period over", sub(models.RailNMI, models.StatusCanceled, endsAt(past), pending), CancelModeDestructive, false, false},
+		{"engine user cancel", sub(models.RailNMI, models.StatusCanceled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeUser)), CancelModeReversible, true, true},
+		{"engine user cancel without card", sub(models.RailNMI, models.StatusCanceled, endsAt(future), engineOwned(false), cancelType(models.CancelTypeUser)), CancelModeReversible, false, true},
+		{"engine merchant cancel", sub(models.RailStripe, models.StatusCanceled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeMerchant)), CancelModeReversible, false, true},
+		{"engine chargeback", sub(models.RailStripe, models.StatusCanceled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeChargeback)), CancelModeReversible, false, true},
+		{"engine cancel type unknown", sub(models.RailStripe, models.StatusCanceled, endsAt(future), engineOwned(true)), CancelModeReversible, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.mode, CancelModeFor(tc.sub, now))

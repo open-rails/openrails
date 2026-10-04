@@ -156,29 +156,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add notification email sweep worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.CancelSubscriptionWorker{
-		StripeClients:                r.StripeClients,
-		DB:                           r.DB,
-		Config:                       r.Config,
-		Rails:                        r.RailConfigs,
-		UserSubscriptionService:      r.UserSubscriptionService,
-		SubscriptionService:          r.SubscriptionService,
-		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
-	}); err != nil {
-		return fmt.Errorf("add cancel subscription worker: %w", err)
-	}
-	if err := addTrackedWorker(r, workers, &riverjobs.ResumeSubscriptionWorker{
-		StripeClients:                r.StripeClients,
-		Clock:                        r.Clock,
-		DB:                           r.DB,
-		Config:                       r.Config,
-		Rails:                        r.RailConfigs,
-		EntitlementService:           r.EntitlementService,
-		SubscriptionService:          r.SubscriptionService,
-		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
-	}); err != nil {
-		return fmt.Errorf("add resume subscription worker: %w", err)
-	}
 	// Plan-migration re-driver (#816): re-drives blocked #813 plan-change rows
 	// (deferred far-future pushes entering their final pre-effective period;
 	// crash-window rows whose rail already carries the target) through the same

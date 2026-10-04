@@ -90,7 +90,7 @@ func (c *NMIClient) GetCutoverSubscription(ctx context.Context, id string) (V5Su
 	if sub.Object != "subscription" || sub.ID != id || (sub.DelayedCondition != "active" && sub.DelayedCondition != "inactive") {
 		return sub, false, errors.New("subscription readback identity or lifecycle mismatch")
 	}
-	return sub, !sub.cancelledAtNMI(), nil
+	return sub, !sub.canceledAtNMI(), nil
 }
 
 // ConfirmCutoverVault qualifies the one-vault-per-card lane. A vault containing

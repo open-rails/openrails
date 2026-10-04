@@ -116,7 +116,7 @@ func TestCatalogOwnerClientCannotExpandScope(t *testing.T) {
 	_, err = owner.GetProduct(t.Context(), product)
 	require.NoError(t, err)
 
-	_, err = owner.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: uuid.NewString(), ProductID: product.String()})
+	_, err = owner.CheckProductAccess(t.Context(), billing.CustomerID(uuid.New()), billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{product}})
 	require.ErrorIs(t, err, billing.ErrDenied, "resource handles bind to the attenuated clone")
 	_, err = owner.ListCatalogs(t.Context(), billing.CatalogListParams{})
 	require.ErrorIs(t, err, billing.ErrDenied)

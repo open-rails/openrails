@@ -8,20 +8,34 @@ import (
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-type ChangeTierRequest = billing.ChangeTierRequest
+// ChangeTierRequest is the merchant's tier change and both previews.
+type ChangeTierRequest = billing.ChangeTierParams
 
+// CustomerChangeTierRequest is the customer's tier change. Signature
+// completes a solana_sign_transactions next action: the signature of the
+// tier-change transaction the customer's wallet sent.
+type CustomerChangeTierRequest struct {
+	PriceID   billing.PriceID `json:"price_id"`
+	Signature string          `json:"signature"`
+}
+
+// ChangeTier moves one of the customer's subscriptions to another price of
+// its tier group. An upgrade charges now, a downgrade applies at period end;
+// a rail that needs the customer's own step answers requires_action with
+// next_action.
 func ChangeTier(r *httprequest.Request) {
-	var req ChangeTierRequest
+	var req CustomerChangeTierRequest
 	if !r.BindJSON(&req) {
 		return
 	}
-	if id, err := billing.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
+	if req.PriceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return
 	}
@@ -54,10 +68,20 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
+	// The wallet signs a Solana tier change; ownership is checked there.
+	if sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID); err == nil && sub.Rail == models.RailSolana {
+		solanaTierChange(r, subscriptionID, req.PriceID.String(), strings.TrimSpace(req.Signature))
+		return
+	}
+	if req.Signature != "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "signature completes a wallet step; this subscription's rail has none").WithParam("signature"))
+		return
+	}
+
 	idempotencyKey := strings.TrimSpace(r.Header("Idempotency-Key"))
 
 	svcReq := &checkout.TierChangeRequest{
-		PriceID:        req.PriceID,
+		PriceID:        req.PriceID.String(),
 		SubscriptionID: subscriptionID,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -91,7 +115,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if id, err := billing.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
+	if req.PriceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return
 	}
@@ -121,7 +145,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 	}
 
 	svcReq := &checkout.TierChangeRequest{
-		PriceID:        req.PriceID,
+		PriceID:        req.PriceID.String(),
 		SubscriptionID: subscriptionID,
 	}
 

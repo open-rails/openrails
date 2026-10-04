@@ -128,7 +128,7 @@ Consequences, all enforced rather than documented:
   also how long a refresh stays fresh — a card is looked up once per cycle).
   Results are applied through the same writers the custodian's webhooks use: a
   reissue refreshes the instrument and CLEARS any park, a closed account or a
-  "contact cardholder" answer parks it. Nothing is ever deleted or cancelled.
+  "contact cardholder" answer parks it. Nothing is ever deleted or canceled.
   Both settings are off/default until declared — the updater is a priced add-on,
   and an unarmed custodian is never enumerated by the worker at all.
 * The retired inline keys (`settings.custodian_account_id`,

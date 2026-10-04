@@ -69,12 +69,14 @@ test("seeded customer lists and manages their own billing", async ({
     "POST",
     `${me}/subscriptions/${sub.id}/cancel`,
     token,
-    { feedback: "e2e cancel" }
+    { reason: "e2e cancel" }
   )
-  expect(cancel.status, JSON.stringify(cancel.body)).toBe(202)
-  await expect
-    .poll(state)
-    .toEqual({ status: "cancelled", cancel_scheduled: true, resumable: true })
+  expect(cancel.status, JSON.stringify(cancel.body)).toBe(200)
+  expect(await state()).toEqual({
+    status: "canceled",
+    cancel_scheduled: true,
+    resumable: true,
+  })
 
   const resume = await api(
     page,
@@ -82,10 +84,12 @@ test("seeded customer lists and manages their own billing", async ({
     `${me}/subscriptions/${sub.id}/resume`,
     token
   )
-  expect(resume.status, JSON.stringify(resume.body)).toBe(202)
-  await expect
-    .poll(state)
-    .toEqual({ status: "active", cancel_scheduled: false, resumable: false })
+  expect(resume.status, JSON.stringify(resume.body)).toBe(200)
+  expect(await state()).toEqual({
+    status: "active",
+    cancel_scheduled: false,
+    resumable: false,
+  })
 })
 
 test("customer routes reject anonymous and foreign access", async ({

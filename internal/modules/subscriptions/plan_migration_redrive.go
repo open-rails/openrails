@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -46,7 +45,7 @@ type PlanMigrationRedriveResult struct {
 	// period. Left blocked; a later pass picks them up.
 	Deferred int `json:"deferred"`
 	// Skipped: stale rows the re-driver must not touch (subscription gone,
-	// cancelled, moved to a different price, target archived, or another
+	// canceled, moved to a different price, target archived, or another
 	// scheduled row owns the subscription).
 	Skipped int `json:"skipped"`
 	// Failed: the re-push failed again; the row is re-blocked with the fresh
@@ -57,9 +56,8 @@ type PlanMigrationRedriveResult struct {
 // RedriveBlocked re-drives blocked plan-change rows across every merchant that
 // has one. batchSize bounds one pass (default 200).
 //
-// The enumeration is a work queue returning merchant ids; every row read,
-// every rail push and every batch-header re-sync happens inside that
-// merchant's own pinned scope.
+// The enumeration is a work queue returning merchant ids; every row read and
+// rail push happens inside that merchant's own pinned scope.
 func (s *PlanMigrationService) RedriveBlocked(ctx context.Context, batchSize int) (*PlanMigrationRedriveResult, error) {
 	if batchSize <= 0 {
 		batchSize = 200
@@ -87,13 +85,12 @@ func (s *PlanMigrationService) RedriveBlocked(ctx context.Context, batchSize int
 }
 
 // redriveMerchant runs one merchant's re-drive inside its pinned scope: read
-// the blocked rows, re-drive each, then re-sync every touched batch header.
+// the blocked rows and re-drive each.
 func (s *PlanMigrationService) redriveMerchant(ctx context.Context, res *PlanMigrationRedriveResult, limit int) error {
 	rows, err := s.reprice.repo.ListRedrivableBlockedPlanChanges(ctx, limit)
 	if err != nil {
 		return fmt.Errorf("redrive: list blocked plan changes: %w", err)
 	}
-	touchedBatches := map[uuid.UUID]struct{}{}
 	for _, row := range rows {
 		res.Examined++
 		outcome, rerr := s.redriveRow(ctx, row)
@@ -112,20 +109,6 @@ func (s *PlanMigrationService) redriveMerchant(ctx context.Context, res *PlanMig
 			res.Skipped++
 		case redriveOutcomeFailed:
 			res.Failed++
-		}
-		if row.RepriceBatchID != nil && outcome != redriveOutcomeDeferred && outcome != redriveOutcomeSkipped {
-			touchedBatches[*row.RepriceBatchID] = struct{}{}
-		}
-	}
-	// Re-sync every touched batch header from its actual rows — the header
-	// must always agree with the per-subscription ledger (#813 invariant).
-	for batchID := range touchedBatches {
-		scheduled, blocked, cerr := s.reprice.repo.CountBatchRows(ctx, batchID)
-		if cerr != nil {
-			return fmt.Errorf("redrive: count batch %s rows: %w", batchID, cerr)
-		}
-		if uerr := s.reprice.repo.UpdatePlanMigrationBatchCounts(ctx, batchID, scheduled, blocked); uerr != nil {
-			return fmt.Errorf("redrive: sync batch %s counts: %w", batchID, uerr)
 		}
 	}
 	return nil
@@ -156,7 +139,7 @@ func (s *PlanMigrationService) redriveRow(ctx context.Context, row *models.Subsc
 		return redriveOutcomeSkipped, nil
 	}
 	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
-		// Left the migratable cohort (cancelled etc.) — the row stays blocked
+		// Left the migratable cohort (canceled etc.) — the row stays blocked
 		// as the honest ledger of what never happened.
 		return redriveOutcomeSkipped, nil
 	}

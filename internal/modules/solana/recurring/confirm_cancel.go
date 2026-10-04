@@ -23,7 +23,7 @@ type cancelConfirmRPC interface {
 // membershipCanceller is the minimal lifecycle surface ConfirmCancel needs to
 // MIRROR the confirmed on-chain cancel into the DB (satisfied by
 // *subscriptions.SubscriptionLifecycleService). The cascade inside
-// CancelMembership flips the linked solana_subscriptions row to cancelled so the
+// CancelMembership flips the linked solana_subscriptions row to canceled so the
 // cranker stops — that cascade IS the mirror step. We call it with
 // RevokeAccess=false so the local state matches the card "cancel-at-period-end".
 type membershipCanceller interface {
@@ -36,8 +36,8 @@ type membershipCanceller interface {
 // subscriber signs (the unsigned tx comes from PrepareCancelService); the wallet
 // signs + sends it. OpenRails then CONFIRMS the cancel landed on-chain and only
 // then MIRRORS it into the DB by cancelling the membership (whose cascade flips
-// the solana_subscriptions row to cancelled, stopping the cranker). There is NO
-// DB-only "soft cancel": we never mark a Solana subscription cancelled in the DB
+// the solana_subscriptions row to canceled, stopping the cranker). There is NO
+// DB-only "soft cancel": we never mark a Solana subscription canceled in the DB
 // unless we have observed the on-chain cancel succeed.
 //
 // The on-chain cancel_subscription sets the subscription's expires_at_ts to the
@@ -72,7 +72,9 @@ func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCan
 // cancellation. Returns an error (and does NOT cancel) if the signature never
 // confirms or confirmed with an on-chain failure — the source of truth is the
 // chain, so a cancel that did not actually land must not touch the DB.
-func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.UUID, signature string) error {
+//
+// reason is the customer's cancellation reason, recorded with the cancel.
+func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.UUID, signature, reason string) error {
 	if subscriptionID == uuid.Nil {
 		return fmt.Errorf("recurring: subscription id is required")
 	}
@@ -91,7 +93,7 @@ func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.
 		return fmt.Errorf("recurring: confirm cancel signature %s: %w", signature, err)
 	}
 	if !outcome.Succeeded() {
-		// Landed but reverted: the subscription is NOT cancelled on-chain.
+		// Landed but reverted: the subscription is NOT canceled on-chain.
 		return fmt.Errorf("recurring: cancel transaction did not succeed on-chain: %w", outcome.OnChainError())
 	}
 
@@ -104,16 +106,19 @@ func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.
 	// expires_at_ts = end-of-current-period.
 	//
 	// The cascade inside CancelMembership flips the linked solana_subscriptions
-	// row to cancelled, stopping the cranker. Independently, once expires_at_ts
-	// passes on-chain the next pull would return Custom:508 (SubscriptionCancelled)
+	// row to canceled, stopping the cranker. Independently, once expires_at_ts
+	// passes on-chain the next pull would return Custom:508 (SubscriptionCanceled)
 	// which ClassifyCrankError maps to Terminal — so this mirror plus the 508
 	// classification together give the complete period-end cancel.
-	cancelType := models.CancelTypeUser
-	if err := s.canceller.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+	params := &subscriptions.CancelMembershipParams{
 		SubscriptionID: &subscriptionID,
-		CancelType:     cancelType,
+		CancelType:     models.CancelTypeUser,
 		RevokeAccess:   false,
-	}); err != nil {
+	}
+	if reason != "" {
+		params.CancelFeedback = &reason
+	}
+	if err := s.canceller.CancelMembership(ctx, params); err != nil {
 		return fmt.Errorf("recurring: mirror on-chain cancel to membership: %w", err)
 	}
 	return nil

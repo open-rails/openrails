@@ -13,12 +13,12 @@ type SubscriptionStatus string
 const (
 	// The status system is designed around a simple question: "Will we attempt to rebill this subscription?"
 	// - If rebilling will be attempted → past_due (when payment fails but we're still trying)
-	// - If rebilling will NEVER be attempted again → cancelled (user cancelled, max retries reached, etc.)
+	// - If rebilling will NEVER be attempted again → canceled (user canceled, max retries reached, etc.)
 
-	StatusPending   SubscriptionStatus = "pending"   // Subscription created, waiting for initial payment confirmation
-	StatusActive    SubscriptionStatus = "active"    // Normal good-standing, successful payments, rebill scheduled
-	StatusPastDue   SubscriptionStatus = "past_due"  // Payment failed but we're still attempting rebills (will retry)
-	StatusCancelled SubscriptionStatus = "cancelled" // Will never rebill again (user cancelled, max retries, admin cancelled, expired)
+	StatusPending  SubscriptionStatus = "pending"  // Subscription created, waiting for initial payment confirmation
+	StatusActive   SubscriptionStatus = "active"   // Normal good-standing, successful payments, rebill scheduled
+	StatusPastDue  SubscriptionStatus = "past_due" // Payment failed but we're still attempting rebills (will retry)
+	StatusCanceled SubscriptionStatus = "canceled" // Will never rebill again (user canceled, max retries, admin canceled, expired)
 	// StatusAwaitingMethod: a renewal was declined because the card needs the
 	// customer's attention. Charging stops, access is kept, and a replaced
 	// method resumes dunning (#1091).
@@ -29,7 +29,7 @@ const (
 )
 
 // Live reports whether the subscription still bills or may bill: every state
-// but pending and cancelled.
+// but pending and canceled.
 func (s SubscriptionStatus) Live() bool {
 	return s == StatusActive || s == StatusPastDue || s == StatusAwaitingMethod || s == StatusUnverified
 }
@@ -38,10 +38,10 @@ func (s SubscriptionStatus) Live() bool {
 type CancelType string
 
 const (
-	CancelTypeUser       CancelType = "user"       // User manually cancelled
-	CancelTypeMerchant   CancelType = "merchant"   // We manually cancelled for them
+	CancelTypeUser       CancelType = "user"       // User manually canceled
+	CancelTypeMerchant   CancelType = "merchant"   // We manually canceled for them
 	CancelTypeExpired    CancelType = "expired"    // User failed to rebill
-	CancelTypeChargeback CancelType = "chargeback" // Cancelled due to chargeback
+	CancelTypeChargeback CancelType = "chargeback" // Canceled due to chargeback
 	CancelTypeUpgrade    CancelType = "upgrade"    // Superseded by a tier upgrade
 )
 
@@ -73,7 +73,6 @@ type Subscription struct {
 	RailSubscriptionID string `json:"rail_subscription_id"` // Subscription ID from rail
 	// PspID is the PSP that owns this subscription (#641).
 	PspID           uuid.UUID  `json:"psp_id"`
-	UserEmail       *string    `json:"user_email,omitempty"`
 	PaymentMethodID *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
 
 	// Manual rebill attempt fields for NMI
@@ -88,7 +87,7 @@ type Subscription struct {
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
 	CancelType     *CancelType `json:"cancel_type"`     // Who/what caused cancellation
-	CancelledAt    *time.Time  `json:"cancelled_at"`
+	CanceledAt     *time.Time  `json:"canceled_at"`
 
 	// DeletionScheduledAt is set for NMI-backed cancellations that defer the
 	// rail-side delete_subscription until shortly before the paid period
@@ -144,7 +143,7 @@ func (s *Subscription) ActivateWithPrice(price *Price) error {
 
 	s.EndedAt = nil
 	s.CancelType = nil
-	s.CancelledAt = nil
+	s.CanceledAt = nil
 	s.PriceID = price.ID
 	s.ProductID = price.ProductID // Update product when price changes (upgrade/downgrade)
 	s.CancelFeedback = nil
@@ -177,7 +176,7 @@ func (s *Subscription) Validate(amountCents int64) error {
 
 	if s.Status == StatusPastDue {
 		if s.RetryAttempts != nil && *s.RetryAttempts >= 5 {
-			return fmt.Errorf("subscription has exceeded maximum dunning attempts, should be cancelled")
+			return fmt.Errorf("subscription has exceeded maximum dunning attempts, should be canceled")
 		}
 	}
 
@@ -189,7 +188,7 @@ type lifecycleFields struct {
 	status                 SubscriptionStatus
 	periodStart, periodEnd time.Time
 	cancelType             CancelType
-	cancelledAt, endedAt   time.Time
+	canceledAt, endedAt    time.Time
 }
 
 func (s *Subscription) lifecycle() lifecycleFields {
@@ -203,8 +202,8 @@ func (s *Subscription) lifecycle() lifecycleFields {
 	if s.CancelType != nil {
 		f.cancelType = *s.CancelType
 	}
-	if s.CancelledAt != nil {
-		f.cancelledAt = s.CancelledAt.UTC()
+	if s.CanceledAt != nil {
+		f.canceledAt = s.CanceledAt.UTC()
 	}
 	if s.EndedAt != nil {
 		f.endedAt = s.EndedAt.UTC()

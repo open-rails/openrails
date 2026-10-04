@@ -21,7 +21,7 @@ import (
 // River's client default is JobTimeoutDefault = 1 minute, and nothing in
 // OpenRails ever overrode it, so EVERY job — dunning across every merchant,
 // cleanup, provider refresh, account-updater batches, ledger integrity — had
-// its context cancelled at 60 s. The worst case is a charge that landed at
+// its context canceled at 60 s. The worst case is a charge that landed at
 // NMI at t=60 whose bookkeeping never ran. The number appeared nowhere in
 // OpenRails code, docs or tests.
 //
@@ -42,13 +42,13 @@ import (
 //   - PROGRESS: workers report units of work through progress.Mark. A job that
 //     stays silent past the same staleness rule the fleet monitor applies to
 //     its kind (k x declared cadence, floored — progress.go, one function) is
-//     wedged, and its context is cancelled with a NoProgressError that names
+//     wedged, and its context is canceled with a NoProgressError that names
 //     the last thing it reported. "A clock reading is not a death certificate"
 //     (jobs_dunning.go); silence is.
 //
 // A job that dies WITH its process stops beating and stops marking; River's
 // rescuer takes it back at its horizon. A job that is alive but wedged keeps
-// beating (so it is never duplicated) and is cancelled here (so it does not
+// beating (so it is never duplicated) and is canceled here (so it does not
 // hold a worker slot forever). A job that is alive and progressing runs for as
 // long as the work takes.
 
@@ -62,7 +62,7 @@ const JobLivenessBeat = time.Minute
 // progress — a leaf package, so the intent runner and the reconcile engine can
 // mark on the context they were handed without importing this one).
 
-// NoProgressError is the reason a wedged job was cancelled: what it last
+// NoProgressError is the reason a wedged job was canceled: what it last
 // reported, and how long ago. It is what the job row's error records.
 type NoProgressError struct {
 	Kind      string
@@ -244,7 +244,7 @@ func (m *JobLivenessMiddleware) beatLiveness(ctx context.Context, job *rivertype
 		return
 	}
 	// Detached from the job's context on purpose: the beat must land even in
-	// the instant the job is being cancelled, and a beat is a single indexed
+	// the instant the job is being canceled, and a beat is a single indexed
 	// UPDATE by primary key.
 	ctx, stop := context.WithTimeout(context.WithoutCancel(ctx), m.beat())
 	defer stop()

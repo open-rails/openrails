@@ -2,7 +2,10 @@ package billing
 
 import "time"
 
-type TierChangeResponse struct {
+// TierChange is the result of a tier change. Status is succeeded,
+// processing, requires_action or blocked; NextAction names the customer's
+// step when it is requires_action.
+type TierChange struct {
 	Object         string                         `json:"object"`                    // "tier_change"
 	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
@@ -12,9 +15,9 @@ type TierChangeResponse struct {
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutAttemptPaymentResponse `json:"payment"`                   // Rail info
 	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
-	NextAction     *CheckoutAttemptNextAction     `json:"next_action,omitempty"`     // For redirects
-	Message        string                         `json:"message,omitempty"`         // User-friendly message
-	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
+	NextAction     *NextAction                    `json:"next_action,omitempty"`
+	Message        string                         `json:"message,omitempty"`       // User-friendly message
+	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"` // For scheduled downgrades
 	// Money summary so the client can confirm/announce what actually happened.
 	// AmountDueNow is what was charged immediately (0 for a scheduled downgrade);
 	// NextChargeAmount/NextChargeDate describe the next renewal at the new price.
@@ -72,7 +75,7 @@ const (
 	CodeTierChangeRequiresLinkedPlan = "tier_change_requires_linked_plan"
 )
 
-type TierChangePreviewResponse struct {
+type TierChangePreview struct {
 	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
 	PriceID          string     `json:"price_id"`
@@ -110,6 +113,9 @@ type CheckoutAttemptPaymentResponse struct {
 	TransactionID  string `json:"transaction_id,omitempty"`
 }
 
-type ChangeTierRequest struct {
-	PriceID string `json:"price_id"`
+// ChangeTierParams moves a subscription to another price of its tier group.
+// IdempotencyKey identifies the change; reuse it until the change resolves.
+type ChangeTierParams struct {
+	PriceID        PriceID `json:"price_id"`
+	IdempotencyKey string  `json:"-"`
 }

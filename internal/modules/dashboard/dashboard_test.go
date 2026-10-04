@@ -49,7 +49,7 @@ const goldenWidget = `{"query":{"measures":["cancellations"],"by":["time"],"grai
 func generate(t *testing.T, base *metrics.Query, responses ...string) (*GenerateResult, *scriptLLM, error) {
 	t.Helper()
 	llm := &scriptLLM{responses: responses}
-	res, err := NewService(Deps{LLM: llm}).Generate(context.Background(), "cancelled per day", base)
+	res, err := NewService(Deps{LLM: llm}).Generate(context.Background(), "canceled per day", base)
 	return res, llm, err
 }
 
@@ -89,5 +89,5 @@ func TestGenerate(t *testing.T) {
 	turn := llm.calls[0][0].Content
 	require.Contains(t, turn, "Current query to modify:")
 	require.Contains(t, turn, `"grain":"week"`)
-	require.Contains(t, turn, "Instruction: cancelled per day")
+	require.Contains(t, turn, "Instruction: canceled per day")
 }

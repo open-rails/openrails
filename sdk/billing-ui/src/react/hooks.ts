@@ -1,7 +1,11 @@
 import { useCallback, useMemo, useState } from "react"
 
-import type { SendSolanaTransaction, SolanaCancelStage } from "../client/client"
-import { toBillingError, type BillingError } from "../client/errors"
+import {
+  isWalletAction,
+  signWalletAction,
+  type SendSolanaTransaction,
+} from "../client/client"
+import { localError, toBillingError, type BillingError } from "../client/errors"
 import type {
   NewCard,
   Payment,
@@ -11,13 +15,19 @@ import type {
   TierChange,
 } from "../client/types"
 import { useBillingContext } from "./context"
-import { sleep, useRemote } from "./remote"
+import { useRemote } from "./remote"
 
 // Actions never throw: they resolve to null on success or the error.
 export type ActionResult = Promise<BillingError | null>
 
+/** `signing` and `confirming` are a wallet step's stages. */
 export type SubscriptionAction =
-  "cancel" | "resume" | "payment_method" | "change_tier" | SolanaCancelStage
+  | "cancel"
+  | "resume"
+  | "payment_method"
+  | "change_tier"
+  | "signing"
+  | "confirming"
 
 export interface SubscriptionsOptions {
   /** Server filter; default `all`. */
@@ -27,17 +37,22 @@ export interface SubscriptionsOptions {
 
 export interface SubscriptionsState {
   subscriptions: Subscription[] | null
-  total: number | null
+  /** The next page's cursor; null on the last page. */
+  nextCursor: string | null
   loading: boolean
   error: BillingError | null
   refetch: () => void
   /** In-flight action per subscription id. */
   pending: Readonly<Record<string, SubscriptionAction>>
-  cancel: (subscriptionId: string, feedback: string) => ActionResult
-  /** Solana rail: the wallet signs the server-prepared cancel transaction. */
-  cancelOnChain: (
+  /**
+   * Cancels at period end. A Solana subscription is canceled by the wallet:
+   * pass `sendTransaction`; without it the cancel resolves to a
+   * `wallet_required` error.
+   */
+  cancel: (
     subscriptionId: string,
-    sendTransaction: SendSolanaTransaction
+    reason: string,
+    sendTransaction?: SendSolanaTransaction
   ) => ActionResult
   resume: (subscriptionId: string) => ActionResult
   setPaymentMethod: (
@@ -45,19 +60,16 @@ export interface SubscriptionsState {
     paymentMethodId: string
   ) => ActionResult
   /**
-   * Card rails: `client.changeTier`. Resolves to the change, whose `status`
-   * may still be `processing` or `requires_action`, or to the error.
+   * Resolves to the change, whose `status` may still be `processing` or
+   * `requires_action`, or to the error. A Solana change is signed with
+   * `sendTransaction` and resolves once the chain confirms it.
    */
   changeTier: (
     subscriptionId: string,
-    input: { priceId: string; idempotencyKey: string }
+    input: { priceId: string; idempotencyKey: string },
+    sendTransaction?: SendSolanaTransaction
   ) => Promise<TierChange | BillingError>
 }
-
-const cancelApplied = (s: Subscription) =>
-  !!s.cancel_scheduled || s.status === "cancelled" || !!s.resumable
-const resumeApplied = (s: Subscription) =>
-  !s.cancel_scheduled && s.status !== "cancelled"
 
 function usePending<A extends string>() {
   const [pending, setPending] = useState<Readonly<Record<string, A>>>({})
@@ -72,10 +84,13 @@ function usePending<A extends string>() {
   return [pending, mark] as const
 }
 
+const walletRequired = () =>
+  localError("wallet_required", "A wallet must sign this action.")
+
 export function useSubscriptions(
   options: SubscriptionsOptions = {}
 ): SubscriptionsState {
-  const { client, version, notify, settle } = useBillingContext()
+  const { client, version, notify } = useBillingContext()
   const status = options.status ?? "all"
   const limit = options.limit ?? 100
   const remote = useRemote(`${status}|${limit}|${version}`, (signal) =>
@@ -84,36 +99,27 @@ export function useSubscriptions(
   const [pending, mark] = usePending<SubscriptionAction>()
   const { replace } = remote
 
-  // Re-reads a queued change until it shows, then patches the row.
-  const settleRow = useCallback(
-    async (id: string, applied: (s: Subscription) => boolean) => {
-      for (let i = 0; i < settle.attempts; i++) {
-        const next = await client.getSubscription(id).catch(() => null)
-        if (next && applied(next)) {
-          replace((page) => ({
-            ...page,
-            data: page.data.map((s) => (s.id === id ? next : s)),
-          }))
-          return true
-        }
-        await sleep(settle.intervalMs)
-      }
-      return false
-    },
-    [client, replace, settle.attempts, settle.intervalMs]
+  const patchRow = useCallback(
+    (next: Subscription) =>
+      replace((page) => ({
+        ...page,
+        data: page.data.map((s) => (s.id === next.id ? next : s)),
+      })),
+    [replace]
   )
 
   const act = useCallback(
     async (
       id: string,
       action: SubscriptionAction,
-      run: () => Promise<boolean | void>,
-      done?: (settled: boolean) => void
+      run: () => Promise<Subscription>,
+      done: (subscription: Subscription) => void
     ): ActionResult => {
       mark(id, action)
       try {
-        const settled = await run()
-        done?.(settled !== false)
+        const next = await run()
+        patchRow(next)
+        done(next)
         return null
       } catch (err) {
         return toBillingError(err)
@@ -121,48 +127,31 @@ export function useSubscriptions(
         mark(id, null)
       }
     },
-    [mark]
+    [mark, patchRow]
   )
 
+  // A declined wallet prompt resolves to a `wallet_rejected` error.
   const cancel = useCallback(
-    (id: string, feedback: string) =>
+    (id: string, reason: string, sendTransaction?: SendSolanaTransaction) =>
       act(
         id,
         "cancel",
         async () => {
-          await client.cancelSubscription(id, { feedback })
-          return settleRow(id, cancelApplied)
-        },
-        (settled) =>
-          notify({
-            type: "subscription.cancelled",
-            subscriptionId: id,
-            settled,
-          })
-      ),
-    [act, client, notify, settleRow]
-  )
-
-  // A declined wallet prompt resolves to a `wallet_rejected` error.
-  const cancelOnChain = useCallback(
-    (id: string, sendTransaction: SendSolanaTransaction) =>
-      act(
-        id,
-        "preparing",
-        async () => {
-          await client.cancelSubscriptionOnChain(id, sendTransaction, (stage) =>
-            mark(id, stage)
+          const sub = await client.cancelSubscription(id, { reason })
+          if (!sub.next_action) return sub
+          if (!isWalletAction(sub.next_action) || !sendTransaction)
+            throw walletRequired()
+          mark(id, "signing")
+          const signature = await signWalletAction(
+            sub.next_action,
+            sendTransaction
           )
-          return settleRow(id, cancelApplied)
+          mark(id, "confirming")
+          return client.cancelSubscription(id, { reason, signature })
         },
-        (settled) =>
-          notify({
-            type: "subscription.cancelled",
-            subscriptionId: id,
-            settled,
-          })
+        () => notify({ type: "subscription.canceled", subscriptionId: id })
       ),
-    [act, client, mark, notify, settleRow]
+    [act, client, mark, notify]
   )
 
   const resume = useCallback(
@@ -170,14 +159,10 @@ export function useSubscriptions(
       act(
         id,
         "resume",
-        async () => {
-          await client.resumeSubscription(id)
-          return settleRow(id, resumeApplied)
-        },
-        (settled) =>
-          notify({ type: "subscription.resumed", subscriptionId: id, settled })
+        () => client.resumeSubscription(id),
+        () => notify({ type: "subscription.resumed", subscriptionId: id })
       ),
-    [act, client, notify, settleRow]
+    [act, client, notify]
   )
 
   const setPaymentMethod = useCallback(
@@ -185,15 +170,7 @@ export function useSubscriptions(
       act(
         id,
         "payment_method",
-        async () => {
-          await client.setSubscriptionPaymentMethod(id, paymentMethodId)
-          replace((page) => ({
-            ...page,
-            data: page.data.map((s) =>
-              s.id === id ? { ...s, payment_method_id: paymentMethodId } : s
-            ),
-          }))
-        },
+        () => client.setSubscriptionPaymentMethod(id, paymentMethodId),
         () =>
           notify({
             type: "subscription.payment_method_changed",
@@ -201,15 +178,32 @@ export function useSubscriptions(
             paymentMethodId,
           })
       ),
-    [act, client, notify, replace]
+    [act, client, notify]
   )
 
   // An upgrade may open a successor subscription: notify refetches the list.
   const changeTier = useCallback(
-    async (id: string, input: { priceId: string; idempotencyKey: string }) => {
+    async (
+      id: string,
+      input: { priceId: string; idempotencyKey: string },
+      sendTransaction?: SendSolanaTransaction
+    ) => {
       mark(id, "change_tier")
       try {
-        const change = await client.changeTier(id, input)
+        let change = await client.changeTier(id, input)
+        if (
+          change.status === "requires_action" &&
+          isWalletAction(change.next_action) &&
+          sendTransaction
+        ) {
+          mark(id, "signing")
+          const signature = await signWalletAction(
+            change.next_action!,
+            sendTransaction
+          )
+          mark(id, "confirming")
+          change = await client.changeTier(id, { ...input, signature })
+        }
         notify({
           type: "subscription.tier_changed",
           subscriptionId: id,
@@ -227,13 +221,12 @@ export function useSubscriptions(
 
   return {
     subscriptions: remote.data?.data ?? null,
-    total: remote.data?.total ?? null,
+    nextCursor: remote.data?.next_cursor ?? null,
     loading: remote.loading,
     error: remote.error,
     refetch: remote.refetch,
     pending,
     cancel,
-    cancelOnChain,
     resume,
     setPaymentMethod,
     changeTier,

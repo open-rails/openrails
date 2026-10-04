@@ -106,11 +106,11 @@ func (b *legacyBook) add(r *bookRow) *bookRow {
 // sub is the row's local subscription.
 func (r *bookRow) sub(w *world, tp topology) *billing.Subscription {
 	w.t.Helper()
-	subs, err := w.client[tp].ListSubscriptions(w.t.Context(), billing.SubscriptionFilter{CustomerID: r.c.id})
+	subs, err := w.client[tp].ListSubscriptions(w.t.Context(), billing.SubscriptionListParams{CustomerID: r.c.customerID()})
 	require.NoError(w.t, err)
-	for i := range subs.Data {
-		if subs.Data[i].RailSubscriptionID == r.schedule {
-			return &subs.Data[i]
+	for i := range subs.Items {
+		if subs.Items[i].RailSubscriptionID == r.schedule {
+			return &subs.Items[i]
 		}
 	}
 	w.t.Fatalf("%s: no local subscription for schedule %s", r.source, r.schedule)
@@ -190,9 +190,9 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			pastDue := b.add(&bookRow{source: "past_due", tier: monthly, paid: now.Add(-day), declared: true,
 				dunning: &billing.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
 			w.nmi.EditSchedule(pastDue.schedule, func(s *nmimock.Schedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
-			cancelled := b.add(&bookRow{source: "cancelled", tier: monthly, paid: now.Add(20 * day), declared: true,
-				cancel: billing.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
-			w.nmi.DeleteSchedule(cancelled.schedule)
+			canceled := b.add(&bookRow{source: "canceled", tier: monthly, paid: now.Add(20 * day), declared: true,
+				cancel: billing.CancelEvidence{Kind: "user_canceled", At: now.Add(-5 * day)}})
+			w.nmi.DeleteSchedule(canceled.schedule)
 			expired := b.add(&bookRow{source: "expired", tier: monthly, paid: now.Add(-35 * day), declared: true,
 				cancel: billing.CancelEvidence{Kind: "provider_terminated", At: now.Add(-35 * day)}})
 			w.nmi.DeleteSchedule(expired.schedule)
@@ -200,7 +200,7 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			// member's cancellation at the pause, with runway, and the paused
 			// schedule is left alone (schedule_live=false).
 			paused := b.add(&bookRow{source: "paused", tier: monthly, paid: now.Add(5 * day), declared: true,
-				cancel: billing.CancelEvidence{Kind: "user_cancelled", At: now.Add(-2 * day)}})
+				cancel: billing.CancelEvidence{Kind: "user_canceled", At: now.Add(-2 * day)}})
 			w.nmi.EditSchedule(paused.schedule, func(s *nmimock.Schedule) { s.Paused = true })
 			calendar := b.add(&bookRow{source: "calendar", tier: monthly, months: 1, paid: now.Add(15 * day), declared: true})
 			gone := b.add(&bookRow{source: "gone_at_nmi", tier: monthly, paid: now.Add(8 * day), declared: true})
@@ -234,12 +234,12 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			}
 			wants := []want{
 				{active, "active", "", true}, {shared, "active", "", true}, {yearlyRow, "active", "", true}, {calendar, "active", "", true}, {gone, "active", "", true},
-				{pastDue, "past_due", "", true}, {cancelled, "cancelled", "user", true}, {expired, "cancelled", "expired", false}, {paused, "cancelled", "user", true},
+				{pastDue, "past_due", "", true}, {canceled, "canceled", "user", true}, {expired, "canceled", "expired", false}, {paused, "canceled", "user", true},
 			}
 			state := map[string]string{}
 			for _, x := range wants {
 				sub := x.row.sub(w, tp)
-				require.Equal(t, x.status, sub.Status, x.row.source)
+				require.Equal(t, x.status, string(sub.Status), x.row.source)
 				require.Equal(t, "nmi_schedule", sub.CollectionPolicy, x.row.source, "every NMI schedule is dunned by OpenRails")
 				require.NotNil(t, sub.PaymentMethodID, x.row.source)
 				require.NotNil(t, sub.CurrentPeriodEndsAt, x.row.source)
@@ -285,11 +285,11 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			w.armDestructive()
 			w.pull()
 			require.Contains(t, w.openFindings("pull.subscription.missing"), stray, "the NMI-only schedule is surfaced")
-			require.Equal(t, "cancelled", gone.sub(w, tp).Status, "the schedule NMI deleted is mirrored")
+			require.Equal(t, billing.SubscriptionCanceled, gone.sub(w, tp).Status, "the schedule NMI deleted is mirrored")
 			require.Empty(t, w.openFindings("pull.subscription.drift"), "matching schedules raise no drift")
 			require.Empty(t, w.openFindings("pull.payment_method.mismatch"), "each card of a multi-card vault matches its own billing entry")
-			require.Equal(t, "active", active.sub(w, tp).Status)
-			require.Equal(t, "cancelled", paused.sub(w, tp).Status, "the paused schedule stays a runway cancellation")
+			require.Equal(t, billing.SubscriptionActive, active.sub(w, tp).Status)
+			require.Equal(t, billing.SubscriptionCanceled, paused.sub(w, tp).Status, "the paused schedule stays a runway cancellation")
 
 			require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charges a provider-owned book")
 			require.Len(t, w.nmiWrites(), writes, "import and pull never write to NMI")

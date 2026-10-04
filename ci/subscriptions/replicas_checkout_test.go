@@ -120,9 +120,9 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			}, 60*time.Second, 50*time.Millisecond, "a survivor reclaims the key and resolves the sale")
 			require.Equal(t, before+1, charges(), "the reclaimed request never charges again")
 			require.Equal(t, attempts+1, f.submissionCount(rail), "one provider submission")
-			owned, err := b.client[embedded].CheckEntitlements(t.Context(), victim.id, []string{"content:post"}, time.Time{})
+			owned, err := b.client[embedded].HasEntitlement(t.Context(), victim.customerID(), "content:post", time.Time{})
 			require.NoError(t, err)
-			require.True(t, owned["content:post"])
+			require.True(t, owned)
 			var claims int64
 			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claims FROM billing.idempotency_keys
 				WHERE operation = 'checkout_attempt_create' AND idempotency_key LIKE $1`), victim.id+":%").Scan(&claims))
@@ -253,9 +253,9 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	price := a.membership("content:members", 9_990_000)
 	charges := func() int { return len(f.base.nmi.Ledger("")) }
 	subscriptions := func(c *customer) int {
-		subs, err := b.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
+		subs, err := b.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 		require.NoError(t, err)
-		return len(subs.Data)
+		return len(subs.Items)
 	}
 	request := func(c *customer, key string) billing.CreateCheckoutAttemptRequest {
 		return billing.CreateCheckoutAttemptRequest{

@@ -38,14 +38,21 @@ SELECT * FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND status = 'scheduled'
 LIMIT 1;
 
--- name: ListSubscriptionReprices :many
+-- name: ListSubscriptionRepricesPage :many
 SELECT * FROM billing.subscription_reprices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(reprice_batch_id)::uuid IS NULL OR reprice_batch_id = sqlc.narg(reprice_batch_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
-ORDER BY created_at DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- The batch's still-scheduled reprices, for a batch cancel.
+-- name: ListScheduledBatchReprices :many
+SELECT * FROM billing.subscription_reprices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND reprice_batch_id = sqlc.arg(reprice_batch_id)::uuid AND status = 'scheduled'
+ORDER BY id;
 
 -- name: CancelSubscriptionReprice :execrows
 UPDATE billing.subscription_reprices SET
@@ -101,17 +108,6 @@ UPDATE billing.subscription_reprices SET
     status = 'scheduled',
     blocked_reason = ''
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'blocked';
-
--- #816: batch-header re-sync source of truth. Rows exist only for
--- scheduled/blocked cohort members (skips are header-only), and the header's
--- "scheduled" has always counted every auto-migratable row regardless of how
--- far it progressed — so non-blocked = scheduled|applied|canceled.
--- name: CountPlanMigrationBatchRows :one
-SELECT
-    count(*) FILTER (WHERE status = 'blocked')  AS blocked,
-    count(*) FILTER (WHERE status <> 'blocked') AS scheduled
-FROM billing.subscription_reprices
-WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND reprice_batch_id = sqlc.arg(batch_id)::uuid;
 
 -- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice.
 -- Ids only; the re-driver reads the rows per merchant.

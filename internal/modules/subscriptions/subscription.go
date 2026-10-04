@@ -9,27 +9,26 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/query"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
 )
 
 type GetSubscriptionsFilters struct {
-	CustomerID      string     `form:"customer_id"`
-	Status          string     `form:"status"`
-	PriceID         uuid.UUID  `form:"price_id"`
-	Rail            string     `form:"rail"`
-	CreatedAfter    *time.Time `form:"created_after" time_format:"2006-01-02"`
-	CreatedBefore   *time.Time `form:"created_before" time_format:"2006-01-02"`
-	CancelledAfter  *time.Time `form:"cancelled_after" time_format:"2006-01-02"`
-	CancelledBefore *time.Time `form:"cancelled_before" time_format:"2006-01-02"`
-	ExpiresBefore   *time.Time `form:"expires_before" time_format:"2006-01-02"`
-	SortBy          string     `form:"sort_by"`    // created_at (default), expires_at, cancelled_at
-	SortOrder       string     `form:"sort_order"` // asc, desc (default)
+	CustomerID     billing.CustomerID `form:"customer_id"`
+	Status         string             `form:"status"`
+	PriceID        billing.PriceID    `form:"price_id"`
+	Rail           string             `form:"rail"`
+	CreatedAfter   *time.Time         `form:"created_after" time_format:"2006-01-02"`
+	CreatedBefore  *time.Time         `form:"created_before" time_format:"2006-01-02"`
+	CanceledAfter  *time.Time         `form:"canceled_after" time_format:"2006-01-02"`
+	CanceledBefore *time.Time         `form:"canceled_before" time_format:"2006-01-02"`
+	ExpiresBefore  *time.Time         `form:"expires_before" time_format:"2006-01-02"`
 }
 
 type SubscriptionService struct {
@@ -197,33 +196,48 @@ func (s *SubscriptionService) Update(ctx context.Context, subscription *models.S
 }
 
 // ReplaceForTierChange atomically swaps oldSub (pre-mutated by the caller to
-// its cancelled state) for newSub in one transaction, so the one-live-
+// its canceled state) for newSub in one transaction, so the one-live-
 // subscription-per-(subject, tier-group) unique index is never violated and a
 // failure leaves the old subscription active (SEC-10 — nothing to reactivate).
 func (s *SubscriptionService) ReplaceForTierChange(ctx context.Context, oldSub, newSub *models.Subscription) error {
 	return s.subscriptionRepo.ReplaceForTierChange(ctx, oldSub, newSub, s.now())
 }
 
-func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.QueryOptions[GetSubscriptionsFilters]) ([]*models.Subscription, int64, error) {
-	repoParams := query.QueryOptions[SubscriptionFilters]{
-		Filters: SubscriptionFilters{
-			UserID:          params.Filters.CustomerID,
-			Status:          params.Filters.Status,
-			PriceID:         params.Filters.PriceID,
-			Rail:            params.Filters.Rail,
-			CreatedAfter:    params.Filters.CreatedAfter,
-			CreatedBefore:   params.Filters.CreatedBefore,
-			CancelledAfter:  params.Filters.CancelledAfter,
-			CancelledBefore: params.Filters.CancelledBefore,
-			ExpiresBefore:   params.Filters.ExpiresBefore,
-			SortBy:          params.Filters.SortBy,
-			SortOrder:       params.Filters.SortOrder,
-		},
-		Limit:  params.Limit,
-		Offset: params.Offset,
+func (f GetSubscriptionsFilters) repo() SubscriptionFilters {
+	var customer string
+	if !f.CustomerID.IsZero() {
+		customer = f.CustomerID.String()
 	}
+	return SubscriptionFilters{
+		UserID: customer, Status: f.Status, PriceID: f.PriceID.UUID(), Rail: f.Rail,
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
+		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
+	}
+}
 
-	return s.subscriptionRepo.GetSubscribers(ctx, repoParams)
+// ListSubscribers is one page of the merchant's subscriptions matching f,
+// newest first.
+func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*models.Subscription], error) {
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return billing.ListPage[*models.Subscription]{}, err
+	}
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return billing.ListPage[*models.Subscription]{}, err
+	}
+	rows, err := s.subscriptionRepo.ListPage(ctx, f.repo(), pagination.Fetch(limit), afterAt, afterID)
+	if err != nil {
+		return billing.ListPage[*models.Subscription]{}, err
+	}
+	return pagination.Cut(rows, limit, func(sub *models.Subscription) any {
+		return pagination.TimeID{At: sub.CreatedAt, ID: sub.ID}
+	}), nil
+}
+
+// CountSubscribers is how many of the merchant's subscriptions match f.
+func (s *SubscriptionService) CountSubscribers(ctx context.Context, f GetSubscriptionsFilters) (int64, error) {
+	return s.subscriptionRepo.Count(ctx, f.repo())
 }
 
 func (s *SubscriptionService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {

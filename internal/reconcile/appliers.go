@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -158,28 +161,18 @@ func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMe
 }
 
 func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error) {
-	now := w.now()
-	granted := 0
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return granted, err
+		return 0, err
 	}
-	for _, name := range a.Entitlements {
-		n, err := w.DB.Gen(ctx).ReconcileGrantSubscriptionEntitlement(ctx, gen.ReconcileGrantSubscriptionEntitlementParams{
-			MerchantID:     tid.UUID(),
-			CustomerID:     a.CustomerID,
-			Entitlement:    name,
-			StartAt:        a.StartAt,
-			EndAt:          a.EndAt,
-			SubscriptionID: a.SubscriptionID,
-			Now:            now,
-		})
-		if err != nil {
-			return granted, err
-		}
-		granted += int(n)
-	}
-	return granted, nil
+	granted := 0
+	err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		gl := grants.New(gen.New(tx), tid.UUID())
+		gl.SetClock(w.now)
+		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.Entitlements, a.StartAt, a.EndAt)
+		return err
+	})
+	return granted, err
 }
 
 // MaterializeSubscription creates the local subscription for a resolved PS-1
@@ -189,10 +182,6 @@ func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlemen
 // spec, and entitlements are granted through the normal subscription-sourced
 // path when the remote period is still running.
 func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error) {
-	var emailPtr *string
-	if email := a.UserEmail; email != "" {
-		emailPtr = &email
-	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return MaterializeResult{}, err
@@ -202,7 +191,6 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		Status:             string(a.Status),
 		Rail:               a.Rail,
 		RailSubscriptionID: a.RailSubscriptionID,
-		UserEmail:          emailPtr,
 		PeriodStartsAt:     a.PeriodStartsAt,
 		PeriodEndsAt:       a.PeriodEndsAt,
 		StartedAt:          a.StartedAt,
@@ -218,6 +206,9 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return MaterializeResult{}, nil // already materialized (or price vanished): no-op
 	}
 	res := MaterializeResult{SubscriptionID: rows[0].ID, Created: true}
+	if err := subscriptions.FillCustomerEmail(ctx, w.DB.Gen(ctx), a.CustomerID, a.CustomerEmail); err != nil {
+		return res, fmt.Errorf("record customer email: %w", err)
+	}
 
 	// Entitlements via the normal subscription-sourced path, for the remote
 	// period when it is still running (mirrors the PS-4 current-period grant).

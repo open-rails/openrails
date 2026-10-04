@@ -79,11 +79,11 @@ func TestDecodeSubscriptionAccountByteLayout(t *testing.T) {
 		InitID: -3, Amount: 5_000_000, PeriodHours: 720, CreatedAt: 1_700_000_000,
 		AmountPulledInPeriod: 4_000_000, CurrentPeriodStartTs: 1_750_000_000, ExpiresAtTs: 1_752_592_000,
 	}, *s)
-	require.True(t, s.Cancelled())
+	require.True(t, s.Canceled())
 
 	s, err = DecodeSubscriptionAccount(build(0))
 	require.NoError(t, err)
-	require.False(t, s.Cancelled(), "expiresAt 0 = active")
+	require.False(t, s.Canceled(), "expiresAt 0 = active")
 
 	_, err = DecodeSubscriptionAccount(blob[:SubscriptionAccountSize-1])
 	require.ErrorContains(t, err, "too short")

@@ -44,10 +44,10 @@ func TestTransitionWritesTheDecidedRow(t *testing.T) {
 	sub.RetryAttempts, sub.NextRetryAt, sub.GraceEndsAt = nil, nil, nil
 	_, err = Transition(sub, lifecycle.Cancel{Kind: lifecycle.CancelUser, At: now}, now)
 	require.NoError(t, err)
-	require.Equal(t, models.StatusCancelled, sub.Status)
+	require.Equal(t, models.StatusCanceled, sub.Status)
 	require.Equal(t, models.CancelTypeUser, *sub.CancelType)
 	require.Equal(t, end, *sub.EndedAt, "a user cancel keeps what was paid")
-	require.Equal(t, now, *sub.CancelledAt)
+	require.Equal(t, now, *sub.CanceledAt)
 
 	effects, err = Transition(sub, lifecycle.Resume{At: now.Add(time.Hour)}, now.Add(time.Hour))
 	require.NoError(t, err)
@@ -67,5 +67,5 @@ func TestTransitionWritesTheDecidedRow(t *testing.T) {
 	sub.CollectionPolicy, sub.Rail = models.CollectionPolicyProvider, models.RailStripe
 	_, err = Transition(sub, lifecycle.RenewalDeclined{PeriodStart: end, Bucket: lifecycle.NonRecoverable}, now)
 	require.NoError(t, err)
-	require.Equal(t, models.StatusPastDue, sub.Status, "a provider-owned decline is mirrored, never cancelled here")
+	require.Equal(t, models.StatusPastDue, sub.Status, "a provider-owned decline is mirrored, never canceled here")
 }

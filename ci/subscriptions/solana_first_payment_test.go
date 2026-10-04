@@ -129,9 +129,9 @@ func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (int, map[str
 // checkout still awaits its payment.
 func (s *solanaShop) requireNothingGranted(t *testing.T, b *solanaBuyer, c *solanaCheckout) {
 	t.Helper()
-	subs, err := s.w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: b.id})
+	subs, err := s.w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: b.customerID()})
 	require.NoError(t, err)
-	require.Empty(t, subs.Data)
+	require.Empty(t, subs.Items)
 	require.Empty(t, s.w.payments(embedded, b.id))
 	require.False(t, b.entitled(s.key))
 	require.Equal(t, "requires_action", s.w.attempt(c.id)["status"])

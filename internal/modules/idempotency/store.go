@@ -228,7 +228,7 @@ func (c *Claim) renew(ctx context.Context) (time.Time, error) {
 }
 
 // Hold renews the lease every quarter lease and returns the context the owner
-// works under. It is cancelled with ErrClaimLost once a renewal is refused,
+// works under. It is canceled with ErrClaimLost once a renewal is refused,
 // or when none was confirmed in time to be sure the lease has not lapsed.
 // stop ends the renewals; call it before Complete or Fail.
 func (c *Claim) Hold(ctx context.Context) (context.Context, func()) {

@@ -233,7 +233,7 @@ type crankKind int
 const (
 	crankSucceeded    crankKind = iota // pulled + renewed + advanced
 	crankAlreadyPaid                   // period already paid on-chain; advanced without local renewal
-	crankCancelled                     // delegate revoked → membership cancelled (no dunning)
+	crankCanceled                      // delegate revoked → membership canceled (no dunning)
 	crankDunned                        // recoverable decline → FailMembership + rescheduled
 	crankGhostExpired                  // ghost plan → row expired
 )
@@ -345,8 +345,8 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			if err := w.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err
 			}
-			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
-				return crankOutcome{}, fmt.Errorf("solana crank: set cancelled status: %w", err)
+			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCanceled); err != nil {
+				return crankOutcome{}, fmt.Errorf("solana crank: set canceled status: %w", err)
 			}
 			subID := row.SubscriptionID
 			proc := models.RailSolana
@@ -361,7 +361,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				return crankOutcome{}, fmt.Errorf("solana crank: cancel membership: %w", err)
 			}
 			return crankOutcome{
-				kind:     crankCancelled,
+				kind:     crankCanceled,
 				reason:   reason,
 				evidence: map[string]any{"decline_code": string(cf.Code)},
 			}, nil
@@ -394,7 +394,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}
 			if gap <= 0 {
 				// That failure was terminal under the schedule (FailMembership
-				// cancelled the membership); advance one period so this record
+				// canceled the membership); advance one period so this record
 				// doesn't hot-loop while the cancellation settles.
 				periodHoursI64, err := safecast.Convert[int64](periodHours)
 				if err != nil {

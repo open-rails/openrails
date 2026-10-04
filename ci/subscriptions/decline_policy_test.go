@@ -48,7 +48,7 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 	}{
 		{"do_not_honor", "201", "past_due", true},
 		{"expired_card", "223", "awaiting_method", false},
-		{"stolen_card", "252", "cancelled", false},
+		{"stolen_card", "252", "canceled", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -62,13 +62,13 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 			w.settle()
 			sub := w.subscription(embedded, l.sub)
-			require.Equal(t, tc.status, sub.Status)
+			require.Equal(t, tc.status, string(sub.Status))
 			if !tc.retry {
 				require.Nil(t, sub.NextRetryAt)
 				w.advance(3 * day)
 				w.runRenewals()
 				require.Zero(t, len(w.nmi.Attempts()), "no OpenRails charge against this card")
-				if tc.status == "cancelled" {
+				if tc.status == "canceled" {
 					w.wake() // past the system delete's 24h cooling-off
 					require.False(t, w.nmi.ScheduleLive(l.railSub), "the NMI schedule is ended")
 				}
@@ -80,7 +80,7 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			w.runRenewals()
 			require.Len(t, w.nmi.Attempts(), 1, "OpenRails retries the declined period")
 			sub = w.subscription(embedded, l.sub)
-			require.Equal(t, "past_due", sub.Status)
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			require.NotNil(t, sub.NextRetryAt)
 			require.WithinDuration(t, first.Add(5*day), *sub.NextRetryAt, time.Minute)
 			require.True(t, w.nmi.ScheduleLive(l.railSub))

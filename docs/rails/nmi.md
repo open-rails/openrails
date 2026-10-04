@@ -148,7 +148,7 @@ Enable these event types (what the handler consumes):
 - `transaction.refund.success` / `.failure`
 - `transaction.void.success` / `.failure`
 - `chargeback.batch.complete` — auto-reconciled: refund recorded, subscription
-  cancelled
+  canceled
 - `acu.summary.automaticallyupdated` / `.closedaccount` / `.contactcustomer`
   (Automatic Card Updater). An updated card is re-read from the vault, and
   memberships waiting on it retry at the next due pass. A closed account parks
@@ -256,7 +256,7 @@ doesn't surprise you:
   also documents `initial_recurring` and says processor support varies; obtain
   written confirmation from the ISO/acquirer before changing this value for a
   merchant account.
-- **Cancelled subscriptions are deleted.** NMI tombstones cancelled recurring
+- **Canceled subscriptions are deleted.** NMI tombstones canceled recurring
   records; `GET /v5/subscriptions/{id}` answers 404. OpenRails treats "gone at
   NMI" as a terminal state, not an error.
 - **Duplicate-transaction window.** The gateway rejects a repeat of the same
@@ -331,7 +331,7 @@ from NMI as soon as that commits:
   from its last page after a crash.
 
 A payment renews exactly the periods it paid, a decline enters dunning, and a
-schedule NMI ended is cancelled. A row with no evidence stays `unverified`. The
+schedule NMI ended is canceled. A row with no evidence stays `unverified`. The
 `life.unverified.backlog` finding reports each account's count and oldest age;
 a row still unverified after three days raises `life.unverified.unresolved` for
 the operator.

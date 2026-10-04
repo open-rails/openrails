@@ -33,7 +33,7 @@ import (
 // effectively-once), the entitlement service's as-of revoke, and the
 // product-access admin grant. It introduces NO new mutation logic.
 //
-// Semantics: idempotent per step (an already-cancelled subscription /
+// Semantics: idempotent per step (an already-canceled subscription /
 // already-revoked window / already-recorded grant no-ops); a partial failure
 // returns the completed steps alongside the error so the caller can leave the
 // finding OPEN with the compensation state documented.
@@ -296,7 +296,7 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 // cancelSubscriptionForFinding cancels one LOCAL subscription through the
 // lifecycle chokepoint; the remote side of NMI-backed rails rides the durable
 // nmi_delete_subscription intent (queue-always #679 — the breaker gates its
-// EXECUTION, never the enqueue). Mirrors the ResolveCancelledRemoteAlive
+// EXECUTION, never the enqueue). Mirrors the ResolveCanceledRemoteAlive
 // pattern: cancellation UPDATE (with the marker) and intent enqueue commit in
 // ONE transaction.
 func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reason string, result map[string]any) error {
@@ -311,8 +311,8 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		}
 		return fmt.Errorf("load subscription %s: %w", subID, err)
 	}
-	if sub.Status == models.StatusCancelled {
-		result["cancel"] = "noop_already_cancelled"
+	if sub.Status == models.StatusCanceled {
+		result["cancel"] = "noop_already_canceled"
 		return nil
 	}
 	now := r.Clock.Now().UTC()
@@ -327,8 +327,8 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 			if err != nil {
 				return fmt.Errorf("lock subscription %s: %w", subID, err)
 			}
-			if locked.Status == models.StatusCancelled {
-				localResult["cancel"] = "noop_already_cancelled"
+			if locked.Status == models.StatusCanceled {
+				localResult["cancel"] = "noop_already_canceled"
 				return nil
 			}
 			if locked.Rail != sub.Rail {
@@ -349,7 +349,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 			if locked.RailSubscriptionID != "" {
 				localResult["provider_cancel"] = "queued"
 			}
-			localResult["cancel"] = "cancelled"
+			localResult["cancel"] = "canceled"
 			localResult["subscription_id"] = billing.SubscriptionID(subID).String()
 			return nil
 		})

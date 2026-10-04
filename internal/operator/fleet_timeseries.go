@@ -32,10 +32,10 @@ func FleetTimeseries(ctx context.Context, a *app.App, exclude billing.MerchantID
 	}
 	for _, p := range series.Points {
 		out.Points = append(out.Points, billing.FleetWeeklyPoint{
-			WeekStart:              p.WeekStart,
-			NewMerchants:           p.NewMerchants,
-			ActiveMerchants:        p.ActiveMerchants,
-			CancelledSubscriptions: p.CancelledSubscriptions,
+			WeekStart:             p.WeekStart,
+			NewMerchants:          p.NewMerchants,
+			ActiveMerchants:       p.ActiveMerchants,
+			CanceledSubscriptions: p.CanceledSubscriptions,
 		})
 	}
 	for _, v := range series.Volume {

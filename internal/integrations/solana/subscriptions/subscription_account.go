@@ -26,7 +26,7 @@ import (
 //	terms.createdAt       i64
 //	amountPulledInPeriod  u64
 //	currentPeriodStartTs  i64
-//	expiresAtTs           i64     (0 = not cancelled; else the valid-until boundary
+//	expiresAtTs           i64     (0 = not canceled; else the valid-until boundary
 //	                               cancel_subscription set — end of the then-current
 //	                               period. resume_subscription clears it back to 0.)
 const subscriptionAccountDiscriminator byte = 4
@@ -62,12 +62,12 @@ type SubscriptionAccount struct {
 	CreatedAt            int64
 	AmountPulledInPeriod uint64
 	CurrentPeriodStartTs int64
-	ExpiresAtTs          int64 // 0 = active (not cancelled)
+	ExpiresAtTs          int64 // 0 = active (not canceled)
 }
 
-// Cancelled reports whether a cancel is in effect: expiresAtTs was set by
+// Canceled reports whether a cancel is in effect: expiresAtTs was set by
 // cancel_subscription and not cleared by resume_subscription.
-func (s *SubscriptionAccount) Cancelled() bool { return s.ExpiresAtTs != 0 }
+func (s *SubscriptionAccount) Canceled() bool { return s.ExpiresAtTs != 0 }
 
 // DecodeSubscriptionAccount parses raw SubscriptionDelegation account bytes
 // (as returned by RPCClient.GetAccountData) by fixed offset, validating the

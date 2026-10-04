@@ -87,11 +87,11 @@ WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NUL
 GROUP BY 1;
 
 -- Weekly subscription cancellations: the churn proxy on the fleet trend chart.
--- name: FleetWeeklyCancelledSubscriptions :many
-SELECT date_trunc('week', s.cancelled_at)::timestamptz AS week_start, count(*)::bigint AS cancellations
+-- name: FleetWeeklyCanceledSubscriptions :many
+SELECT date_trunc('week', s.canceled_at)::timestamptz AS week_start, count(*)::bigint AS cancellations
 FROM billing.subscriptions s
-WHERE s.cancelled_at IS NOT NULL AND s.deleted_at IS NULL
-  AND s.cancelled_at >= date_trunc('week', sqlc.arg(since)::timestamptz)
+WHERE s.canceled_at IS NOT NULL AND s.deleted_at IS NULL
+  AND s.canceled_at >= date_trunc('week', sqlc.arg(since)::timestamptz)
   AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR s.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)
 GROUP BY 1;
 

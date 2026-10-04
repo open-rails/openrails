@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -20,9 +20,8 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -43,220 +42,188 @@ func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
 	}
 }
 
-// ServiceEntitlementRecord is the shared client entitlement wire type.
-type ServiceEntitlementRecord = billing.EntitlementRecord
-
-type adminUserEntitlementsPath struct {
-	UserID string `uri:"customer_id" binding:"required"`
-}
-
-type adminEntitlementPath struct {
-	UserID        string `uri:"customer_id" binding:"required"`
-	EntitlementID string `uri:"id" binding:"required"`
-}
-
-func ServiceGetCustomerEntitlements(r *httprequest.Request) {
-	tenantSubject, err := parseServiceCustomerID(r.Param("customer_id"))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if tenantSubject == nil {
-		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
-		return
-	}
-	atStr := strings.TrimSpace(r.Query("at"))
-	var at *time.Time
-	if atStr != "" {
-		parsed, err := timeutil.ParseRFC3339UTC(atStr)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
-			return
-		}
-		at = &parsed
-	}
-	queryTime := r.Clock.Now()
-	if at != nil {
-		queryTime = *at
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	entitlements, err := svc.ListActiveEntitlementRecordsForCustomer(r.Request.Context(), *tenantSubject, queryTime)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
-		return
-	}
-	r.JSON(http.StatusOK, serviceEntitlementRecordsFromService(entitlements))
-}
-
-// ServiceGetCustomersWithEntitlement is the REVERSE entitlement lookup (#535):
-// the customer ids holding an ACTIVE window of the path `entitlement` for the
-// caller's merchant, keyset-paginated by customer_id (?cursor=&limit=, ?at=).
-// Backs a host directory's filter-by-entitlement (AuthKit's
-// EntitlementFilterProvider). Subject == customer_id (#364 UUID-only).
-func ServiceGetCustomersWithEntitlement(r *httprequest.Request) {
-	entitlement := strings.TrimSpace(r.Param("entitlement"))
-	if entitlement == "" {
-		r.ErrorJSON(http.StatusBadRequest, "entitlement required")
-		return
-	}
-	at := r.Clock.Now()
-	if raw := strings.TrimSpace(r.Query("at")); raw != "" {
-		parsed, err := timeutil.ParseRFC3339UTC(raw)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
-			return
-		}
-		at = parsed
-	}
-	var afterID uuid.UUID
-	if raw := strings.TrimSpace(r.Query("cursor")); raw != "" {
-		parsed, err := uuid.Parse(raw)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid cursor; must be a customer id (uuid)")
-			return
-		}
-		afterID = parsed
-	}
-	limit := 1000
-	if raw := strings.TrimSpace(r.Query("limit")); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n <= 0 {
-			r.ErrorJSON(http.StatusBadRequest, "invalid limit")
-			return
-		}
-		limit = n
-	}
-	if limit > entitlements.CustomersWithEntitlementMaxPageSize {
-		limit = entitlements.CustomersWithEntitlementMaxPageSize
-	}
-	svc := r.State.EntitlementService
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
-		return
-	}
-	ids, err := svc.ListCustomersWithEntitlement(r.Request.Context(), entitlement, at, afterID, limit)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list customers")
-		return
-	}
-	customers := make([]string, len(ids))
-	for i, id := range ids {
-		customers[i] = id.String()
-	}
-	// A full page means there may be more; hand back a keyset cursor.
-	hasMore := len(ids) == limit
-	nextCursor := ""
-	if hasMore {
-		nextCursor = ids[len(ids)-1].String()
-	}
-	r.JSON(http.StatusOK, map[string]any{
-		"customers":   customers,
-		"next_cursor": nextCursor,
-		"has_more":    hasMore,
-	})
-}
-
-type ServiceExternalSubjectEntitlementsRequest struct {
-	Subjects []string `json:"subjects"`
-	At       string   `json:"at,omitempty"` // RFC3339; empty = now
-}
-
-// ServiceGetExternalSubjectEntitlements is always batch (#354): one query
-// answers many subjects; a single lookup is an array of one. Response is
-// keyed by subject with an entry per requested subject (unknown = [], never
-// an error) after trim + dedupe; over-cap is a 400. The merchant is pinned from
-// the request credential, so no issuer is accepted (#555); customer identity is
-// (merchant, subject).
-func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
-	var req ServiceExternalSubjectEntitlementsRequest
+// ServiceListEntitlements answers the active entitlements of up to
+// billing.MaxEntitlementLookupCustomers customers in one read: every requested
+// customer is present, one with none maps to an empty list.
+func ServiceListEntitlements(r *httprequest.Request) {
+	var req billing.EntitlementListParams
 	if !r.BindJSON(&req) {
 		return
 	}
-	subjects := make([]string, 0, len(req.Subjects))
-	seen := make(map[string]struct{}, len(req.Subjects))
-	for _, s := range req.Subjects {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		if id, err := uuid.Parse(s); err != nil || id == uuid.Nil {
-			r.ErrorJSON(http.StatusBadRequest, "subjects must be nonzero UUIDs")
+	ids := make([]uuid.UUID, 0, len(req.CustomerIDs))
+	seen := make(map[billing.CustomerID]bool, len(req.CustomerIDs))
+	for _, id := range req.CustomerIDs {
+		if id.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "customer_ids must be nonzero UUIDs").WithParam("customer_ids"))
 			return
 		}
-		if _, dup := seen[s]; dup {
-			continue
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id.UUID())
 		}
-		seen[s] = struct{}{}
-		subjects = append(subjects, s)
 	}
-	if len(subjects) == 0 {
-		r.ErrorJSON(http.StatusBadRequest, "subjects required")
+	switch {
+	case len(ids) == 0:
+		r.APIError(api.Coded(billing.CodeInvalidParam, "customer_ids is required").WithParam("customer_ids"))
+		return
+	case len(ids) > billing.MaxEntitlementLookupCustomers:
+		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("at most %d customer_ids per call", billing.MaxEntitlementLookupCustomers)).WithParam("customer_ids"))
 		return
 	}
-	if len(subjects) > billingservice.EntitlementsBatchMaxSubjects {
-		r.ErrorJSON(http.StatusBadRequest, fmt.Sprintf("too many subjects: %d > %d per call", len(subjects), billingservice.EntitlementsBatchMaxSubjects))
-		return
-	}
-	at := r.Clock.Now()
-	if raw := strings.TrimSpace(req.At); raw != "" {
-		parsed, err := timeutil.ParseRFC3339UTC(raw)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
+	for _, id := range ids {
+		if !requireServiceCustomerScope(r, identity.CustomerID(id)) {
 			return
 		}
-		at = parsed
 	}
+	at := req.At
+	if at.IsZero() {
+		at = r.Clock.Now()
+	}
+	grouped, err := r.State.EntitlementService.ListActiveRecordsByCustomers(r.Request.Context(), ids, at)
+	if err != nil {
+		r.InternalError("failed to fetch entitlements", err)
+		return
+	}
+	out := billing.EntitlementLookup{Customers: make(map[billing.CustomerID][]billing.EntitlementRecord, len(ids))}
+	for _, id := range ids {
+		records := make([]billing.EntitlementRecord, 0, len(grouped[id]))
+		for i := range grouped[id] {
+			records = append(records, entitlementRecord(&grouped[id][i]))
+		}
+		out.Customers[billing.CustomerID(id)] = records
+	}
+	r.SuccessJSON(out)
+}
 
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+// ServiceListEntitlementCustomers is the reverse lookup: one page of the
+// customers holding an active window of the path's entitlement at ?at=,
+// ordered by customer id. It backs a host directory's filter by entitlement.
+func ServiceListEntitlementCustomers(r *httprequest.Request) {
+	entitlement := strings.TrimSpace(r.Param("entitlement"))
+	if entitlement == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "entitlement is required").WithParam("entitlement"))
 		return
 	}
-	grouped, err := svc.ListActiveEntitlementRecordsByExternalSubjects(r.Request.Context(), subjects, at)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to fetch entitlements")
+	at, ok := parseAtQuery(r)
+	if !ok {
 		return
 	}
-	// A subject-scoped token reads only its own subject. All records of one
-	// subject share a tenant_subject id.
-	for _, records := range grouped {
-		if len(records) == 0 {
-			continue
+	if at.IsZero() {
+		at = r.Clock.Now()
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		writeRefusal(r, err, "invalid page")
+		return
+	}
+	var after uuid.UUID
+	if _, err := pagination.Decode(page.Cursor, &after); err != nil {
+		writeRefusal(r, err, "invalid cursor")
+		return
+	}
+	ids, err := r.State.EntitlementService.ListCustomersWithEntitlement(r.Request.Context(), entitlement, at, after, int(pagination.Fetch(limit)))
+	if err != nil {
+		r.InternalError("failed to list customers", err)
+		return
+	}
+	customers := pagination.Map(pagination.Cut(ids, limit, func(id uuid.UUID) any { return id }), func(id uuid.UUID) billing.CustomerID { return billing.CustomerID(id) })
+	r.SuccessJSON(customers)
+}
+
+// ServiceCheckEntitlements answers which of the requested keys the customer
+// holds at at (zero: now). It reads only those keys.
+func ServiceCheckEntitlements(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+	if !ok {
+		return
+	}
+	var req billing.EntitlementCheckParams
+	if !r.BindJSON(&req) {
+		return
+	}
+	at := req.At
+	if at.IsZero() {
+		at = r.Clock.Now()
+	}
+	result, err := r.State.EntitlementService.CheckMany(r.Request.Context(), customer.String(), req.Entitlements, at)
+	if err != nil {
+		writeRefusal(r, err, "entitlement check failed")
+		return
+	}
+	r.SuccessJSON(billing.EntitlementCheck{Entitlements: result})
+}
+
+// SelfListEntitlements is the customer's own active entitlements.
+func SelfListEntitlements(r *httprequest.Request) {
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return
+	}
+	at, ok := parseAtQuery(r)
+	if !ok {
+		return
+	}
+	if at.IsZero() {
+		at = r.Clock.Now()
+	}
+	windows, err := r.State.EntitlementService.ListActiveRecordsByCustomer(r.Request.Context(), payer.UUID(), at)
+	if err != nil {
+		r.InternalError("failed to resolve active entitlements", err)
+		return
+	}
+	records := make([]billing.EntitlementRecord, 0, len(windows))
+	for i := range windows {
+		records = append(records, entitlementRecord(&windows[i]))
+	}
+	r.SuccessJSON(billing.ListPage[billing.EntitlementRecord]{Items: records})
+}
+
+// ServiceGetEffectiveTier answers the tier the customer holds in ?group=.
+func ServiceGetEffectiveTier(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+	if !ok {
+		return
+	}
+	group := strings.TrimSpace(r.Query("group"))
+	if group == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "group is required").WithParam("group"))
+		return
+	}
+	tier, err := r.State.EntitlementService.ResolveEffectiveTierByCustomer(r.Request.Context(), customer.UUID(), group, r.Clock.Now())
+	if err != nil {
+		r.InternalError("effective tier lookup failed", err)
+		return
+	}
+	out := billing.EffectiveTier{Group: group}
+	if tier != nil {
+		out.Tier = &billing.Tier{
+			Entitlement: tier.Entitlement, DisplayName: tier.ProductDisplayName, TierRank: tier.TierRank,
+			ProductID: billing.ProductID(tier.ProductID), ProductKey: tier.ProductKey,
 		}
-		if !requireServiceCustomerScope(r, identity.CustomerID(records[0].CustomerID)) {
-			return
-		}
 	}
-	out := make(map[string][]ServiceEntitlementRecord, len(subjects))
-	for _, s := range subjects {
-		out[s] = []ServiceEntitlementRecord{}
-	}
-	for subject, records := range grouped {
-		out[subject] = serviceEntitlementRecordsFromService(records)
-	}
-	r.JSON(http.StatusOK, out)
+	r.SuccessJSON(out)
 }
 
 // maxGrantHours is the longest hours value a time.Duration holds.
 const maxGrantHours = math.MaxInt64 / int64(time.Hour)
 
-// GrantAdminEntitlement records a manual grant. One with no end also needs
-// merchant:access:grant-permanent.
-func GrantAdminEntitlement(gate billingauth.Gate) func(*httprequest.Request) {
-	return func(r *httprequest.Request) { grantAdminEntitlement(r, gate) }
+// CreateEntitlement records the merchant's own grant of an entitlement. One
+// with no end also needs merchant:access:grant-permanent.
+func CreateEntitlement(gate billingauth.Gate) func(*httprequest.Request) {
+	return func(r *httprequest.Request) { createEntitlement(r, gate) }
 }
 
-func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
-	var path adminUserEntitlementsPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
+	customerID := customerIDParam(r.Param("customer_id"))
+	if customerID.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid customer_id").WithParam("customer_id"))
 		return
 	}
-	var req billing.GrantEntitlementRequest
+	var req billing.CreateEntitlementParams
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -273,10 +240,10 @@ func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 	// #511: a manual grant is an admin-sourced ledger fact whose SourceID is
 	// the grant's own identity. Hours extends the finite timeline; EndAt fixes
 	// this grant's own end; neither is indefinite.
-	params := entitlements.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, SourceType: models.EntitlementSourceAdmin, SourceID: uuidutil.NewV7()}
+	params := entitlements.PushNewEntitlementParams{UserID: customerID.String(), Entitlement: req.Entitlement, SourceType: models.EntitlementSourceAdmin, SourceID: uuidutil.NewV7()}
 	switch {
-	case req.Hours != nil && req.EndAt != nil:
-		r.ErrorJSON(http.StatusBadRequest, "hours and end_at are mutually exclusive")
+	case req.Hours != nil && req.EndsAt != nil:
+		r.ErrorJSON(http.StatusBadRequest, "hours and ends_at are mutually exclusive")
 		return
 	case req.Hours != nil:
 		if *req.Hours <= 0 || int64(*req.Hours) > maxGrantHours {
@@ -285,12 +252,12 @@ func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 		}
 		d := time.Duration(*req.Hours) * time.Hour
 		params.Duration = &d
-	case req.EndAt != nil:
-		if !req.EndAt.After(r.Clock.Now()) {
-			r.ErrorJSON(http.StatusBadRequest, "end_at must be in the future")
+	case req.EndsAt != nil:
+		if !req.EndsAt.After(r.Clock.Now()) {
+			r.ErrorJSON(http.StatusBadRequest, "ends_at must be in the future")
 			return
 		}
-		endAt := req.EndAt.UTC()
+		endAt := req.EndsAt.UTC()
 		params.EndAt = &endAt
 	default:
 		if !permitPermanentGrant(r, gate) {
@@ -299,7 +266,7 @@ func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 		params.Indefinite = true
 	}
 	var err error
-	params.CustomerID, err = tenantSubjectForEntitlementGrantTarget(r, path.UserID)
+	params.CustomerID, err = tenantSubjectForEntitlementGrantTarget(r, customerID.String())
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve target tenant subject")
 		return
@@ -310,7 +277,7 @@ func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 		return
 	}
 	convergeAfterMutation(r, params.CustomerID) // #511: re-converge the customer inline
-	r.JSON(http.StatusCreated, entitlementRecordFromModel(ent))
+	r.JSON(http.StatusCreated, entitlementRecord(ent))
 }
 
 // permitPermanentGrant requires merchant:access:grant-permanent for a manual
@@ -331,11 +298,16 @@ func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
 	return false
 }
 
-func entitlementRecordFromModel(e *models.Entitlement) billing.EntitlementRecord {
-	rec := billing.EntitlementRecord{ID: e.ID.String(), CustomerID: billing.CustomerID(e.CustomerID).String(), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+// entitlementRecord is the one projection of an entitlement window onto the
+// wire.
+func entitlementRecord(e *models.Entitlement) billing.EntitlementRecord {
+	rec := billing.EntitlementRecord{
+		ID: billing.EntitlementID(e.ID), CustomerID: billing.CustomerID(e.CustomerID), Entitlement: e.Entitlement,
+		StartsAt: e.StartAt, EndsAt: e.EndAt, SourceType: billing.EntitlementSourceType(e.SourceType),
+		RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
+	}
 	if e.SourceID != nil {
-		source := billing.SourceRef(string(e.SourceType), e.SourceID.String())
-		rec.SourceID = &source
+		rec.SourceID = billing.SourceRef(string(e.SourceType), e.SourceID.String())
 	}
 	if e.RevokeReason != nil {
 		reason := string(*e.RevokeReason)
@@ -359,57 +331,26 @@ func tenantSubjectForEntitlementGrantTarget(r *httprequest.Request, subject stri
 	return db.EnsureCustomerID(r.Request.Context(), r.State.DB.Qx(r.Request.Context()), uuid.Nil, subject)
 }
 
-func RevokeAdminEntitlement(r *httprequest.Request) {
-	var path adminEntitlementPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	entitlementID, err := uuid.Parse(path.EntitlementID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid entitlement ID")
+// DeleteEntitlement revokes one of the customer's entitlement windows. The
+// merchant's own grant is revoked in the grant ledger, so its future windows
+// end with it; a window from a purchase or subscription is revoked on its own.
+func DeleteEntitlement(r *httprequest.Request) {
+	customerID := customerIDParam(r.Param("customer_id"))
+	id, err := billing.ParseEntitlementID(r.Param("id"))
+	if customerID.IsZero() || err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid entitlement id").WithParam("id"))
 		return
 	}
 	svc := r.State.EntitlementService
-	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
+	ent, err := svc.GetByID(r.Request.Context(), id.UUID())
+	if err != nil || ent.CustomerID != customerID.UUID() {
+		r.APIError(api.Coded(billing.CodeResourceNotFound, "entitlement not found"))
 		return
 	}
-	ent, err := svc.GetByID(r.Request.Context(), entitlementID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "entitlement not found")
+	if err := svc.Revoke(r.Request.Context(), ent, models.EntitlementRevokeAdmin); err != nil {
+		r.InternalError("failed to revoke entitlement", err)
 		return
 	}
-	if ent.CustomerID.String() != path.UserID {
-		r.ErrorJSON(http.StatusNotFound, "entitlement not found for this user")
-		return
-	}
-	if err := svc.RevokeExistingEntitlement(r.Request.Context(), entitlements.RevokeExistingEntitlementParams{EntitlementID: &entitlementID, Reason: models.EntitlementRevokeAdmin}); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	convergeAfterMutation(r, ent.CustomerID) // #511: re-converge the customer inline
-	r.SuccessJSONMessage("entitlement revoked")
-}
-
-func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
-	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
-	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: billing.CustomerID(e.CustomerID).String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
-		if e.EndAt != nil {
-			rec.EndAt = e.EndAt
-		}
-		if e.SourceID != nil {
-			sourceStr := e.SourceID.String()
-			rec.SourceID = &sourceStr
-		}
-		if e.RevokedAt != nil {
-			rec.RevokedAt = e.RevokedAt
-		}
-		if e.RevokeReason != nil {
-			rec.RevokeReason = e.RevokeReason
-		}
-		result = append(result, rec)
-	}
-	return result
+	convergeAfterMutation(r, ent.CustomerID)
+	r.Status(http.StatusNoContent)
 }

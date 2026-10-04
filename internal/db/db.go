@@ -51,7 +51,7 @@ const (
 )
 
 // NewDB opens the application pool and waits for the database to answer.
-// ctx bounds the wait: it is the boot context (cancelled by SIGTERM in the
+// ctx bounds the wait: it is the boot context (canceled by SIGTERM in the
 // standalone binary), never a package clock.
 func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if cfg == nil || cfg.DB == nil {

@@ -270,7 +270,7 @@ export function Checkout({
 
   // Load the session once per source; map its status straight to a phase.
   React.useEffect(() => {
-    let cancelled = false
+    let canceled = false
     solanaStartedFor.current = undefined
     attempted.current = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: a new source restarts the flow from loading
@@ -279,7 +279,7 @@ export function Checkout({
     source
       .getSession()
       .then((loaded) => {
-        if (cancelled || !mounted.current) return
+        if (canceled || !mounted.current) return
         setSession(loaded)
         setSolanaURL(solanaLink(loaded.next_action))
         const options = usable(loaded.options)
@@ -322,10 +322,10 @@ export function Checkout({
         changePhase("ready")
       })
       .catch(() => {
-        if (!cancelled && mounted.current) changePhase("error")
+        if (!canceled && mounted.current) changePhase("error")
       })
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [source, changePhase, usable])
 
@@ -703,7 +703,7 @@ export function Checkout({
     )
       return
 
-    let cancelled = false
+    let canceled = false
     let timer: number | undefined
     const schedule = () => {
       timer = window.setTimeout(() => void poll(), POLL_INTERVAL_MS)
@@ -711,7 +711,7 @@ export function Checkout({
     const poll = async () => {
       try {
         const loaded = await source.getSession()
-        if (cancelled || !mounted.current) return
+        if (canceled || !mounted.current) return
         switch (loaded.status) {
           case "succeeded":
             setSession(loaded)
@@ -757,7 +757,7 @@ export function Checkout({
             schedule()
         }
       } catch (err) {
-        if (cancelled || !mounted.current) return
+        if (canceled || !mounted.current) return
         if (isServerError(err)) setPayError(STATUS_UNAVAILABLE)
         schedule()
       }
@@ -765,7 +765,7 @@ export function Checkout({
 
     schedule()
     return () => {
-      cancelled = true
+      canceled = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
   }, [

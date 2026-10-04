@@ -201,12 +201,12 @@ export function useCollectJS(config: {
     if (!configurationChanged && !config.active) return
     configuredFor.current = configuration
 
-    let cancelled = false
+    let canceled = false
     const settle = (fn: () => void) => {
-      if (!cancelled) fn()
+      if (!canceled) fn()
     }
     const configure = () => {
-      if (cancelled) return
+      if (canceled) return
       const collect = window.CollectJS
       if (!collect) {
         settle(() => setLoadError("Card fields failed to load"))
@@ -347,13 +347,13 @@ export function useCollectJS(config: {
       if (window.CollectJS) {
         configure()
         return () => {
-          cancelled = true
+          canceled = true
         }
       }
       if (collectScriptStates.get(existing) === "loaded") {
         settle(() => setLoadError("Card fields failed to load"))
         return () => {
-          cancelled = true
+          canceled = true
         }
       }
       const failed = () =>
@@ -361,7 +361,7 @@ export function useCollectJS(config: {
       existing.addEventListener("load", configure)
       existing.addEventListener("error", failed)
       return () => {
-        cancelled = true
+        canceled = true
         existing.removeEventListener("load", configure)
         existing.removeEventListener("error", failed)
       }
@@ -382,7 +382,7 @@ export function useCollectJS(config: {
     }
     document.head.appendChild(script)
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [
     config.enabled,

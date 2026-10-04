@@ -246,7 +246,7 @@ func (c *NMIClient) ReadCycleTransactions(ctx context.Context, scope CycleScope,
 
 // RecurringLiveness is the parsed remote-truth view of one NMI recurring
 // subscription. Found=false means NMI no longer knows the subscription id —
-// at NMI that IS terminal (cancelled records are deleted, and the v5 GET
+// at NMI that IS terminal (canceled records are deleted, and the v5 GET
 // answers 404). NextChargeDate is zero when absent/unparseable.
 type RecurringLiveness struct {
 	Found          bool

@@ -21,7 +21,7 @@ const (
 	// neutral "access ended" copy, no charge/dunning language.
 	PremiumEndReasonAccessEnded PremiumEndReason = "access_ended"
 	// PremiumEndReasonNonRecoverable (or#870 bucket 3): the issuer withdrew the
-	// recurring mandate, or the instrument is permanently dead. We cancelled the
+	// recurring mandate, or the instrument is permanently dead. We canceled the
 	// schedule at the rail — their stored payment method is untouched — and the
 	// copy invites them to re-subscribe.
 	PremiumEndReasonNonRecoverable PremiumEndReason = "non_recoverable"

@@ -14,12 +14,10 @@ import (
 	"github.com/open-rails/openrails/internal/providerqualification"
 )
 
-func ProviderCutover(r *httprequest.Request)          { providerCutover(r, false, false) }
-func PreviewProviderCutover(r *httprequest.Request)   { providerCutover(r, false, true) }
-func MyProviderCutover(r *httprequest.Request)        { providerCutover(r, true, false) }
-func PreviewMyProviderCutover(r *httprequest.Request) { providerCutover(r, true, true) }
+func ProviderCutover(r *httprequest.Request)        { providerCutover(r, false) }
+func PreviewProviderCutover(r *httprequest.Request) { providerCutover(r, true) }
 
-func providerCutover(r *httprequest.Request, owned, preview bool) {
+func providerCutover(r *httprequest.Request, preview bool) {
 	ctx := r.Request.Context()
 	sid, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || sid.IsZero() {
@@ -30,28 +28,6 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 	if r.State.ProviderCutovers == nil {
 		cutoverRefusal(r, http.StatusServiceUnavailable, "provider_cutover_unavailable", "provider cutover unavailable", "")
 		return
-	}
-	// Ownership is checked before either lookup or replay; a known request key
-	// never grants access to somebody else's subscription or operation receipts.
-	if owned {
-		user := r.GetUser()
-		if user == nil {
-			cutoverRefusal(r, http.StatusUnauthorized, "authentication_required", "authentication required", "")
-			return
-		}
-		sub, e := r.State.SubscriptionService.GetByID(ctx, id)
-		if e != nil {
-			if db.IsNotFound(e) {
-				cutoverRefusal(r, http.StatusNotFound, api.CodeResourceNotFound, "subscription not found", "subscription_id")
-			} else {
-				r.InternalError("could not load subscription", e)
-			}
-			return
-		}
-		if sub.CustomerID.String() != user.ID {
-			cutoverRefusal(r, http.StatusNotFound, api.CodeResourceNotFound, "subscription not found", "subscription_id")
-			return
-		}
 	}
 	if !preview {
 		key := r.Request.Header.Get("Idempotency-Key")
@@ -86,11 +62,7 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 		if preview {
 			out, err = r.State.ProviderCutovers.Preview(ctx, id, body)
 		} else {
-			origin := intents.OriginAdmin
-			if owned {
-				origin = intents.OriginUser
-			}
-			out, err = r.State.ProviderCutovers.Submit(ctx, r.State.IntentRunner(), id, r.Request.Header.Get("Idempotency-Key"), body, origin)
+			out, err = r.State.ProviderCutovers.Submit(ctx, r.State.IntentRunner(), id, r.Request.Header.Get("Idempotency-Key"), body, intents.OriginAdmin)
 		}
 	}
 	if err != nil {

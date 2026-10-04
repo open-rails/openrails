@@ -434,7 +434,7 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 
 // WriteOffOwed cancels accrued arrears WITHOUT money moving (DR platform_revenue
 // / CR arrears_liability) — the exact inverse of AccrueOwed. Posted when an
-// invoice is voided: the debt is cancelled, so the revenue recognised at accrual
+// invoice is voided: the debt is canceled, so the revenue recognised at accrual
 // is given back and the payer's liability returns toward zero. Without this the
 // invoice says "voided" and the ledger says "still owed", and since the ledger
 // is the exposure substrate the payer stays capped for a bill nobody owes.

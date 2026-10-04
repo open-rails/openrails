@@ -65,9 +65,9 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 	require.NoError(t, err)
-	for _, sub := range subs.Data {
+	for _, sub := range subs.Items {
 		if sub.RailSubscriptionID == l.railSub {
 			l.sub = sub.ID
 			require.Equal(t, "nmi_schedule", sub.CollectionPolicy, "every NMI schedule is dunned by OpenRails")
@@ -137,7 +137,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 		{"nmi_dunning", 30, true, 1, func(t *testing.T, w *world, l *legacy) {
 			w.advanceTo(l.periodEnd().Add(time.Hour))
 			l.renewAtNMI(false, true)
-			require.Equal(t, "past_due", w.subscription(l.tp, l.sub).Status)
+			require.Equal(t, billing.SubscriptionPastDue, w.subscription(l.tp, l.sub).Status)
 			for range 10 {
 				w.advance(2 * day)
 				w.runRenewals()

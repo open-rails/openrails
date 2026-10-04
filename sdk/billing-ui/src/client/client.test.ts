@@ -6,6 +6,7 @@ import { fakeBilling, json, subscription } from "../test/billing-server"
 import {
   createBillingClient,
   RETRY_BUDGET_MS,
+  signWalletAction,
   WalletRejectedError,
 } from "./client"
 import { BillingError, isServerError } from "./errors"
@@ -43,20 +44,20 @@ describe("wire fixtures", () => {
 
 describe("createBillingClient", () => {
   it("targets the mount, encodes ids and attaches the bearer", async () => {
-    const fetch = vi.fn(async () => new Response(null, { status: 202 }))
+    const fetch = vi.fn(async () => json(200, subscriptionFixture))
     const client = createBillingClient({
       baseUrl: "https://shop.test/billing/v1/",
       fetch,
       getToken: async () => "tok",
       language: () => "de",
     })
-    await client.cancelSubscription("sub_a/b", { feedback: "  too pricey " })
+    await client.cancelSubscription("sub_a/b", { reason: "  too pricey " })
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe(
       "https://shop.test/billing/v1/me/subscriptions/sub_a%2Fb/cancel"
     )
     expect(init.method).toBe("POST")
-    expect(JSON.parse(String(init.body))).toEqual({ feedback: "too pricey" })
+    expect(JSON.parse(String(init.body))).toEqual({ reason: "too pricey" })
     const headers = new Headers(init.headers)
     expect(headers.get("Authorization")).toBe("Bearer tok")
     expect(headers.get("Accept-Language")).toBe("de")
@@ -97,25 +98,35 @@ describe("createBillingClient", () => {
     expect(client.currencies).toMatchObject({ USD: 6, JPY: 4, BTC: 8 })
   })
 
-  it("runs the Solana cancel loop and maps a declined wallet", async () => {
+  it("completes a Solana cancel with the wallet's signature", async () => {
     const server = fakeBilling({
       subscriptions: [subscription({ id: "sub_sol", rail: "solana" })],
     })
     const client = createBillingClient({ fetch: server.fetch })
-    const stages: string[] = []
+    const asked = await client.cancelSubscription("sub_sol", { reason: "done" })
+    expect(asked.status).toBe("active")
+    expect(asked.next_action?.type).toBe("solana_sign_transactions")
     const send = vi.fn(async (tx: string) => `sig-for-${tx}`)
-    await client.cancelSubscriptionOnChain("sub_sol", send, (s) =>
-      stages.push(s)
-    )
-    expect(stages).toEqual(["preparing", "signing", "confirming"])
+    const signature = await signWalletAction(asked.next_action!, send)
     expect(send).toHaveBeenCalledWith("dHg=")
-    expect(server.subscriptions[0].status).toBe("cancelled")
+    const done = await client.cancelSubscription("sub_sol", {
+      reason: "done",
+      signature,
+    })
+    expect(done.status).toBe("canceled")
+    expect(JSON.parse(String(server.fetch.mock.calls[1][1]?.body))).toEqual({
+      reason: "done",
+      signature: "sig-for-dHg=",
+    })
 
     await expect(
-      client.cancelSubscriptionOnChain("sub_sol", async () => {
+      signWalletAction(asked.next_action!, async () => {
         throw new WalletRejectedError()
       })
     ).rejects.toMatchObject({ code: "wallet_rejected" })
+    await expect(
+      signWalletAction(asked.next_action!, async () => "")
+    ).rejects.toMatchObject({ code: "wallet_no_signature" })
   })
 })
 
@@ -170,7 +181,7 @@ describe("server errors", () => {
     const fetch = calls(() => status(503))
     await expect(
       createBillingClient({ fetch }).cancelSubscription("sub_1", {
-        feedback: "too pricey",
+        reason: "too pricey",
       })
     ).rejects.toMatchObject({ status: 503 })
     expect(fetch).toHaveBeenCalledTimes(1)

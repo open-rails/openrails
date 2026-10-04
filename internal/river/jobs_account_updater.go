@@ -62,7 +62,7 @@ const (
 // 34). It used to be abandoned after 14 days of silence, which re-dued its
 // instruments into a SECOND paid batch while the first might still be
 // processing — the code's own log said "silence is not evidence" and then
-// acted on it. Now the job's state (failed / cancelled) or the custodian's
+// acted on it. Now the job's state (failed / canceled) or the custodian's
 // own expires_at is the only terminal; a job that is merely slow stays open
 // and is polled every pass, and the open-batch row is exactly what stops a
 // later cycle from paying for the same cards again.

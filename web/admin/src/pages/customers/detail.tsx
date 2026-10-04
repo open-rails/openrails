@@ -314,8 +314,8 @@ export function CustomerDetailPage() {
                           {e.source_type}
                         </p>
                         <p className="text-xs text-muted-foreground tabular-nums">
-                          {formatDate(e.start_at)} to{" "}
-                          {e.end_at ? formatDate(e.end_at) : "no end date"}
+                          {formatDate(e.starts_at)} to{" "}
+                          {e.ends_at ? formatDate(e.ends_at) : "no end date"}
                         </p>
                       </div>
                       <RevokeEntitlementButton

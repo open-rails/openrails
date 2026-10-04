@@ -17,7 +17,7 @@ func TestStoreFailure(t *testing.T) {
 		want bool
 	}{
 		{"database error", fmt.Errorf("resolve: %w", &pgconn.PgError{Code: "57014"}), true},
-		{"request cancelled", fmt.Errorf("resolve: %w", context.Canceled), true},
+		{"request canceled", fmt.Errorf("resolve: %w", context.Canceled), true},
 		{"request deadline", context.DeadlineExceeded, true},
 		{"credential backend", errors.New("secret backend unavailable"), false},
 		{"settings", errors.New("NMI endpoint_deployment must be gateway or sandbox"), false},

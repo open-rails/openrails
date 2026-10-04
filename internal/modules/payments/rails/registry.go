@@ -151,12 +151,12 @@ func autoBilledAlways(*models.Subscription) bool { return true }
 func cancelReversible(*models.Subscription, time.Time) CancelMode  { return CancelModeReversible }
 func cancelDestructive(*models.Subscription, time.Time) CancelMode { return CancelModeDestructive }
 
-// nmiCancelMode: reversible only while the subscription is cancelled, its
+// nmiCancelMode: reversible only while the subscription is canceled, its
 // deferred delete_subscription has not yet executed (DeletionScheduledAt is
 // cleared by the River finalizer), and the paid period is still in the future
 // (issue 216). Once the delete fires or the period lapses it is destructive.
 func nmiCancelMode(sub *models.Subscription, now time.Time) CancelMode {
-	if sub.Status != models.StatusCancelled {
+	if sub.Status != models.StatusCanceled {
 		return CancelModeDestructive
 	}
 	if sub.DeletionScheduledAt == nil || sub.DeletionScheduledAt.IsZero() {

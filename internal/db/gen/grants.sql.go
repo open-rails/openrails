@@ -1319,8 +1319,8 @@ WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
   -- Engine card access is authored only by its atomic accepted-payment writer.
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
-  AND (s.status IN ('active', 'cancelled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
-  AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
+  AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
+  AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)
   AND COALESCE(s.current_period_ends_at, s.ended_at) >= $3::timestamptz
@@ -1351,13 +1351,13 @@ type ListUngrantedSubscriptionsRow struct {
 }
 
 // #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
-// granting state (active/cancelled/unknown) for a product that PROMISES entitlements,
+// granting state (active/canceled/unknown) for a product that PROMISES entitlements,
 // with NO subscription-sourced grant yet. After the migrate/convergence split the
 // host-one migrate moves subscriptions as source-of-truth (#724) but no longer
 // writes their entitlements — derive-1 materializes the grant + entitlement window
 // from the stored subscription. Window is computed Go-side (mirrors the retired
 // migrate logic): [COALESCE(current_period_starts_at,started_at),
-// COALESCE(current_period_ends_at,ended_at)). active+cancelled+unknown grant
+// COALESCE(current_period_ends_at,ended_at)). active+canceled+unknown grant
 // access (pending/expired/failed/past_due do not). #716 fail-open: `unknown`
 // matches SubscriptionProjectsStandingAccess — an imported-as-unknown sub gets
 // its entitlement while the resolution machinery finds the truth. #717:

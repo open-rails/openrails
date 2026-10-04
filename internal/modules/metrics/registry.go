@@ -29,7 +29,7 @@ type Family string
 const (
 	FamPayments       Family = "payments"        // flow over billing.payments (purchased_at)
 	FamSubsNew        Family = "subs_new"        // flow over subscriptions (started_at)
-	FamSubsCancelled  Family = "subs_cancelled"  // flow over subscriptions (cancelled_at)
+	FamSubsCanceled   Family = "subs_canceled"   // flow over subscriptions (canceled_at)
 	FamSubsEnded      Family = "subs_ended"      // flow over subscriptions (ended_at)
 	FamGrants         Family = "grants"          // flow over credit-purchase grant lots (created_at)
 	FamUsage          Family = "usage"           // flow over usage_events (occurred_at)
@@ -136,7 +136,7 @@ var Dimensions = []Dimension{
 	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
-	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "awaiting_method", "unverified"}},
+	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
 	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
@@ -219,10 +219,10 @@ var families = map[Family]familySpec{
 			) THEN 'returning' ELSE 'first_time' END`,
 		},
 	},
-	FamSubsCancelled: {
+	FamSubsCanceled: {
 		Kind:     "flow",
 		From:     `billing.subscriptions s`,
-		TimeExpr: `s.cancelled_at`,
+		TimeExpr: `s.canceled_at`,
 		DimJoins: map[string]string{
 			"currency":     `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 			"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = s.merchant_id AND rma.id = s.psp_id`,
@@ -235,7 +235,7 @@ var families = map[Family]familySpec{
 			"price_id":     `COALESCE('price_' || s.price_id::text, '')`,
 			"cancel_type":  `COALESCE(s.cancel_type, 'unknown')`,
 		},
-		BaseWhere: `s.cancelled_at IS NOT NULL`,
+		BaseWhere: `s.canceled_at IS NOT NULL`,
 	},
 	FamSubsEnded: {
 		Kind:     "flow",
@@ -417,7 +417,7 @@ var families = map[Family]familySpec{
 }
 
 // Each rebill cycle with its first attempt, the attempt that collected it and
-// when it closes: collected, the subscription cancelled, or 15 days past due
+// when it closes: collected, the subscription canceled, or 15 days past due
 // (the dunning window is at most 14). ListRebillCycles derives the same facts.
 const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
 		f.category AS first_category, f.reason AS first_reason, f.attempted_at AS first_at,
@@ -428,7 +428,7 @@ const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner
 			WHEN f.category = 'approved' THEN 'approved'
 			WHEN f.category = 'system_error' THEN 'error'
 			ELSE 'declined' END AS first_outcome,
-		LEAST(w.attempted_at, CASE WHEN s.cancelled_at IS NOT NULL THEN GREATEST(s.cancelled_at, c.due_at) END, c.due_at + interval '15 days') AS closed_at,
+		LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END, c.due_at + interval '15 days') AS closed_at,
 		CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
 			WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
 			WHEN EXISTS (SELECT 1 FROM billing.payment_method_updates u
@@ -552,13 +552,13 @@ var Measures = []Measure{
 		Formula:     "COUNT(subs with started_at in bucket, status <> pending)",
 		// or#893: `failed` left the lifecycle enum, and naming a label the type
 		// no longer has is a runtime cast error, not a no-op predicate. A
-		// subscription whose first charge failed is past_due or cancelled; only
+		// subscription whose first charge failed is past_due or canceled; only
 		// `pending` still means never-activated.
 		Expr: `COUNT(*) FILTER (WHERE s.status <> 'pending')`,
 		Dims: []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
-	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCancelled, Unit: "count",
-		Description: "subscriptions cancelled in the bucket, by cancel_type",
-		Formula:     "COUNT(subs with cancelled_at in bucket)",
+	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCanceled, Unit: "count",
+		Description: "subscriptions canceled in the bucket, by cancel_type",
+		Formula:     "COUNT(subs with canceled_at in bucket)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"currency", "rail", "rail_account", "product_id", "price_id", "cancel_type"}},
 	{Name: "ended_membership_days", Class: ClassAdditive, Family: FamSubsEnded, Unit: "days", Internal: true,
@@ -774,9 +774,9 @@ var Measures = []Measure{
 		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE pr.auto_renew), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle", "status"}},
 	{Name: "billable_subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
-		Description: "subs at t projected to keep billing: auto-renew price, non-terminal status, not cancelled/scheduled for deletion",
-		Formula:     "COUNT(subs at t with auto_renew AND status IN (pending,active,past_due,unknown) AND cancelled_at IS NULL AND deletion_scheduled_at IS NULL)",
-		Expr:        `COUNT(s.id) FILTER (WHERE pr.auto_renew AND s.status IN ('pending','active','past_due','unknown') AND s.cancelled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
+		Description: "subs at t projected to keep billing: auto-renew price, non-terminal status, not canceled/scheduled for deletion",
+		Formula:     "COUNT(subs at t with auto_renew AND status IN (pending,active,past_due,unknown) AND canceled_at IS NULL AND deletion_scheduled_at IS NULL)",
+		Expr:        `COUNT(s.id) FILTER (WHERE pr.auto_renew AND s.status IN ('pending','active','past_due','unknown') AND s.canceled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
 		Dims:        []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle"}},
 	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count",
 		Description: "distinct customers holding a live entitlement at t (includes timed/comped access, not just subscribers)",

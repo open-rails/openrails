@@ -35,8 +35,8 @@ func (s *SubscriptionLifecycleService) CompleteUpgradeTx(ctx context.Context, tx
 	}
 	at := next.StartedAt
 	reason := models.CancelType("upgrade")
-	old.Status, old.CancelType = models.StatusCancelled, &reason
-	old.CancelledAt, old.DeletionScheduledAt = &at, &at
+	old.Status, old.CancelType = models.StatusCanceled, &reason
+	old.CanceledAt, old.DeletionScheduledAt = &at, &at
 	old.ClearRetrySchedule()
 	old.MarkLifecycleDecision("tier_change_superseded")
 	if err := repo.UpdateAt(ctx, old, at); err != nil {
@@ -91,7 +91,7 @@ func LockReplacedMembership(ctx context.Context, d *db.DB, terms InitialMembersh
 		return nil, ErrUpgradeReplacedChanged
 	}
 	if !admission {
-		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && (sub.Status != models.StatusCancelled || sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser) {
+		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && (sub.Status != models.StatusCanceled || sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser) {
 			return nil, ErrUpgradeReplacedChanged
 		}
 		return sub, nil
@@ -122,7 +122,7 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 	}
 	at := terms.PeriodStart
 	reason := models.CancelTypeUpgrade
-	old.Status, old.CancelType, old.CancelledAt, old.EndedAt, old.ScheduledPriceID = models.StatusCancelled, &reason, &at, &at, nil
+	old.Status, old.CancelType, old.CanceledAt, old.EndedAt, old.ScheduledPriceID = models.StatusCanceled, &reason, &at, &at, nil
 	old.CurrentPeriodEndsAt = &at
 	if old.CurrentPeriodStartsAt != nil && !old.CurrentPeriodStartsAt.Before(at) {
 		start := at.Add(-time.Microsecond)

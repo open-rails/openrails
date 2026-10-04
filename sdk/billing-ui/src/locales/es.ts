@@ -14,7 +14,7 @@ export const es: BillingUiMessageBundle = {
     active: "Activa",
     pending: "Pendiente",
     past_due: "Vencida",
-    cancelled: "Cancelada",
+    canceled: "Cancelada",
     cancel_scheduled: "Finaliza",
     unknown: "Desconocido",
     awaiting_method: "Actualiza tu tarjeta",

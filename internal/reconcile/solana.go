@@ -138,7 +138,7 @@ type solanaRPC interface {
 //   - Subscription status comes from decoding the SubscriptionDelegation
 //     account (expires_at_ts == 0 => active; a future expires_at_ts is the
 //     on-chain cancel-at-period-end, normalized active like Stripe's
-//     cancel_at_period_end; a past one => cancelled). PDA absence => cancelled
+//     cancel_at_period_end; a past one => canceled). PDA absence => canceled
 //     (revoke closes the account). If the account bytes don't decode, status
 //     falls back to presence inference with a note in Raw; the raw bytes are
 //     preserved base64 either way.
@@ -370,8 +370,8 @@ func (f *SolanaFetcher) fetchSubscription(ctx context.Context, ref SolanaSubscri
 	}
 	if len(data) == 0 {
 		// The program closes the subscription account on revoke; absence of a
-		// once-known account is the on-chain cancelled state.
-		sub.Status = SubscriptionStatusCancelled
+		// once-known account is the on-chain canceled state.
+		sub.Status = SubscriptionStatusCanceled
 		sub.RawStatus = "account_closed"
 		sub.Raw = rawJSON(raw)
 		return sub, nil
@@ -425,13 +425,13 @@ func applyDecodedSubscription(sub *RemoteSubscription, dec *subscriptions.Subscr
 		sub.Status = SubscriptionStatusActive
 		sub.RawStatus = "cancel_at_period_end"
 	default:
-		sub.Status = SubscriptionStatusCancelled
+		sub.Status = SubscriptionStatusCanceled
 		sub.RawStatus = "expires_at_passed"
 	}
 
 	if dec.ExpiresAtTs == 0 && dec.PeriodHours > 0 && dec.PeriodHours <= maxSanePeriodHours {
 		// Next billing window opens at the current period's end. Not set
-		// for cancelled subs: no billing follows expires_at_ts.
+		// for canceled subs: no billing follows expires_at_ts.
 		next := time.Unix(dec.CurrentPeriodStartTs, 0).UTC().Add(time.Duration(dec.PeriodHours) * time.Hour)
 		sub.NextBillingAt = &next
 	}

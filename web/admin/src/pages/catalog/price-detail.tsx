@@ -45,12 +45,7 @@ export function PriceDetailPage() {
   const { data: product } = useQuery(adminQueries.product(price?.product_id))
   const { data: history } = useQuery(adminQueries.priceHistory(price?.key))
   const { data: batches } = useQuery(adminQueries.repriceBatches(price?.key))
-  const latestBatch = batches?.items?.[0]
-  const { data: batchReprices } = useQuery(
-    adminQueries.reprices(
-      latestBatch ? { reprice_batch_id: latestBatch.id } : undefined
-    )
-  )
+  const latestBatch = batches?.data?.[0]
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
@@ -61,11 +56,7 @@ export function PriceDetailPage() {
       </p>
     )
 
-  const scheduled =
-    batchReprices?.items?.filter((r) => r.status === "scheduled") ?? []
-  const applied =
-    batchReprices?.items?.filter((r) => r.status === "applied") ?? []
-  const isPending = !!latestBatch && scheduled.length > 0
+  const isPending = !!latestBatch && latestBatch.scheduled > 0
 
   return (
     <div className="flex flex-col gap-4">
@@ -184,20 +175,25 @@ export function PriceDetailPage() {
                 : "Last move to a new price"}
             </CardTitle>
             {isPending && (
-              <CancelMigrationButton repriceIds={scheduled.map((r) => r.id)} />
+              <CancelMigrationButton batchId={latestBatch.id} />
             )}
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             <p>
-              {applied.length} of {latestBatch.subscriptions_scheduled} moved
-              {scheduled.length > 0 && ` · ${scheduled.length} still scheduled`}
+              {latestBatch.applied} of{" "}
+              {latestBatch.applied +
+                latestBatch.scheduled +
+                latestBatch.canceled}{" "}
+              moved
+              {latestBatch.scheduled > 0 &&
+                ` · ${latestBatch.scheduled} still scheduled`}
               {" · effective"}
               {formatDate(latestBatch.effective_at)}
             </p>
-            {latestBatch.subscriptions_skipped > 0 && (
+            {latestBatch.skipped > 0 && (
               <p className="text-xs text-muted-foreground">
-                {latestBatch.subscriptions_skipped} subscription
-                {latestBatch.subscriptions_skipped === 1
+                {latestBatch.skipped} subscription
+                {latestBatch.skipped === 1
                   ? " was"
                   : "s were"}{" "}
                 left alone because another change was already scheduled for
@@ -211,26 +207,27 @@ export function PriceDetailPage() {
   )
 }
 
-function CancelMigrationButton({ repriceIds }: { repriceIds: string[] }) {
+function CancelMigrationButton({ batchId }: { batchId: string }) {
   const queryClient = useQueryClient()
-  const cancelReprices = useMutation(adminMutations.cancelReprices(queryClient))
+  const cancelBatch = useMutation(adminMutations.cancelRepriceBatch(queryClient))
   return (
     <Button
       variant="destructive"
       size="sm"
-      disabled={cancelReprices.isPending || !repriceIds.length}
+      disabled={cancelBatch.isPending}
       onClick={async () => {
         try {
-          await cancelReprices.mutateAsync(repriceIds)
+          const result = await cancelBatch.mutateAsync(batchId)
           toast.success(
-            `Canceled ${repriceIds.length} pending reprice${repriceIds.length === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
+            `Canceled ${result.canceled} pending reprice${result.canceled === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
           )
+          if (result.warning) toast.warning(result.warning)
         } catch (err) {
           toastApiError(err, "Cancel migration")
         }
       }}
     >
-      {cancelReprices.isPending ? "Canceling…" : "Cancel migration"}
+      {cancelBatch.isPending ? "Canceling…" : "Cancel migration"}
     </Button>
   )
 }

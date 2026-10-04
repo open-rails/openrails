@@ -71,7 +71,7 @@ func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 
 	w.runRenewals() // the due pass may already have run on its own
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	next := *sub.CurrentPeriodEndsAt
 	require.True(t, next.After(due))
 	require.Len(t, w.nmi.Attempts(), 1, "OpenRails charges the skipped period once")
@@ -119,7 +119,7 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 		w.watchRebills()
 		w.runRenewals()
 		require.Empty(t, w.missReason(l.sub, due), "no proof, no miss")
-		require.Equal(t, "active", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
 		require.Zero(t, len(w.nmi.Attempts()))
 		w.nmi.ClearIntercepts()
 		w.watchRebills()
@@ -140,7 +140,7 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 		w.watchRebills()
 		w.runRenewals()
 		require.Equal(t, "schedule_gone", w.missReason(l.sub, due))
-		require.NotEqual(t, "past_due", w.subscription(embedded, l.sub).Status)
+		require.NotEqual(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 		require.Zero(t, len(w.nmi.Attempts()), "a deleted schedule only raises the finding")
 	})
 	t.Run("read_only", func(t *testing.T) {
@@ -152,7 +152,7 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 		w.watchRebills()
 		w.runRenewals()
 		require.Equal(t, "provider_skipped", w.missReason(l.sub, due))
-		require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "read-only records the miss and collects nothing")
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "read-only records the miss and collects nothing")
 		require.Zero(t, len(w.nmi.Attempts()))
 	})
 	t.Run("schedule_moved_back", func(t *testing.T) {
@@ -223,7 +223,7 @@ func TestNMIAttemptedRebillIsNeverCollected(t *testing.T) {
 			w.runRenewals()
 			require.Equal(t, tc.reason, w.missReason(l.sub, due))
 			require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charges a period NMI attempted")
-			require.NotEqual(t, "past_due", w.subscription(embedded, l.sub).Status)
+			require.NotEqual(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 			findings := w.openFindings("life.rebill.missed")
 			require.Len(t, findings, 1)
 			var evidence struct {
@@ -276,12 +276,12 @@ func TestNMIScheduleLostWebhookFoundByPull(t *testing.T) {
 			require.Zero(t, len(w.nmi.Attempts()), "a charge NMI made is never made again")
 			if paid {
 				require.Equal(t, "approved", rows[0].Category)
-				require.Equal(t, "active", sub.Status)
+				require.Equal(t, billing.SubscriptionActive, sub.Status)
 				require.True(t, sub.CurrentPeriodEndsAt.After(due), "the period is renewed")
 				return
 			}
 			require.Equal(t, "insufficient_funds", str(rows[0].Reason))
-			require.Equal(t, "past_due", sub.Status, "the decline opens dunning")
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status, "the decline opens dunning")
 			require.NotNil(t, sub.NextRetryAt)
 		})
 	}

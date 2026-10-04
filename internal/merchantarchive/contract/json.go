@@ -264,7 +264,7 @@ var jsonRules = map[string]jsonRule{
 	"payments.metadata": nullable(object(map[string]jsonRule{
 		"initial_payment_reversal": func(v any) bool { return v == "refund" || v == "dispute" },
 		"order_id":                 textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
-		"refund_review": func(v any) bool { return v == "confirmed charge on a cancelled subscription" },
+		"refund_review": func(v any) bool { return v == "confirmed charge on a canceled subscription" },
 	})),
 	"invoice_items.metadata": nullable(object(map[string]jsonRule{
 		"operation": textValue, "source": textValue,

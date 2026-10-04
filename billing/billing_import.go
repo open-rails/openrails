@@ -18,7 +18,7 @@ type DeclaredBilling struct {
 	AsOf time.Time `json:"as_of"`
 	// SubscriptionsExhaustive declares that this call covers the merchant's
 	// ENTIRE subscription book, so every local subscription it omits is
-	// cancelled. It must be false for batched imports.
+	// canceled. It must be false for batched imports.
 	SubscriptionsExhaustive bool `json:"subscriptions_exhaustive,omitempty"`
 	// ExpectedSubscriptions is the typed confirmation required alongside
 	// SubscriptionsExhaustive; a mismatch refuses the whole import.
@@ -87,7 +87,7 @@ type PaymentMethodRef struct {
 }
 
 // CancelEvidence is explicit, settled cancel history. Kind is "" (none),
-// "user_cancelled", "chargeback" or "provider_terminated".
+// "user_canceled", "chargeback" or "provider_terminated".
 type CancelEvidence struct {
 	Kind string    `json:"kind,omitempty"`
 	At   time.Time `json:"at,omitempty"`
@@ -127,7 +127,6 @@ type DeclaredSubscription struct {
 	// PSP is the merchant account owning this subscription at the provider;
 	// falls back to DefaultPSP.
 	PSP           PSPRef            `json:"psp,omitzero"`
-	UserEmail     string            `json:"user_email,omitempty"`
 	StartedAt     time.Time         `json:"started_at"`
 	PaidThrough   *time.Time        `json:"paid_through,omitempty"`
 	Cancel        CancelEvidence    `json:"cancel,omitempty"`

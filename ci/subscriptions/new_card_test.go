@@ -45,9 +45,9 @@ func (h hostedPay) methods() []billing.PaymentMethod {
 
 func (h hostedPay) subscriptions() []billing.Subscription {
 	h.w.t.Helper()
-	subs, err := h.w.client[embedded].ListSubscriptions(h.w.t.Context(), billing.SubscriptionFilter{CustomerID: h.c.id})
+	subs, err := h.w.client[embedded].ListSubscriptions(h.w.t.Context(), billing.SubscriptionListParams{CustomerID: h.c.customerID()})
 	require.NoError(h.w.t, err)
-	return subs.Data
+	return subs.Items
 }
 
 func (w *world) vaultCount() int {
@@ -72,7 +72,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			subs := h.subscriptions()
 			require.Len(t, subs, 1)
 			require.Equal(t, "engine", subs[0].CollectionPolicy)
-			require.Equal(t, "active", subs[0].Status)
+			require.Equal(t, billing.SubscriptionActive, subs[0].Status)
 			require.Equal(t, *session.SubscriptionID, subs[0].ID)
 			methods := h.methods()
 			require.Len(t, methods, 1, "the new card is saved for renewals")

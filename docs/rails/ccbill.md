@@ -152,8 +152,8 @@ posture alone accepts nothing extra.
 - CCBill owns the rebill schedule; OpenRails follows the roster via webhooks
   (`RenewalSuccess` extends, `Cancellation`/`Expiration` end access at the
   paid-through boundary).
-- User cancels queue like every other rail (`POST
-  /v1/me/subscriptions/{id}/cancel` → `202 queued`). The remote leg is a
+- User cancels work like every other rail (`POST
+  /v1/me/subscriptions/{id}/cancel` answers the subscription). The remote leg is a
   durable intent executing DataLink's `cancelSubscription`
   (verify-then-execute: a status read first — already-not-rebilling counts as
   success; ambiguous outcomes re-verify rather than decline). CCBill keeps
@@ -167,7 +167,7 @@ posture alone accepts nothing extra.
 - Webhooks mirror CCBill through the lifecycle machine, one event per post on
   the locked row. BillingDateChange never moves the paid period;
   UserReactivation resumes only inside a paid period (else a
-  `life.ccbill.reactivation_unapplied` finding); a RenewalSuccess on a cancelled
+  `life.ccbill.reactivation_unapplied` finding); a RenewalSuccess on a canceled
   row is recorded for refund review.
 - Automatic CCBill refunds are unavailable. The admin API refuses full and
   partial requests; combined cancel-and-refund refuses before cancellation.

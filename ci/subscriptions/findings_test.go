@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,10 +42,10 @@ func TestDuplicateChargeFindings(t *testing.T) {
 				w.runRenewals()
 				require.True(t, clean.periodEnd().After(end))
 				if i == 0 {
-					require.Equal(t, "past_due", w.subscription(embedded, retried.sub).Status)
+					require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, retried.sub).Status)
 					retried.replaceCard(mastercard)
 					w.runRenewals()
-					require.Equal(t, "active", w.subscription(embedded, retried.sub).Status, "the retry renews")
+					require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, retried.sub).Status, "the retry renews")
 				}
 			}
 			require.Len(t, completed(w.payments(embedded, clean.c.id)), 4)

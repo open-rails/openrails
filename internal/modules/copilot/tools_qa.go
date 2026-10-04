@@ -13,22 +13,17 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/query"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// activeSubscriberCount is the per-price-row subscriber count primitive: the
-// COUNT(*) query only (Limit:0 discards the items page — cheap regardless of
-// cohort size, same pattern #757/#733 pagination already uses everywhere).
+// activeSubscriberCount is the per-price-row subscriber count: one COUNT(*)
+// query.
 func (s *Service) activeSubscriberCount(ctx context.Context, priceID uuid.UUID) (int, error) {
 	if s.subs == nil {
 		return 0, fmt.Errorf("subscription service unavailable")
 	}
-	_, total, err := s.subs.GetSubscribers(ctx, query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
-		Filters: subscriptions.GetSubscriptionsFilters{PriceID: priceID, Status: string(models.StatusActive)},
-		Limit:   0,
-	})
+	total, err := s.subs.CountSubscribers(ctx, subscriptions.GetSubscriptionsFilters{PriceID: billing.PriceID(priceID), Status: string(models.StatusActive)})
 	if err != nil {
 		return 0, err
 	}
@@ -85,7 +80,7 @@ func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]c
 			}
 			grand := 0
 			if s.reprices != nil {
-				preview, err := s.reprices.PreviewAllPriorVersions(ctx, price.Key)
+				preview, err := s.reprices.PreviewBatch(ctx, price.Key)
 				if err == nil && preview.Matched > active {
 					grand = preview.Matched - active
 				}
@@ -201,13 +196,13 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 	grand := 0
 	pending := "no pending migration"
 	if s.reprices != nil {
-		if preview, err := s.reprices.PreviewAllPriorVersions(ctx, key); err == nil && preview.Matched > active {
+		if preview, err := s.reprices.PreviewBatch(ctx, key); err == nil && preview.Matched > active {
 			grand = preview.Matched - active
 		}
-		if batches, err := s.reprices.ListBatchesForKey(ctx, key, 1, 0); err == nil && len(batches) > 0 {
-			b := batches[0]
+		if batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 1}, PriceKey: key}); err == nil && len(batches.Items) > 0 {
+			b := batches.Items[0]
 			pending = fmt.Sprintf("pending migration: batch effective %s, %d/%d scheduled, %d skipped",
-				b.EffectiveAt.Format("2006-01-02"), b.SubscriptionsScheduled, b.SubscriptionsMatched, b.SubscriptionsSkipped)
+				b.EffectiveAt.Format("2006-01-02"), b.Scheduled, b.Matched, b.Skipped)
 		}
 	}
 	lines := []string{
@@ -296,11 +291,6 @@ func toolDefListRepriceBatches() dashboard.ToolDef {
 	}
 }
 
-// repriceBatchCountLimit caps the per-batch row fetch used to tally
-// applied/scheduled/canceled — generous for a Q&A summary; a batch beyond
-// this is noted as truncated rather than silently under-counted.
-const repriceBatchCountLimit = 2000
-
 func (s *Service) runListRepriceBatches(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args getPriceArgs
 	if err := strictDecode(raw, &args); err != nil {
@@ -313,35 +303,16 @@ func (s *Service) runListRepriceBatches(ctx context.Context, raw json.RawMessage
 	if s.reprices == nil {
 		return "", fmt.Errorf("reprice service unavailable")
 	}
-	batches, err := s.reprices.ListBatchesForKey(ctx, key, 20, 0)
+	batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 20}, PriceKey: key})
 	if err != nil {
 		return "", err
 	}
-	table := make([][]string, 0, len(batches))
-	for _, b := range batches {
-		rows, err := s.reprices.List(ctx, subscriptions.SubscriptionRepriceFilter{RepriceBatchID: &b.ID}, repriceBatchCountLimit, 0)
-		if err != nil {
-			return "", err
-		}
-		var applied, scheduled, canceled int
-		for _, r := range rows {
-			switch r.Status {
-			case models.RepriceStatusApplied:
-				applied++
-			case models.RepriceStatusScheduled:
-				scheduled++
-			case models.RepriceStatusCanceled:
-				canceled++
-			}
-		}
-		note := ""
-		if len(rows) >= repriceBatchCountLimit {
-			note = " (truncated count)"
-		}
+	table := make([][]string, 0, len(batches.Items))
+	for _, b := range batches.Items {
 		table = append(table, []string{
 			b.EffectiveAt.Format("2006-01-02"),
-			fmt.Sprintf("%d matched", b.SubscriptionsMatched),
-			fmt.Sprintf("%d applied / %d scheduled / %d canceled%s", applied, scheduled, canceled, note),
+			fmt.Sprintf("%d matched", b.Matched),
+			fmt.Sprintf("%d applied / %d scheduled / %d canceled", b.Applied, b.Scheduled, b.Canceled),
 			b.CreatedAt.Format("2006-01-02"),
 		})
 	}

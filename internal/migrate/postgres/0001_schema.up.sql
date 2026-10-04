@@ -1570,7 +1570,7 @@ BEGIN
     IF NEW.current_period_starts_at IS DISTINCT FROM OLD.current_period_starts_at THEN changed := changed || 'current_period_starts_at'::text; END IF;
     IF NEW.current_period_ends_at IS DISTINCT FROM OLD.current_period_ends_at THEN changed := changed || 'current_period_ends_at'::text; END IF;
     IF NEW.cancel_type IS DISTINCT FROM OLD.cancel_type THEN changed := changed || 'cancel_type'::text; END IF;
-    IF NEW.cancelled_at IS DISTINCT FROM OLD.cancelled_at THEN changed := changed || 'cancelled_at'::text; END IF;
+    IF NEW.canceled_at IS DISTINCT FROM OLD.canceled_at THEN changed := changed || 'canceled_at'::text; END IF;
     IF NEW.ended_at IS DISTINCT FROM OLD.ended_at THEN changed := changed || 'ended_at'::text; END IF;
     IF NEW.lifecycle_rev IS DISTINCT FROM OLD.lifecycle_rev AND NEW.lifecycle_rev <> OLD.lifecycle_rev + 1 THEN
         RAISE EXCEPTION 'subscription % lifecycle_rev must advance by one (% -> %)', OLD.id, OLD.lifecycle_rev, NEW.lifecycle_rev
@@ -1638,7 +1638,6 @@ CREATE TABLE billing.subscriptions (
     rail text NOT NULL,
     collection_policy text DEFAULT 'provider' NOT NULL,
     rail_subscription_id text DEFAULT ''::text NOT NULL,
-    user_email text,
     payment_method_id uuid,
     current_period_starts_at timestamp with time zone,
     current_period_ends_at timestamp with time zone,
@@ -1649,7 +1648,7 @@ CREATE TABLE billing.subscriptions (
     last_retry_at timestamp with time zone,
     retry_attempts integer DEFAULT 0,
     next_retry_at timestamp with time zone,
-    cancelled_at timestamp with time zone,
+    canceled_at timestamp with time zone,
     cancel_type text,
     cancel_feedback text,
     entitlements_spec_snapshot jsonb,
@@ -1669,20 +1668,20 @@ CREATE TABLE billing.subscriptions (
     row_version bigint DEFAULT 0 NOT NULL,
     dunning_policy jsonb,
     CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id='') OR rail='solana')),
-    CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled') OR (cancelled_at IS NOT NULL))),
-    CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled') OR (cancel_type IS NOT NULL))),
-    CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled') OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
-    CONSTRAINT chk_ended_not_before_cancelled CHECK (((ended_at IS NULL) OR (cancelled_at IS NULL) OR (ended_at >= cancelled_at))),
+    CONSTRAINT chk_canceled_has_timestamp CHECK (((status <> 'canceled') OR (canceled_at IS NOT NULL))),
+    CONSTRAINT chk_canceled_has_type CHECK (((status <> 'canceled') OR (cancel_type IS NOT NULL))),
+    CONSTRAINT chk_canceled_no_retry_schedule CHECK (((status <> 'canceled') OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
+    CONSTRAINT chk_ended_not_before_canceled CHECK (((ended_at IS NULL) OR (canceled_at IS NULL) OR (ended_at >= canceled_at))),
     CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due') OR (current_period_ends_at IS NOT NULL))),
     CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at))),
     CONSTRAINT chk_subscriptions_transient_retries CHECK (transient_retries >= 0),
     CONSTRAINT subscriptions_collection_policy_check CHECK (collection_policy IN ('provider', 'nmi_schedule', 'engine')),
-    CONSTRAINT subscriptions_status_check CHECK (status IN ('pending', 'active', 'past_due', 'awaiting_method', 'cancelled', 'unverified')),
-    CONSTRAINT subscriptions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade', 'engine_takeover')),
+    CONSTRAINT subscriptions_status_check CHECK (status IN ('pending', 'active', 'past_due', 'awaiting_method', 'canceled', 'unverified')),
+    CONSTRAINT subscriptions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade')),
     CONSTRAINT subscriptions_nmi_schedule_rail_check CHECK ((collection_policy = 'nmi_schedule') = (rail = 'nmi' AND collection_policy <> 'engine'))
 );
 COMMENT ON TABLE billing.subscriptions IS 'Core subscription records tracking user billing relationships';
-COMMENT ON COLUMN billing.subscriptions.status IS 'Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; cancelled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.';
+COMMENT ON COLUMN billing.subscriptions.status IS 'Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; canceled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.';
 COMMENT ON COLUMN billing.subscriptions.product_id IS 'Denormalized product ID for efficient user+product lookups without joining prices';
 COMMENT ON COLUMN billing.subscriptions.scheduled_price_id IS 'Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.';
 COMMENT ON COLUMN billing.subscriptions.tier_group IS 'Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs uq_subscriptions_customer_tier_group_active: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.';
@@ -1700,8 +1699,10 @@ CREATE INDEX idx_subscriptions_engine_due ON billing.subscriptions (merchant_id,
 CREATE INDEX idx_subscriptions_due_dunning ON billing.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due') AND (next_retry_at IS NOT NULL));
 CREATE INDEX idx_subscriptions_gateway_order_id ON billing.subscriptions USING btree (merchant_id, rail, ((gateway_response ->> 'order_id'::text))) WHERE ((gateway_response ->> 'order_id'::text) IS NOT NULL);
 CREATE INDEX idx_subscriptions_grace_ends_at ON billing.subscriptions USING btree (grace_ends_at) WHERE (grace_ends_at IS NOT NULL);
-CREATE INDEX idx_subscriptions_merchant_cancelled ON billing.subscriptions USING btree (merchant_id, cancelled_at) WHERE (cancelled_at IS NOT NULL);
+CREATE INDEX idx_subscriptions_merchant_canceled ON billing.subscriptions USING btree (merchant_id, canceled_at) WHERE (canceled_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_merchant_ended ON billing.subscriptions USING btree (merchant_id, ended_at) WHERE (ended_at IS NOT NULL);
+CREATE INDEX idx_subscriptions_merchant_created ON billing.subscriptions USING btree (merchant_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL);
+CREATE INDEX idx_subscriptions_customer_created ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL);
 CREATE INDEX idx_subscriptions_merchant_started ON billing.subscriptions USING btree (merchant_id, started_at);
 CREATE INDEX idx_subscriptions_next_retry_at ON billing.subscriptions USING btree (next_retry_at) WHERE (next_retry_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_payment_method_id ON billing.subscriptions USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL);
@@ -1768,12 +1769,12 @@ CREATE TABLE billing.subscription_status_transitions (
     from_paid_through timestamp with time zone,
     to_paid_through timestamp with time zone,
     CONSTRAINT chk_sst_real_transition CHECK (from_status IS DISTINCT FROM to_status OR from_paid_through IS DISTINCT FROM to_paid_through),
-    CONSTRAINT subscription_status_transitions_from_status_check CHECK (from_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'cancelled', 'unverified')),
-    CONSTRAINT subscription_status_transitions_to_status_check CHECK (to_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'cancelled', 'unverified')),
-    CONSTRAINT subscription_status_transitions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade', 'engine_takeover'))
+    CONSTRAINT subscription_status_transitions_from_status_check CHECK (from_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'canceled', 'unverified')),
+    CONSTRAINT subscription_status_transitions_to_status_check CHECK (to_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'canceled', 'unverified')),
+    CONSTRAINT subscription_status_transitions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade'))
 );
 COMMENT ON TABLE billing.subscription_status_transitions IS 'Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.';
-COMMENT ON COLUMN billing.subscription_status_transitions.cancel_type IS 'The subscription''s cancel_type at transition time (meaningful for to_status=cancelled).';
+COMMENT ON COLUMN billing.subscription_status_transitions.cancel_type IS 'The subscription''s cancel_type at transition time (meaningful for to_status=canceled).';
 
 ALTER TABLE ONLY billing.subscription_status_transitions
     ADD CONSTRAINT subscription_status_transitions_pkey PRIMARY KEY (merchant_id, id);
@@ -1811,25 +1812,23 @@ CREATE TABLE billing.reprice_batches (
     to_price_id uuid NOT NULL,
     effective_at timestamp with time zone NOT NULL,
     subscriptions_matched integer DEFAULT 0 NOT NULL,
-    subscriptions_scheduled integer DEFAULT 0 NOT NULL,
     subscriptions_skipped integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     kind text DEFAULT 'reprice'::text NOT NULL,
     source_price_id uuid,
     fallback_policy text DEFAULT ''::text NOT NULL,
-    subscriptions_blocked integer DEFAULT 0 NOT NULL,
     CONSTRAINT reprice_batches_fallback_chk CHECK ((fallback_policy = ANY (ARRAY[''::text, 'keep_grandfathered'::text, 'cancel_at_period_end'::text]))),
     CONSTRAINT reprice_batches_kind_chk CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text])))
 );
-COMMENT ON TABLE billing.reprice_batches IS 'Header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.';
+COMMENT ON TABLE billing.reprice_batches IS 'Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id.';
 COMMENT ON COLUMN billing.reprice_batches.source_price_id IS 'The retired plan''s price for a plan_change batch (the cohort selector); NULL for price-key batches.';
 COMMENT ON COLUMN billing.reprice_batches.fallback_policy IS 'Operator''s choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.';
 
 ALTER TABLE ONLY billing.reprice_batches
     ADD CONSTRAINT reprice_batches_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_reprice_batches_merchant ON billing.reprice_batches USING btree (merchant_id, created_at DESC);
-CREATE INDEX idx_reprice_batches_price_key ON billing.reprice_batches USING btree (merchant_id, price_key, created_at DESC) WHERE (price_key IS NOT NULL);
+CREATE INDEX idx_reprice_batches_merchant ON billing.reprice_batches USING btree (merchant_id, created_at DESC, id DESC);
+CREATE INDEX idx_reprice_batches_price_key ON billing.reprice_batches USING btree (merchant_id, price_key, created_at DESC, id DESC) WHERE (price_key IS NOT NULL);
 CREATE INDEX reprice_batches_to_price_id_idx ON billing.reprice_batches USING btree (merchant_id, to_price_id);
 CREATE INDEX reprice_batches_source_price_id_idx ON billing.reprice_batches USING btree (merchant_id, source_price_id) WHERE (source_price_id IS NOT NULL);
 
@@ -1872,7 +1871,7 @@ ALTER TABLE ONLY billing.subscription_reprices
 CREATE INDEX idx_subscription_reprices_batch ON billing.subscription_reprices USING btree (merchant_id, reprice_batch_id) WHERE (reprice_batch_id IS NOT NULL);
 CREATE INDEX idx_subscription_reprices_blocked_plan_change ON billing.subscription_reprices USING btree (merchant_id) WHERE ((status = 'blocked'::text) AND (kind = 'plan_change'::text));
 CREATE INDEX idx_subscription_reprices_due ON billing.subscription_reprices USING btree (effective_at) WHERE (status = 'scheduled'::text);
-CREATE INDEX idx_subscription_reprices_merchant ON billing.subscription_reprices USING btree (merchant_id, created_at DESC);
+CREATE INDEX idx_subscription_reprices_merchant ON billing.subscription_reprices USING btree (merchant_id, created_at DESC, id DESC);
 CREATE INDEX idx_subscription_reprices_subscription ON billing.subscription_reprices USING btree (merchant_id, subscription_id);
 CREATE UNIQUE INDEX uq_subscription_reprices_one_scheduled ON billing.subscription_reprices USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text);
 CREATE INDEX subscription_reprices_from_price_id_idx ON billing.subscription_reprices USING btree (merchant_id, from_price_id);
@@ -1906,7 +1905,7 @@ CREATE TABLE billing.solana_subscriptions (
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT solana_subscriptions_status_check CHECK (status IN ('active', 'cancelled', 'expired'))
+    CONSTRAINT solana_subscriptions_status_check CHECK (status IN ('active', 'canceled', 'expired'))
 );
 COMMENT ON TABLE billing.solana_subscriptions IS 'On-chain mirror of one Solana subscription: its program accounts, mint and next pull.';
 
@@ -2606,10 +2605,10 @@ CREATE TABLE billing.entitlements (
     deleted_at timestamp with time zone,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    grant_id uuid,
+    grant_id uuid NOT NULL,
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
-    CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['subscription'::text, 'one_off'::text, 'admin'::text, 'grace'::text, 'grant'::text]))),
+    CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text]))),
     CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at)))
 );
@@ -2624,14 +2623,14 @@ CREATE INDEX idx_entitlements_closed_at ON billing.entitlements USING btree (mer
 CREATE INDEX idx_entitlements_customer_active_window ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, start_at, end_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_destructive_run ON billing.entitlements USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_entitlements_grace_by_subscription_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, start_at, end_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_grant_id ON billing.entitlements USING btree (merchant_id, grant_id) WHERE (grant_id IS NOT NULL);
+CREATE INDEX idx_entitlements_grant_id ON billing.entitlements USING btree (merchant_id, grant_id);
 CREATE INDEX idx_entitlements_live_by_id ON billing.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_one_off_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'one_off'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_purchase_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'purchase'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_reverse_active ON billing.entitlements USING btree (merchant_id, entitlement, customer_id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_source ON billing.entitlements USING btree (merchant_id, source_type, source_id);
 CREATE INDEX idx_entitlements_subscription_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_entitlements_grant_feature ON billing.entitlements (merchant_id, grant_id, entitlement)
-    WHERE grant_id IS NOT NULL AND deleted_at IS NULL;
+    WHERE deleted_at IS NULL;
 
 ALTER TABLE ONLY billing.entitlements
     ADD CONSTRAINT entitlements_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);

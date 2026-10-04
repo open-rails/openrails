@@ -1,195 +1,373 @@
 package handlers
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// User-initiated cancellations must include a typed explanation. The bound
-// gin validator only honors `binding` tags, so the length rule is enforced
-// explicitly below (after trimming) rather than via struct tags.
+// A customer's cancel carries their reason: 4 to 500 characters.
 const (
-	minCancelFeedbackChars = 4
-	maxCancelFeedbackChars = 500
+	minCancelReasonChars = 4
+	maxCancelReasonChars = 500
 )
 
-type CancelSubscriptionRequest struct {
-	Feedback string `json:"feedback"`
+// CustomerCancelSubscriptionRequest is the customer's cancel, at period end.
+// Signature completes a solana_sign_transactions next action: the signature
+// of the cancel transaction the customer's wallet sent.
+type CustomerCancelSubscriptionRequest struct {
+	Reason    string `json:"reason"`
+	Signature string `json:"signature"`
 }
 
-func subscriptionLifecycleUniqueOpts() river.UniqueOpts {
-	return river.UniqueOpts{
-		ByArgs:  true,
-		ByQueue: true,
-		ByState: []rivertype.JobState{
-			rivertype.JobStateAvailable,
-			rivertype.JobStatePending,
-			rivertype.JobStateRunning,
-			rivertype.JobStateRetryable,
-			rivertype.JobStateScheduled,
-		},
-	}
-}
-
+// CancelSubscription cancels one of the customer's subscriptions at period
+// end and answers the subscription. A rail that needs the customer's own step
+// (Solana: the wallet signs the on-chain cancel) answers the unchanged
+// subscription with next_action; the customer repeats the request with the
+// signature.
 func CancelSubscription(r *httprequest.Request) {
-	req := new(CancelSubscriptionRequest)
-	if !r.BindJSON(req) {
+	var req CustomerCancelSubscriptionRequest
+	if !r.BindJSON(&req) {
 		return
 	}
-
-	feedback := strings.TrimSpace(req.Feedback)
-	switch n := utf8.RuneCountInString(feedback); {
-	case n < minCancelFeedbackChars:
-		r.ErrorJSON(http.StatusBadRequest, "Please tell us why you're cancelling (at least 4 characters).")
+	reason := strings.TrimSpace(req.Reason)
+	switch n := utf8.RuneCountInString(reason); {
+	case n < minCancelReasonChars:
+		r.ErrorJSON(http.StatusBadRequest, "Please tell us why you're canceling (at least 4 characters).")
 		return
-	case n > maxCancelFeedbackChars:
-		r.ErrorJSON(http.StatusBadRequest, "Cancellation feedback must be 500 characters or fewer.")
-		return
-	}
-
-	uc, ok := r.UserContext()
-	if !ok || uc.UserID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+	case n > maxCancelReasonChars:
+		r.ErrorJSON(http.StatusBadRequest, "The cancellation reason must be 500 characters or fewer.")
 		return
 	}
-
-	subscriptionIDStr := r.Param("id")
-	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+	userID, sub, ok := ownSubscription(r)
+	if !ok {
 		return
 	}
+	ctx := db.WithPSPID(r.Request.Context(), sub.PspID)
 
-	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-
-	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
-	if err != nil {
-		if db.IsNotFound(err) {
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
+	if sub.Rail == models.RailSolana {
+		signature := strings.TrimSpace(req.Signature)
+		if signature == "" {
+			if r.State.SolanaPrepareCancelService == nil {
+				r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+				return
+			}
+			prepared, err := r.State.SolanaPrepareCancelService.Prepare(ctx, sub.ID)
+			if err != nil {
+				r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+				return
+			}
+			writeMySubscription(r, userID, sub.ID, &billing.NextAction{
+				Type: "solana_sign_transactions", Transactions: []string{prepared.Transaction},
+			})
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
-		return
+		if r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil {
+			r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+			return
+		}
+		svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
+		if err := svc.Confirm(ctx, sub.ID, signature, reason); err != nil {
+			r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+			return
+		}
+	} else {
+		if req.Signature != "" {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "signature completes a wallet step; this subscription's rail has none").WithParam("signature"))
+			return
+		}
+		if err := cancelForCustomer(ctx, r, userID, sub, reason); err != nil {
+			writeRefusal(r, err, "failed to cancel subscription")
+			return
+		}
 	}
+	convergeAfter(ctx, r, sub, "subscription_cancel")
+	writeMySubscription(r, userID, sub.ID, nil)
+}
 
-	if sub.CustomerID.String() != uc.UserID {
-		r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		return
-	}
-
-	// or#896: Solana is refused HERE, synchronously, with the dedicated
-	// endpoints named. Queuing it would park a job that can only fail
-	// permanently — the cancel is a transaction the subscriber's wallet signs.
-	if sub.Rail == models.RailSolana {
-		r.ErrorJSON(http.StatusBadRequest, subscriptions.ErrSolanaCancelNeedsWalletSignature.Error())
-		return
-	}
-
+// cancelForCustomer records the customer's cancel at period end: the local
+// cancel plus the provider's cancel (inline on Stripe, a durable intent
+// committed with it on NMI and CCBill).
+func cancelForCustomer(ctx context.Context, r *httprequest.Request, userID string, sub *models.Subscription, reason string) error {
 	// A provider-billed schedule that cannot be deleted (destructive actions
-	// disarmed) is refused now, with its operator finding, instead of queueing
-	// a cancel the provider would ignore.
-	if _, err := subscriptions.RequireProviderCancelArmed(r.Request.Context(), r.State.SubscriptionService.Database(), sub, false); err != nil {
+	// disarmed) is refused with its operator finding.
+	if _, err := subscriptions.RequireProviderCancelArmed(ctx, r.State.SubscriptionService.Database(), sub, false); err != nil {
+		return err
+	}
+	if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail != models.RailStripe {
+		if r.State.UserSubscriptionService == nil {
+			return fmt.Errorf("user subscription service unavailable")
+		}
+		return r.State.UserSubscriptionService.CancelUserSubscription(ctx, userID, sub.ID, reason)
+	}
+	if r.State.SubscriptionLifecycleService == nil {
+		return fmt.Errorf("subscription lifecycle service unavailable")
+	}
+	if sub.CollectionPolicy != models.CollectionPolicyEngine {
+		stripeSvc := &subscriptions.StripeService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
+		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
+			return err
+		}
+	}
+	return r.State.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+		SubscriptionID: &sub.ID,
+		CancelType:     models.CancelTypeUser,
+		CancelFeedback: &reason,
+		RevokeAccess:   false,
+	})
+}
+
+// ResumeSubscription undoes the customer's own scheduled cancel on a
+// reversible rail before the paid period ends, and answers the subscription.
+func ResumeSubscription(r *httprequest.Request) {
+	userID, sub, ok := ownSubscription(r)
+	if !ok {
+		return
+	}
+	if !resume(r, sub) {
+		return
+	}
+	writeMySubscription(r, userID, sub.ID, nil)
+}
+
+// AdminResumeSubscription is the merchant's resume of a subscription.
+func AdminResumeSubscription(r *httprequest.Request) {
+	id, ok := subscriptionIDParam(r)
+	if !ok {
+		return
+	}
+	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), id)
+	if err != nil {
+		writeSubscriptionLoadError(r, err)
+		return
+	}
+	if !resume(r, sub) {
+		return
+	}
+	writeMerchantSubscription(r, sub.ID)
+}
+
+// AdminCancelSubscriptionRequest is the merchant's cancel body.
+type AdminCancelSubscriptionRequest = billing.CancelSubscriptionParams
+
+// AdminCancelSubscription is the merchant's cancel; it answers the
+// subscription.
+func AdminCancelSubscription(r *httprequest.Request) {
+	id, ok := subscriptionIDParam(r)
+	if !ok {
+		return
+	}
+	var req AdminCancelSubscriptionRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), id, strings.TrimSpace(req.Reason), req.RevokeAccess, req.AccountDeletion); err != nil {
 		writeRefusal(r, err, "failed to cancel subscription")
 		return
 	}
-
-	// #696: CCBill cancels queue like every other rail — the worker's user
-	// cancel path records the local runway cancel + durable remote-cancel intent.
-	_, err = r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.CancelSubscriptionArgs{
-		MerchantID:     sub.MerchantID,
-		UserID:         uc.UserID,
-		SubscriptionID: subscriptionID,
-		Feedback:       feedback,
-	}, &river.InsertOpts{
-		Queue:      riverjobs.QueueBilling,
-		UniqueOpts: subscriptionLifecycleUniqueOpts(),
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue cancellation")
-		return
-	}
-
-	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
+	writeMerchantSubscription(r, id)
 }
 
-func ResumeSubscription(r *httprequest.Request) {
-	uc, ok := r.UserContext()
-	if !ok || uc.UserID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return
-	}
-
-	subscriptionIDStr := r.Param("id")
-	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
-		return
-	}
-
-	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-
-	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
-	if err != nil {
-		if db.IsNotFound(err) {
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load subscription")
-		return
-	}
-
-	if sub.CustomerID.String() != uc.UserID {
-		r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		return
-	}
-
-	// Gate on the single shared resumability predicate so the handler, the
-	// worker, and the DTO cannot drift. Resumable == CancelMode reversible &&
-	// cancelled && period end in the future. Preserve distinguishable 400s.
+// resume restores a resumable subscription, writing the refusal when it is
+// not resumable or the resume fails.
+func resume(r *httprequest.Request, sub *models.Subscription) bool {
 	now := r.Clock.Now().UTC()
 	if !subscriptions.Resumable(sub, now) {
-		if sub.Status != models.StatusCancelled {
-			r.ErrorJSON(http.StatusBadRequest, "subscription is not cancelled")
-			return
-		}
-		if subscriptions.CancelModeFor(sub, now) != subscriptions.CancelModeReversible {
+		switch {
+		case sub.Status != models.StatusCanceled:
+			r.ErrorJSON(http.StatusBadRequest, "subscription is not canceled")
+		case subscriptions.CancelModeFor(sub, now) != subscriptions.CancelModeReversible:
 			r.ErrorJSON(http.StatusBadRequest, "resume unsupported for rail")
-			return
+		default:
+			r.ErrorJSON(http.StatusBadRequest, "subscription can no longer be resumed")
 		}
-		// Cancelled + reversible rail but the paid period has elapsed.
-		r.ErrorJSON(http.StatusBadRequest, "subscription can no longer be resumed")
+		return false
+	}
+	ctx := db.WithPSPID(r.Request.Context(), sub.PspID)
+	if r.State.SubscriptionLifecycleService == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
+		return false
+	}
+	var err error
+	switch {
+	case sub.CollectionPolicy == models.CollectionPolicyEngine || sub.Rail == models.RailStripe:
+		if sub.CollectionPolicy != models.CollectionPolicyEngine {
+			stripeSvc := &subscriptions.StripeService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
+			if err = stripeSvc.ResumeSubscription(ctx, sub.RailSubscriptionID); err != nil {
+				break
+			}
+		}
+		_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID})
+	case rails.IsNMI(sub.Rail):
+		err = resumeNMI(ctx, r, sub)
+	default:
+		r.ErrorJSON(http.StatusBadRequest, "resume unsupported for rail")
+		return false
+	}
+	if err != nil {
+		writeRefusal(r, err, "failed to resume subscription")
+		return false
+	}
+	return true
+}
+
+// resumeNMI undoes an NMI cancel inside its undo window. The NMI schedule was
+// never deleted (the delete is deferred), so nothing is sent to NMI: the
+// pending delete intent is superseded, the subscription and its paid access
+// are restored, and the deferred-delete schedule is cleared. The status flip
+// to active is the guard that counts: the intent executor re-reads it and
+// supersedes the delete on its own if the supersede here missed.
+func resumeNMI(ctx context.Context, r *httprequest.Request, sub *models.Subscription) error {
+	if n, err := intents.NewStore(r.State.DB).SupersedeBySubject(ctx, intents.TypeNMIDeleteSubscription, sub.ID,
+		"cancellation undone (resume) for customer "+sub.CustomerID.String()); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
+			Warn("failed to supersede the scheduled NMI delete; the executor's relevance check remains the guard")
+	} else if n > 0 {
+		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "superseded": n}).Info("superseded the deferred NMI delete on resume")
+	}
+	reactivated, err := r.State.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
+		Rail:                sub.Rail,
+		RailSubscriptionID:  sub.RailSubscriptionID,
+		CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt,
+		// A canceled subscription is terminal to the lifecycle guard; the
+		// Resumable predicate checked above is the gate.
+		AllowTerminalReactivation: true,
+	})
+	if err != nil {
+		return fmt.Errorf("reactivate NMI subscription: %w", err)
+	}
+	if reactivated != nil && reactivated.DeletionScheduledAt != nil {
+		reactivated.DeletionScheduledAt = nil
+		if err := r.State.SubscriptionService.Update(ctx, reactivated); err != nil {
+			return fmt.Errorf("clear deferred delete schedule: %w", err)
+		}
+	}
+	return nil
+}
+
+// convergeAfter reconciles the customer right after a lifecycle change, so
+// the drift it implies is repaired now rather than at the next sweep.
+// Best-effort: the sweep is the backstop.
+func convergeAfter(ctx context.Context, r *httprequest.Request, sub *models.Subscription, operation string) {
+	if r.State.DB == nil {
 		return
 	}
+	if _, err := converge.AfterMutation(ctx, r.State.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, r.Clock); err != nil {
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+			"operation": operation, "merchant_id": sub.MerchantID, "customer_id": sub.CustomerID,
+		}).Warn("inline converge after a subscription change failed; the sweep will reconcile")
+	}
+}
 
-	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
-		MerchantID:     sub.MerchantID,
-		UserID:         uc.UserID,
-		SubscriptionID: subscriptionID,
-	}, &river.InsertOpts{
-		Queue:      riverjobs.QueueBilling,
-		UniqueOpts: subscriptionLifecycleUniqueOpts(),
-	}); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue resume")
+// subscriptionIDParam reads the {id} path parameter.
+func subscriptionIDParam(r *httprequest.Request) (uuid.UUID, bool) {
+	id, err := billing.ParseSubscriptionID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid subscription ID").WithParam("id"))
+		return uuid.Nil, false
+	}
+	return id.UUID(), true
+}
+
+// ownSubscription loads the {id} subscription when it is the signed-in
+// customer's; another customer's subscription is not found.
+func ownSubscription(r *httprequest.Request) (string, *models.Subscription, bool) {
+	user := r.GetUser()
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		return "", nil, false
+	}
+	id, ok := subscriptionIDParam(r)
+	if !ok {
+		return "", nil, false
+	}
+	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), id)
+	if err != nil {
+		writeSubscriptionLoadError(r, err)
+		return "", nil, false
+	}
+	if sub.CustomerID.String() != user.ID {
+		writeRefusal(r, subscriptions.ErrSubscriptionNotFound, "subscription not found")
+		return "", nil, false
+	}
+	return user.ID, sub, true
+}
+
+func writeSubscriptionLoadError(r *httprequest.Request, err error) {
+	if db.IsNotFound(err) {
+		err = subscriptions.ErrSubscriptionNotFound
+	}
+	writeRefusal(r, err, "failed to load subscription")
+}
+
+// writeMySubscription answers the customer's subscription as GET
+// /v1/me/subscriptions/{id} serves it, with an optional next action.
+func writeMySubscription(r *httprequest.Request, userID string, id uuid.UUID, next *billing.NextAction) {
+	out, ok := mySubscription(r, userID, id)
+	if !ok {
 		return
 	}
+	out.NextAction = next
+	r.SuccessJSON(out)
+}
 
-	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
+func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billing.Subscription, bool) {
+	subscription, err := r.State.UserSubscriptionService.GetUserSubscriptionByID(r.Request.Context(), userID, id)
+	if err != nil {
+		if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
+			writeRefusal(r, err, "subscription not found")
+		} else {
+			r.InternalError("failed to retrieve subscription", err)
+		}
+		return billing.Subscription{}, false
+	}
+	out := subscription.View()
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return billing.Subscription{}, false
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return billing.Subscription{}, false
+	}
+	if out.Recovery, err = svc.SubscriptionRecovery(r.Request.Context(), payer, id); err != nil {
+		r.InternalError("subscription recovery unavailable", err)
+		return billing.Subscription{}, false
+	}
+	return out, true
+}
+
+// writeMerchantSubscription answers the subscription as GET
+// /v1/merchant/subscriptions/{id} serves it.
+func writeMerchantSubscription(r *httprequest.Request, id uuid.UUID) {
+	svc := r.State.AdminSubscriptionService
+	if svc == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "admin subscription service unavailable")
+		return
+	}
+	subscription, err := svc.GetSubscriptionByID(r.Request.Context(), id)
+	if err != nil {
+		writeRefusal(r, err, "failed to load subscription")
+		return
+	}
+	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
 }

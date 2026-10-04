@@ -78,7 +78,7 @@ func canonicalWireFixtures() map[string]any {
 			SuccessURL:   ptr("https://merchant.example/thanks?checkout=ocs_fixture"),
 			ExpiresAt:    when,
 		},
-		"subscription.json": subscriptionFixtureValue(when, maxMoney, card),
+		"subscription.json": subscriptionFixtureValue(when, priceFixtureValue, card),
 		"notification.json": billing.Notification{
 			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: (customerFixture).String(), EventType: "subscription_reprice_scheduled", CreatedAt: when,
 			Data: billing.NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: (priceFixture).String(), ToPriceID: (scheduledPriceFixture).String(), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
@@ -91,7 +91,7 @@ func canonicalWireFixtures() map[string]any {
 			PriceID: &priceFixture, Amount: new(maxMoney), Currency: new("USD"), SubscriptionID: &subscriptionFixture, PaymentID: &paymentFixture,
 			ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"},
 		},
-		"payment.json": paymentFixtureValue(when, maxMoney, card),
+		"payment.json": paymentFixtureValue(when, priceFixtureValue, card),
 		"payment_method.json": billing.PaymentMethod{
 			ID: methodFixture, CustomerID: customerFixture, Rail: "nmi", PSPID: ptr("55555555-5555-5555-5555-555555555555"), Card: card,
 			BillingDetails:       &billing.BillingDetails{Name: ptr("Ada Lovelace"), Address: &billing.BillingAddress{PostalCode: ptr("80202"), Country: ptr("US")}},
@@ -113,28 +113,30 @@ func ptr[T any](v T) *T { return &v }
 
 // subscriptionFixtureValue is the self-route shape: the merchant routes serve
 // the same struct without ScheduledPrice/ScheduledProduct/CancelPortalURL/Access.
-func subscriptionFixtureValue(when time.Time, maxMoney int64, card *billing.CardDetails) billing.Subscription {
+func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing.CardDetails) billing.Subscription {
 	portal := "https://support.ccbill.com/"
+	scheduled := price
+	scheduled.ID, scheduled.Key = scheduledPriceFixture, "pro-annual"
 	return billing.Subscription{
 		CollectionPolicy: "provider",
-		ID:               subscriptionFixture, CustomerID: customerFixture.String(), ProductID: (productFixture).String(), PriceID: (priceFixture).String(), PSPID: "55555555-5555-5555-5555-555555555555",
-		Rail: "nmi", RailSubscriptionID: "rail-sub-1", Status: "active", ScheduledPriceID: ptr(scheduledPriceFixture.String()), PaymentMethodID: &methodFixture,
+		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: "55555555-5555-5555-5555-555555555555",
+		Rail: "nmi", RailSubscriptionID: "rail-sub-1", Status: "active", ScheduledPriceID: ptr(scheduledPriceFixture), PaymentMethodID: &methodFixture,
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,
-		Price:            &billing.SubscriptionPrice{ID: (priceFixture).String(), Key: "pro-monthly", ProductID: (productFixture).String(), UnitAmount: maxMoney, Currency: "USD", AutoRenew: true},
-		Product:          &billing.ProductSummary{ID: (productFixture).String(), Key: "pro", DisplayName: "Pro"},
-		ScheduledPrice:   &billing.SubscriptionPrice{ID: (scheduledPriceFixture).String(), Key: "pro-annual", ProductID: (productFixture).String(), UnitAmount: maxMoney, Currency: "USD", AutoRenew: true},
-		ScheduledProduct: &billing.ProductSummary{ID: (productFixture).String(), Key: "pro", DisplayName: "Pro"},
+		Price:            &price,
+		Product:          &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
+		ScheduledPrice:   &scheduled,
+		ScheduledProduct: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		Card:             card,
 		Access:           &billing.SubscriptionAccess{Kind: "subscription", Entitlement: "premium", SubscriptionID: subscriptionFixture, Rail: "nmi", StartAt: when, EndAt: &when},
-		Payments:         []billing.Payment{paymentFixtureValue(when, maxMoney, card)},
+		Payments:         []billing.Payment{paymentFixtureValue(when, price, card)},
 	}
 }
 
-func paymentFixtureValue(when time.Time, maxMoney int64, card *billing.CardDetails) billing.Payment {
+func paymentFixtureValue(when time.Time, price billing.Price, card *billing.CardDetails) billing.Payment {
 	return billing.Payment{
-		ID: paymentFixture, Kind: billing.PaymentCharge, Status: billing.PaymentSucceeded, Amount: maxMoney, Currency: "USD", CustomerID: customerFixture,
-		SubscriptionID: &subscriptionFixture, PriceID: priceFixture, Product: &billing.ProductSummary{ID: (productFixture).String(), Key: "pro", DisplayName: "Pro"},
-		Price:   &billing.SubscriptionPrice{ID: priceFixture.String(), Key: "pro-monthly", ProductID: productFixture.String(), UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, AccessDurationHours: ptr(720)},
+		ID: paymentFixture, Kind: billing.PaymentCharge, Status: billing.PaymentSucceeded, Amount: price.UnitAmount, Currency: "USD", CustomerID: customerFixture,
+		SubscriptionID: &subscriptionFixture, PriceID: priceFixture, Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
+		Price:   &price,
 		Channel: billing.ChannelRail, Rail: ptr("nmi"), PSPID: ptr("55555555-5555-5555-5555-555555555555"), TransactionID: "txn-1", Card: card, CreatedAt: when,
 	}
 }

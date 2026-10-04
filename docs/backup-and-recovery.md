@@ -15,7 +15,7 @@ database leaves you with an unreadable system.
 
 **Restoring the database does not undo what already happened at the payment provider.**
 
-If OpenRails deleted an NMI customer vault, charged a card, or cancelled a Stripe subscription,
+If OpenRails deleted an NMI customer vault, charged a card, or canceled a Stripe subscription,
 a restore does not reverse any of it. A restore *creates* divergence between local state and
 provider truth rather than removing it.
 

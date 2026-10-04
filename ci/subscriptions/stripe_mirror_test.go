@@ -38,8 +38,8 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChange(l.railSub, stripePrice, 1999, 500))))
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, l.price.ID.String(), sub.PriceID, "an open invoice pays for nothing")
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, l.price.ID, sub.PriceID, "an open invoice pays for nothing")
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.False(t, l.c.entitled(premium))
 	require.True(t, l.c.entitled(l.ent), "the paid tier stands")
 
@@ -47,8 +47,8 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	w.advance(end.Sub(w.clock.Now()) + time.Hour)
 	require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(true)))
 	sub = w.subscription(embedded, l.sub)
-	require.Equal(t, price.ID.String(), sub.PriceID, "Stripe's paid invoice for the new price")
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, price.ID, sub.PriceID, "Stripe's paid invoice for the new price")
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.After(end))
 	require.True(t, l.c.entitled(premium))
 	require.Zero(t, l.engineCharges())
@@ -78,7 +78,7 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChangePaid(l.railSub, stripePrice, 1999, 500))))
 	w.settle()
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, price.ID.String(), sub.PriceID, "a paid proration moves the tier")
+	require.Equal(t, price.ID, sub.PriceID, "a paid proration moves the tier")
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a proration never moves the paid period")
 	require.True(t, l.c.entitled(premium))
 	paid := completed(w.payments(embedded, l.c.id))
@@ -125,6 +125,6 @@ func TestStripeEventMidConvergeIsNotLost(t *testing.T) {
 	w.stripe.unhold()
 	w.settle()
 
-	require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status, "the mid-run cancellation is converged")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status, "the mid-run cancellation is converged")
 	require.False(t, l.c.entitled(l.ent))
 }

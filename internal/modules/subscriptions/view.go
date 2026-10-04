@@ -12,7 +12,7 @@ import (
 // at the response's read time.
 func (r *UserSubscriptionResponse) View() billing.Subscription {
 	out := SubscriptionView(r.Subscription, r.Price, r.EvaluationTime())
-	out.ScheduledPrice = subscriptionPriceView(r.ScheduledPrice)
+	out.ScheduledPrice = r.ScheduledPrice.PublicView()
 	out.ScheduledProduct = r.ScheduledProduct.Summary()
 	out.Access = r.Access
 	return out
@@ -24,17 +24,17 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Ti
 	out := billing.Subscription{
 		CollectionPolicy: string(sub.CollectionPolicy),
 		LastRetryAt:      sub.LastRetryAt, RetryAttempts: sub.RetryAttempts, NextRetryAt: sub.NextRetryAt, GraceEndsAt: sub.GraceEndsAt, DeletionScheduledAt: sub.DeletionScheduledAt,
-		ID: billing.SubscriptionID(sub.ID), CustomerID: (billing.CustomerID(sub.CustomerID)).String(), ProductID: billing.ProductID(sub.ProductID).String(), PriceID: billing.PriceID(sub.PriceID).String(),
-		PSPID: sub.PspID.String(), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, Status: string(sub.Status),
+		ID: billing.SubscriptionID(sub.ID), CustomerID: billing.CustomerID(sub.CustomerID), ProductID: billing.ProductID(sub.ProductID), PriceID: billing.PriceID(sub.PriceID),
+		PSPID: sub.PspID.String(), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, Status: billing.SubscriptionStatus(sub.Status),
 		StartedAt: sub.StartedAt, EndedAt: sub.EndedAt, CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt, CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt,
-		CancelledAt: sub.CancelledAt, CancelFeedback: sub.CancelFeedback, CreatedAt: sub.CreatedAt, UpdatedAt: sub.UpdatedAt,
+		CanceledAt: sub.CanceledAt, CancelFeedback: sub.CancelFeedback, CreatedAt: sub.CreatedAt, UpdatedAt: sub.UpdatedAt,
 		PaymentMethodID: (*billing.PaymentMethodID)(sub.PaymentMethodID),
 		Resumable:       Resumable(sub, now), CancelScheduled: CancelScheduled(sub, now), CancelMode: string(CancelModeFor(sub, now)),
 		CancelPortalURL: CancelPortalURL(sub, now),
-		Price:           subscriptionPriceView(price), Product: sub.Product.Summary(), Card: subscriptionCardView(sub.PaymentMethod),
+		Price:           price.PublicView(), Product: sub.Product.Summary(), Card: subscriptionCardView(sub.PaymentMethod),
 	}
 	if sub.ScheduledPriceID != nil {
-		id := billing.PriceID(*sub.ScheduledPriceID).String()
+		id := billing.PriceID(*sub.ScheduledPriceID)
 		out.ScheduledPriceID = &id
 	}
 	if sub.CancelType != nil {
@@ -42,13 +42,6 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Ti
 		out.CancelType = &v
 	}
 	return out
-}
-
-func subscriptionPriceView(p *models.Price) *billing.SubscriptionPrice {
-	if p == nil {
-		return nil
-	}
-	return &billing.SubscriptionPrice{ID: billing.PriceID(p.ID).String(), Key: p.Key, ProductID: billing.ProductID(p.ProductID).String(), UnitAmount: p.Amount, Currency: p.Currency, AutoRenew: p.AutoRenew, AccessDurationHours: p.AccessDurationHours, Archived: p.Archived}
 }
 
 // subscriptionCardView is the card on the subscription's payment method, from

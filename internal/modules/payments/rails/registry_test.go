@@ -74,7 +74,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 	require.False(t, ok, "a custodian key is not an NMI credential (or#880)")
 }
 
-// NMI cancellation is reversible only while cancelled, delete still pending, and paid period ahead (issue 216).
+// NMI cancellation is reversible only while canceled, delete still pending, and paid period ahead (issue 216).
 func TestCancelModeFor(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -84,10 +84,10 @@ func TestCancelModeFor(t *testing.T) {
 		sub  *models.Subscription
 		want CancelMode
 	}{
-		{"nmi delete pending", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCancelled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &future}, CancelModeReversible},
-		{"nmi delete executed", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCancelled, CurrentPeriodEndsAt: &future}, CancelModeDestructive},
-		{"nmi period lapsed", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCancelled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &past}, CancelModeDestructive},
-		{"nmi period ends now", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCancelled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &now}, CancelModeDestructive},
+		{"nmi delete pending", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &future}, CancelModeReversible},
+		{"nmi delete executed", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, CurrentPeriodEndsAt: &future}, CancelModeDestructive},
+		{"nmi period lapsed", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &past}, CancelModeDestructive},
+		{"nmi period ends now", &models.Subscription{Rail: models.RailNMI, Status: models.StatusCanceled, DeletionScheduledAt: &future, CurrentPeriodEndsAt: &now}, CancelModeDestructive},
 		{"engine owns its schedule", &models.Subscription{Rail: models.RailSolana, CollectionPolicy: models.CollectionPolicyEngine}, CancelModeReversible},
 		{"unknown rail", &models.Subscription{Rail: "bogus"}, CancelModeDestructive},
 		{"nil", nil, CancelModeDestructive},

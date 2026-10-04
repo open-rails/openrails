@@ -12,17 +12,33 @@
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "key": "pro-monthly",
     "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "archived": false,
     "unit_amount": "9223372036854775807",
     "currency": "USD",
-    "auto_renew": true,
     "access_duration_hours": 720,
-    "archived": false
+    "auto_renew": true,
+    "trial_unit_amount": null,
+    "trial_duration_hours": null,
+    "psps": {
+      "mobius": {
+        "status": "linked",
+        "ids": null,
+        "lookup_key": "",
+        "sync_status": "unknown",
+        "drift": null,
+        "message": ""
+      }
+    },
+    "pending_manual_actions": [],
+    "created_at": "2026-09-16T00:00:00.123456789Z",
+    "updated_at": "2026-09-16T00:00:00.123456789Z"
   },
   "product": {
     "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "key": "pro",
     "display_name": "Pro",
     "description": "",
+    "tier_group": null,
     "tier_rank": 0,
     "archived": false
   },

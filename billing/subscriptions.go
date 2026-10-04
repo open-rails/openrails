@@ -14,11 +14,28 @@ type Page[T any] struct {
 
 type PageOptions struct{ Limit, Offset int }
 
-type SubscriptionFilter struct {
-	PageOptions
-	CustomerID string
-	Status     string
+// SubscriptionStatus is a subscription's lifecycle state: whether it will
+// rebill.
+type SubscriptionStatus string
+
+const (
+	SubscriptionPending        SubscriptionStatus = "pending"
+	SubscriptionActive         SubscriptionStatus = "active"
+	SubscriptionPastDue        SubscriptionStatus = "past_due"
+	SubscriptionAwaitingMethod SubscriptionStatus = "awaiting_method"
+	SubscriptionCanceled       SubscriptionStatus = "canceled"
+	// SubscriptionUnverified: the provider must say whether it still bills.
+	SubscriptionUnverified SubscriptionStatus = "unverified"
+)
+
+// SubscriptionListParams filters one page of the merchant's subscriptions,
+// newest first.
+type SubscriptionListParams struct {
+	PageRequest
+	CustomerID CustomerID
+	Status     SubscriptionStatus
 	Rail       string
+	PriceID    PriceID
 }
 
 // Subscription exposes lifecycle and recovery state without making provider
@@ -40,28 +57,28 @@ type Subscription struct {
 	// GET /v1/merchant/payments serves.
 	Payments              []Payment          `json:"payments,omitempty"`
 	ID                    SubscriptionID     `json:"id"`
-	CustomerID            string             `json:"customer_id"`
-	ProductID             string             `json:"product_id"`
-	PriceID               string             `json:"price_id"`
+	CustomerID            CustomerID         `json:"customer_id"`
+	ProductID             ProductID          `json:"product_id"`
+	PriceID               PriceID            `json:"price_id"`
 	PSPID                 string             `json:"psp_id"`
 	Rail                  string             `json:"rail"`
 	RailSubscriptionID    string             `json:"rail_subscription_id"`
-	Status                string             `json:"status"`
-	ScheduledPriceID      *string            `json:"scheduled_price_id,omitempty"`
+	Status                SubscriptionStatus `json:"status"`
+	ScheduledPriceID      *PriceID           `json:"scheduled_price_id,omitempty"`
 	PaymentMethodID       *PaymentMethodID   `json:"payment_method_id"`
 	StartedAt             time.Time          `json:"started_at"`
 	EndedAt               *time.Time         `json:"ended_at"`
 	CurrentPeriodStartsAt *time.Time         `json:"current_period_starts_at"`
 	CurrentPeriodEndsAt   *time.Time         `json:"current_period_ends_at"`
-	CancelledAt           *time.Time         `json:"cancelled_at"`
+	CanceledAt            *time.Time         `json:"canceled_at"`
 	CancelType            *string            `json:"cancel_type"`
 	CancelFeedback        *string            `json:"cancel_feedback"`
 	Resumable             bool               `json:"resumable"`
 	CancelScheduled       bool               `json:"cancel_scheduled"`
 	CancelMode            string             `json:"cancel_mode"`
-	Price                 *SubscriptionPrice `json:"price,omitempty"`
+	Price                 *Price             `json:"price,omitempty"`
 	Product               *ProductSummary    `json:"product,omitempty"`
-	ScheduledPrice        *SubscriptionPrice `json:"scheduled_price,omitempty"`
+	ScheduledPrice        *Price             `json:"scheduled_price,omitempty"`
 	ScheduledProduct      *ProductSummary    `json:"scheduled_product,omitempty"`
 	// Card is display data for the card behind PaymentMethodID, when it is one.
 	Card *CardDetails `json:"card,omitempty"`
@@ -70,9 +87,14 @@ type Subscription struct {
 	CancelPortalURL *string `json:"cancel_portal_url,omitempty"`
 	// Access summarizes the premium access this subscription grants; the self
 	// routes fill it.
-	Access    *SubscriptionAccess `json:"access,omitempty"`
-	CreatedAt time.Time           `json:"created_at"`
-	UpdatedAt time.Time           `json:"updated_at"`
+	Access *SubscriptionAccess `json:"access,omitempty"`
+	// NextAction is set only on the answer to an action whose rail needs the
+	// customer's own step before it takes effect (a Solana cancel is signed by
+	// the customer's wallet). The subscription is then unchanged; complete the
+	// step and repeat the request with its result.
+	NextAction *NextAction `json:"next_action"`
+	CreatedAt  time.Time   `json:"created_at"`
+	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
 // SubscriptionAccess is how a customer currently holds premium access: Kind
@@ -90,46 +112,42 @@ type SubscriptionAccess struct {
 	EndAt          *time.Time     `json:"end_at,omitempty"`
 }
 
-// SubscriptionPrice is the price a subscription is on; UnitAmount is spelled
-// unit_amount as on every other price shape.
-type SubscriptionPrice struct {
-	ID                  string `json:"id"`
-	Key                 string `json:"key"`
-	ProductID           string `json:"product_id"`
-	UnitAmount          int64  `json:"unit_amount,string"`
-	Currency            string `json:"currency"`
-	AutoRenew           bool   `json:"auto_renew"`
-	AccessDurationHours *int   `json:"access_duration_hours"`
-	Archived            bool   `json:"archived"`
-}
-
-// ProductSummary identifies the product a subscription or payment is for.
+// ProductSummary names the product a subscription or payment is for. It is
+// not the catalog Product: that one carries the product's current prices and
+// entitlement spec, which are not about this subscription or payment, whose
+// own price is beside it.
 type ProductSummary struct {
-	ID          string  `json:"id"`
-	Key         string  `json:"key"`
-	DisplayName string  `json:"display_name"`
-	Description string  `json:"description"`
-	TierGroup   *string `json:"tier_group,omitempty"`
-	TierRank    int     `json:"tier_rank"`
-	Archived    bool    `json:"archived"`
+	ID          ProductID `json:"id"`
+	Key         string    `json:"key"`
+	DisplayName string    `json:"display_name"`
+	Description string    `json:"description"`
+	TierGroup   *string   `json:"tier_group"`
+	TierRank    int       `json:"tier_rank"`
+	Archived    bool      `json:"archived"`
 }
 
-// CancelSubscriptionRequest cancels at period end (access kept to the paid
-// period end) or, with RevokeAccess, immediately. Both stop provider billing.
-type CancelSubscriptionRequest struct {
+// CancelSubscriptionParams is the merchant's cancel: at period end (access
+// kept to the paid period end) or, with RevokeAccess, immediately. Both stop
+// provider billing.
+type CancelSubscriptionParams struct {
 	Reason       string `json:"reason"`
 	RevokeAccess bool   `json:"revoke_access,omitempty"`
 	// AccountDeletion marks the host's irrevocable account-deletion cancel.
 	// While destructive provider actions are disarmed an ordinary cancel of a
 	// provider-billed subscription is refused (CodeProviderCancelHeld); an
-	// account deletion is cancelled locally and its provider schedule delete
+	// account deletion is canceled locally and its provider schedule delete
 	// waits for the operator's arming.
 	AccountDeletion bool `json:"account_deletion,omitempty"`
 }
 
-type UpdateSubscriptionPaymentMethodRequest struct {
+type UpdateSubscriptionPaymentMethodParams struct {
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
+
+// CodeCustomerActionRequired: only the customer can take this action, through
+// their own step (a wallet signature, the provider's hosted page, an
+// authenticated payment). Nothing changed.
+const CodeCustomerActionRequired = "customer_action_required"
 
 // CodePaymentMethodPSPMismatch: the saved method the request named was vaulted
 // by a different provider account than the one that owns the subscription

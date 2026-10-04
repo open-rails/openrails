@@ -84,11 +84,11 @@ type SubscriptionStatusResult struct {
 // Rebilling reports whether CCBill will attempt future rebills. Status
 // vocabulary VERIFIED against production (#696 Phase 0) for "2" (active
 // recurring: nextBillingDate future, timesRebilled>0) and "0" (dead:
-// expirationDate past); "1" (active non-recurring / cancelled-with-runway)
+// expirationDate past); "1" (active non-recurring / canceled-with-runway)
 // unobserved but held from the DataLink docs.
 //
 //	"2" = active, recurring        -> will rebill
-//	"1" = active, non-recurring    -> no rebill (cancelled-with-runway / one-time)
+//	"1" = active, non-recurring    -> no rebill (canceled-with-runway / one-time)
 //	"0" = inactive / expired       -> no rebill
 //
 // NOTE: rebill prediction keys off subscriptionStatus, NOT the separate

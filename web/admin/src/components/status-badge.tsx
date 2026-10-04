@@ -11,7 +11,7 @@ const tones: Record<string, string> = {
   pending: "bg-held-surface text-held",
   unknown: "bg-held-surface text-held",
   open: "bg-held-surface text-held",
-  cancelled: "bg-muted text-muted-foreground",
+  canceled: "bg-muted text-muted-foreground",
   failed: "bg-failed-surface text-failed",
   declined: "bg-failed-surface text-failed",
   lost: "bg-failed-surface text-failed",

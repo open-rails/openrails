@@ -196,7 +196,7 @@ FROM billing.solana_subscriptions s
 JOIN billing.subscriptions sub ON sub.id = s.subscription_id
 WHERE s.merchant_id = $1::uuid AND sub.merchant_id = $1::uuid AND s.status = 'active' AND s.next_pull_at <= $2::timestamptz
   AND sub.deleted_at IS NULL
-  AND sub.status <> 'cancelled'
+  AND sub.status <> 'canceled'
 ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF($3::int, 0)
 `

@@ -175,7 +175,7 @@ func NewConvergeEngine(database *db.DB, clocks ...clockwork.Clock) *ConvergeEngi
 	clock := timeutil.FirstClock(clocks...)
 	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }}
 	// Real clock: the LIFE pass passes its own detection instants (now / grace-end)
-	// explicitly into the cores, so the lifecycle clock only stamps cancelled_at.
+	// explicitly into the cores, so the lifecycle clock only stamps canceled_at.
 	// Side-effect deps (notifications / event log / payments / deferred delete) are
 	// nil: convergence applies LOCAL state only — converge-not-replay.
 	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clock)

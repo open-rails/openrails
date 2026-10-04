@@ -59,7 +59,7 @@ func (o ReadUntilConsistentOpts) backoff() time.Duration {
 }
 
 // ReadUntilConsistent runs read() repeatedly until ok() accepts its value, ctx is
-// cancelled, or the attempt bound is reached. It is the generic, ctx-aware
+// canceled, or the attempt bound is reached. It is the generic, ctx-aware
 // read-after-write compensation for reads that have no confirmed slot to gate on.
 //
 // Semantics:
@@ -90,7 +90,7 @@ func ReadUntilConsistent[T any](
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return last, fmt.Errorf("solana: read-until-consistent cancelled: %w", ctx.Err())
+				return last, fmt.Errorf("solana: read-until-consistent canceled: %w", ctx.Err())
 			case <-time.After(backoff):
 			}
 		}

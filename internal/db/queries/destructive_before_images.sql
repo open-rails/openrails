@@ -87,7 +87,7 @@ RETURNING id, intent_type, subscription_id, rail;
 -- name: ListRailIntentsForRun :many
 -- The divergence manifest. Read AFTER the supersede so every row's status is
 -- final: superseded = neutralised; succeeded = it reached the provider and is
--- IRREVERSIBLE (the vault entry is gone, the remote subscription is cancelled);
+-- IRREVERSIBLE (the vault entry is gone, the remote subscription is canceled);
 -- in_flight / unknown_needs_verify = ambiguous, may have reached the provider.
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
 FROM billing.rail_intents
@@ -121,7 +121,7 @@ SET lifecycle_rev            = s.lifecycle_rev + 1,
     last_retry_at            = (b.before->>'last_retry_at')::timestamptz,
     retry_attempts           = (b.before->>'retry_attempts')::integer,
     next_retry_at            = (b.before->>'next_retry_at')::timestamptz,
-    cancelled_at             = (b.before->>'cancelled_at')::timestamptz,
+    canceled_at             = (b.before->>'canceled_at')::timestamptz,
     cancel_type              = b.before->>'cancel_type',
     cancel_feedback          = b.before->>'cancel_feedback',
     deletion_scheduled_at    = (b.before->>'deletion_scheduled_at')::timestamptz,

@@ -60,11 +60,11 @@ func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, billi
 
 // requirePreview asserts both Client topologies quote charge (cents) now and
 // a new period of newCycle hours.
-func (w *world) requirePreview(sub billing.SubscriptionID, target string, charge int64, newCycle int) {
+func (w *world) requirePreview(sub billing.SubscriptionID, target billing.PriceID, charge int64, newCycle int) {
 	t := w.t
 	t.Helper()
 	for _, tp := range []topology{embedded, remote} {
-		preview, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: target})
+		preview, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierParams{PriceID: target})
 		require.NoError(t, err, tp)
 		require.Equal(t, "upgrade", preview.Action)
 		require.Equal(t, charge*10_000, preview.AmountDueNow, "%s preview", tp)
@@ -108,8 +108,8 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 			require.Equal(t, time.Duration(row.oldCycle)*h, current.CurrentPeriodEndsAt.Sub(*current.CurrentPeriodStartsAt), "the actual current period")
 			sales := len(w.nmi.ledger(vault))
 
-			w.requirePreview(sub, next.ID.String(), row.charge, row.newCyc)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID.String()})
+			w.requirePreview(sub, next.ID, row.charge, row.newCyc)
+			done, err := w.client[tp].ChangeTier(t.Context(), sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "upgrade-" + uuid.NewString()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, row.charge*10_000, done.AmountDueNow, "charged equals preview")
@@ -151,7 +151,7 @@ func TestUpgradeProrationHourlyQuotes(t *testing.T) {
 			current := w.subscription(remote, sub)
 			require.Equal(t, time.Hour, current.CurrentPeriodEndsAt.Sub(*current.CurrentPeriodStartsAt))
 			w.advance(current.CurrentPeriodEndsAt.Sub(w.clock.Now()) - row.left)
-			w.requirePreview(sub, next.ID.String(), row.charge, 24)
+			w.requirePreview(sub, next.ID, row.charge, 24)
 		})
 	}
 }
@@ -183,15 +183,15 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 		{noCycle, billing.CodeTierChangeCycleUnknown, 422},
 	} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: tc.target.ID.String()})
+			_, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierParams{PriceID: tc.target.ID})
 			requireCode(t, err, tc.status, tc.code)
-			_, err = w.client[tp].ChangeTier(t.Context(), sub, "refused-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target.ID.String()})
+			_, err = w.client[tp].ChangeTier(t.Context(), sub, billing.ChangeTierParams{PriceID: tc.target.ID, IdempotencyKey: "refused-" + uuid.NewString()})
 			requireCode(t, err, tc.status, tc.code)
 		}
 	}
 	w.settle()
 	require.Len(t, w.nmi.ledger(vault), sales, "a refused upgrade charges nothing")
-	require.Equal(t, old.ID.String(), w.subscription(embedded, sub).PriceID)
+	require.Equal(t, old.ID, w.subscription(embedded, sub).PriceID)
 }
 
 func requireCode(t *testing.T, err error, status int, code string) {

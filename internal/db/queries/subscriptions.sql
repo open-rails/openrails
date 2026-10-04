@@ -6,9 +6,9 @@ INSERT INTO billing.subscriptions (
     id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, rail,
-    rail_subscription_id, user_email, payment_method_id, last_retry_at,
+    rail_subscription_id, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
-    cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
+    cancel_type, canceled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at, psp_id, collection_policy
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
@@ -17,9 +17,9 @@ INSERT INTO billing.subscriptions (
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
     sqlc.arg(rail), sqlc.arg(rail_subscription_id),
-    sqlc.narg(user_email), sqlc.narg(payment_method_id), sqlc.narg(last_retry_at),
+    sqlc.narg(payment_method_id), sqlc.narg(last_retry_at),
     sqlc.narg(retry_attempts), sqlc.narg(next_retry_at), sqlc.narg(grace_ends_at),
-    sqlc.narg(cancel_feedback), sqlc.narg(cancel_type), sqlc.narg(cancelled_at),
+    sqlc.narg(cancel_feedback), sqlc.narg(cancel_type), sqlc.narg(canceled_at),
     sqlc.narg(deletion_scheduled_at), sqlc.narg(gateway_response),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
@@ -28,7 +28,7 @@ INSERT INTO billing.subscriptions (
 );
 
 -- name: UpdateSubscriptionAt :execrows
--- Full-column update (nil pointers CLEAR fields like cancelled_at) against the
+-- Full-column update (nil pointers CLEAR fields like canceled_at) against the
 -- row version it was read at (#1102): a stale image never reverts a change.
 UPDATE billing.subscriptions SET
     price_id = $2,
@@ -41,7 +41,6 @@ UPDATE billing.subscriptions SET
     current_period_ends_at = sqlc.narg(current_period_ends_at),
     rail = sqlc.arg(rail),
     rail_subscription_id = sqlc.arg(rail_subscription_id),
-    user_email = sqlc.narg(user_email),
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
@@ -50,7 +49,7 @@ UPDATE billing.subscriptions SET
     grace_ends_at = sqlc.narg(grace_ends_at),
     cancel_feedback = sqlc.narg(cancel_feedback),
     cancel_type = sqlc.narg(cancel_type),
-    cancelled_at = sqlc.narg(cancelled_at),
+    canceled_at = sqlc.narg(canceled_at),
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
     scheduled_price_id = sqlc.narg(scheduled_price_id),
@@ -64,7 +63,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
 -- A lifecycle decision (#1091 part C): the full-row write that may change
 -- status, paid period and cancellation, against the revision it was decided on.
 -- Full-column update (the bun version listed every column explicitly so nil
--- pointers CLEAR fields like cancelled_at on reactivation).
+-- pointers CLEAR fields like canceled_at on reactivation).
 UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
@@ -76,7 +75,6 @@ UPDATE billing.subscriptions SET
     current_period_ends_at = sqlc.narg(current_period_ends_at),
     rail = sqlc.arg(rail),
     rail_subscription_id = sqlc.arg(rail_subscription_id),
-    user_email = sqlc.narg(user_email),
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
@@ -85,7 +83,7 @@ UPDATE billing.subscriptions SET
     grace_ends_at = sqlc.narg(grace_ends_at),
     cancel_feedback = sqlc.narg(cancel_feedback),
     cancel_type = sqlc.narg(cancel_type),
-    cancelled_at = sqlc.narg(cancelled_at),
+    canceled_at = sqlc.narg(canceled_at),
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
     scheduled_price_id = sqlc.narg(scheduled_price_id),
@@ -236,12 +234,14 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id):
   AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
   AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
-  AND (sqlc.narg(cancelled_after)::timestamptz IS NULL OR sub.cancelled_at >= sqlc.narg(cancelled_after)::timestamptz)
-  AND (sqlc.narg(cancelled_before)::timestamptz IS NULL OR sub.cancelled_at <= sqlc.narg(cancelled_before)::timestamptz)
+  AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
+  AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
   AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
   AND sub.deleted_at IS NULL;
 
--- name: ListSubscriptionsFiltered :many
+-- One page of a subscription list, newest first; after_at/after_id is the
+-- last row of the previous page.
+-- name: ListSubscriptionsPage :many
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
@@ -249,18 +249,13 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id):
   AND (sqlc.narg(rail)::text IS NULL OR sub.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR sub.created_at >= sqlc.narg(created_after)::timestamptz)
   AND (sqlc.narg(created_before)::timestamptz IS NULL OR sub.created_at <= sqlc.narg(created_before)::timestamptz)
-  AND (sqlc.narg(cancelled_after)::timestamptz IS NULL OR sub.cancelled_at >= sqlc.narg(cancelled_after)::timestamptz)
-  AND (sqlc.narg(cancelled_before)::timestamptz IS NULL OR sub.cancelled_at <= sqlc.narg(cancelled_before)::timestamptz)
+  AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
+  AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
   AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (sub.created_at, sub.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
   AND sub.deleted_at IS NULL
-ORDER BY
-    CASE WHEN sqlc.arg(sort_by)::text = 'expires_at'   AND NOT sqlc.arg(sort_desc)::boolean THEN sub.current_period_ends_at END ASC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'expires_at'   AND sqlc.arg(sort_desc)::boolean     THEN sub.current_period_ends_at END DESC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'cancelled_at' AND NOT sqlc.arg(sort_desc)::boolean THEN sub.cancelled_at END ASC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'cancelled_at' AND sqlc.arg(sort_desc)::boolean     THEN sub.cancelled_at END DESC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'created_at'   AND NOT sqlc.arg(sort_desc)::boolean THEN sub.created_at END ASC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'created_at'   AND sqlc.arg(sort_desc)::boolean     THEN sub.created_at END DESC
-LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
+ORDER BY sub.created_at DESC, sub.id DESC
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetLifecycleSubscriptionByCustomerAndTierGroup :one
 SELECT sub.* FROM billing.subscriptions sub
@@ -315,8 +310,8 @@ SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[])
   AND sub.deleted_at IS NULL;
 
--- name: MarkCancelledSubscriptionsSuperseded :execrows
--- Preserve cancelled subscriptions for refund/chargeback correlation while
+-- name: MarkCanceledSubscriptionsSuperseded :execrows
+-- Preserve canceled subscriptions for refund/chargeback correlation while
 -- stamping them superseded by the new activation (gateway_response patch).
 UPDATE billing.subscriptions
 SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
@@ -326,7 +321,7 @@ SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
     updated_at = current_timestamp
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = $1
   AND product_id = $2
-  AND status = 'cancelled'
+  AND status = 'canceled'
   AND (sqlc.narg(exclude_id)::uuid IS NULL OR id != sqlc.narg(exclude_id)::uuid)
   AND deleted_at IS NULL;
 
@@ -396,10 +391,10 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(
 ORDER BY CASE WHEN sub.status='awaiting_method' THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: GetLatestResumableCancelledSubscription :one
+-- name: GetLatestResumableCanceledSubscription :one
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
-  AND sub.status = 'cancelled'
+  AND sub.status = 'canceled'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC

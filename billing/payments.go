@@ -52,15 +52,15 @@ type Payment struct {
 	PriceID        PriceID         `json:"price_id"`
 	// Price and Product are what the charge bought; a refund names its
 	// charge's.
-	Price             *SubscriptionPrice `json:"price"`
-	Product           *ProductSummary    `json:"product"`
-	Channel           PaymentChannel     `json:"channel"`
-	Rail              *string            `json:"rail"`
-	PSPID             *string            `json:"psp_id"`
-	TransactionID     string             `json:"transaction_id"`
-	Card              *CardDetails       `json:"card"`
-	Failure           *PaymentFailure    `json:"failure"`
-	RefundedPaymentID *PaymentID         `json:"refunded_payment_id"`
+	Price             *Price          `json:"price"`
+	Product           *ProductSummary `json:"product"`
+	Channel           PaymentChannel  `json:"channel"`
+	Rail              *string         `json:"rail"`
+	PSPID             *string         `json:"psp_id"`
+	TransactionID     string          `json:"transaction_id"`
+	Card              *CardDetails    `json:"card"`
+	Failure           *PaymentFailure `json:"failure"`
+	RefundedPaymentID *PaymentID      `json:"refunded_payment_id"`
 	// Reason is the merchant's stated reason for a refund.
 	Reason *string `json:"reason"`
 	// Refunds are the reversals of a charge: read with a single payment, null

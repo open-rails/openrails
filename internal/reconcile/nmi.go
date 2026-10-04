@@ -27,7 +27,7 @@ type nmiQueryClient interface {
 // GET /v5/customers (stored payment methods).
 //
 // Provider quirks (verified against the live sandbox 2026-06-11):
-//   - NMI deletes cancelled subscriptions entirely (v5 GET answers 404), so
+//   - NMI deletes canceled subscriptions entirely (v5 GET answers 404), so
 //     every listed subscription is live. Status is therefore inferred:
 //     next_billing_date today-or-later => active; in the past => past_due
 //     (NMI stopped advancing the charge date); unparseable => unknown.

@@ -64,6 +64,24 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return err
 }
 
+const fillCustomerEmail = `-- name: FillCustomerEmail :exec
+UPDATE billing.customers SET email = $1::text
+WHERE merchant_id = $2 AND id = $3 AND email IS NULL
+`
+
+type FillCustomerEmailParams struct {
+	Email      string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// An email seen at signup or at the provider fills an unset one; a declared
+// email stands.
+func (q *Queries) FillCustomerEmail(ctx context.Context, arg FillCustomerEmailParams) error {
+	_, err := q.db.Exec(ctx, fillCustomerEmail, arg.Email, arg.MerchantID, arg.ID)
+	return err
+}
+
 const getCustomer = `-- name: GetCustomer :one
 SELECT id, merchant_id, issuer, email, created_at, last_seen_at FROM billing.customers
 WHERE merchant_id = $1 AND id = $2

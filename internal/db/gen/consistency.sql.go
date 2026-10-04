@@ -226,7 +226,7 @@ const conOrphanEntitlementPaymentSource = `-- name: ConOrphanEntitlementPaymentS
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
 FROM billing.entitlements ent
 LEFT JOIN billing.payments purch ON purch.merchant_id = $1::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
-WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'one_off'
+WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'purchase'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
   AND purch.id IS NULL

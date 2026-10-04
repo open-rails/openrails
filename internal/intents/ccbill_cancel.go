@@ -48,7 +48,7 @@ func CCBillCancelIdempotencyKey(subscriptionID uuid.UUID) string {
 // CCBillCancelHandler implements verify-then-execute cancellation of a CCBill
 // subscription through the DataLink SMS choke point:
 //
-//   - relevance: applies while the local subscription is still cancelled; a
+//   - relevance: applies while the local subscription is still canceled; a
 //     reactivation (CCBill UserReactivation, admin repair) supersedes it.
 //   - execute: viewSubscriptionStatus FIRST — already not-rebilling IS success
 //     (cancels are idempotent by observation); rebilling -> cancelSubscription.
@@ -77,7 +77,7 @@ func (h *CCBillCancelHandler) Type() string { return TypeCCBillCancelSubscriptio
 func (h *CCBillCancelHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
 // CheckRelevance: the remote cancel applies while the subscription is still
-// locally cancelled. Re-checked at execution time so a reactivation between
+// locally canceled. Re-checked at execution time so a reactivation between
 // enqueue and drain can never cancel a live subscription remotely.
 func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
@@ -87,8 +87,8 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 		}
 		return Relevance{}, err
 	}
-	if sub.Status != models.StatusCancelled {
-		return SupersededBy(fmt.Sprintf("subscription no longer cancelled (status=%s) — reactivated", sub.Status)), nil
+	if sub.Status != models.StatusCanceled {
+		return SupersededBy(fmt.Sprintf("subscription no longer canceled (status=%s) — reactivated", sub.Status)), nil
 	}
 	return StillRelevant(), nil
 }
@@ -136,12 +136,12 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingRai
 			}
 			return Retryable("cancelSubscription authentication/access rejected: provider refused (auth/IP, or not permitted); bounded retry")
 		default:
-			// Definite reject (may mean already-cancelled) or transport
+			// Definite reject (may mean already-canceled) or transport
 			// ambiguity — the verifier's read resolves either way.
 			return Ambiguous("cancelSubscription failed: " + err.Error())
 		}
 	}
-	return Succeeded(map[string]any{"cancelled": true, "results": res.Results, "rail_subscription_id": psid})
+	return Succeeded(map[string]any{"canceled": true, "results": res.Results, "rail_subscription_id": psid})
 }
 
 // Verify resolves an ambiguous cancel by reading: not-rebilling means the

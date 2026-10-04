@@ -25,7 +25,7 @@ const (
 // Timing assumption: NMI attempts the recurring auto-charge AT the period end
 // (current_period_ends_at). We must delete the recurring subscription on the NMI
 // side strictly BEFORE that charge fires, or the user gets billed after they
-// cancelled. A 48h margin gives River ample room to run the job (and retry on
+// canceled. A 48h margin gives River ample room to run the job (and retry on
 // transient failures) before NMI's rebill window opens, while still preserving
 // the user's full paid access right up to ~48h before expiry as an undo window.
 //
@@ -66,7 +66,7 @@ func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bo
 //
 // The window is not a delay for its own sake: NMIDeleteHandler.CheckRelevance
 // re-reads the subscription at execution time and SUPERSEDES the delete if the
-// row is no longer a cancelled-awaiting-delete one. A late renewal charge, a
+// row is no longer a canceled-awaiting-delete one. A late renewal charge, a
 // converge pass that resurrects the row, or an operator undo inside the window
 // therefore leaves the rail schedule intact — the delete simply never happens.
 // 24h covers one full worker/reconcile cycle plus an operator's working day.
@@ -78,7 +78,7 @@ const SystemDeleteCoolingOff = 24 * time.Hour
 //
 // The clamp is the same doctrine as NMIDeleteSafetyMargin: the delete must land
 // strictly before the rail's next auto-charge or the customer is billed after
-// being cancelled. When the paid period ends in the future but the 48h pre-rebill
+// being canceled. When the paid period ends in the future but the 48h pre-rebill
 // margin has already opened, there is no safe room to wait at all and the delete
 // is due immediately, exactly as before. The dominant automated case — a
 // subscription already past its period end — has no known future charge date, so
@@ -119,15 +119,15 @@ func periodEndsInFuture(sub *models.Subscription, now time.Time) bool {
 	return sub.CurrentPeriodEndsAt.After(now)
 }
 
-// CancelScheduled reports whether a subscription is cancelled but the user still
-// retains paid access until the end of the current period (status == cancelled
+// CancelScheduled reports whether a subscription is canceled but the user still
+// retains paid access until the end of the current period (status == canceled
 // && current_period_ends_at > now). This is independent of whether the cancel
 // can be undone.
 func CancelScheduled(sub *models.Subscription, now time.Time) bool {
 	if sub == nil {
 		return false
 	}
-	if sub.Status != models.StatusCancelled {
+	if sub.Status != models.StatusCanceled {
 		return false
 	}
 	return periodEndsInFuture(sub, now)
@@ -135,7 +135,7 @@ func CancelScheduled(sub *models.Subscription, now time.Time) bool {
 
 // Resumable is the single shared predicate for "can this subscription be resumed
 // right now". It is true when the cancellation is reversible for this rail
-// AND the subscription is cancelled AND the paid period is still in the future.
+// AND the subscription is canceled AND the paid period is still in the future.
 //
 // This is the ONE place that gates resume — the HTTP handler, the River worker,
 // the public DTO, and the library facade all consult it so they cannot drift.
@@ -151,7 +151,7 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	if CancelModeFor(sub, now) != CancelModeReversible {
 		return false
 	}
-	if sub.Status != models.StatusCancelled {
+	if sub.Status != models.StatusCanceled {
 		return false
 	}
 	return periodEndsInFuture(sub, now)

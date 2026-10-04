@@ -49,7 +49,7 @@ const stripeCancelDenialMaxAttempts = 3
 
 // StripeCancelHandler verifies, then cancels:
 //
-//   - relevance: applies while the local subscription is still cancelled; a
+//   - relevance: applies while the local subscription is still canceled; a
 //     won dispute that restores it supersedes the intent.
 //   - execute: read first. Gone, canceled, or an active subscription already
 //     set to cancel at period end is success. A paid-up subscription is set to
@@ -80,8 +80,8 @@ func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 		}
 		return Relevance{}, err
 	}
-	if sub.Status != models.StatusCancelled {
-		return SupersededBy(fmt.Sprintf("subscription no longer cancelled (status=%s)", sub.Status)), nil
+	if sub.Status != models.StatusCanceled {
+		return SupersededBy(fmt.Sprintf("subscription no longer canceled (status=%s)", sub.Status)), nil
 	}
 	return StillRelevant(), nil
 }

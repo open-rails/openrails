@@ -22,7 +22,7 @@ const (
 
 	// DeclinedStopRecurring — the authorization to bill has been withdrawn (card:
 	// issuer "stop all recurring payments", NMI 261; Solana: the subscriber
-	// cancelled or revoked the delegation on-chain). Terminal -> cancel + stop.
+	// canceled or revoked the delegation on-chain). Terminal -> cancel + stop.
 	DeclinedStopRecurring CrankCode = "declined_stop_all_recurring_payments"
 
 	// DuplicateTransaction — this period was already charged (card: duplicate at
@@ -57,7 +57,7 @@ const (
 	// route to the dunning state machine (retry schedule + grace + eventual cancel).
 	Recoverable CrankCategory = "recoverable"
 
-	// Terminal — billing authorization is gone (cancelled/revoked); cancel the
+	// Terminal — billing authorization is gone (canceled/revoked); cancel the
 	// membership and stop. Dunning would burn the grace window pointlessly.
 	Terminal CrankCategory = "terminal"
 

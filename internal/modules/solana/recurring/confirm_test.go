@@ -66,7 +66,7 @@ func TestConfirmCancel(t *testing.T) {
 		{"nil subscription", landed(), uuid.Nil, zeroSig, false},
 	} {
 		c := &canceller{}
-		err := NewConfirmCancelService(tc.w, c).Confirm(context.Background(), tc.subID, tc.sig)
+		err := NewConfirmCancelService(tc.w, c).Confirm(context.Background(), tc.subID, tc.sig, "")
 		if !tc.mirror {
 			require.Error(t, err, tc.name)
 			require.Empty(t, c.params, tc.name)

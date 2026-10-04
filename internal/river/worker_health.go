@@ -107,7 +107,7 @@ func (m *WorkerHealthMiddleware) record(ctx context.Context, kind string, workEr
 	if m.Clock != nil {
 		now = m.Clock.Now().UTC()
 	}
-	// Detached ctx: a cancelled/timed-out job must still get its failure recorded.
+	// Detached ctx: a canceled/timed-out job must still get its failure recorded.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	var err error

@@ -203,7 +203,6 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		RailSubscriptionID:    s.RailSubscriptionID,
 		CollectionPolicy:      CollectionPolicy(s.CollectionPolicy),
 		PspID:                 s.PspID,
-		UserEmail:             s.UserEmail,
 		PaymentMethodID:       s.PaymentMethodID,
 		LastRetryAt:           s.LastRetryAt,
 		RetryAttempts:         DerefIntPtr(s.RetryAttempts),
@@ -211,7 +210,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		NextRetryAt:           s.NextRetryAt,
 		GraceEndsAt:           s.GraceEndsAt,
 		CancelFeedback:        s.CancelFeedback,
-		CancelledAt:           s.CancelledAt,
+		CanceledAt:            s.CanceledAt,
 		DeletionScheduledAt:   s.DeletionScheduledAt,
 		Metadata:              s.GatewayResponse,
 		CreatedAt:             s.CreatedAt,
@@ -335,6 +334,7 @@ func EntitlementFromGen(e gen.BillingEntitlement) *Entitlement {
 		MerchantID:  e.MerchantID,
 		CustomerID:  e.CustomerID,
 		Entitlement: e.Entitlement,
+		GrantID:     e.GrantID,
 		StartAt:     e.StartAt,
 		EndAt:       e.EndAt,
 		SourceID:    &sourceID,
@@ -424,25 +424,4 @@ func SubscriptionRepricesFromGen(rows []gen.BillingSubscriptionReprice) []*Subsc
 		out = append(out, SubscriptionRepriceFromGen(r))
 	}
 	return out
-}
-
-// RepriceBatchFromGen maps a generated reprice_batches row (#773). The
-// int32->int widenings are always exact (Go's int is 64-bit on every
-// platform this project targets).
-func RepriceBatchFromGen(r gen.BillingRepriceBatch) *RepriceBatch {
-	return &RepriceBatch{
-		ID:                     r.ID,
-		MerchantID:             r.MerchantID,
-		PriceKey:               r.PriceKey,
-		ToPriceID:              r.ToPriceID,
-		EffectiveAt:            r.EffectiveAt,
-		SubscriptionsMatched:   int(r.SubscriptionsMatched),
-		SubscriptionsScheduled: int(r.SubscriptionsScheduled),
-		SubscriptionsSkipped:   int(r.SubscriptionsSkipped),
-		CreatedAt:              r.CreatedAt,
-		Kind:                   RepriceKind(r.Kind),
-		SourcePriceID:          r.SourcePriceID,
-		FallbackPolicy:         r.FallbackPolicy,
-		SubscriptionsBlocked:   int(r.SubscriptionsBlocked),
-	}
 }

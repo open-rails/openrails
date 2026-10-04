@@ -227,8 +227,8 @@ func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData
 func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmailData, reason PremiumEndReason) EmailContent {
 	periodEnd := data.periodInstant(data.PeriodEnd)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	subject := fmt.Sprintf("Your %s subscription has been cancelled", premiumName)
-	reasonBlurb := "We've cancelled your membership as requested."
+	subject := fmt.Sprintf("Your %s subscription has been canceled", premiumName)
+	reasonBlurb := "We've canceled your membership as requested."
 	footer := "You can resubscribe at any time. We'd love to see you back!"
 
 	switch reason {
@@ -406,7 +406,7 @@ func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string,
 // RenderSubscriptionNonRecoverableEmail is the or#870 BUCKET 3 goodbye: the
 // issuer withdrew the recurring mandate (NMI 261/262, Stripe
 // revocation_of_authorization) or the instrument is permanently dead
-// (pick-up/lost/stolen/fraudulent). We cancelled the schedule at the rail. We
+// (pick-up/lost/stolen/fraudulent). We canceled the schedule at the rail. We
 // did NOT touch their stored payment method — only they delete that — and they
 // are welcome to re-subscribe.
 func RenderSubscriptionNonRecoverableEmail(storeName, checkoutURL string, data SubscriptionEmailData) EmailContent {

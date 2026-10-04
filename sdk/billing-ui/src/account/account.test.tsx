@@ -22,6 +22,7 @@ import {
   fakeBilling,
   payment,
   paymentMethod,
+  price,
   subscription,
   type FakeBilling,
 } from "../test/billing-server"
@@ -29,18 +30,6 @@ import { AccountBilling } from "./account-billing"
 import { PaymentHistory } from "./payment-history"
 import { BillingStatusBadge } from "./status-badge"
 import { SubscriptionsPanel } from "./subscriptions-panel"
-
-// The price a payment bought: renewing every `hours`, or a one-time purchase.
-const price = (hours: number | null, autoRenew = true) => ({
-  id: "price_1",
-  key: "plan",
-  product_id: "prod_1",
-  unit_amount: "9990000",
-  currency: "USD",
-  auto_renew: autoRenew,
-  access_duration_hours: hours,
-  archived: false,
-})
 
 function mount(
   ui: ReactNode,
@@ -50,9 +39,7 @@ function mount(
   const client = createBillingClient({ fetch: server.fetch })
   return render(
     <BillingUiProvider locale="en-US" {...props}>
-      <BillingProvider client={client} settle={{ intervalMs: 1, attempts: 5 }}>
-        {ui}
-      </BillingProvider>
+      <BillingProvider client={client}>{ui}</BillingProvider>
     </BillingUiProvider>
   )
 }
@@ -69,7 +56,7 @@ describe("AccountBilling", () => {
       payments: [
         payment({
           subscription_id: "sub_1",
-          price: price(720),
+          price: price(720, true),
           product: { id: "prod_1", display_name: "Pro" },
         }),
         payment({
@@ -149,7 +136,7 @@ describe("SubscriptionsPanel", () => {
     )
   })
 
-  it("cancels with feedback, then resumes", async () => {
+  it("cancels with a reason, then resumes", async () => {
     const server = fakeBilling()
     mount(<SubscriptionsPanel />, server)
     const row = await screen.findByTestId("subscription-row")
@@ -283,11 +270,13 @@ describe("SubscriptionsPanel", () => {
     expect(row).toHaveTextContent("Solana wallet")
     fireEvent.click(within(row).getByRole("button", { name: "Cancel Pro" }))
     const dialog = await screen.findByRole("alertdialog")
-    expect(within(dialog).queryByRole("textbox")).toBeNull()
+    fireEvent.change(within(dialog).getByLabelText("Why are you cancelling?"), {
+      target: { value: "Too expensive" },
+    })
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Sign with wallet" })
     )
-    await waitFor(() => expect(row).toHaveTextContent("Cancelled"))
+    await waitFor(() => expect(row).toHaveTextContent("Canceled"))
     expect(send).toHaveBeenCalledWith("dHg=")
   })
 })
@@ -297,10 +286,10 @@ describe("PaymentHistory", () => {
     const server = fakeBilling({
       payments: [
         payment({
-          price: price(168),
+          price: price(168, true),
           product: { id: "prod_1", display_name: "Weekly pass" },
         }),
-        payment({ id: "pay_2", subscription_id: "sub_1", price: price(720) }),
+        payment({ id: "pay_2", subscription_id: "sub_1", price: price(720, true) }),
         payment({ id: "pay_3", price: price(null, false) }),
         payment({
           id: "pay_4",
@@ -330,7 +319,7 @@ describe("PaymentHistory", () => {
 
   it("localizes the fallback name and period", async () => {
     const server = fakeBilling({
-      payments: [payment({ subscription_id: "sub_1", price: price(720) })],
+      payments: [payment({ subscription_id: "sub_1", price: price(720, true) })],
     })
     mount(<PaymentHistory />, server, { locale: "ja-JP", messages: ja })
     const row = await screen.findByTestId("payment-row")

@@ -205,7 +205,7 @@ func TestSolanaSubscriptionStatusDoctrine(t *testing.T) {
 	for i, want := range []struct {
 		status SubscriptionStatus
 		raw    string
-	}{{SubscriptionStatusActive, "cancel_at_period_end"}, {SubscriptionStatusCancelled, "expires_at_passed"}, {SubscriptionStatusExpired, "plan_ended"}} {
+	}{{SubscriptionStatusActive, "cancel_at_period_end"}, {SubscriptionStatusCanceled, "expires_at_passed"}, {SubscriptionStatusExpired, "plan_ended"}} {
 		s := snap.Subscriptions[i+1]
 		require.Equal(t, want.status, s.Status, want.raw)
 		require.Equal(t, want.raw, s.RawStatus)
@@ -585,7 +585,7 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 	})
 
 	t.Run("a ref skipped this tick is never read as disappeared", func(t *testing.T) {
-		require.False(t, traitsFor(ProviderSolana).absenceMeansCancelled)
+		require.False(t, traitsFor(ProviderSolana).absenceMeansCanceled)
 		local := &LocalState{Subscriptions: []LocalSubscription{{ID: uuid.New(), CustomerID: uuid.New(), Status: "active", Rail: "solana", RailSubscriptionID: newKey().String()}}}
 		snap := &RemoteSnapshot{Provider: ProviderSolana, Capabilities: Capabilities{Subscriptions: true}}
 		require.Empty(t, diffProvider(ProviderSolana, snap, local, nil, now, diffOptions{}))

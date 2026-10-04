@@ -84,9 +84,9 @@ const cases: Case[] = [
   ["restores a price", (c, g) => g(M.setPriceActive(c), { id: "price_1", active: true }),
     "PATCH /merchant/catalog/prices/price_1", catalogTree, { archived: false }],
   ["previews affected subscribers without writing catalog state", (_c, g) => g(M.previewPriceChange(), "pro-monthly"),
-    "GET /merchant/catalog/reprice-all-prior-versions/preview", []],
-  ["cancels a batch of reprices", (c, g) => g(M.cancelReprices(c), ["rep_1", "rep_2"]),
-    ["POST /merchant/reprices/rep_1/cancel", "POST /merchant/reprices/rep_2/cancel"], catalogTree],
+    "POST /merchant/reprice-batches/preview", [], { price_key: "pro-monthly" }],
+  ["cancels a reprice batch", (c, g) => g(M.cancelRepriceBatch(c), "rpb_1"),
+    "POST /merchant/reprice-batches/rpb_1/cancel", catalogTree],
   ["stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
     "PUT /merchant/catalog/meters/tokens", meterTree, meter],
   ["stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { key: "tokens", rateCard }),
@@ -209,9 +209,8 @@ it("stores a saved dashboard on the merchant that saved it", async () => {
 it("walks every export page, stops on an empty one, and looks one customer up", async () => {
   const queryClient = client()
   selectMerchant("merchant-a")
-  const page = (rows: unknown[], total: number) => ({ data: rows, total })
   const customers = [{ data: [{ id: "cus_1" }], next_cursor: "c1" }, { data: [{ id: "cus_2" }], next_cursor: null }]
-  const subscriptions = [page([{ id: "sub_1" }], 2), page([], 2)]
+  const subscriptions = [{ data: [{ id: "sub_1" }], next_cursor: "c2" }, { data: [], next_cursor: null }]
   routes["/merchant/customers"] = () => customers.shift() ?? { data: [{ id: "cus_9" }], next_cursor: "more" }
   routes["/merchant/subscriptions"] = () => subscriptions.shift()
   expect(await exec(queryClient, M.exportCustomers(), "alice")).toEqual([{ id: "cus_1" }, { id: "cus_2" }])
@@ -219,7 +218,7 @@ it("walks every export page, stops on an empty one, and looks one customer up", 
   expect(await exec(queryClient, M.findCustomer(), "a@example.test")).toEqual({ id: "cus_9" })
   expect(requests.map((request) => request.query)).toEqual([
     "q=alice&limit=200", "q=alice&limit=200&cursor=c1",
-    "status=past_due&limit=200&offset=0", "status=past_due&limit=200&offset=200",
+    "status=past_due&limit=200", "status=past_due&limit=200&cursor=c2",
     "q=a%40example.test&limit=1",
   ])
 })
@@ -256,7 +255,7 @@ describe("price change", () => {
     await exec(queryClient, M.changePrice(queryClient), change)
     expect(calls(requests).slice(0, 2)).toEqual([
       "POST /merchant/catalog/prices",
-      "POST /merchant/catalog/reprice-all-prior-versions",
+      "POST /merchant/reprice-batches",
     ])
     expect(requests[1].body).toEqual({ price_key: "pro-monthly", effective_at: effectiveAt })
     expect(invalidated(queryClient, seeded)).toEqual(refreshed)
@@ -267,7 +266,7 @@ describe("price change", () => {
   it("refreshes the catalog when scheduling fails after the price was created", async () => {
     const queryClient = client()
     const seeded = seedCache(queryClient, "merchant-a")
-    routes["POST /merchant/catalog/reprice-all-prior-versions"] = () =>
+    routes["POST /merchant/reprice-batches"] = () =>
       Response.json({ error: { message: "schedule failed" } }, { status: 503 })
     await expect(exec(queryClient, M.changePrice(queryClient), change)).rejects.toThrow("schedule failed")
     expect(invalidated(queryClient, seeded)).toEqual(refreshed)

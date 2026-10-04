@@ -1,9 +1,5 @@
 package billing
 
-// MaxEntitlementChecks bounds the entitlement keys of one check or offer
-// lookup.
-const MaxEntitlementChecks = 100
-
 // OfferKind distinguishes commercial access terms; currency preference never
 // substitutes a subscription or rental for permanent ownership.
 type OfferKind string

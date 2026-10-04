@@ -3,8 +3,8 @@ import * as React from "react"
 import type { CheckoutAppearance } from "#orck/appearance"
 
 import {
-  CANCEL_FEEDBACK_MAX,
-  CANCEL_FEEDBACK_MIN,
+  CANCEL_REASON_MAX,
+  CANCEL_REASON_MIN,
   isWalletRejection,
 } from "#orck/client/client"
 import type { BillingError } from "#orck/client/errors"
@@ -32,12 +32,12 @@ export interface CancelSubscriptionDialogProps {
   onOpenChange: (open: boolean) => void
   /** Subscription display name. */
   name: string
-  /** On-chain (Solana) cancel: no feedback, the wallet signs. */
+  /** On-chain (Solana) cancel: the wallet signs after the reason. */
   onChain?: boolean
   /** In-flight stage, when cancelling. */
   pending?: SubscriptionAction
   /** Resolves null on success; the dialog then closes. */
-  onConfirm: (feedback: string) => Promise<BillingError | null>
+  onConfirm: (reason: string) => Promise<BillingError | null>
   appearance?: CheckoutAppearance
 }
 
@@ -55,24 +55,24 @@ export function CancelSubscriptionDialog({
   const scope = useScopeProps(appearance)
   const reasonId = React.useId()
   const hintId = React.useId()
-  const [feedback, setFeedback] = React.useState("")
+  const [reason, setReason] = React.useState("")
   const [touched, setTouched] = React.useState(false)
   const [error, setError] = React.useState<BillingError | null>(null)
   const busy = pending !== undefined
 
-  const length = feedback.trim().length
-  const tooShort = !onChain && length < CANCEL_FEEDBACK_MIN
+  const length = reason.trim().length
+  const tooShort = length < CANCEL_REASON_MIN
   const confirm = async () => {
     setTouched(true)
     if (tooShort || busy) return
     setError(null)
-    const result = await onConfirm(feedback)
+    const result = await onConfirm(reason)
     if (!result) onOpenChange(false)
     else if (!isWalletRejection(result)) setError(result)
   }
 
   const stageLabel =
-    pending === "preparing"
+    pending === "cancel" && onChain
       ? t("cancel.preparing")
       : pending === "signing"
         ? t("cancel.signing")
@@ -113,41 +113,39 @@ export function CancelSubscriptionDialog({
                 : t("cancel.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {onChain ? null : (
-            <div className="grid gap-2">
-              <Label htmlFor={reasonId}>{t("cancel.reasonLabel")}</Label>
-              <Textarea
-                id={reasonId}
-                value={feedback}
-                maxLength={CANCEL_FEEDBACK_MAX}
-                placeholder={t("cancel.reasonPlaceholder")}
-                aria-describedby={hintId}
-                aria-invalid={touched && tooShort ? true : undefined}
-                disabled={busy}
-                required
-                rows={3}
-                className="[font:inherit]"
-                onChange={(event) => setFeedback(event.target.value)}
-                onBlur={() => length > 0 && setTouched(true)}
-              />
-              <div
-                id={hintId}
-                className="flex justify-between gap-3 text-xs text-muted-foreground"
-              >
-                <span className={touched && tooShort ? "text-destructive" : ""}>
-                  {touched && tooShort
-                    ? t("cancel.reasonTooShort", { min: CANCEL_FEEDBACK_MIN })
-                    : ""}
-                </span>
-                <span className="tabular-nums">
-                  {t("cancel.reasonHint", {
-                    count: feedback.length,
-                    max: CANCEL_FEEDBACK_MAX,
-                  })}
-                </span>
-              </div>
+          <div className="grid gap-2">
+            <Label htmlFor={reasonId}>{t("cancel.reasonLabel")}</Label>
+            <Textarea
+              id={reasonId}
+              value={reason}
+              maxLength={CANCEL_REASON_MAX}
+              placeholder={t("cancel.reasonPlaceholder")}
+              aria-describedby={hintId}
+              aria-invalid={touched && tooShort ? true : undefined}
+              disabled={busy}
+              required
+              rows={3}
+              className="[font:inherit]"
+              onChange={(event) => setReason(event.target.value)}
+              onBlur={() => length > 0 && setTouched(true)}
+            />
+            <div
+              id={hintId}
+              className="flex justify-between gap-3 text-xs text-muted-foreground"
+            >
+              <span className={touched && tooShort ? "text-destructive" : ""}>
+                {touched && tooShort
+                  ? t("cancel.reasonTooShort", { min: CANCEL_REASON_MIN })
+                  : ""}
+              </span>
+              <span className="tabular-nums">
+                {t("cancel.reasonHint", {
+                  count: reason.length,
+                  max: CANCEL_REASON_MAX,
+                })}
+              </span>
             </div>
-          )}
+          </div>
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {m.error(error)}

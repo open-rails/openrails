@@ -1,111 +1,54 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/query"
-	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
+// MySubscriptionsQuery filters the customer's own subscriptions; status
+// "all" (or none) lists every status.
+type MySubscriptionsQuery struct {
+	Status string `form:"status"`
+}
+
+// GetMySubscriptions is one page of the customer's own subscriptions,
+// newest first.
 func GetMySubscriptions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
 		return
 	}
-
-	listSubscriptionsForUser(r, user.ID)
-}
-
-func listSubscriptionsForUser(r *httprequest.Request, userID string) {
-	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 10
-	}
-
-	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-
-	status := r.Request.URL.Query().Get("status")
-
-	queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
-		Limit:   limit,
-		Offset:  offset,
-		Filters: subscriptions.GetSubscriptionsFilters{},
-	}
-
-	if status != "" && status != "all" {
-		queryOpts.Filters.Status = status
-	}
-
-	subscriptions, _, err := r.State.UserSubscriptionService.GetUserSubscriptionHistory(
-		r.Request.Context(),
-		userID,
-		queryOpts,
-	)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscriptions")
+	var q MySubscriptionsQuery
+	if !r.BindQuery(&q) {
 		return
 	}
-
-	out := make([]billing.Subscription, 0, len(subscriptions))
-	for _, sub := range subscriptions {
-		out = append(out, sub.View())
-	}
-	r.SuccessJSONPaginated(out, queryOpts.TotalItems, limit, offset)
-}
-
-func GetSubscription(r *httprequest.Request) {
-	user := r.GetUser()
-	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
-		return
-	}
-
-	subscriptionIDStr := r.Param("id")
-	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
-		return
-	}
-
-	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-
-	subscription, err := r.State.UserSubscriptionService.GetUserSubscriptionByID(r.Request.Context(), user.ID, subscriptionID)
-	if err != nil {
-		if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
-			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to retrieve subscription")
-		return
-	}
-
-	out := subscription.View()
-	payer, ok := selfAccountPayer(r)
+	page, ok := r.Page()
 	if !ok {
 		return
 	}
-	svc, err := billingservice.New(r.State)
+	var filters subscriptions.GetSubscriptionsFilters
+	if q.Status != "all" {
+		filters.Status = q.Status
+	}
+	subs, err := r.State.UserSubscriptionService.ListUserSubscriptions(r.Request.Context(), user.ID, filters, page)
 	if err != nil {
-		r.InternalError("billing service unavailable", err)
+		writeRefusal(r, err, "failed to retrieve subscriptions")
 		return
 	}
-	out.Recovery, err = svc.SubscriptionRecovery(r.Request.Context(), payer, subscriptionID)
-	if err != nil {
-		r.InternalError("subscription recovery unavailable", err)
+	r.SuccessJSON(pagination.Map(subs, func(sub *subscriptions.UserSubscriptionResponse) billing.Subscription { return sub.View() }))
+}
+
+// GetSubscription reads one of the customer's own subscriptions, with its
+// recovery state.
+func GetSubscription(r *httprequest.Request) {
+	userID, sub, ok := ownSubscription(r)
+	if !ok {
 		return
 	}
-	r.SuccessJSON(out)
+	writeMySubscription(r, userID, sub.ID, nil)
 }

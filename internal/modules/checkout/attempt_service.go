@@ -1709,7 +1709,7 @@ func (s *CheckoutAttemptService) enrollSolanaSubscription(ctx context.Context, s
 		MerchantID:        tenantID,
 		CheckoutAttemptID: session.ID,
 		UserID:            session.CustomerID.String(),
-		UserEmail:         email,
+		CustomerEmail:     email,
 		PriceID:           *session.PriceID,
 		SubscriberWallet:  strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet")),
 		PlanID:            terms.planID,

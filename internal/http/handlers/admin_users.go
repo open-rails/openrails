@@ -2,15 +2,11 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/query"
-	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/riverqueue/river"
+	"github.com/open-rails/openrails/internal/pagination"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -25,8 +21,6 @@ const adminProfileSubscriptionWindow = 100
 type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
-
-type AdminCancelSubscriptionRequest = billing.CancelSubscriptionRequest
 
 // GetCustomerBillingProfile is one customer's billing at a glance: each
 // section is the shape its own route serves.
@@ -85,7 +79,7 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 		ents, err := r.State.EntitlementService.ListActiveRecords(ctx, subject, now)
 		if err == nil {
 			for i := range ents {
-				profile.Entitlements = append(profile.Entitlements, entitlementRecordFromModel(&ents[i]))
+				profile.Entitlements = append(profile.Entitlements, entitlementRecord(&ents[i]))
 			}
 		}
 	}
@@ -110,43 +104,37 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 	}
 	if svc := productAccessService(r); svc != nil {
 		if grants, err := svc.ListAllGrantsByUser(ctx, subject); err == nil && len(grants) > 0 {
-			profile.ProductAccess = productAccessResponses(r, grants)
+			profile.ProductAccess = productAccessGrants(r, grants)
 		}
 	}
 	r.SuccessJSON(profile)
 }
 
+// GetAdminSubscriptions is one page of the merchant's subscriptions,
+// newest first.
 func GetAdminSubscriptions(r *httprequest.Request) {
-	limit, offset, ok := offsetPage(r)
+	var filters subscriptions.GetSubscriptionsFilters
+	if !r.BindQuery(&filters) {
+		return
+	}
+	page, ok := r.Page()
 	if !ok {
 		return
 	}
-	queryOpts := query.QueryOptions[subscriptions.GetSubscriptionsFilters]{Limit: limit, Offset: offset}
-	if err := r.ShouldBindQuery(&queryOpts); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	var filters subscriptions.GetSubscriptionsFilters
-	if err := r.ShouldBindQuery(&filters); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	queryOpts.Filters = filters
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "admin subscription service unavailable")
 		return
 	}
-	subscriptions, total, err := svc.GetAllSubscriptions(r.Request.Context(), &queryOpts)
+	subs, err := svc.ListSubscriptions(r.Request.Context(), filters, page)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		writeRefusal(r, err, "failed to list subscriptions")
 		return
 	}
-	out := make([]billing.Subscription, 0, len(subscriptions))
-	for _, sub := range subscriptions {
-		out = append(out, subscriptionView(sub, r.Clock.Now()))
-	}
-	r.SuccessJSON(api.NewList(out, total, limit, offset))
+	now := r.Clock.Now()
+	r.SuccessJSON(pagination.Map(subs, func(sub *subscriptions.AdminSubscriptionResponse) billing.Subscription {
+		return subscriptionView(sub, now)
+	}))
 }
 
 func GetAdminSubscription(r *httprequest.Request) {
@@ -172,78 +160,4 @@ func GetAdminSubscription(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
-}
-
-func AdminCancelSubscription(r *httprequest.Request) {
-	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-	req := new(AdminCancelSubscriptionRequest)
-	if !r.BindJSON(req) {
-		r.ErrorJSON(http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess, req.AccountDeletion); err != nil {
-		writeRefusal(r, err, "failed to cancel subscription")
-		return
-	}
-	r.SuccessJSONMessage("subscription cancelled successfully")
-}
-
-func AdminResumeSubscription(r *httprequest.Request) {
-	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
-		return
-	}
-	subscriptionID := typedSubscriptionID.UUID()
-	if r.State.SubscriptionService == nil || r.State.RiverProducer == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
-		return
-	}
-	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		return
-	}
-	now := r.Clock.Now().UTC()
-	if !subscriptions.Resumable(sub, now) {
-		r.ErrorJSON(http.StatusBadRequest, "subscription is not resumable")
-		return
-	}
-	if _, err := r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.ResumeSubscriptionArgs{
-		MerchantID:     sub.MerchantID,
-		UserID:         sub.CustomerID.String(),
-		SubscriptionID: subscriptionID,
-	}, &river.InsertOpts{
-		Queue:      riverjobs.QueueBilling,
-		UniqueOpts: subscriptionLifecycleUniqueOpts(),
-	}); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to enqueue resume")
-		return
-	}
-	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
-}
-
-// offsetPage reads an offset page: limit 1-100 (default 50) and offset.
-func offsetPage(r *httprequest.Request) (int, int, bool) {
-	limit, offset := 50, 0
-	for name, target := range map[string]*int{"limit": &limit, "offset": &offset} {
-		if raw := r.Query(name); raw != "" {
-			n, err := strconv.Atoi(raw)
-			if err != nil || n < 0 {
-				r.APIError(api.Coded(billing.CodeInvalidQuery, "invalid "+name).WithParam(name))
-				return 0, 0, false
-			}
-			*target = n
-		}
-	}
-	if limit < 1 || limit > 100 {
-		r.APIError(api.Coded(billing.CodeInvalidQuery, "limit must be between 1 and 100").WithParam("limit"))
-		return 0, 0, false
-	}
-	return limit, offset, true
 }

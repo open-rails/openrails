@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -39,18 +40,12 @@ var (
 	ErrNotificationNotFound     = errors.New("notification not found")
 	ErrNotificationAccessDenied = errors.New("notification does not belong to user")
 
-	// ErrSolanaCancelNeedsWalletSignature refuses the rail-agnostic cancel on
-	// Solana (or#896). A Solana cancel is an on-chain transaction the
-	// SUBSCRIBER'S wallet must sign — OpenRails holds no authority to revoke
-	// the delegation and never DB-only "soft cancels" a chain-truth
-	// subscription. This used to fall through the worker's default branch into
-	// a facade with no Solana case and fail permanently, which read as a bug
-	// rather than a rail fact.
-	ErrSolanaCancelNeedsWalletSignature = apperr.New(http.StatusBadRequest, "solana_cancel_needs_wallet_signature",
-		"cancelling a Solana subscription requires the subscriber's wallet signature: "+
-			"POST /v1/me/subscriptions/{id}/solana-cancel-tx to build the unsigned cancel_subscription "+
-			"transaction, sign and send it from the wallet, then POST /v1/me/subscriptions/{id}/solana-cancel "+
-			"with the signature to confirm and mirror it")
+	// ErrCustomerActionRequired refuses a cancel only the customer can make:
+	// a Solana cancel is an on-chain transaction the customer's wallet signs
+	// (POST /v1/me/subscriptions/{id}/cancel answers it as next_action).
+	// OpenRails never marks a chain-truth subscription canceled on its own.
+	ErrCustomerActionRequired = apperr.New(http.StatusForbidden, billing.CodeCustomerActionRequired,
+		"only the customer can cancel this subscription: its wallet signs the cancel")
 )
 
 // UserSubscriptionService handles user-facing subscription operations
@@ -201,27 +196,25 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 	return resp, nil
 }
 
-// GetUserSubscriptionHistory retrieves subscription history for a user
-func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context, userID string, queryOpts *query.QueryOptions[GetSubscriptionsFilters]) ([]*UserSubscriptionResponse, int64, error) {
-	if queryOpts.Filters.CustomerID == "" {
-		queryOpts.Filters.CustomerID = userID
+// ListUserSubscriptions is one page of the customer's own subscriptions
+// matching f, newest first.
+func (s *UserSubscriptionService) ListUserSubscriptions(ctx context.Context, userID string, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*UserSubscriptionResponse], error) {
+	customer, err := billing.ParseCustomerID(userID)
+	if err != nil || customer.IsZero() {
+		return billing.ListPage[*UserSubscriptionResponse]{}, ErrSubscriptionNotFound
 	}
-
-	subscriptions, total, err := s.SubscriptionService.GetSubscribers(ctx, *queryOpts)
+	f.CustomerID = customer
+	subs, err := s.SubscriptionService.ListSubscribers(ctx, f, page)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get subscription history: %w", err)
+		return billing.ListPage[*UserSubscriptionResponse]{}, fmt.Errorf("failed to list subscriptions: %w", err)
 	}
-	queryOpts.SetTotal(total)
-
-	responses := make([]*UserSubscriptionResponse, len(subscriptions))
-	for i, sub := range subscriptions {
-		responses[i] = &UserSubscriptionResponse{Subscription: sub, Access: accessFromSubscription(sub)}
+	out := pagination.Map(subs, func(sub *models.Subscription) *UserSubscriptionResponse {
+		return &UserSubscriptionResponse{Subscription: sub, Access: accessFromSubscription(sub)}
+	})
+	if err := s.enrichSubscriptionResponses(ctx, out.Items); err != nil {
+		return billing.ListPage[*UserSubscriptionResponse]{}, err
 	}
-	if err := s.enrichSubscriptionResponses(ctx, responses); err != nil {
-		return nil, 0, err
-	}
-
-	return responses, total, nil
+	return out, nil
 }
 
 // enrichSubscriptionResponses loads every current and scheduled price, with its
@@ -359,14 +352,14 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
 		}
 	case subscription.Rail == models.RailSolana:
-		return ErrSolanaCancelNeedsWalletSignature
+		return ErrCustomerActionRequired
 	default:
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
 
 	// #691 closure: a user cancel is PROOF — write the access end on disk NOW, at
 	// the known period end (resumable runway; a dead system cannot extend a
-	// cancelled sub). Immediate when no future paid period remains.
+	// canceled sub). Immediate when no future paid period remains.
 	accessEnd := now
 	if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
 		accessEnd = *subscription.CurrentPeriodEndsAt

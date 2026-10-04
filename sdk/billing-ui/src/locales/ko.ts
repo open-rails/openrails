@@ -14,7 +14,7 @@ export const ko: BillingUiMessageBundle = {
     active: "활성",
     pending: "대기 중",
     past_due: "연체",
-    cancelled: "해지됨",
+    canceled: "해지됨",
     cancel_scheduled: "종료 예정",
     unknown: "알 수 없음",
     awaiting_method: "카드 업데이트 필요",

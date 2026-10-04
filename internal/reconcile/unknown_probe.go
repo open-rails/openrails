@@ -70,7 +70,7 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 		Provider:  ProviderNMI,
 		FetchedAt: now,
 		// Per-subscription scope: the v5 GET's 404 IS authoritative absence at
-		// NMI (cancelled records are deleted), so this one-row roster is
+		// NMI (canceled records are deleted), so this one-row roster is
 		// exhaustive FOR THIS SUBJECT.
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Capabilities: Capabilities{Subscriptions: true, Transactions: subj.PeriodEnd != nil},
@@ -303,14 +303,14 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 		case rebilling:
 			sub.Status = SubscriptionStatusActive
 		case res.RawStatus == "1":
-			sub.Status = SubscriptionStatusCancelled
+			sub.Status = SubscriptionStatusCanceled
 		default:
 			sub.Status = SubscriptionStatusExpired
 		}
 	}
 	if exp, ok := res.ExpiresAt(); ok {
 		// Paid-through boundary: the rebill instant for a recurring sub, the
-		// runway end for a cancelled one.
+		// runway end for a canceled one.
 		e := exp
 		sub.NextBillingAt = &e
 	}

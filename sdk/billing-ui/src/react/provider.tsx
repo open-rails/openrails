@@ -14,18 +14,12 @@ export interface BillingProviderProps {
   client: BillingClient
   /** Fires after each successful mutation: the host's cache-invalidation hook. */
   onChange?: (change: BillingChange) => void
-  /**
-   * Cancel and resume are queued server-side (202); hooks re-read the
-   * subscription until the change shows. Default 1000 ms x 10.
-   */
-  settle?: { intervalMs?: number; attempts?: number }
   children?: ReactNode
 }
 
 export function BillingProvider({
   client,
   onChange,
-  settle,
   children,
 }: BillingProviderProps) {
   const [version, setVersion] = useState(0)
@@ -38,17 +32,9 @@ export function BillingProvider({
     onChangeRef.current?.(change)
   }, [])
   const refresh = useCallback(() => setVersion((v) => v + 1), [])
-  const intervalMs = settle?.intervalMs ?? 1000
-  const attempts = settle?.attempts ?? 10
   const value = useMemo(
-    () => ({
-      client,
-      version,
-      notify,
-      refresh,
-      settle: { intervalMs, attempts },
-    }),
-    [client, version, notify, refresh, intervalMs, attempts]
+    () => ({ client, version, notify, refresh }),
+    [client, version, notify, refresh]
   )
   return (
     <BillingContext.Provider value={value}>{children}</BillingContext.Provider>

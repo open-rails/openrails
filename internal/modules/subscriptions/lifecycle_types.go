@@ -19,12 +19,14 @@ type CreateMembershipParams struct {
 	// PaymentCustodian is the frozen credential custody of the accepted payment.
 	PaymentCustodian string
 	// Prepared is supplied by a qualified durable initial-enrollment operation.
-	Prepared              *InitialMembershipTerms
-	UserID                string
-	PriceID               uuid.UUID
-	Rail                  models.Rail
-	RailSubscriptionID    *string
-	UserEmail             *string
+	Prepared           *InitialMembershipTerms
+	UserID             string
+	PriceID            uuid.UUID
+	Rail               models.Rail
+	RailSubscriptionID *string
+	// CustomerEmail is the email seen at signup; it fills the customer's
+	// email when none is declared.
+	CustomerEmail         string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	TransactionID         string
@@ -190,7 +192,7 @@ func TerminalCancelReason(subscription *models.Subscription) (string, bool) {
 	if subscription == nil {
 		return "", false
 	}
-	if subscription.Status != models.StatusCancelled {
+	if subscription.Status != models.StatusCanceled {
 		return "", false
 	}
 	if subscription.CancelType != nil {

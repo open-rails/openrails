@@ -62,22 +62,22 @@ export const StripeCardEntry = React.forwardRef<
   })
 
   React.useEffect(() => {
-    let cancelled = false
+    let canceled = false
     client
       .createCardSetup({ pspId: psp.psp_id, idempotencyKey })
       .then((created) => {
-        if (cancelled) return
+        if (canceled) return
         if (!created.client_secret && !created.payment_method_id)
           throw new Error(unavailableMessage)
         setSetup(created)
         if (created.payment_method_id) completeRef.current?.(true)
       })
       .catch((cause: unknown) => {
-        if (!cancelled)
+        if (!canceled)
           setError(cause instanceof Error ? cause.message : unavailableMessage)
       })
     return () => {
-      cancelled = true
+      canceled = true
     }
   }, [client, psp.psp_id, idempotencyKey, unavailableMessage])
 
@@ -85,11 +85,11 @@ export const StripeCardEntry = React.forwardRef<
   const publishable = psp.config?.publishable_key
   React.useEffect(() => {
     if (!secret || !publishable || !host.current) return
-    let cancelled = false
+    let canceled = false
     let unmount: (() => void) | undefined
     void loadStripeFor(publishable).then(
       (stripe) => {
-        if (cancelled || !host.current) return
+        if (canceled || !host.current) return
         const elements = stripe.elements({
           clientSecret: secret,
           appearance: stripeAppearance(host.current),
@@ -113,12 +113,12 @@ export const StripeCardEntry = React.forwardRef<
         unmount = () => element.destroy()
       },
       (cause: unknown) => {
-        if (!cancelled)
+        if (!canceled)
           setError(cause instanceof Error ? cause.message : unavailableMessage)
       }
     )
     return () => {
-      cancelled = true
+      canceled = true
       mounted.current = null
       unmount?.()
     }

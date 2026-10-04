@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,13 +44,13 @@ func TestCCBillReversalStopsCCBillBilling(t *testing.T) {
 			w.armDestructive()
 			fields := tc.fields(m)
 			w.deliverCCBill(tc.event, fields)
-			require.Equal(t, "cancelled", w.subscription(embedded, m.sub).Status)
+			require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, m.sub).Status)
 			require.False(t, m.c.entitled(m.ent), "a reversed payment ends access")
 
-			w.until(func() bool { return dl.cancelled(m.railSub) > 0 }, "the queued cancel reaches CCBill")
+			w.until(func() bool { return dl.canceled(m.railSub) > 0 }, "the queued cancel reaches CCBill")
 			w.deliverCCBill(tc.event, fields)
 			w.wake()
-			require.Equal(t, 1, dl.cancelled(m.railSub), "one cancel for a redelivered postback")
+			require.Equal(t, 1, dl.canceled(m.railSub), "one cancel for a redelivered postback")
 			require.Equal(t, 1, w.providerCancels("ccbill_cancel_subscription", m.sub.UUID()))
 			require.Zero(t, w.engineCharges())
 		})
@@ -64,10 +65,10 @@ func TestCCBillFailedRebillCancelQueuesNothing(t *testing.T) {
 	m := importCCBill(t, w)
 	w.armDestructive()
 	w.deliverCCBill("Cancellation", map[string]string{"subscriptionId": m.railSub, "reason": "Transaction Declined", "source": "failedRB"})
-	require.Equal(t, "cancelled", w.subscription(embedded, m.sub).Status)
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, m.sub).Status)
 	w.wake()
 	require.Zero(t, w.providerCancels("ccbill_cancel_subscription", m.sub.UUID()))
-	require.Zero(t, dl.cancelled(m.railSub))
+	require.Zero(t, dl.canceled(m.railSub))
 }
 
 // A merchant cancel of a Stripe membership never calls Stripe inline: the
@@ -82,7 +83,7 @@ func TestStripeMerchantCancelIsDurable(t *testing.T) {
 	cancel := map[string]any{"reason": "merchant ended the membership"}
 	status, body := w.staffJSON(http.MethodPost, "/v1/merchant/subscriptions/"+l.sub.String()+"/cancel", cancel)
 	require.Equal(t, http.StatusOK, status, "%v", body)
-	require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status, "the cancel never waits on Stripe")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status, "the cancel never waits on Stripe")
 	require.True(t, l.c.entitled(l.ent), "the paid period is kept")
 	require.Equal(t, false, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
 
@@ -91,7 +92,7 @@ func TestStripeMerchantCancelIsDurable(t *testing.T) {
 	require.Len(t, l.stripeSubWrites(), 1)
 
 	status, _ = w.staffJSON(http.MethodPost, "/v1/merchant/subscriptions/"+l.sub.String()+"/cancel", cancel)
-	require.NotEqual(t, http.StatusOK, status, "a cancelled membership is not cancelled again")
+	require.NotEqual(t, http.StatusOK, status, "a canceled membership is not canceled again")
 	w.wake()
 	require.Len(t, l.stripeSubWrites(), 1)
 	require.Equal(t, 1, w.providerCancels("stripe_cancel_subscription", l.sub.UUID()))

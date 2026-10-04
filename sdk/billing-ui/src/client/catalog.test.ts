@@ -380,68 +380,42 @@ describe("Solana", () => {
     })
   })
 
-  it("prepares the tier-change transaction", async () => {
+  it("answers a tier change's wallet step and repeats it signed", async () => {
+    const change = {
+      object: "tier_change",
+      mode: "tier_change",
+      action: "upgrade",
+      effective: "now",
+      price_id: "price_2",
+      payment: { rail: "solana" },
+      currency: "USD",
+      amount_due_now: "5000000",
+      next_charge_amount: "19990000",
+    }
     const { client, request } = served(
       json(200, {
-        transaction: "dHg=",
-        kind: "upgrade",
-        new_subscription_pda: "pda",
+        ...change,
+        status: "requires_action",
+        subscription_id: "sub_1",
+        next_action: {
+          type: "solana_sign_transactions",
+          redirect_to_url: null,
+          transactions: ["dHg="],
+        },
       }),
-      json(200, { transaction: "", kind: "upgrade" }),
-      apiError(
-        503,
-        "service_unavailable",
-        "Solana recurring billing is not configured"
-      )
+      json(200, { ...change, status: "succeeded", subscription_id: "sub_2" })
     )
-    expect(await client.prepareSolanaTierChange("sub_a/b", "price_2")).toEqual({
-      transaction: "dHg=",
-      kind: "upgrade",
-      new_subscription_pda: "pda",
+    const input = { priceId: "price_2", idempotencyKey: "key-1" }
+    expect(await client.changeTier("sub_1", input)).toMatchObject({
+      status: "requires_action",
+      next_action: { type: "solana_sign_transactions", transactions: ["dHg="] },
     })
-    expect(request()).toMatchObject({
-      url: "/billing/v1/me/subscriptions/sub_a%2Fb/solana-tier-change",
-      method: "POST",
-      body: { new_price_id: "price_2" },
-    })
-    await expect(
-      client.prepareSolanaTierChange("sub_1", "price_2")
-    ).rejects.toMatchObject({ code: "invalid_response" })
-    await expect(
-      client.prepareSolanaTierChange("sub_1", "price_2")
-    ).rejects.toMatchObject({ status: 503, code: "service_unavailable" })
-  })
-
-  it("confirms the signed tier change", async () => {
-    const { client, request, fetch } = served(
-      json(200, {
-        subscription_id: "sub_2",
-        new_subscription_id: "sub_2",
-        kind: "downgrade",
-        status: "active",
-        already_confirmed: true,
-      }),
-      apiError(400, "invalid_param", "transaction not confirmed")
-    )
-    const input = { signature: "sig", newPriceId: "price_2" }
-    expect(await client.confirmSolanaTierChange("sub_1", input)).toEqual({
-      subscription_id: "sub_2",
-      new_subscription_id: "sub_2",
-      kind: "downgrade",
-      status: "active",
-      already_confirmed: true,
-    })
-    expect(request()).toMatchObject({
-      url: "/billing/v1/me/subscriptions/sub_1/solana-tier-change/confirm",
-      method: "POST",
-      body: { signature: "sig", new_price_id: "price_2" },
-    })
-    await expect(
-      client.confirmSolanaTierChange("sub_1", input)
-    ).rejects.toMatchObject({
-      status: 400,
-      message: "transaction not confirmed",
-    })
-    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(request().body).toEqual({ price_id: "price_2" })
+    expect(
+      await client.changeTier("sub_1", { ...input, signature: "sig" })
+    ).toMatchObject({ status: "succeeded", subscription_id: "sub_2" })
+    const sent = request(1)
+    expect(sent.body).toEqual({ price_id: "price_2", signature: "sig" })
+    expect(sent.headers.get("Idempotency-Key")).toBe("key-1")
   })
 })

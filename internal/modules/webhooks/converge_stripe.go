@@ -344,18 +344,18 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		}
 
 		switch {
-		case remoteAlive && rec.CancelAtPeriodEnd && sub.Status != models.StatusCancelled:
+		case remoteAlive && rec.CancelAtPeriodEnd && sub.Status != models.StatusCanceled:
 			if err := s.mirrorPortalCancel(ctx, txdb, sub, now); err != nil {
 				return err
 			}
-		case remoteAlive && !rec.CancelAtPeriodEnd && sub.Status == models.StatusCancelled &&
+		case remoteAlive && !rec.CancelAtPeriodEnd && sub.Status == models.StatusCanceled &&
 			sub.CancelType != nil && *sub.CancelType == models.CancelTypeUser:
 			if err := s.mirrorPortalResume(ctx, txdb, sub, now); err != nil {
 				return err
 			}
 		}
 
-		if sub.Status == models.StatusCancelled || rec.PriceID == "" {
+		if sub.Status == models.StatusCanceled || rec.PriceID == "" {
 			return nil
 		}
 		price := s.paidPriceMove(ctx, sub, rec)

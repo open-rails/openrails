@@ -8,9 +8,9 @@ import (
 
 // SolanaSubscriptionStatus enumerates the on-chain record lifecycle.
 const (
-	SolanaSubscriptionActive    = "active"
-	SolanaSubscriptionCancelled = "cancelled"
-	SolanaSubscriptionExpired   = "expired"
+	SolanaSubscriptionActive   = "active"
+	SolanaSubscriptionCanceled = "canceled"
+	SolanaSubscriptionExpired  = "expired"
 )
 
 // SolanaSubscription is the per-subscriber on-chain state for a recurring Solana

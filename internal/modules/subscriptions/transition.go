@@ -29,7 +29,7 @@ func SnapshotOf(sub *models.Subscription) lifecycle.Snapshot {
 	}
 	if sub.EndedAt != nil {
 		s.EndedAt = sub.EndedAt.UTC()
-	} else if sub.Status == models.StatusCancelled {
+	} else if sub.Status == models.StatusCanceled {
 		s.EndedAt = s.PaidThrough // an older period-end cancel recorded no end
 	}
 	if sub.CancelType != nil {
@@ -55,18 +55,18 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 	}
 	for _, e := range effects {
 		if _, ok := e.(lifecycle.CloseDunning); ok {
-			if next.Status == lifecycle.Active || next.Status == lifecycle.Cancelled {
+			if next.Status == lifecycle.Active || next.Status == lifecycle.Canceled {
 				sub.ClearRetrySchedule()
 			} else {
 				sub.NextRetryAt, sub.GraceEndsAt = nil, nil // attempts stay as evidence
 			}
 		}
 	}
-	if next.Status == lifecycle.Active || next.Status == lifecycle.Cancelled {
+	if next.Status == lifecycle.Active || next.Status == lifecycle.Canceled {
 		sub.DunningPolicy = nil // the dunning case is over
 	}
 	switch next.Status {
-	case lifecycle.Cancelled, lifecycle.Unverified:
+	case lifecycle.Canceled, lifecycle.Unverified:
 		sub.NextRetryAt, sub.GraceEndsAt = nil, nil
 	case lifecycle.AwaitingMethod:
 		sub.NextRetryAt = nil // nothing is charged; GraceEndsAt is the deadline
@@ -87,21 +87,21 @@ func writeSnapshot(sub *models.Subscription, before, next lifecycle.Snapshot, ef
 		}
 	}
 	switch {
-	case next.Status == lifecycle.Cancelled && before.Status != lifecycle.Cancelled:
+	case next.Status == lifecycle.Canceled && before.Status != lifecycle.Canceled:
 		kind := modelCancelType(next.CancelKind)
-		ended, cancelled := next.EndedAt, now
-		if ended.Before(cancelled) {
-			cancelled = ended
+		ended, canceled := next.EndedAt, now
+		if ended.Before(canceled) {
+			canceled = ended
 		}
-		sub.CancelType, sub.EndedAt, sub.CancelledAt = &kind, &ended, &cancelled
-	case next.Status == lifecycle.Cancelled:
+		sub.CancelType, sub.EndedAt, sub.CanceledAt = &kind, &ended, &canceled
+	case next.Status == lifecycle.Canceled:
 		kind, ended := modelCancelType(next.CancelKind), next.EndedAt
 		sub.CancelType, sub.EndedAt = &kind, &ended
-		if sub.CancelledAt != nil && sub.CancelledAt.After(ended) {
-			sub.CancelledAt = &ended
+		if sub.CanceledAt != nil && sub.CanceledAt.After(ended) {
+			sub.CanceledAt = &ended
 		}
-	case before.Status == lifecycle.Cancelled:
-		sub.CancelType, sub.EndedAt, sub.CancelledAt, sub.CancelFeedback = nil, nil, nil, nil
+	case before.Status == lifecycle.Canceled:
+		sub.CancelType, sub.EndedAt, sub.CanceledAt, sub.CancelFeedback = nil, nil, nil, nil
 	}
 }
 

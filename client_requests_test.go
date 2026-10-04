@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,13 +41,14 @@ func recordingRemote(t *testing.T, replies map[string]string) (*Client, chan rec
 }
 
 func TestClientRequestShapes(t *testing.T) {
-	customer := billing.CustomerID(uuid.MustParse("7d5b4a0e-8c3f-4c1e-9b2a-1f0e2d3c4b5a")).String()
+	customerID := billing.CustomerID(uuid.MustParse("7d5b4a0e-8c3f-4c1e-9b2a-1f0e2d3c4b5a"))
+	customer := customerID.String()
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
 		"/v1/merchant/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
 		"/v1/merchant/customers/" + customer + "/trust-level":          `{"customer_id":"` + customer + `","currency":"USD","trust_level":"gold"}`,
 		"/v1/merchant/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
-		"/v1/merchant/customers/" + customer + "/product-access":       `{"customer_id":"` + customer + `","product_id":"` + product + `","has_access":true,"data":[],"has_more":true,"next_cursor":"next"}`,
+		"/v1/merchant/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
 		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
 	})
 	key := "operation-key"
@@ -135,29 +135,25 @@ func TestClientRequestShapes(t *testing.T) {
 		{"delegation delete escapes one segment per key", func() error {
 			return client.DeleteSpendDelegation(t.Context(), typedCustomer, " invoker ", "a/b:c")
 		}, http.MethodDelete, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
-		{"access check by id", func() error {
-			got, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: customer, ProductID: product})
-			if err == nil && !got.HasAccess {
-				err = errors.New("access not decoded")
-			}
-			return err
-		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/product-access", "product_id=" + product, nil},
-		{"access check by key", func() error {
-			_, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: customer, ProductKey: "pro plan&x"})
-			return err
-		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/product-access", "product_key=pro+plan%26x", nil},
-		{"access batch keeps duplicates", func() error {
-			got, err := client.ProductAccess.CheckMany(t.Context(), &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{product, product}})
+		{"access check keeps duplicates", func() error {
+			id, _ := billing.ParseProductID(product)
+			got, err := client.CheckProductAccess(t.Context(), customerID, billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{id, id}})
 			if err == nil && !got[product] {
-				err = errors.New("batch access not decoded")
+				err = errors.New("access not decoded")
 			}
 			return err
 		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{product, product}, b["product_ids"])
 		}},
+		{"access check by key", func() error {
+			_, err := client.CheckProductAccess(t.Context(), customerID, billing.ProductAccessCheckParams{ProductKeys: []string{"pro plan&x"}})
+			return err
+		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, []any{"pro plan&x"}, b["product_keys"])
+		}},
 		{"access list pages", func() error {
-			page, err := client.ProductAccess.List(t.Context(), &billing.ProductAccessListParams{CustomerID: customer, Limit: 7, Cursor: "cursor"})
-			if err == nil && (!page.HasMore || page.NextCursor != "next") {
+			page, err := client.ListProductAccess(t.Context(), customerID, billing.PageRequest{Limit: 7, Cursor: "cursor"})
+			if err == nil && page.Next != "next" {
 				err = errors.New("page not decoded")
 			}
 			return err
@@ -175,9 +171,6 @@ func TestClientRequestShapes(t *testing.T) {
 			}
 		})
 	}
-	empty, err := client.ProductAccess.CheckMany(t.Context(), &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{}})
-	require.NoError(t, err)
-	require.Empty(t, empty, "an empty batch is answered locally")
 	require.Empty(t, seen)
 }
 
@@ -197,8 +190,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		WithTokenProvider(func(context.Context) (string, error) { return "", errors.New("token provider must not run") }))
 	require.NoError(t, err)
 	now := time.Now()
-	customer, price, subscription, method := billing.CustomerID(uuid.New()).String(), billing.PriceID(uuid.New()), billing.SubscriptionID(uuid.New()), billing.PaymentMethodID(uuid.New())
-	noCustomer := billing.CustomerID{}.String()
+	customerID := billing.CustomerID(uuid.New())
+	price, subscription, method := billing.PriceID(uuid.New()), billing.SubscriptionID(uuid.New()), billing.PaymentMethodID(uuid.New())
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
@@ -222,11 +215,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"delete delegation key": func(id string) error {
 			return c.DeleteSpendDelegation(ctx, billing.CustomerID(uuid.New()), billing.SpendDelegationInvoker, id)
 		},
-		"grant entitlement": func(id string) error {
-			_, err := c.GrantEntitlement(ctx, customer, billing.GrantEntitlementRequest{Entitlement: id})
-			return err
-		},
-		"revoke entitlement":      func(id string) error { return c.RevokeEntitlement(ctx, customer, id) },
 		"operation authorization": func(id string) error { _, err := c.GetOperationAuthorization(ctx, id); return err },
 		"billing qualification":   func(id string) error { _, err := c.GetProviderBillingQualification(ctx, id); return err },
 	}
@@ -253,14 +241,21 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ExtendAdmission(ctx, id, billing.ExtendAdmissionParams{ExpiresAt: now})
 			return err
 		},
-		"admission":           func(id string) error { _, err := c.GetAdmission(ctx, id); return err },
-		"entitlement subject": func(id string) error { _, err := c.ListEntitlements(ctx, id, now); return err },
+		"admission": func(id string) error { _, err := c.GetAdmission(ctx, id); return err },
+		"entitlement key": func(id string) error {
+			_, err := c.CreateEntitlement(ctx, customerID, billing.CreateEntitlementParams{Entitlement: id})
+			return err
+		},
+		"entitlement check key": func(id string) error { _, err := c.HasEntitlement(ctx, customerID, id, now); return err },
+		"entitled customers": func(id string) error {
+			_, err := c.ListEntitlementCustomers(ctx, id, billing.EntitlementCustomerListParams{})
+			return err
+		},
 	}
 	// Typed identifiers: zero, malformed, or another kind's spelling.
 	typed := map[string]func() error{
-		"retry subscription": func() error { _, err := c.RetrySubscriptionNow(ctx, billing.RetrySubscriptionNowRequest{}); return err },
-		"invoice":            func() error { _, err := c.GetInvoice(ctx, billing.InvoiceID{}); return err },
-		"void invoice":       func() error { _, err := c.VoidInvoice(ctx, billing.InvoiceID{}); return err },
+		"invoice":      func() error { _, err := c.GetInvoice(ctx, billing.InvoiceID{}); return err },
+		"void invoice": func() error { _, err := c.VoidInvoice(ctx, billing.InvoiceID{}); return err },
 		"uncollectible invoice": func() error {
 			_, err := c.MarkInvoiceUncollectible(ctx, billing.InvoiceID{})
 			return err
@@ -298,12 +293,12 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreateOffChannelPayment(ctx, billing.CustomerID(uuid.New()), billing.CreateOffChannelPaymentParams{})
 			return err
 		},
-		"my subscription": func() error { _, err := c.GetMySubscription(ctx, billing.SubscriptionID{}); return err },
-		"subscription":    func() error { _, err := c.GetSubscription(ctx, billing.SubscriptionID{}); return err },
+		"subscription": func() error { _, err := c.GetSubscription(ctx, billing.SubscriptionID{}); return err },
 		"cancel subscription": func() error {
-			return c.CancelSubscription(ctx, billing.SubscriptionID{}, billing.CancelSubscriptionRequest{})
+			_, err := c.CancelSubscription(ctx, billing.SubscriptionID{}, billing.CancelSubscriptionParams{})
+			return err
 		},
-		"resume subscription": func() error { return c.ResumeSubscription(ctx, billing.SubscriptionID{}) },
+		"resume subscription": func() error { _, err := c.ResumeSubscription(ctx, billing.SubscriptionID{}); return err },
 		"payment":             func() error { _, err := c.GetPayment(ctx, billing.PaymentID{}); return err },
 		"product":             func() error { _, err := c.GetProduct(ctx, billing.ProductID{}); return err },
 		"update product": func() error {
@@ -334,47 +329,53 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}})
 			return err
 		},
-		"access check product": func() error {
-			_, err := c.ProductAccess.Check(ctx, &billing.ProductAccessCheckParams{CustomerID: customer})
+		"access check customer": func() error {
+			_, err := c.CheckProductAccess(ctx, billing.CustomerID{}, billing.ProductAccessCheckParams{ProductKeys: []string{"k"}})
 			return err
 		},
 		"access check both": func() error {
-			_, err := c.ProductAccess.Check(ctx, &billing.ProductAccessCheckParams{CustomerID: customer, ProductID: billing.ProductID(uuid.New()).String(), ProductKey: "k"})
+			_, err := c.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{}, ProductKeys: []string{}})
 			return err
 		},
-		"access batch wrong kind": func() error {
-			_, err := c.ProductAccess.CheckMany(ctx, &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{price.String()}})
+		"access check neither": func() error {
+			_, err := c.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{})
 			return err
 		},
-		"access batch over limit": func() error {
-			_, err := c.ProductAccess.CheckMany(ctx, &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: make([]string, billing.ProductAccessMaxPageSize+1)})
+		"access list customer": func() error {
+			_, err := c.ListProductAccess(ctx, billing.CustomerID{}, billing.PageRequest{})
 			return err
 		},
-		"access batch ids and keys": func() error {
-			_, err := c.ProductAccess.CheckMany(ctx, &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{}, ProductKeys: []string{}})
+		"create access product": func() error {
+			_, err := c.CreateProductAccess(ctx, customerID, billing.CreateProductAccessParams{})
 			return err
 		},
-		"access list over limit": func() error {
-			_, err := c.ProductAccess.List(ctx, &billing.ProductAccessListParams{CustomerID: customer, Limit: billing.ProductAccessMaxPageSize + 1})
+		"delete access id":   func() error { return c.DeleteProductAccess(ctx, customerID, billing.ProductAccessID{}) },
+		"delete entitlement": func() error { return c.DeleteEntitlement(ctx, customerID, billing.EntitlementID{}) },
+		"create entitlement customer": func() error {
+			_, err := c.CreateEntitlement(ctx, billing.CustomerID{}, billing.CreateEntitlementParams{Entitlement: "pro"})
 			return err
 		},
-		"access nil params": func() error { _, err := c.ProductAccess.List(ctx, nil); return err },
+		"entitlement check customer": func() error { _, err := c.HasEntitlement(ctx, billing.CustomerID{}, "pro", now); return err },
+		"effective tier customer":    func() error { _, err := c.GetEffectiveTier(ctx, billing.CustomerID{}, "group"); return err },
+		"list entitlements empty":    func() error { _, err := c.ListEntitlements(ctx, billing.EntitlementListParams{}); return err },
 		"subscription payment method": func() error {
-			return c.UpdateSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: method})
+			_, err := c.UpdateSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.UpdateSubscriptionPaymentMethodParams{PaymentMethodID: method})
+			return err
 		},
 		"payment method for subscription": func() error {
-			return c.UpdateSubscriptionPaymentMethod(ctx, subscription, billing.UpdateSubscriptionPaymentMethodRequest{})
+			_, err := c.UpdateSubscriptionPaymentMethod(ctx, subscription, billing.UpdateSubscriptionPaymentMethodParams{})
+			return err
 		},
 		"tier preview subscription": func() error {
-			_, err := c.PreviewTierChange(ctx, billing.SubscriptionID{}, billing.ChangeTierRequest{PriceID: price.String()})
+			_, err := c.PreviewTierChange(ctx, billing.SubscriptionID{}, billing.ChangeTierParams{PriceID: price})
 			return err
 		},
 		"tier preview price": func() error {
-			_, err := c.PreviewTierChange(ctx, subscription, billing.ChangeTierRequest{})
+			_, err := c.PreviewTierChange(ctx, subscription, billing.ChangeTierParams{})
 			return err
 		},
 		"tier change price": func() error {
-			_, err := c.ChangeTier(ctx, subscription, "key", billing.ChangeTierRequest{})
+			_, err := c.ChangeTier(ctx, subscription, billing.ChangeTierParams{IdempotencyKey: "key"})
 			return err
 		},
 		"delete payment method": func() error {
@@ -382,25 +383,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"empty delegations customer": func() error { _, err := c.SetSpendDelegations(ctx, billing.CustomerID{}, nil); return err },
-		"entitlement check": func() error {
-			_, err := c.HasEntitlement(ctx, customer, "", time.Time{})
-			return err
-		},
-		"entitled customers": func() error { _, err := c.ListCustomersWithEntitlement(ctx, "", time.Time{}); return err },
-	}
-	// Every customer-scoped operation validates the customer the same way.
-	customerScoped := map[string]func(id string) error{
-		"effective tier": func(id string) error { _, err := c.ResolveEffectiveTier(ctx, id, "group"); return err },
-		"access list": func(id string) error {
-			_, err := c.ProductAccess.List(ctx, &billing.ProductAccessListParams{CustomerID: id})
-			return err
-		},
-
-		"grant customer": func(id string) error {
-			_, err := c.GrantEntitlement(ctx, id, billing.GrantEntitlementRequest{Entitlement: "pro"})
-			return err
-		},
-		"revoke customer": func(id string) error { return c.RevokeEntitlement(ctx, id, "ent") },
 	}
 	// Typed customer ids: the zero id names nobody.
 	zero := billing.CustomerID{}
@@ -441,7 +423,10 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 	}
 	uuidCalls := map[string]func() error{
-		"cancel migration":       func() error { _, err := c.CancelPlanMigration(ctx, uuid.Nil); return err },
+		"get reprice batch":      func() error { _, err := c.GetRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
+		"cancel reprice batch":   func() error { _, err := c.CancelRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
+		"get reprice":            func() error { _, err := c.GetReprice(ctx, billing.RepriceID{}); return err },
+		"cancel reprice":         func() error { _, err := c.CancelReprice(ctx, billing.RepriceID{}); return err },
 		"acknowledge host event": func() error { return c.AcknowledgeHostEvent(ctx, uuid.Nil) },
 	}
 
@@ -461,11 +446,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	for name, call := range blankOnly {
 		for _, id := range []string{"", "   ", "\t\n"} {
 			requireInvalidParam(t, name, call(id))
-		}
-	}
-	for name, call := range customerScoped {
-		for _, id := range []string{"", noCustomer, "not-a-uuid", billing.PriceID(uuid.New()).String(), strings.ToUpper("cus_" + uuid.NewString())} {
-			requireInvalidParam(t, name+" "+id, call(id))
 		}
 	}
 	for name, call := range typed {

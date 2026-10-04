@@ -144,7 +144,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		return err
 	}
 	if paid && receipt.ReversalKind() != "" {
-		if sub.Status != models.StatusCancelled {
+		if sub.Status != models.StatusCanceled {
 			return errors.New("reversed initial payment has an active agreement")
 		}
 		hasGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})

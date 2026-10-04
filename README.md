@@ -57,7 +57,7 @@ products:
         currency: USD
         unit_amount: 9990000 # $9.99; every amount is micros (millionths of a dollar)
         access_duration_hours: 720 # 30 days of access per payment
-        auto_renew: true # rebill every 30 days until cancelled
+        auto_renew: true # rebill every 30 days until canceled
 ```
 
 Now let's build the billing client:
@@ -188,7 +188,12 @@ func run(ctx context.Context) error {
 	// Our own route: only premium members can watch.
 	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		claims, _ := auth.VerifyRequest(c.Request)
-		premium, err := bill.HasEntitlement(c, claims.UserID, "premium", time.Now())
+		customer, err := billing.ParseCustomerID(claims.UserID)
+		if err != nil {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		premium, err := bill.HasEntitlement(c, customer, "premium", time.Now())
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
@@ -226,11 +231,9 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `GET /billing/v1/me/entitlements/active` | everything they currently have access to |
-| `GET /billing/v1/me/tier` | their effective tier in a tier group |
-| `GET /billing/v1/me/products`, `/me/products/{id}/access` | products they own; access to one |
+| `GET /billing/v1/me/entitlements` | everything they currently have access to |
 | `GET /billing/v1/me/subscriptions`, `/me/subscriptions/{id}` | their subscriptions |
-| `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with feedback) |
+| `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
 | `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
 | `POST /billing/v1/me/subscriptions/{id}/change-tier`, `/change-tier/preview` | upgrade or downgrade, with a proration preview |
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
@@ -346,8 +349,8 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey` |
 | `CreateCheckoutAttempt` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
-| `HasEntitlement` / `CheckEntitlements` | Exact grant-backed access; batch maximum 100 keys |
-| `ProductAccess.Check` / `CheckMany` | Product ID or key; archived purchase access remains readable |
+| `HasEntitlement` / `ListEntitlements` | Exact grant-backed access; `ListEntitlements` reads up to 500 customers at once |
+| `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
 | `GetCheckoutConfig` | `CheckoutConfigQuery`: a `PriceID` or `PriceKey` lists the options that can sell it |
 | `checkout-config` HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
@@ -372,7 +375,7 @@ archived. See the [checkout admission contract](docs/architecture/catalog-checko
   proration before committing.
 - **Dunning: capture lost revenue** — failed rebills are retried on a schedule derived
   from the billing cycle, with a staleness window that guarantees a months-old failure is
-  cancelled, never surprise-charged.
+  canceled, never surprise-charged.
 - **Payment-lifecycle emails, handled** — "your payment failed", "update your card",
   renewal and cancellation notices: templated, deduplicated (a resolved failure
   supersedes the stale notice instead of double-sending), and branded per merchant. You
@@ -455,7 +458,7 @@ OpenRails ships the whole recovery stack built in:
   rates on the charges that matter most: the renewals.
 - **Smart retries on the failures that remain** — hard declines (stolen card,
   do-not-honor) go terminal immediately instead of burning retries; soft declines get a
-  cycle-derived schedule, and a months-stale failure is cancelled, never surprise-charged.
+  cycle-derived schedule, and a months-stale failure is canceled, never surprise-charged.
 - **The customer conversation, handled** — templated, deduplicated payment-failure and
   card-expiry emails that supersede themselves when the problem resolves.
 - **Proof it's working** — approval rate by rail, token type, and decline reason on your

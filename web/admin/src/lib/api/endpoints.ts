@@ -3,7 +3,7 @@
 import {
   api,
   apiResponse,
-  type ItemsEnvelope,
+  type CursorEnvelope,
   type ListEnvelope,
   type PageRequest,
 } from "./client"
@@ -44,12 +44,14 @@ import type {
   PaymentProviderConfig,
   PaymentProviderDefinition,
   RawEntitlement,
+  RawProductAccessGrant,
   RepairAlert,
   RepriceBatch,
+  Reprice,
+  RepriceBatchCancel,
+  RepriceBatchPreview,
   RepriceBatchResult,
-  RepricePreviewResult,
   RepriceStatus,
-  SubscriptionReprice,
   TierChangePreview,
   TierChangeResult,
   TeamInvite,
@@ -133,32 +135,29 @@ export const grantEntitlement = (
   })
 
 export const revokeEntitlement = (customerId: string, entitlementId: string) =>
-  api<{ message: string }>(
-    `/merchant/customers/${customerId}/entitlements/${entitlementId}`,
-    {
-      method: "DELETE",
-    }
-  )
+  api<void>(`/merchant/customers/${customerId}/entitlements/${entitlementId}`, {
+    method: "DELETE",
+  })
 
 export const grantProductAccess = (
   customerId: string,
   productId: string,
   endsAt?: string
 ) =>
-  api<unknown>(`/merchant/customers/${customerId}/product-access`, {
-    method: "POST",
-    body: endsAt
-      ? { product_id: productId, ends_at: endsAt }
-      : { product_id: productId },
-  })
-
-export const revokeProductAccess = (customerId: string, grantId: string) =>
-  api<{ message: string }>(
-    `/merchant/customers/${customerId}/product-access/${grantId}`,
+  api<RawProductAccessGrant>(
+    `/merchant/customers/${customerId}/product-access`,
     {
-      method: "DELETE",
+      method: "POST",
+      body: endsAt
+        ? { product_id: productId, ends_at: endsAt }
+        : { product_id: productId },
     }
   )
+
+export const revokeProductAccess = (customerId: string, grantId: string) =>
+  api<void>(`/merchant/customers/${customerId}/product-access/${grantId}`, {
+    method: "DELETE",
+  })
 
 // createOffChannelPayment records a payment taken outside any rail. The
 // transaction id is its identity: recorded is false when it was already
@@ -181,18 +180,16 @@ export interface SubscriptionFilters {
   rail?: string
   customer_id?: string
   price_id?: string
-  sort_by?: string
-  sort_order?: string
 }
 
 export const listSubscriptions = (
   filters: SubscriptionFilters,
   limit: number,
-  offset: number,
+  cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListEnvelope<AdminSubscription>>("/merchant/subscriptions", {
-    query: { ...filters, limit, offset },
+  api<CursorEnvelope<AdminSubscription>>("/merchant/subscriptions", {
+    query: { ...filters, limit, ...(cursor ? { cursor } : {}) },
     signal,
   })
 
@@ -204,28 +201,24 @@ export const cancelSubscription = (
   reason: string,
   revokeAccess: boolean
 ) =>
-  api<{ message: string }>(`/merchant/subscriptions/${id}/cancel`, {
+  api<AdminSubscription>(`/merchant/subscriptions/${id}/cancel`, {
     method: "POST",
     body: { reason, revoke_access: revokeAccess },
   })
 
 export const resumeSubscription = (id: string) =>
-  api<{ status: string }>(`/merchant/subscriptions/${id}/resume`, {
+  api<AdminSubscription>(`/merchant/subscriptions/${id}/resume`, {
     method: "POST",
-    body: {},
   })
 
 export const changeSubscriptionPaymentMethod = (
   id: string,
   paymentMethodId: string
 ) =>
-  api<{ success: boolean; message: string }>(
-    `/merchant/subscriptions/${id}/payment-method`,
-    {
-      method: "PUT",
-      body: { payment_method_id: paymentMethodId },
-    }
-  )
+  api<AdminSubscription>(`/merchant/subscriptions/${id}/payment-method`, {
+    method: "PUT",
+    body: { payment_method_id: paymentMethodId },
+  })
 
 export const previewSubscriptionTierChange = (id: string, priceId: string) =>
   api<TierChangePreview>(`/merchant/subscriptions/${id}/change-tier/preview`, {
@@ -534,39 +527,36 @@ export const getPriceKeyHistory = (key: string, signal?: AbortSignal) =>
 
 // --- Repricing / migration (#773 primitive, #777 console wizard) ---
 
-// previewRepriceAllPriorVersions is the wizard's Step 2 affected-count
-// preview: a READ-ONLY dry run, called BEFORE the price edit lands (so it
-// never mutates, unlike repriceAllPriorVersions below).
-export const previewRepriceAllPriorVersions = (priceKey: string) =>
-  api<RepricePreviewResult>(
-    "/merchant/catalog/reprice-all-prior-versions/preview",
-    {
-      query: { price_key: priceKey },
-    }
-  )
+// previewRepriceBatch is the wizard's Step 2 affected-count dry run, called
+// BEFORE the price edit lands; it never writes.
+export const previewRepriceBatch = (priceKey: string) =>
+  api<RepriceBatchPreview>("/merchant/reprice-batches/preview", {
+    method: "POST",
+    body: { price_key: priceKey },
+  })
 
-// repriceAllPriorVersions bulk-schedules every active subscription pinned to
-// a prior version of priceKey to move to its current price at effectiveAt.
-export const repriceAllPriorVersions = (
-  priceKey: string,
-  effectiveAt: string
-) =>
-  api<RepriceBatchResult>("/merchant/catalog/reprice-all-prior-versions", {
+// createRepriceBatch schedules every active subscription on a prior version
+// of priceKey to move to its current price at effectiveAt.
+export const createRepriceBatch = (priceKey: string, effectiveAt: string) =>
+  api<RepriceBatchResult>("/merchant/reprice-batches", {
     method: "POST",
     body: { price_key: priceKey, effective_at: effectiveAt },
   })
 
-// listRepriceBatchesByKey finds a price key's bulk reprice operations
-// (most recent first) — the price page's pending-migration lookup, without
-// already knowing a batch id.
-export const listRepriceBatchesByKey = (
+// listRepriceBatches lists a price key's batches, newest first.
+export const listRepriceBatches = (
   priceKey: string,
   limit = 20,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<RepriceBatch>>("/merchant/reprices/batches", {
+  api<CursorEnvelope<RepriceBatch>>("/merchant/reprice-batches", {
     query: { price_key: priceKey, limit },
     signal,
+  })
+
+export const cancelRepriceBatch = (id: string) =>
+  api<RepriceBatchCancel>(`/merchant/reprice-batches/${id}/cancel`, {
+    method: "POST",
   })
 
 export interface RepriceFilters {
@@ -578,16 +568,16 @@ export interface RepriceFilters {
 export const listReprices = (
   filters: RepriceFilters,
   limit = 100,
-  offset = 0,
+  cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<SubscriptionReprice>>("/merchant/reprices", {
-    query: { ...filters, limit, offset },
+  api<CursorEnvelope<Reprice>>("/merchant/reprices", {
+    query: { ...filters, limit, ...(cursor ? { cursor } : {}) },
     signal,
   })
 
 export const cancelReprice = (id: string) =>
-  api<{ message: string }>(`/merchant/reprices/${id}/cancel`, {
+  api<Reprice>(`/merchant/reprices/${id}/cancel`, {
     method: "POST",
   })
 

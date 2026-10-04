@@ -200,7 +200,6 @@ export type OpenRailsErrorCode =
   | "service_credential_merchant_unresolved"
   | "service_credential_resource_scope_denied"
   | "service_unavailable"
-  | "solana_cancel_needs_wallet_signature"
   | "spend_delegation_not_found"
   | "step_up_required"
   | "step_up_unavailable"
@@ -295,7 +294,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   csrf_origin_denied: { status: 403, type: "authorization_error", meaning: "A cookie-authenticated request came from an origin that is not allowed." },
   currency_unsupported: { status: 400, type: "invalid_request_error", meaning: "The currency is not in OpenRails' registry." },
   custodian_capture_unavailable: { status: 503, type: "api_error", meaning: "The card custodian cannot capture cards right now." },
-  customer_action_required: { status: 403, type: "authorization_error", meaning: "Only the verified customer may perform this payment action." },
+  customer_action_required: { status: 403, type: "authorization_error", meaning: "Only the customer may take this action, through their own step." },
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
@@ -434,7 +433,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   service_credential_merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The service credential's issuer owns no merchant." },
   service_credential_resource_scope_denied: { status: 403, type: "authorization_error", meaning: "The service credential is scoped to other resources." },
   service_unavailable: { status: 503, type: "api_error", meaning: "A dependency is temporarily unavailable; retry." },
-  solana_cancel_needs_wallet_signature: { status: 400, type: "invalid_request_error", meaning: "Cancelling a Solana subscription needs the subscriber's wallet signature." },
   spend_delegation_not_found: { status: 404, type: "invalid_request_error", meaning: "The spend delegation does not exist." },
   step_up_required: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in; metadata carries the challenge." },
   step_up_unavailable: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in and this credential cannot prove one." },

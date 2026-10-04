@@ -13,7 +13,7 @@ export const en = {
     active: "Active",
     pending: "Pending",
     past_due: "Past due",
-    cancelled: "Cancelled",
+    canceled: "Canceled",
     cancel_scheduled: "Ending",
     unknown: "Unknown",
     awaiting_method: "Update card",

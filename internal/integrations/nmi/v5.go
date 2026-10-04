@@ -428,8 +428,8 @@ type V5Subscription struct {
 	Plan               *V5Plan `json:"plan"`
 }
 
-// cancelledAtNMI reports whether the record is a deletion tombstone.
-func (s *V5Subscription) cancelledAtNMI() bool {
+// canceledAtNMI reports whether the record is a deletion tombstone.
+func (s *V5Subscription) canceledAtNMI() bool {
 	return strings.EqualFold(strings.TrimSpace(s.DelayedCondition), "inactive")
 }
 
@@ -496,7 +496,7 @@ func (c *NMIClient) GetSubscription(ctx context.Context, subscriptionID string) 
 	if err != nil {
 		return sub, false, err
 	}
-	if sub.cancelledAtNMI() {
+	if sub.canceledAtNMI() {
 		return sub, false, nil
 	}
 	return sub, true, nil

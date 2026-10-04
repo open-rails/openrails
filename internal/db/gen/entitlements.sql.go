@@ -23,62 +23,6 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 	return err
 }
 
-const createEntitlement = `-- name: CreateEntitlement :one
-
-INSERT INTO billing.entitlements (
-    id, merchant_id, customer_id, entitlement, start_at, end_at,
-    source_id, source_type, grant_id, revoked_at, revoke_reason, created_at, updated_at
-) VALUES (
-    COALESCE(NULLIF($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid), uuidv7()),
-    $5::uuid,
-    NULLIF($6::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-    $1, $2, $7, $8, $3, $9,
-    $10, $11,
-    COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
-)
-RETURNING id
-`
-
-type CreateEntitlementParams struct {
-	Entitlement  string
-	StartAt      time.Time
-	SourceType   string
-	ID           uuid.UUID
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	EndAt        *time.Time
-	SourceID     *uuid.UUID
-	GrantID      *uuid.UUID
-	RevokedAt    *time.Time
-	RevokeReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-// billing.entitlements. The model is bun-soft-delete (deleted_at): every
-// read filters deleted_at IS NULL explicitly here (bun added it implicitly).
-func (q *Queries) CreateEntitlement(ctx context.Context, arg CreateEntitlementParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createEntitlement,
-		arg.Entitlement,
-		arg.StartAt,
-		arg.SourceType,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.EndAt,
-		arg.SourceID,
-		arg.GrantID,
-		arg.RevokedAt,
-		arg.RevokeReason,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const endActiveEntitlementsBySubscription = `-- name: EndActiveEntitlementsBySubscription :exec
 UPDATE billing.entitlements ent SET
     end_at = $2::timestamptz,
@@ -104,7 +48,7 @@ type EndActiveEntitlementsBySubscriptionParams struct {
 
 // #691 closure write: bound a subscription's live windows to a PROVEN end
 // (user cancel at period end, terminal resolution). Advance-written on disk —
-// a dead system cannot extend a cancelled sub. start_at < end_at keeps the
+// a dead system cannot extend a canceled sub. start_at < end_at keeps the
 // generated period range valid; future-start windows are handled by
 // SoftDeleteFutureEntitlementsBySubscription.
 func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg EndActiveEntitlementsBySubscriptionParams) error {
@@ -159,6 +103,7 @@ func (q *Queries) EntitlementCoverage(ctx context.Context, arg EntitlementCovera
 }
 
 const entitlementExistsActive = `-- name: EntitlementExistsActive :one
+
 SELECT EXISTS (
     SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $1
@@ -178,6 +123,8 @@ type EntitlementExistsActiveParams struct {
 	At          time.Time
 }
 
+// billing.entitlements. The model is bun-soft-delete (deleted_at): every
+// read filters deleted_at IS NULL explicitly here (bun added it implicitly).
 func (q *Queries) EntitlementExistsActive(ctx context.Context, arg EntitlementExistsActiveParams) (bool, error) {
 	row := q.db.QueryRow(ctx, entitlementExistsActive,
 		arg.MerchantID,
@@ -197,7 +144,7 @@ SELECT EXISTS (
       AND ent.source_id = $2
       AND ent.entitlement = $3
       -- A purchase projects once: a revoked or retracted window is final.
-      AND (ent.source_type = 'one_off' OR (ent.revoked_at IS NULL AND ent.deleted_at IS NULL))
+      AND (ent.source_type = 'purchase' OR (ent.revoked_at IS NULL AND ent.deleted_at IS NULL))
 )
 `
 
@@ -908,7 +855,7 @@ INSERT INTO billing.entitlements (
     $4::timestamptz, $5::timestamptz,
     $6::text, $7::uuid, $8::uuid
 )
-ON CONFLICT (merchant_id, grant_id, entitlement) WHERE grant_id IS NOT NULL AND deleted_at IS NULL DO NOTHING
+ON CONFLICT (merchant_id, grant_id, entitlement) WHERE deleted_at IS NULL DO NOTHING
 `
 
 type MaterializeEntitlementParams struct {
@@ -919,7 +866,7 @@ type MaterializeEntitlementParams struct {
 	EndAt       *time.Time
 	SourceType  string
 	SourceID    *uuid.UUID
-	GrantID     *uuid.UUID
+	GrantID     uuid.UUID
 }
 
 // Concurrent replay of one immutable grant cannot duplicate its projection.
@@ -1038,7 +985,7 @@ UPDATE billing.entitlements ent SET
     revoked_at = $3::timestamptz,
     revoke_reason = $4,
     updated_at = $3::timestamptz
-WHERE ent.merchant_id = $5::uuid AND ent.source_type = 'one_off'
+WHERE ent.merchant_id = $5::uuid AND ent.source_type = 'purchase'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1190,7 +1137,7 @@ SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.sour
        'revoke', g.id, g.spec_snapshot, $2::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
 FROM billing.grants g
 WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+  AND g.id IN (SELECT grant_id FROM retracted)
 ORDER BY g.id
 ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
@@ -1243,7 +1190,7 @@ WITH retracted AS (
 UPDATE billing.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
-WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'one_off'
+WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'purchase'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -1258,7 +1205,7 @@ SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.sour
        'revoke', g.id, g.spec_snapshot, $2::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
 FROM billing.grants g
 WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+  AND g.id IN (SELECT grant_id FROM retracted)
 ORDER BY g.id
 ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
@@ -1304,7 +1251,7 @@ SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.sour
        'revoke', g.id, g.spec_snapshot, $3::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
 FROM billing.grants g
 WHERE g.merchant_id = $4::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+  AND g.id IN (SELECT grant_id FROM retracted)
 ORDER BY g.id
 ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')

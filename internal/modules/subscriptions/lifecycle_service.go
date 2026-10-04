@@ -286,7 +286,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 				}
 				historyTerms := *terms
 				if params.InitialPaymentReversal != "" {
-					if sub.Status != models.StatusCancelled || len(rows) != 0 {
+					if sub.Status != models.StatusCanceled || len(rows) != 0 {
 						return nil, nil, errors.New("reversed initial payment has active membership or grants")
 					}
 					historyTerms.Entitlements = map[string]*int{}
@@ -494,11 +494,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	var subscription *models.Subscription
 	if existingPendingSub != nil {
-		if params.UserEmail != nil && strings.TrimSpace(*params.UserEmail) != "" {
-			emailc := strings.TrimSpace(*params.UserEmail)
-			existingPendingSub.UserEmail = &emailc
-		}
-
 		existingPendingSub.PriceID = price.ID
 		existingPendingSub.ProductID = price.ProductID
 		existingPendingSub.Status = models.StatusActive
@@ -513,7 +508,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			existingPendingSub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
 		}
 		existingPendingSub.StartedAt = periodStartsAt
-		existingPendingSub.CancelledAt = nil
+		existingPendingSub.CanceledAt = nil
 		existingPendingSub.CancelType = nil
 		existingPendingSub.CancelFeedback = nil
 		existingPendingSub.EndedAt = nil
@@ -552,11 +547,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			StartedAt:             periodStartsAt,
 		}
 
-		if params.UserEmail != nil && strings.TrimSpace(*params.UserEmail) != "" {
-			emailc := strings.TrimSpace(*params.UserEmail)
-			subscription.UserEmail = &emailc
-		}
-
 		if terms := params.Prepared; terms != nil {
 			subscription.ID, subscription.PspID = terms.SubscriptionID, terms.PSPID
 			subscription.CollectionPolicy = terms.CollectionPolicy
@@ -578,9 +568,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if params.InitialPaymentReversal == "dispute" {
 				kind = models.CancelTypeChargeback
 			}
-			subscription.Status = models.StatusCancelled
+			subscription.Status = models.StatusCanceled
 			subscription.CancelType = &kind
-			subscription.CancelledAt = &at
+			subscription.CanceledAt = &at
 			subscription.EndedAt = &at
 			subscription.CurrentPeriodEndsAt = &at
 			if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(at) {
@@ -600,6 +590,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"period_start":         periodStartsAt,
 			"period_end":           periodEndsAt,
 		}).Info("Created new subscription record for membership")
+	}
+
+	if err := FillCustomerEmail(ctx, dbb.Gen(ctx), subscription.CustomerID, params.CustomerEmail); err != nil {
+		return nil, nil, fmt.Errorf("record customer email: %w", err)
 	}
 
 	if params.Prepared != nil && params.Prepared.Pending {
@@ -794,7 +788,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 // RecordConfirmedChargeWithoutRenewal records a provider-confirmed renewal
 // charge whose lifecycle must be preserved: a later period is already applied
-// or the subscription was terminally cancelled meanwhile. The completed payment
+// or the subscription was terminally canceled meanwhile. The completed payment
 // uses its accepted terms; current price, benefits, access and period stay intact.
 // A terminal cancellation alone flags the charge for refund review.
 func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx context.Context, params *RenewMembershipParams) error {
@@ -842,12 +836,12 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			}
 		}
 		_, terminal := TerminalCancelReason(subscription)
-		terminal = terminal || (subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled)
+		terminal = terminal || (subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCanceled)
 		if terminal {
 			if metadata == nil {
 				metadata = map[string]any{}
 			}
-			metadata["refund_review"] = "confirmed charge on a cancelled subscription"
+			metadata["refund_review"] = "confirmed charge on a canceled subscription"
 		}
 		now := s.now().UTC()
 		payment := &models.Payment{
@@ -879,7 +873,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		if created && terminal {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID, "transaction_id": params.TransactionID, "status": subscription.Status,
-			}).Error("confirmed rebill charge on a cancelled subscription; payment recorded without reactivation — refund review required")
+			}).Error("confirmed rebill charge on a canceled subscription; payment recorded without reactivation — refund review required")
 		}
 		return nil
 	})
@@ -1198,7 +1192,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	return nil
 }
 
-// ResumeMembership restores a reversibly-cancelled subscription and its
+// ResumeMembership restores a reversibly-canceled subscription and its
 // standing entitlement projection in one transaction.
 func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, params *ResumeMembershipParams) (*models.Subscription, error) {
 	if params == nil || params.SubscriptionID == uuid.Nil {
@@ -1278,7 +1272,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 	return resumed, nil
 }
 
-// ReactivateMembership reactivates a previously cancelled subscription and restores
+// ReactivateMembership reactivates a previously canceled subscription and restores
 // its paid entitlement windows for the current product tier.
 func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *ReactivateMembershipParams) (*models.Subscription, error) {
 	if params == nil {
@@ -1495,13 +1489,13 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		Notifications:  make([]*models.NotificationQueue, 0, 1),
 	}
 	// A late event must preserve the existing cancellation and its terminal reason.
-	if subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
+	if subscription.Status == models.StatusCanceled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
 		return result, nil
 	}
 
 	// A repeated refund/merchant reversal cannot reactivate an already revoked
 	// engine agreement or move its terminal dates. No paid/grace interval remains.
-	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeMerchant) && params.CancelType == models.CancelTypeMerchant && subscription.EndedAt != nil && !subscription.EndedAt.After(s.now()) && subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.After(s.now()) {
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCanceled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeMerchant) && params.CancelType == models.CancelTypeMerchant && subscription.EndedAt != nil && !subscription.EndedAt.After(s.now()) && subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.After(s.now()) {
 		return result, nil
 	}
 
@@ -1513,7 +1507,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 
 	// A replayed engine user cancel cannot soften a later merchant or system
 	// cancellation. The locked current row is the lifecycle authority.
-	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled && params.CancelType == models.CancelTypeUser {
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCanceled && params.CancelType == models.CancelTypeUser {
 		return result, nil
 	}
 
@@ -1633,28 +1627,28 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	}
 	now := s.now()
 	endedAt := c.EndedAt
-	// cancelled_at is the operation instant, but never after ended_at: the
-	// chk_ended_not_before_cancelled constraint requires ended_at >= cancelled_at,
+	// canceled_at is the operation instant, but never after ended_at: the
+	// chk_ended_not_before_canceled constraint requires ended_at >= canceled_at,
 	// and an immediate revoke pins ended_at to the caller's `now` (computed a hair
 	// before this method's own s.now()).
-	cancelledAt := now
-	if endedAt.Before(cancelledAt) {
-		cancelledAt = endedAt
+	canceledAt := now
+	if endedAt.Before(canceledAt) {
+		canceledAt = endedAt
 	}
-	wasCancelled := sub.Status == models.StatusCancelled
+	wasCanceled := sub.Status == models.StatusCanceled
 	applied, err := Transition(sub, lifecycle.Cancel{Kind: cancelKindOf(c.CancelType), Immediate: !endedAt.After(now), At: now}, now)
 	if err != nil {
 		return fmt.Errorf("apply local cancellation %s: %w", sub.ID, err)
 	}
-	if wasCancelled && len(applied) == 0 {
+	if wasCanceled && len(applied) == 0 {
 		return nil // the first decided cancellation stands
 	}
 	cancelType := c.CancelType
 	sub.EndedAt = &endedAt
 	sub.CancelType = &cancelType
 	sub.CancelFeedback = c.Feedback
-	if !wasCancelled {
-		sub.CancelledAt = &cancelledAt
+	if !wasCanceled {
+		sub.CanceledAt = &canceledAt
 	}
 	sub.ClearRetrySchedule()
 
@@ -1864,11 +1858,11 @@ func samePeriodEnd(belief, current *time.Time) bool {
 }
 
 // cancelSolanaSubscriptionCascade flips the linked billing.solana_subscriptions
-// row to cancelled so the hourly Solana cranker's ListDue (which filters
+// row to canceled so the hourly Solana cranker's ListDue (which filters
 // status = active) no longer returns it — billing stops because OpenRails is the
 // only puller (#264). `d` must be the tx-bound db handle so the cascade commits
 // atomically with the lifecycle cancellation. Idempotent: setting an
-// already-cancelled row to cancelled is a no-op. Tolerant of a missing row (a
+// already-canceled row to canceled is a no-op. Tolerant of a missing row (a
 // Solana sub that was never enrolled): returns nil after logging so the cancel
 // itself never fails on the cascade.
 func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
@@ -1878,16 +1872,16 @@ func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscription
 		if db.IsNotFound(err) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscriptionID,
-			}).Info("no solana_subscriptions row linked to cancelled subscription; nothing to cascade")
+			}).Info("no solana_subscriptions row linked to canceled subscription; nothing to cascade")
 			return nil
 		}
 		return fmt.Errorf("lookup solana_subscriptions row: %w", err)
 	}
-	if row.Status == models.SolanaSubscriptionCancelled {
+	if row.Status == models.SolanaSubscriptionCanceled {
 		return nil
 	}
-	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
-		return fmt.Errorf("set solana_subscriptions status cancelled: %w", err)
+	if err := solanaRepo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCanceled); err != nil {
+		return fmt.Errorf("set solana_subscriptions status canceled: %w", err)
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscription_id":        subscriptionID,
@@ -1917,18 +1911,18 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 
 		// A late event must preserve the existing cancellation and its terminal reason.
-		if subscription.Status == models.StatusCancelled {
+		if subscription.Status == models.StatusCanceled {
 			return nil
 		}
 
-		// The provider ended it (expired = cancelled, never rebilled again).
+		// The provider ended it (expired = canceled, never rebilled again).
 		now := s.now()
-		if _, err := Transition(subscription, lifecycle.ProviderCancelled{At: now}, now); err != nil {
+		if _, err := Transition(subscription, lifecycle.ProviderCanceled{At: now}, now); err != nil {
 			return fmt.Errorf("expire membership %s: %w", subscription.ID, err)
 		}
 		// Access is revoked now below, so the row ends now too.
 		subscription.EndedAt = &now
-		subscription.CancelledAt = &now
+		subscription.CanceledAt = &now
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
@@ -2049,7 +2043,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 
 		// A late event must preserve the existing cancellation and its terminal reason.
-		if subscription.Status == models.StatusCancelled {
+		if subscription.Status == models.StatusCanceled {
 			return nil
 		}
 
@@ -2108,7 +2102,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it (#1102).
-		if subscription.Status != models.StatusCancelled && subscription.Status != models.StatusPending {
+		if subscription.Status != models.StatusCanceled && subscription.Status != models.StatusPending {
 			if err := openCase(ctx, db, subscription); err != nil {
 				return err
 			}
@@ -2153,7 +2147,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					cycleHours = collection.BillingCycleHoursOf(price)
 				}
 			}
-			// An unknown cycle fails closed: nothing is retried or cancelled on
+			// An unknown cycle fails closed: nothing is retried or canceled on
 			// a guessed cadence; the caller raises the operator finding.
 			policy, err := CasePolicy(ctx, db, subscription)
 			if err != nil {
@@ -2235,7 +2229,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			subscription.GraceEndsAt = &deadline
 		}
-		if subscription.Status == models.StatusCancelled {
+		if subscription.Status == models.StatusCanceled {
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
 				reason = "transaction_failure"
@@ -2260,7 +2254,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// exhaustion is our own inference, and the handler's relevance re-check
 		// supersedes the delete if the row recovers inside the window.
 		deferredDeleteAt := SystemDeferredDeleteAt(subscription, now)
-		if subscription.Status == models.StatusCancelled &&
+		if subscription.Status == models.StatusCanceled &&
 			rails.RemoteDeleteOnTerminalCancel(subscription.Rail) &&
 			subscription.RailSubscriptionID != "" {
 			if s.providerCancel != nil {
@@ -2283,7 +2277,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 		// A terminal outcome the operator's switch (or a missing certainty
 		// leg) refused is a standing finding: the member is neither charged
-		// nor cancelled until someone decides.
+		// nor canceled until someone decides.
 		if heldTerminal != "" {
 			evidence, _ := json.Marshal(map[string]any{"subscription_id": subscription.ID, "collection_policy": subscription.CollectionPolicy, "status": subscription.Status, "refusal": heldTerminal, "failure_code": normalize.FromPtr(params.FailureCode)})
 			action := fmt.Sprintf("subscription %s reached a terminal decline but cancellation was refused (%s); it waits %s with no further charges. Arm the destructive-action switch to let terminal outcomes apply, or resolve it by hand", subscription.ID, heldTerminal, subscription.Status)
@@ -2295,7 +2289,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// default the member keeps access until a confirmed outcome (a payment,
 		// a non-recoverable decline, a spent schedule); under "suspend" access
 		// ends with the paid period.
-		if subscription.Status != models.StatusCancelled && entSvc != nil {
+		if subscription.Status != models.StatusCanceled && entSvc != nil {
 			if err := s.dunningAccess(ctx, db, entSvc, subscription, now); err != nil {
 				return err
 			}
@@ -2318,9 +2312,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			"next_retry_at":   subscription.NextRetryAt,
 		}).Warn("Updated subscription during failure flow")
 
-		// Revoke entitlements if subscription is cancelled after max retries or a
+		// Revoke entitlements if subscription is canceled after max retries or a
 		// terminal decline.
-		if subscription.Status == models.StatusCancelled && entSvc != nil {
+		if subscription.Status == models.StatusCanceled && entSvc != nil {
 			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
 			if err != nil {
 				return fmt.Errorf("list entitlements for failed subscription %s: %w", subscription.ID, err)
@@ -2363,7 +2357,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		// Immediate notification for each outcome, so a customer is
 		// never silent-treated through a whole dunning cycle and then suddenly
-		// cancelled:
+		// canceled:
 		//   bucket 1, still trying  -> payment_method_failed ("we'll keep trying")
 		//   bucket 1, schedule out  -> premium_ended / expired ("we gave up")
 		//   bucket 2                -> payment_method_update_required ("fix it,
@@ -2376,7 +2370,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		case needsPaymentMethodUpdate:
 			eventType = models.NotificationPaymentMethodUpdateRequired
 			data.FailureCode = normalize.FromPtr(params.FailureCode)
-		case subscription.Status == models.StatusCancelled:
+		case subscription.Status == models.StatusCanceled:
 			eventType = models.NotificationPremiumEnded
 			endReason := PremiumEndReasonExpired
 			if params.Decline == decline.NonRecoverable {

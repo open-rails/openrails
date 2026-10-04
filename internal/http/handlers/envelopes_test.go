@@ -96,7 +96,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"refusal", subscriptions.ErrSubscriptionNotFound, want{404, "subscription_not_found", ""}},
 		{"refusal", subscriptions.ErrSubscriptionNotActive, want{409, "subscription_not_active", ""}},
 		{"refusal", fmt.Errorf("%w: %s", subscriptions.ErrCancelUnsupportedOnRail, "carrier_pigeon"), want{400, "cancel_unsupported_on_rail", ""}},
-		{"refusal", subscriptions.ErrSolanaCancelNeedsWalletSignature, want{400, "solana_cancel_needs_wallet_signature", ""}},
+		{"refusal", subscriptions.ErrCustomerActionRequired, want{403, "customer_action_required", ""}},
 		{"refusal", fmt.Errorf("%w: row 7", billingimport.ErrInvalidPSPReference), want{400, "invalid_psp_reference", ""}},
 		{"refusal", fmt.Errorf("%w: declared field refused", billingimport.ErrInvalidDeclaredInput), want{400, api.CodeInvalidParam, ""}},
 		{"refusal", apperr.Conflictf("payment method belongs to another customer"), want{409, api.CodeResourceConflict, ""}},

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -132,68 +133,13 @@ func (s *RepriceService) scheduledConflict(ctx context.Context, subscriptionID u
 	return err
 }
 
-// Reprice schedules subscription.PriceID -> req.ToPriceID, effective at the
-// subscription's first renewal on/after req.EffectiveAt (v1's only mode — no
-// proration, no mid-cycle math). Emits subscription.reprice_scheduled at
-// SCHEDULE time (the card-network advance-notice disclosure), not at apply
-// time.
-func (s *RepriceService) Reprice(ctx context.Context, req RepriceRequest) (*models.SubscriptionReprice, error) {
-	sub, err := s.subscriptions.GetByID(ctx, req.SubscriptionID)
-	if err != nil {
-		if db.IsNotFound(err) {
-			return nil, ErrSubscriptionNotFound
-		}
-		return nil, fmt.Errorf("reprice: load subscription: %w", err)
-	}
-	fromPrice, err := s.prices.GetByID(ctx, sub.PriceID)
-	if err != nil {
-		return nil, fmt.Errorf("reprice: load current price: %w", err)
-	}
-	toPrice, err := s.prices.GetByID(ctx, req.ToPriceID)
-	if err != nil {
-		if db.IsNotFound(err) {
-			return nil, ErrRepriceTargetPriceNotFound
-		}
-		return nil, fmt.Errorf("reprice: load target price: %w", err)
-	}
-	if err := validateRepriceConstraints(req.SubscriptionID, fromPrice, toPrice); err != nil {
-		return nil, err
-	}
-	if err := s.scheduledConflict(ctx, req.SubscriptionID); err != nil {
-		return nil, err
-	}
-	violatesNotice, err := s.checkNoticeWindow(ctx, fromPrice, toPrice, req.EffectiveAt)
-	if err != nil {
-		return nil, err
-	}
-	if violatesNotice && !req.AcknowledgeShortNotice {
-		return nil, &RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: req.SubscriptionID, FromPriceID: fromPrice.ID, ToPriceID: toPrice.ID}
-	}
-	acknowledgedShortNotice := violatesNotice && req.AcknowledgeShortNotice
-	if acknowledgedShortNotice {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": req.SubscriptionID,
-			"from_price_id":   fromPrice.ID,
-			"to_price_id":     toPrice.ID,
-			"effective_at":    req.EffectiveAt,
-		}).Warn("reprice: short-notice override acknowledged for a price increase inside the merchant's notice window")
-	}
-
-	rr, err := s.repo.CreateSubscriptionReprice(ctx, req.SubscriptionID, fromPrice.ID, toPrice.ID, req.EffectiveAt, nil, acknowledgedShortNotice)
-	if err != nil {
-		return nil, fmt.Errorf("reprice: schedule: %w", err)
-	}
-	s.emitScheduledNotification(ctx, sub, fromPrice, toPrice, req.EffectiveAt)
-	return rr, nil
-}
-
 // RepriceAllPriorVersions bulk-schedules every ACTIVE subscription pinned to a
 // PRIOR version of key (the archived members of its #774 version chain) to
 // move to key's CURRENT price at req.EffectiveAt — "end the grandfather
 // window" / a full price-increase rollout. Per-subscription constraint
 // failures or scheduling conflicts are SKIPPED (recorded with a reason), never
 // abort the whole batch.
-func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req RepriceAllPriorVersionsRequest) (*RepriceBatchResult, error) {
+func (s *RepriceService) CreateBatch(ctx context.Context, req billing.CreateRepriceBatchParams) (*billing.RepriceBatchResult, error) {
 	key := strings.TrimSpace(req.PriceKey)
 	if key == "" {
 		return nil, apperr.Invalidf("reprice_all_prior_versions: price_key required")
@@ -214,11 +160,11 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 		return nil, fmt.Errorf("reprice_all_prior_versions: list prior versions: %w", err)
 	}
 	if len(priorVersions) == 0 {
-		batch, err := s.repo.CreateBatch(ctx, &key, toPrice.ID, req.EffectiveAt, 0, 0, 0)
+		batchID, err := s.repo.CreateBatch(ctx, &key, toPrice.ID, req.EffectiveAt, 0, 0)
 		if err != nil {
 			return nil, err
 		}
-		return &RepriceBatchResult{BatchID: batch.ID, ToPriceID: billing.PriceID(toPrice.ID)}, nil
+		return &billing.RepriceBatchResult{BatchID: billing.RepriceBatchID(batchID), ToPriceID: billing.PriceID(toPrice.ID), Scheduled: []billing.RepriceOutcome{}, Skipped: []billing.RepriceOutcome{}}, nil
 	}
 	priorByID := make(map[uuid.UUID]*models.Price, len(priorVersions))
 	priorIDs := make([]uuid.UUID, 0, len(priorVersions))
@@ -239,22 +185,22 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 	}
 	var (
 		schedule          []toSchedule
-		skipped           []RepriceOutcome
+		skipped           = []billing.RepriceOutcome{}
 		acknowledgedCount int
 	)
 	for _, sub := range subs {
 		fromPrice := priorByID[sub.PriceID]
 		if fromPrice == nil {
 			// Should not happen (sub.PriceID came from priorIDs) — skip defensively.
-			skipped = append(skipped, RepriceOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Reason: "current price not found among prior versions"})
+			skipped = append(skipped, billing.RepriceOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Reason: ref("current price not found among prior versions")})
 			continue
 		}
 		if err := validateRepriceConstraints(sub.ID, fromPrice, toPrice); err != nil {
-			skipped = append(skipped, RepriceOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Reason: err.Error()})
+			skipped = append(skipped, billing.RepriceOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Reason: ref(err.Error())})
 			continue
 		}
 		if err := s.scheduledConflict(ctx, sub.ID); err != nil {
-			skipped = append(skipped, RepriceOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Reason: err.Error()})
+			skipped = append(skipped, billing.RepriceOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Reason: ref(err.Error())})
 			continue
 		}
 		// #781: per-subscription, since a bulk call's prior versions can carry
@@ -265,9 +211,9 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 			return nil, fmt.Errorf("reprice_all_prior_versions: check notice window for subscription %s: %w", sub.ID, err)
 		}
 		if violatesNotice && !req.AcknowledgeShortNotice {
-			skipped = append(skipped, RepriceOutcome{
+			skipped = append(skipped, billing.RepriceOutcome{
 				SubscriptionID: billing.SubscriptionID(sub.ID),
-				Reason:         (&RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: sub.ID, FromPriceID: fromPrice.ID, ToPriceID: toPrice.ID}).Error(),
+				Reason:         ref((&RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: sub.ID, FromPriceID: fromPrice.ID, ToPriceID: toPrice.ID}).Error()),
 			})
 			continue
 		}
@@ -278,27 +224,26 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 		schedule = append(schedule, toSchedule{sub: sub, from: fromPrice, acknowledgedShortNotice: acknowledged})
 	}
 
-	batch, err := s.repo.CreateBatch(ctx, &key, toPrice.ID, req.EffectiveAt, len(subs), len(schedule), len(skipped))
+	batchID, err := s.repo.CreateBatch(ctx, &key, toPrice.ID, req.EffectiveAt, len(subs), len(skipped))
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions: create batch: %w", err)
 	}
 	if acknowledgedCount > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"batch_id":           batch.ID,
+			"batch_id":           batchID,
 			"price_key":          key,
 			"to_price_id":        toPrice.ID,
 			"effective_at":       req.EffectiveAt,
 			"acknowledged_count": acknowledgedCount,
 		}).Warn("reprice_all_prior_versions: short-notice override acknowledged for a price increase inside the merchant's notice window")
 	}
-	result := &RepriceBatchResult{BatchID: batch.ID, ToPriceID: billing.PriceID(toPrice.ID), Matched: len(subs), Skipped: skipped}
-	batchID := batch.ID
+	result := &billing.RepriceBatchResult{BatchID: billing.RepriceBatchID(batchID), ToPriceID: billing.PriceID(toPrice.ID), Matched: len(subs), Scheduled: []billing.RepriceOutcome{}, Skipped: skipped}
 	for _, item := range schedule {
 		rr, err := s.repo.CreateSubscriptionReprice(ctx, item.sub.ID, item.from.ID, toPrice.ID, req.EffectiveAt, &batchID, item.acknowledgedShortNotice)
 		if err != nil {
 			return nil, fmt.Errorf("reprice_all_prior_versions: schedule subscription %s: %w", item.sub.ID, err)
 		}
-		result.Scheduled = append(result.Scheduled, RepriceOutcome{SubscriptionID: billing.SubscriptionID(item.sub.ID), RepriceID: rr.ID, AcknowledgedShortNotice: item.acknowledgedShortNotice})
+		result.Scheduled = append(result.Scheduled, billing.RepriceOutcome{SubscriptionID: billing.SubscriptionID(item.sub.ID), RepriceID: ref(billing.RepriceID(rr.ID)), AcknowledgedShortNotice: item.acknowledgedShortNotice})
 		s.emitScheduledNotification(ctx, item.sub, item.from, toPrice, req.EffectiveAt)
 	}
 	return result, nil
@@ -312,7 +257,7 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 // key's ARCHIVED prior versions once the new one is current), this counts the
 // key's WHOLE chain (current + archived): every active subscriber on it today
 // is a "prior version" candidate the instant the pending edit lands.
-func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey string) (*RepricePreviewResult, error) {
+func (s *RepriceService) PreviewBatch(ctx context.Context, priceKey string) (*billing.RepriceBatchPreview, error) {
 	key := strings.TrimSpace(priceKey)
 	if key == "" {
 		return nil, apperr.Invalidf("reprice_all_prior_versions preview: price_key required")
@@ -333,7 +278,7 @@ func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey s
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: list version chain: %w", err)
 	}
 	if len(chain) == 0 {
-		return &RepricePreviewResult{PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID)}, nil
+		return &billing.RepriceBatchPreview{PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID)}, nil
 	}
 	chainIDs := make([]uuid.UUID, 0, len(chain))
 	for _, p := range chain {
@@ -343,40 +288,90 @@ func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey s
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: count affected subscriptions: %w", err)
 	}
-	return &RepricePreviewResult{PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID), Matched: len(subs)}, nil
+	return &billing.RepriceBatchPreview{PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID), Matched: len(subs)}, nil
 }
 
-// ListBatchesForKey lists a price key's bulk reprice operations, most recent
-// first — the #777 console price page's "is there a pending migration"
-// surface.
-func (s *RepriceService) ListBatchesForKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error) {
-	key := strings.TrimSpace(priceKey)
-	if key == "" {
-		return nil, apperr.Invalidf("list reprice batches: price_key required")
+// GetBatch reads one batch with its reprices counted by status.
+func (s *RepriceService) GetBatch(ctx context.Context, id billing.RepriceBatchID) (billing.RepriceBatch, error) {
+	return s.repo.GetBatch(ctx, id.UUID())
+}
+
+// ListBatches is one page of the merchant's batches, newest first.
+func (s *RepriceService) ListBatches(ctx context.Context, params billing.RepriceBatchListParams) (billing.ListPage[billing.RepriceBatch], error) {
+	limit, err := pagination.Limit(params.PageRequest)
+	if err != nil {
+		return billing.ListPage[billing.RepriceBatch]{}, err
 	}
-	return s.repo.ListBatchesByPriceKey(ctx, key, limit, offset)
+	afterAt, afterID, err := pagination.After(params.Cursor)
+	if err != nil {
+		return billing.ListPage[billing.RepriceBatch]{}, err
+	}
+	var key *string
+	if k := strings.TrimSpace(params.PriceKey); k != "" {
+		key = &k
+	}
+	rows, err := s.repo.ListBatches(ctx, key, pagination.Fetch(limit), afterAt, afterID)
+	if err != nil {
+		return billing.ListPage[billing.RepriceBatch]{}, err
+	}
+	return pagination.Cut(rows, limit, func(b billing.RepriceBatch) any {
+		return pagination.TimeID{At: b.CreatedAt, ID: b.ID.UUID()}
+	}), nil
 }
 
-func (s *RepriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
-	out, err := s.repo.GetByID(ctx, id)
+// GetReprice reads one reprice.
+func (s *RepriceService) GetReprice(ctx context.Context, id billing.RepriceID) (billing.Reprice, error) {
+	out, err := s.repo.GetByID(ctx, id.UUID())
 	if db.IsNotFound(err) {
-		return nil, ErrRepriceNotFound
+		return billing.Reprice{}, ErrRepriceNotFound
 	}
-	return out, err
+	if err != nil {
+		return billing.Reprice{}, err
+	}
+	return Reprice(out), nil
 }
 
-// List returns scheduled/applied/canceled reprices — the inspect-before-effect
-// surface the #777 console wizard needs.
-func (s *RepriceService) List(ctx context.Context, filter SubscriptionRepriceFilter, limit, offset int) ([]*models.SubscriptionReprice, error) {
-	return s.repo.List(ctx, filter, limit, offset)
+// ListReprices is one page of the merchant's reprices, newest first.
+func (s *RepriceService) ListReprices(ctx context.Context, params billing.RepriceListParams) (billing.ListPage[billing.Reprice], error) {
+	limit, err := pagination.Limit(params.PageRequest)
+	if err != nil {
+		return billing.ListPage[billing.Reprice]{}, err
+	}
+	afterAt, afterID, err := pagination.After(params.Cursor)
+	if err != nil {
+		return billing.ListPage[billing.Reprice]{}, err
+	}
+	var f RepriceFilter
+	if !params.SubscriptionID.IsZero() {
+		f.SubscriptionID = ref(params.SubscriptionID.UUID())
+	}
+	if !params.RepriceBatchID.IsZero() {
+		f.RepriceBatchID = ref(params.RepriceBatchID.UUID())
+	}
+	if params.Status != "" {
+		f.Status = &params.Status
+	}
+	rows, err := s.repo.ListPage(ctx, f, pagination.Fetch(limit), afterAt, afterID)
+	if err != nil {
+		return billing.ListPage[billing.Reprice]{}, err
+	}
+	page := pagination.Cut(rows, limit, func(r *models.SubscriptionReprice) any {
+		return pagination.TimeID{At: r.CreatedAt, ID: r.ID}
+	})
+	return pagination.Map(page, Reprice), nil
 }
 
-// Cancel cancels a scheduled reprice. Returns ErrRepriceNotScheduled if it has
-// already applied, was already canceled, or does not exist — cancel-before-
-// effective is enforced at the DB layer (status='scheduled' predicate), so a
-// reprice that already flipped is untouched by a late cancel.
-func (s *RepriceService) Cancel(ctx context.Context, id uuid.UUID) error {
-	return s.repo.Cancel(ctx, id)
+// CancelReprice cancels a scheduled reprice and returns it. A reprice that
+// already applied, was canceled or is blocked is ErrRepriceNotScheduled: the
+// status predicate leaves a reprice that already flipped untouched.
+func (s *RepriceService) CancelReprice(ctx context.Context, id billing.RepriceID) (billing.Reprice, error) {
+	if _, err := s.GetReprice(ctx, id); err != nil {
+		return billing.Reprice{}, err
+	}
+	if err := s.repo.Cancel(ctx, id.UUID()); err != nil {
+		return billing.Reprice{}, err
+	}
+	return s.GetReprice(ctx, id)
 }
 
 func (s *RepriceService) emitScheduledNotification(ctx context.Context, sub *models.Subscription, from, to *models.Price, effectiveAt time.Time) {

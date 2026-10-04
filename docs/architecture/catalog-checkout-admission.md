@@ -140,7 +140,7 @@ each key's page caps at 100 with its own cursor, and preferred currency only
 changes ordering. Every row retains its native currency, amount, duration
 and renewal flag. It never substitutes a monthly plan for permanent access.
 
-`HasEntitlement` and `CheckEntitlements` query only the requested keys in the
+`HasEntitlement` queries only the requested key in the
 existing grant projection. They do not join mutable product contents to invent
 access. Permanent bundle admission rejects an already-owned product or benefits
 that are all already permanently held/reserved. Partial ownership does not

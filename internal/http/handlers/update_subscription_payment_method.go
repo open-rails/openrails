@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/api"
@@ -18,7 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type UpdateSubscriptionPaymentMethodBody = billing.UpdateSubscriptionPaymentMethodRequest
+type UpdateSubscriptionPaymentMethodBody = billing.UpdateSubscriptionPaymentMethodParams
 
 func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
@@ -83,7 +84,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			writeRefusal(r, err, "Failed to select payment method")
 			return
 		}
-		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": billing.SubscriptionID(subscription.ID), "payment_method_id": billing.PaymentMethodID(paymentMethodID)})
+		writeUpdatedSubscription(r, authenticatedUserID, enforceOwnership, subscription.ID)
 		return
 	}
 	if !rails.IsNMI(subscription.Rail) {
@@ -92,7 +93,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	}
 
 	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod {
-		r.ErrorJSON(http.StatusBadRequest, "Cannot update payment method for cancelled subscriptions")
+		r.ErrorJSON(http.StatusBadRequest, "Cannot update payment method for canceled subscriptions")
 		return
 	}
 
@@ -168,7 +169,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	switch {
 	case out.Done:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
-		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": billing.SubscriptionID(subscription.ID), "payment_method_id": billing.PaymentMethodID(paymentMethodID)})
+		writeUpdatedSubscription(r, authenticatedUserID, enforceOwnership, subscription.ID)
 	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
 		writePaymentMethodPSPMismatch(r)
@@ -183,6 +184,16 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Warn("Payment-source update unresolved inline; intent ledger will converge")
 		r.ErrorJSON(http.StatusConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
 	}
+}
+
+// writeUpdatedSubscription answers the subscription after its payment method
+// changed, as the caller's audience reads it.
+func writeUpdatedSubscription(r *httprequest.Request, userID string, customer bool, id uuid.UUID) {
+	if customer {
+		writeMySubscription(r, userID, id, nil)
+		return
+	}
+	writeMerchantSubscription(r, id)
 }
 
 // writePaymentMethodPSPMismatch renders billing.CodePaymentMethodPSPMismatch:

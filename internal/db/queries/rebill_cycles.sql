@@ -66,7 +66,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
 -- name: ListRebillCycles :many
 -- The merchant's rebill cycles, latest due first, each with its first attempt,
 -- the attempt that collected it and when it closes: collected, the subscription
--- cancelled, or 15 days past due (the dunning window is at most 14), whichever
+-- canceled, or 15 days past due (the dunning window is at most 14), whichever
 -- is first. Outcome is collected, lost (closed by now uncollected) or open; a
 -- text filter matches any of its values; a page continues after its cursor.
 -- The metrics rebill_cycles family derives the same facts.
@@ -78,7 +78,7 @@ WITH cf AS (
                 WHEN f.category = 'approved' THEN 'approved'
                 WHEN f.category = 'system_error' THEN 'error'
                 ELSE 'declined' END::text AS first_outcome,
-           LEAST(w.attempted_at, CASE WHEN s.cancelled_at IS NOT NULL THEN GREATEST(s.cancelled_at, c.due_at) END,
+           LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END,
                  c.due_at + interval '15 days')::timestamptz AS closed_at,
            CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
                 WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'

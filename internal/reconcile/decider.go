@@ -222,7 +222,7 @@ type Decision struct {
 	// when that is later.
 	GraceEndsAt time.Time
 	// RemoteGone (#679, TransitionCancel): the provider-side subscription is
-	// confirmed gone (roster cancelled/expired, or absent from an exhaustive
+	// confirmed gone (roster canceled/expired, or absent from an exhaustive
 	// roster). FALSE for the stale-decline cancel, where the remote sub may
 	// still exist and keep retrying — the apply path then queues the deferred
 	// provider delete.
@@ -507,7 +507,7 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	// again, so a renewal charge cannot resurrect it (the charge is still
 	// backfilled — money truth is separate from lifecycle truth).
 	rosterDead := remoteSub != nil &&
-		(remoteSub.Status == SubscriptionStatusCancelled || remoteSub.Status == SubscriptionStatusExpired)
+		(remoteSub.Status == SubscriptionStatusCanceled || remoteSub.Status == SubscriptionStatusExpired)
 
 	// 1) A VERIFIED successful renewal charge → the provider billed the new
 	//    period. The only renewal-shaped outcome (#367: renew only off a real charge).
@@ -543,10 +543,10 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 		}
 	}
 	// remoteGone (#679): the provider-side sub is confirmed gone — roster says
-	// cancelled/expired, or it is absent from an exhaustive roster.
+	// canceled/expired, or it is absent from an exhaustive roster.
 	remoteGone := false
 	if remoteSub != nil {
-		remoteGone = remoteSub.Status == SubscriptionStatusCancelled || remoteSub.Status == SubscriptionStatusExpired
+		remoteGone = remoteSub.Status == SubscriptionStatusCanceled || remoteSub.Status == SubscriptionStatusExpired
 	} else {
 		remoteGone = snap.Coverage.SubscriptionsExhaustive
 	}
@@ -596,9 +596,9 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 		}
 		return with(Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "roster_past_due_beyond_window"})
 	}
-	// 5) The provider says cancelled/expired. The evidence is the roster read
+	// 5) The provider says canceled/expired. The evidence is the roster read
 	//    itself, so it dates from this pass (#835).
-	if remoteSub != nil && (remoteSub.Status == SubscriptionStatusCancelled || remoteSub.Status == SubscriptionStatusExpired) {
+	if remoteSub != nil && (remoteSub.Status == SubscriptionStatusCanceled || remoteSub.Status == SubscriptionStatusExpired) {
 		return with(Decision{Kind: TransitionCancel, RemoteGone: true, EvidenceAt: snap.FetchedAt, Reason: "roster_dead"})
 	}
 	// 6) The sub is absent AND the pull exhaustively covered subscriptions → it

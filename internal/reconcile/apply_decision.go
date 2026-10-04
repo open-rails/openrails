@@ -109,7 +109,7 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			// confirmed end is immediate.
 			return lifecycle.Cancel{Kind: lifecycle.CancelProvider, Immediate: true, At: at}
 		case d.RemoteGone:
-			return lifecycle.ProviderCancelled{At: at} // NMI ended the schedule; paid time is kept
+			return lifecycle.ProviderCanceled{At: at} // NMI ended the schedule; paid time is kept
 		case d.Certainty == collection.CertaintyNonRetryableDecline:
 			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
 		default:
@@ -189,7 +189,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 			grace := d.GraceEndsAt // dunning's pacing marker
 			cur.GraceEndsAt = &grace
 		}
-		if cur.Status == models.StatusCancelled && before.Status != lifecycle.Cancelled {
+		if cur.Status == models.StatusCanceled && before.Status != lifecycle.Canceled {
 			feedback := "provider-confirmed: " + d.Reason
 			cur.CancelFeedback = &feedback
 		}

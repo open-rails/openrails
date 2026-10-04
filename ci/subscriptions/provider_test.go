@@ -85,11 +85,11 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: l.c.customerID()})
 	require.NoError(t, err)
-	require.Len(t, subs.Data, 1)
-	l.sub = subs.Data[0].ID
-	sub := subs.Data[0]
+	require.Len(t, subs.Items, 1)
+	l.sub = subs.Items[0].ID
+	sub := subs.Items[0]
 	status := "active"
 	if d := book.Subscriptions[0].Dunning; d != nil {
 		status = "past_due"
@@ -97,7 +97,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		require.Equal(t, d.Retries, *sub.RetryAttempts)
 		require.NotNil(t, sub.GraceEndsAt)
 	}
-	require.Equal(t, status, sub.Status)
+	require.Equal(t, status, string(sub.Status))
 	require.Equal(t, l.railSub, sub.RailSubscriptionID)
 	wantPolicy := "provider"
 	if rail == "nmi" {
@@ -159,7 +159,7 @@ func TestProviderOwnedRenewals(t *testing.T) {
 			// renewal in progress, never a decline.
 			require.Equal(t, http.StatusOK, w.deliver(rail, stripeEvent("customer.subscription.updated", w.stripe.providerDraft(l.railSub))))
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, "active", sub.Status, "a draft invoice is not a failed renewal")
+			require.Equal(t, billing.SubscriptionActive, sub.Status, "a draft invoice is not a failed renewal")
 			for _, p := range w.payments(tp, l.c.id) {
 				require.NotEqual(t, "failed", p.Status, "no failed payment for a draft invoice")
 			}
@@ -243,11 +243,12 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.armDestructive()
 			l := importLegacy(t, w, rail, tp)
 			w.converge()
-			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionRequest{Reason: "member asked"}))
+			_, err := w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionParams{Reason: "member asked"})
+			require.NoError(t, err)
 			w.settle()
 			w.advance(time.Hour)
 			w.wake()
-			require.NotNil(t, w.subscription(tp, l.sub).CancelledAt)
+			require.NotNil(t, w.subscription(tp, l.sub).CanceledAt)
 			if rail == "stripe" {
 				require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"], "Stripe stops renewing")
 			} else {
@@ -263,7 +264,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.converge()
 			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerCancelNotice()))
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, "cancelled", sub.Status, "the provider's own cancellation is mirrored")
+			require.Equal(t, billing.SubscriptionCanceled, sub.Status, "the provider's own cancellation is mirrored")
 		})
 		t.Run("provider_payment_failed", func(t *testing.T) {
 			t.Parallel()
@@ -273,7 +274,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(false)))
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, "past_due", sub.Status, "the provider's failed renewal is mirrored")
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status, "the provider's failed renewal is mirrored")
 			require.True(t, l.c.entitled(l.ent), "provider-owned dunning keeps standing access")
 			owner := map[string]string{"stripe": "provider", "nmi": "nmi_schedule"}[rail]
 			recorded := w.attempts(l.c.id)
@@ -285,8 +286,9 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.runRenewals()
 			require.Equal(t, charges, l.engineCharges(), "OpenRails leaves the provider's dunning alone")
 			// The host's account-deletion callback cancels what it finds.
-			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionRequest{Reason: "Account deletion evt_2", AccountDeletion: true}))
-			require.NotNil(t, w.subscription(tp, l.sub).CancelledAt)
+			_, err := w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionParams{Reason: "Account deletion evt_2", AccountDeletion: true})
+			require.NoError(t, err)
+			require.NotNil(t, w.subscription(tp, l.sub).CanceledAt)
 			w.advance(time.Hour)
 			w.wake()
 			if rail == "stripe" {
@@ -334,7 +336,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			w.advance(end.Sub(w.clock.Now()) + time.Hour)
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, "past_due", sub.Status)
+			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a future schedule date cannot grant an unpaid period")
 			require.NotNil(t, sub.NextRetryAt, "OpenRails schedules recovery after the provider decline")
 			require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "NMI never retries; OpenRails' first retry is the schedule's +2d from NMI's decline")
@@ -344,7 +346,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 			w.runRenewals()
 			sub = w.subscription(tp, l.sub)
-			require.Equal(t, "active", sub.Status)
+			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.Equal(t, "nmi_schedule", sub.CollectionPolicy)
 			require.Equal(t, l.railSub, sub.RailSubscriptionID)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)))
@@ -421,18 +423,18 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 
 	w.converge()
 	sub := w.subscription(embedded, stalled.sub)
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	require.NotNil(t, sub.NextRetryAt, "the stalled schedule resumes")
 	require.WithinDuration(t, last.Add(3*day), *sub.NextRetryAt, time.Second, "third attempt: +5d after the first failure, 3d after the second")
 	sub = w.subscription(embedded, lapsed.sub)
 	require.Nil(t, sub.NextRetryAt, "past grace, grace_exhausted owns it")
-	require.Equal(t, "unverified", sub.Status)
+	require.Equal(t, billing.SubscriptionUnverified, sub.Status)
 	sub = w.subscription(embedded, stripeOwned.sub)
 	require.Nil(t, sub.NextRetryAt, "stripe: the provider owns its retries")
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	sub = w.subscription(embedded, nmiOwned.sub)
 	require.NotNil(t, sub.NextRetryAt, "nmi: NMI never retries, so OpenRails dunning resumes")
-	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	w.runRenewals()
 	require.Zero(t, len(w.nmi.Attempts()))
 	require.Equal(t, charges, stripeOwned.engineCharges())
@@ -457,7 +459,7 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 		w.watchRebills()
 		w.runRenewals()
 		sub := w.subscription(embedded, l.sub)
-		require.NotEqual(t, "past_due", sub.Status, "a lapse is not a decline")
+		require.NotEqual(t, billing.SubscriptionPastDue, sub.Status, "a lapse is not a decline")
 		require.Nil(t, sub.NextRetryAt)
 		require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charges without a seen decline")
 	}
@@ -466,7 +468,7 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(true)))
 	w.runRenewals()
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, "active", sub.Status)
+	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.After(end))
 	require.Zero(t, len(w.nmi.Attempts()))
 	require.Len(t, w.nmi.ledger(""), 2, "the initial and NMI's renewal, nothing more")

@@ -21,13 +21,13 @@ import (
 // request — no rollup storage at current fleet scale.
 
 // FleetWeeklyPoint is one week's fleet movement: merchants provisioned, the
-// distinct merchants with a settled sale, and cancelled subscriptions (the
+// distinct merchants with a settled sale, and canceled subscriptions (the
 // churn proxy until a richer signal exists).
 type FleetWeeklyPoint struct {
-	WeekStart              time.Time
-	NewMerchants           int64
-	ActiveMerchants        int64
-	CancelledSubscriptions int64
+	WeekStart             time.Time
+	NewMerchants          int64
+	ActiveMerchants       int64
+	CanceledSubscriptions int64
 }
 
 // FleetWeeklyVolume is one week's settled sale volume in one currency, in the
@@ -104,12 +104,12 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude billing.Merc
 	for _, r := range active {
 		assign(r.WeekStart, func(p *FleetWeeklyPoint) { p.ActiveMerchants = r.Merchants })
 	}
-	cancelled, err := q.FleetWeeklyCancelledSubscriptions(ctx, gen.FleetWeeklyCancelledSubscriptionsParams{ExcludeMerchantID: excludeArg, Since: since})
+	canceled, err := q.FleetWeeklyCanceledSubscriptions(ctx, gen.FleetWeeklyCanceledSubscriptionsParams{ExcludeMerchantID: excludeArg, Since: since})
 	if err != nil {
-		return nil, fmt.Errorf("fleet timeseries: cancelled subscriptions: %w", err)
+		return nil, fmt.Errorf("fleet timeseries: canceled subscriptions: %w", err)
 	}
-	for _, r := range cancelled {
-		assign(r.WeekStart, func(p *FleetWeeklyPoint) { p.CancelledSubscriptions = r.Cancellations })
+	for _, r := range canceled {
+		assign(r.WeekStart, func(p *FleetWeeklyPoint) { p.CanceledSubscriptions = r.Cancellations })
 	}
 
 	volume, err := q.FleetWeeklyVolume(ctx, gen.FleetWeeklyVolumeParams{ExcludeMerchantID: excludeArg, Since: since})

@@ -99,7 +99,7 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Billing
 }
 
 // retainedDeclineCode is the issuer's decline code the execute leg retained
-// before cancelling: Stripe clears it from the cancelled PaymentIntent.
+// before cancelling: Stripe clears it from the canceled PaymentIntent.
 func (s *Store) retainedDeclineCode(ctx context.Context, in gen.BillingRailIntent) string {
 	current, err := s.Get(ctx, in.ID)
 	if err != nil {

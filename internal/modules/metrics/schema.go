@@ -79,7 +79,7 @@ func Schema() SchemaDoc {
 	}
 	doc.Examples = []SchemaExample{
 		{
-			Intent: "count of users who cancelled per day, for the past 7 days",
+			Intent: "count of users who canceled per day, for the past 7 days",
 			Query: Query{
 				Measures: []string{"cancellations"},
 				By:       []string{"time"},
@@ -158,7 +158,7 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "net member change per week (plot new, cancelled)",
+			Intent: "net member change per week (plot new, canceled)",
 			Query: Query{
 				Measures: []string{"new_subscriptions", "cancellations"},
 				By:       []string{"time"},

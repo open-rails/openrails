@@ -78,7 +78,7 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 var merchantCols = map[Family]string{
 	FamPayments:       "p.merchant_id",
 	FamSubsNew:        "s.merchant_id",
-	FamSubsCancelled:  "s.merchant_id",
+	FamSubsCanceled:   "s.merchant_id",
 	FamSubsEnded:      "s.merchant_id",
 	FamGrants:         "g.merchant_id",
 	FamUsage:          "ue.merchant_id",

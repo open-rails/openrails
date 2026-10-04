@@ -26,13 +26,14 @@ Revoked or soft-deleted windows are inactive and ignored by every active check.
 Merchant API (API key or service token carrying `merchant:customer-settings:read`;
 prefix `/v1` standalone, `/billing/v1` embedded):
 
-- `POST /v1/merchant/customers/entitlements:batch` body `{"subjects": [...], "at": "RFC3339"}` —
-  the primary host check. Always batch (max 500 subjects); response is keyed by subject,
-  unknown subjects get `[]`, never an error. Omitted `at` = now.
-- `GET /v1/merchant/customers/{customer_id}/entitlements?at=` — active windows for one customer.
+- `POST /v1/merchant/entitlements/lookup` body `{"customer_ids": [...], "at": "RFC3339"}` —
+  the primary host read (max 500 customers); `{"customers": {id: [EntitlementRecord]}}`,
+  a customer with none maps to `[]`. Omitted `at` = now.
+- `POST /v1/merchant/customers/{customer_id}/entitlements/check` body `{"entitlements": [...], "at"}` —
+  `{"entitlements": {key: bool}}` for up to 100 keys (Go: `HasEntitlement`).
 - `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — reverse lookup:
-  customer ids holding an active window, keyset-paginated (`next_cursor`/`has_more`).
-- `GET /v1/me/entitlements/active?at=` — the delegated end-user token reads its own subject.
+  one page of customer ids holding an active window (`{data, next_cursor}`).
+- `GET /v1/me/entitlements?at=` — the signed-in customer's own active windows.
 
 Embedded hosts sharing the DB may run the SQL predicate above directly
 (add `customer_id = $1 AND entitlement = $2`); it is exactly what the API executes.

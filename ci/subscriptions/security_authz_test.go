@@ -53,7 +53,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				body         any
 			}{
 				{http.MethodGet, "/subscriptions/" + aliceSub.String(), nil},
-				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed"}},
+				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"reason": "no longer needed"}},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/resume", map[string]any{}},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/retry-now", map[string]any{}},
 				{http.MethodPut, "/subscriptions/" + aliceSub.String() + "/payment-method", map[string]any{"payment_method_id": malloryCard}},
@@ -83,9 +83,9 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			}
 
 			sub := w.subscription(embedded, aliceSub)
-			require.Equal(t, "active", sub.Status)
+			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.False(t, sub.CancelScheduled)
-			require.Nil(t, sub.CancelledAt)
+			require.Nil(t, sub.CanceledAt)
 			require.True(t, alice.entitled("content:members"))
 			require.Len(t, w.railLedger(rail), charges, "no request charged anyone")
 
@@ -232,7 +232,8 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	_, err = r.client.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "rival-refund"})
 	require.Error(t, err)
-	require.Error(t, r.client.CancelSubscription(ctx, e.sub, billing.CancelSubscriptionRequest{}))
+	_, err = r.client.CancelSubscription(ctx, e.sub, billing.CancelSubscriptionParams{})
+	require.Error(t, err)
 	price, err := w.client[embedded].GetPrice(ctx, typedPriceID(t, e.price), billing.GetPriceParams{})
 	require.NoError(t, err)
 	_, err = r.client.GetPrice(ctx, price.ID, billing.GetPriceParams{})
@@ -315,7 +316,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	got, err := w.client[embedded].GetPayment(ctx, payment.ID)
 	require.NoError(t, err)
 	require.Zero(t, got.AmountRefunded)
-	require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 	for _, entry := range e.providerLedger() {
 		require.Zero(t, entry.Refunded)
 	}

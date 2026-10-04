@@ -91,16 +91,14 @@ func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*
 
 func configuredCapabilities(cfg config.HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
 	active := routeSets(cfg)
-	fullCustomer, solanaManagement := false, false
+	fullCustomer := false
 	for _, exposure := range cfg.CustomerRoutes {
 		fullCustomer = fullCustomer || exposure.Scope == config.CustomerSelfService
-		solanaManagement = solanaManagement || exposure.Scope == config.CustomerSelfService || exposure.Scope == config.CustomerBillingManagement
 	}
 	if len(cfg.CustomerRoutes) > 0 {
 		active = append(active, RouteSetCustomer)
 	}
 	caps := buildCapabilities(active, providers)
 	caps.Features["stripe_billing_portal"] = fullCustomer && providers.StripePortal
-	caps.Features["solana_subscription_management"] = solanaManagement && providers.SolanaSigning
 	return caps
 }

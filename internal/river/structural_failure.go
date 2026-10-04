@@ -75,7 +75,7 @@ const (
 )
 
 // StructuralFailureError wraps the underlying failure with its class, so the
-// cancelled job row says WHY it will never be retried.
+// canceled job row says WHY it will never be retried.
 type StructuralFailureError struct {
 	Reason StructuralFailureReason
 	Kind   string
@@ -113,7 +113,7 @@ func classifyStructural(err error) (StructuralFailureReason, bool) {
 	if err == nil {
 		return "", false
 	}
-	// A snooze or an already-cancelled job is a deliberate outcome; never
+	// A snooze or an already-canceled job is a deliberate outcome; never
 	// reclassify it.
 	if errors.Is(err, &rivertype.JobSnoozeError{}) {
 		return "", false

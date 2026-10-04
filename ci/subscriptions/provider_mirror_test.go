@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -62,7 +63,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		for range 2 {
 			require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_stop", "needs_response", p)))
 		}
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
 		remote := w.stripe.subscriptionObject(l.railSub)
 		require.Equal(t, true, remote["cancel_at_period_end"], "Stripe does not renew a disputed membership")
@@ -71,7 +72,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 
 		// A won dispute restores the paid period; Stripe still stops at its end.
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_stop", "won", p)))
-		require.Equal(t, "active", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
 		require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
 		require.Zero(t, l.engineCharges())
 	})
@@ -83,9 +84,9 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		p := completed(w.payments(embedded, l.c.id))[0]
 		w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
-		require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_late", "needs_response", p)))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
 		require.Equal(t, "canceled", w.stripe.subscriptionObject(l.railSub)["status"], "a delinquent subscription ends now, so its open invoice stops retrying")
 	})
@@ -96,7 +97,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w.converge()
 		w.stripe.dashboardRefund(w.stripe.latestCharge(l.railSub), 999)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", w.refundNotice("stripe")))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
 		require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
 		require.Len(t, l.stripeSubWrites(), 1)
@@ -109,7 +110,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		p := completed(w.payments(embedded, l.c.id))[0]
 		w.stripe.subscriptionWritesDown(true)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_down", "needs_response", p)))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status, "the revoke never waits on Stripe")
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status, "the revoke never waits on Stripe")
 		require.False(t, l.c.entitled(l.ent))
 		require.Equal(t, false, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
 
@@ -141,11 +142,11 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 			if tc.declined {
 				require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
-				require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status)
+				require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 				require.True(t, l.c.entitled(l.ent), "access while Stripe retries")
 			}
 			require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, tc.status, false))))
-			require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+			require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 			require.False(t, l.c.entitled(l.ent), "no access without payment")
 			require.Zero(t, l.engineCharges())
 		})
@@ -159,11 +160,11 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
 		w.advance(20 * day)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, "past_due", true))))
-		require.NotEqual(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.NotEqual(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.True(t, l.c.entitled(l.ent), "Stripe is still retrying")
 
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, "past_due", false))))
-		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
+		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
 	})
 }
@@ -189,7 +190,7 @@ func newDataLinkFake(t *testing.T) *dataLinkFake {
 		case r.URL.Path == "/utils/subscriptionManagement.cgi" && r.Form.Get("action") == "viewSubscriptionStatus":
 			status := "2" // rebilling
 			if f.cancels[id] > 0 {
-				status = "1" // cancelled, access through the paid period
+				status = "1" // canceled, access through the paid period
 			}
 			_, _ = io.WriteString(rw, "<results><subscriptionStatus>"+status+"</subscriptionStatus></results>")
 		case r.URL.Path == "/utils/subscriptionManagement.cgi" && r.Form.Get("action") == "cancelSubscription":
@@ -203,8 +204,8 @@ func newDataLinkFake(t *testing.T) *dataLinkFake {
 	return f
 }
 
-// cancelled counts the cancelSubscription calls CCBill received for id.
-func (f *dataLinkFake) cancelled(id string) int {
+// canceled counts the cancelSubscription calls CCBill received for id.
+func (f *dataLinkFake) canceled(id string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.cancels[id]
@@ -247,7 +248,7 @@ func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 		"renewalDate": ccbillDate(m.paidThrough), "nextRetryDate": ccbillDate(m.paidThrough.Add(2 * day)),
 		"cardType": "VISA", "paymentType": "CREDIT",
 	})
-	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status)
+	require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, m.sub).Status)
 	dl.list(m.railSub, ccbillDate(w.clock.Now().Add(2*day)), "")
 
 	// Surveyed but never armed: the pass is advisory and changes nothing.
@@ -257,24 +258,24 @@ func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 		SELECT id, true, 'e2e', 'survey' FROM billing.merchants WHERE slug = $1`), w.slug)
 	require.NoError(t, err)
 	w.pull()
-	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "an advisory pass reactivates nothing")
+	require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, m.sub).Status, "an advisory pass reactivates nothing")
 	finding := "subscription:" + m.sub.UUID().String()
 	require.NotContains(t, w.openFindings("pull.ccbill.active_without_payment"), finding)
 
 	w.armDestructive()
 	w.pull()
-	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "a future rebill date is not payment")
+	require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, m.sub).Status, "a future rebill date is not payment")
 	require.Contains(t, w.openFindings("pull.ccbill.active_without_payment"), finding)
 
 	dl.list(m.railSub, "", ccbillDate(w.clock.Now().Add(25*day)))
 	w.pull()
-	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "a listed expiry date is not payment either")
+	require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, m.sub).Status, "a listed expiry date is not payment either")
 	require.Contains(t, w.openFindings("pull.ccbill.active_without_payment"), finding)
 
 	next := m.paidThrough.Add(monthHours * time.Hour)
 	w.deliverCCBill("RenewalSuccess", m.renewal(ccbillNumericID(), next))
 	sub := w.subscription(embedded, m.sub)
-	require.Equal(t, "active", sub.Status, "the rebill is the payment")
+	require.Equal(t, billing.SubscriptionActive, sub.Status, "the rebill is the payment")
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "%v", sub.CurrentPeriodEndsAt)
 	require.True(t, m.c.entitled(m.ent))
 	require.Zero(t, w.engineCharges())

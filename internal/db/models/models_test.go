@@ -121,13 +121,13 @@ func TestPriceCadenceAndPurchasability(t *testing.T) {
 	require.Equal(t, []int64{0, 168}, []int64{amount, int64(hours)}, "zero is a free trial")
 
 	end := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
-	sub := &Subscription{CurrentPeriodEndsAt: &end, Status: StatusPastDue, CancelledAt: &end}
+	sub := &Subscription{CurrentPeriodEndsAt: &end, Status: StatusPastDue, CanceledAt: &end}
 	require.Error(t, sub.ActivateWithPrice(&Price{}))
 	require.NoError(t, sub.ActivateWithPrice(&Price{ID: uuid.New(), AutoRenew: true, AccessDurationHours: ptr(720)}))
 	require.Equal(t, end, *sub.CurrentPeriodStartsAt, "renewal continues from the prior period end")
 	require.Equal(t, end.Add(720*time.Hour), *sub.CurrentPeriodEndsAt)
 	require.Equal(t, StatusActive, sub.Status)
-	require.Nil(t, sub.CancelledAt)
+	require.Nil(t, sub.CanceledAt)
 }
 
 // Mirrors the DB CHECKs payments_psp_required_on_rail and

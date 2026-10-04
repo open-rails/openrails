@@ -195,7 +195,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 		// the legacy advance; the reconcile worker (#258) repairs the ledger.
 		evidence["repair"] = "advanced_without_local_renewal"
 		return intents.Succeeded(evidence)
-	case crankGhostExpired, crankCancelled, crankDunned:
+	case crankGhostExpired, crankCanceled, crankDunned:
 		return intents.TerminalWithEvidence(outcome.reason, evidence)
 	default:
 		return intents.Ambiguous("unrecognized crank outcome")

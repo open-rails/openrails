@@ -84,7 +84,7 @@ func TestSchemaExamplesAllValidate(t *testing.T) {
 	for _, ex := range doc.Examples {
 		_, ve := Validate(&ex.Query)
 		require.Nil(t, ve, "example %q: %v", ex.Intent, ve)
-		if strings.Contains(ex.Intent, "cancelled per day") {
+		if strings.Contains(ex.Intent, "canceled per day") {
 			golden = true
 			require.Equal(t, []string{"cancellations"}, ex.Query.Measures)
 			require.Equal(t, "day", ex.Query.Grain)

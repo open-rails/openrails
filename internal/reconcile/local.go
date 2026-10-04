@@ -45,13 +45,13 @@ type LocalSubscription struct {
 	Status                string
 	Rail                  string
 	RailSubscriptionID    string
-	UserEmail             string
+	CustomerEmail         string // the customer's, for identity matching
 	PaymentMethodID       *uuid.UUID
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	StartedAt             time.Time
 	EndedAt               *time.Time
-	CancelledAt           *time.Time
+	CanceledAt            *time.Time
 	CancelType            string
 	DeletionScheduledAt   *time.Time
 	TierGroup             string
@@ -180,15 +180,15 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			CurrentPeriodEndsAt:   row.CurrentPeriodEndsAt,
 			StartedAt:             row.StartedAt,
 			EndedAt:               row.EndedAt,
-			CancelledAt:           row.CancelledAt,
+			CanceledAt:            row.CanceledAt,
 			DeletionScheduledAt:   row.DeletionScheduledAt,
 			LastRetryAt:           row.LastRetryAt,
 			NextRetryAt:           row.NextRetryAt,
 			ScheduledPriceID:      row.ScheduledPriceID,
 			TierChangePending:     row.TierChangePending,
 		}
-		if row.UserEmail != nil {
-			s.UserEmail = *row.UserEmail
+		if row.CustomerEmail != nil {
+			s.CustomerEmail = *row.CustomerEmail
 		}
 		if row.CancelType != nil {
 			s.CancelType = *row.CancelType

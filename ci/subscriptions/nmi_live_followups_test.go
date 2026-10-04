@@ -60,20 +60,20 @@ func TestLegacyImportRaisesNoFindings(t *testing.T) {
 			monthly := w.bookTier("monthly", 999, 30)
 			b := w.newLegacyBook()
 			active := b.add(&bookRow{source: "active", tier: monthly, paid: now.Add(10 * day), declared: true})
-			cancelled := b.add(&bookRow{source: "cancelled", tier: monthly, paid: now.Add(20 * day), declared: true,
-				cancel: billing.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
-			w.nmi.DeleteSchedule(cancelled.schedule)
+			canceled := b.add(&bookRow{source: "canceled", tier: monthly, paid: now.Add(20 * day), declared: true,
+				cancel: billing.CancelEvidence{Kind: "user_canceled", At: now.Add(-5 * day)}})
+			w.nmi.DeleteSchedule(canceled.schedule)
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)
 			require.NoError(t, err)
 			require.Len(t, result.Imported, 2, "%+v", result)
 			w.settle()
-			for _, r := range []*bookRow{active, cancelled} {
+			for _, r := range []*bookRow{active, canceled} {
 				sub := r.sub(w, tp)
 				require.True(t, r.c.entitled(r.tier.ent), "%s is entitled without an operator converge", r.source)
 				require.Empty(t, w.findingsAbout(sub.ID), "%s: no finding raised by the import", r.source)
 			}
 			w.converge()
-			for _, r := range []*bookRow{active, cancelled} {
+			for _, r := range []*bookRow{active, canceled} {
 				require.Empty(t, w.findingsAbout(r.sub(w, tp).ID), "%s: convergence agrees with the import", r.source)
 			}
 		})
@@ -163,9 +163,9 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 			state := w.subscription(tp, sub)
 			require.Equal(t, !r.revoked, c.entitled(ent), "access follows the policy")
 			if r.revoked {
-				require.Equal(t, "cancelled", state.Status)
+				require.Equal(t, billing.SubscriptionCanceled, state.Status)
 			} else {
-				require.NotEqual(t, "cancelled", state.Status)
+				require.NotEqual(t, billing.SubscriptionCanceled, state.Status)
 			}
 			if r.kind == "legacy" {
 				switch {

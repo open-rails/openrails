@@ -63,7 +63,7 @@ func TestCapabilities(t *testing.T) {
 	}{
 		{config.CustomerSelfService, true, true},
 		{config.CustomerBillingManagement, false, true},
-		{config.CustomerSubscriptionManagement, false, false},
+		{config.CustomerSubscriptionManagement, false, true},
 	} {
 		caps := configuredCapabilities(config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Scope: tc.scope}}}, routesurface.AllProviderRoutes())
 		require.True(t, caps.RouteGroups[RouteSetCustomer])

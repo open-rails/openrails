@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/query"
 )
 
 // ProductReader is the read-only product surface the copilot needs — the
@@ -37,22 +36,17 @@ type PriceReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error)
 }
 
-// SubscriptionCounter is the per-price subscriber-count primitive —
-// subscriptions.SubscriptionService's existing GetSubscribers, called with
-// Limit:0 so only the COUNT query runs (the items page is discarded).
+// SubscriptionCounter is the per-price subscriber-count primitive.
 type SubscriptionCounter interface {
-	GetSubscribers(ctx context.Context, params query.QueryOptions[subscriptions.GetSubscriptionsFilters]) ([]*models.Subscription, int64, error)
+	CountSubscribers(ctx context.Context, f subscriptions.GetSubscriptionsFilters) (int64, error)
 }
 
-// RepricePreviewer is the #773/#777 read-only reprice surface the copilot
-// rides for affected-count previews and pending-migration lookups —
-// subscriptions.RepriceService's existing method set. NEVER call a method
-// beyond these three (Reprice / RepriceAllPriorVersions mutate; the copilot
-// tool layer must never reach them).
+// RepricePreviewer is the read-only reprice surface the copilot rides for
+// affected-count previews and pending-migration lookups. It never reaches the
+// mutating methods.
 type RepricePreviewer interface {
-	PreviewAllPriorVersions(ctx context.Context, priceKey string) (*subscriptions.RepricePreviewResult, error)
-	ListBatchesForKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error)
-	List(ctx context.Context, filter subscriptions.SubscriptionRepriceFilter, limit, offset int) ([]*models.SubscriptionReprice, error)
+	PreviewBatch(ctx context.Context, priceKey string) (*billing.RepriceBatchPreview, error)
+	ListBatches(ctx context.Context, params billing.RepriceBatchListParams) (billing.ListPage[billing.RepriceBatch], error)
 }
 
 // Deps are the catalog copilot's collaborators. LLM may be nil, which leaves

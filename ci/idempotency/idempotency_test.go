@@ -295,7 +295,7 @@ func TestStaleProcessing(t *testing.T) {
 	require.JSONEq(t, `{"fresh":true}`, string(rec.Result))
 }
 
-// When no renewal can be confirmed, the owner's context is cancelled before
+// When no renewal can be confirmed, the owner's context is canceled before
 // its lease can lapse: an owner stops before anyone else may start.
 func TestHoldCancelsBeforeTheLeaseLapses(t *testing.T) {
 	t.Parallel()

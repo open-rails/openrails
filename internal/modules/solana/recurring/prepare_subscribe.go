@@ -351,7 +351,7 @@ func (s *PrepareSubscribeService) preflightBalance(ctx context.Context, subscrib
 // isReadFailure reports whether a ReadUntilConsistent error was an underlying RPC
 // read failure (every attempt errored) rather than a satisfied-vs-short predicate
 // outcome. ReadUntilConsistent prefixes the former with "never succeeded" and
-// surfaces a cancelled context distinctly.
+// surfaces a canceled context distinctly.
 func isReadFailure(err error) bool {
 	if err == nil {
 		return false

@@ -9,6 +9,8 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
+import { CursorPager } from "@/components/cursor-pager"
+import { useCursorPages } from "@/lib/cursor-pages"
 import { DataTable } from "@/components/data-table"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
@@ -38,20 +40,19 @@ const statusTabs = [
   { value: "active", label: "Active" },
   { value: "past_due", label: "Dunning" },
   { value: "pending", label: "Pending" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "canceled", label: "Canceled" },
   { value: "awaiting_method", label: "Needs card" },
   { value: "unverified", label: "Unverified" },
 ]
 
 const columns: ColumnDef<AdminSubscription, unknown>[] = [
   {
-    header: "Email",
-    cell: ({ row }) =>
-      row.original.user_email ? (
-        <span className="font-medium">{row.original.user_email}</span>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      ),
+    header: "Customer",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">
+        {shortId(row.original.customer_id, 13)}
+      </span>
+    ),
   },
   {
     header: "Status",
@@ -104,7 +105,6 @@ export function SubscriptionsPage() {
   const rail = params.get("rail") ?? ""
   const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
-  const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
   const navigate = useNavigate()
   const customerLookup = useMutation(adminMutations.findCustomer())
@@ -115,15 +115,17 @@ export function SubscriptionsPage() {
     ...(rail ? { rail } : {}),
     ...(userId ? { customer_id: userId } : {}),
   }
-  const { data, isPending: loading } = useQuery(
-    adminQueries.subscriptions(filters, PAGE, offset)
-  )
+  const pages = useCursorPages(JSON.stringify(filters))
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+  } = useQuery(adminQueries.subscriptions(filters, PAGE, pages.cursor))
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
     if (value) p.set(key, value)
     else p.delete(key)
-    p.delete("offset")
     setParams(p)
   }
 
@@ -141,7 +143,6 @@ export function SubscriptionsPage() {
       const p = new URLSearchParams(params)
       p.set("customer_id", c.id)
       p.set("customer", c.email || shortId(c.id, 13))
-      p.delete("offset")
       setParams(p)
       setInput("")
     } catch (err) {
@@ -153,7 +154,6 @@ export function SubscriptionsPage() {
     const p = new URLSearchParams(params)
     p.delete("customer_id")
     p.delete("customer")
-    p.delete("offset")
     setParams(p)
   }
 
@@ -165,20 +165,20 @@ export function SubscriptionsPage() {
           "id",
           "status",
           "rail",
-          "email",
+          "customer_id",
           "started_at",
           "current_period_ends_at",
-          "cancelled_at",
+          "canceled_at",
         ].join(","),
         ...rows.map((r) =>
           [
             r.id,
             r.status,
             r.rail,
-            r.user_email,
+            r.customer_id,
             r.started_at,
             r.current_period_ends_at,
-            r.cancelled_at,
+            r.canceled_at,
           ]
             .map(csvEscape)
             .join(",")
@@ -248,7 +248,7 @@ export function SubscriptionsPage() {
             disabled={
               exportSubscriptions.isPending ||
               loading ||
-              (data?.total ?? 0) === 0
+              (data?.data.length ?? 0) === 0
             }
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
@@ -296,16 +296,13 @@ export function SubscriptionsPage() {
         columns={columns}
         data={data?.data ?? []}
         loading={loading}
-        total={data?.total}
-        limit={data?.limit ?? PAGE}
-        offset={data?.offset ?? offset}
-        onPageChange={(next) => {
-          const p = new URLSearchParams(params)
-          p.set("offset", String(next))
-          setParams(p)
-        }}
         onRowClick={(row) => navigate(`/subscriptions/${row.id}`)}
         emptyMessage="No subscriptions match."
+      />
+      <CursorPager
+        pages={pages}
+        nextCursor={data?.next_cursor}
+        busy={isFetching}
       />
     </div>
   )

@@ -26,14 +26,14 @@ const (
 	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // (8) Solana or other one-off purchase completed
 
 	// Invoice / arrears collection (or#828). The subscription analogue is
-	// premium_ended, which is wrong for an invoice: nothing was cancelled and
+	// premium_ended, which is wrong for an invoice: nothing was canceled and
 	// no access was withdrawn — we stopped ATTEMPTING to collect, and the debt
 	// stands. data.reason is schedule_exhausted (we gave up) or
 	// non_recoverable (the issuer withdrew the mandate).
 	NotificationInvoiceCollectionStopped NotificationEventType = "invoice_collection_stopped"
 
 	// Arrears delinquency (or#878). The TIME axis, not the card axis: the debt
-	// has outlived the merchant's grace window. Nothing is cancelled and no
+	// has outlived the merchant's grace window. Nothing is canceled and no
 	// entitlement is withdrawn — OpenRails refuses new spend and tells the host,
 	// which owns whatever shutoff its product needs.
 	NotificationAccountDelinquent        NotificationEventType = "account_delinquent"

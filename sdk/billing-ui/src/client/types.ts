@@ -54,26 +54,45 @@ export interface ListPage<T> {
 }
 
 export const subscriptionStatusSchema = z.string()
-/** `pending | active | past_due | awaiting_method | unverified | cancelled`; kept open for new values. */
+/** `pending | active | past_due | awaiting_method | unverified | canceled`; kept open for new values. */
 export type SubscriptionStatus =
   | "pending"
   | "active"
   | "past_due"
   | "awaiting_method"
   | "unverified"
-  | "cancelled"
+  | "canceled"
   | (string & {})
 
-export const subscriptionPriceSchema = z.object({
+export const pspLinkStateSchema = z.object({
+  /** `linked | pending_manual_link | sync_disabled | error` */
+  status: z.string(),
+  ids: z.record(z.string(), z.string()).nullish(),
+  sync_status: z.string().nullish(),
+})
+
+/**
+ * A catalog price (`GET /prices`, embedded in a product): `unit_amount` of
+ * `currency` for `access_duration_hours` of access (null: for good),
+ * renewing when `auto_renew`.
+ */
+export const priceSchema = z.object({
   id: z.string(),
-  key: z.string().nullish(),
-  product_id: z.string().nullish(),
+  key: z.string(),
+  product_id: z.string(),
+  archived: z.boolean(),
   unit_amount: amount,
   currency: z.string(),
-  auto_renew: z.boolean().nullish(),
-  access_duration_hours: z.number().nullish(),
+  access_duration_hours: z.number().nullable(),
+  auto_renew: z.boolean(),
+  trial_unit_amount: amount.nullable(),
+  trial_duration_hours: z.number().nullable(),
+  /** Keyed by PSP key. */
+  psps: z.record(z.string(), pspLinkStateSchema).nullish(),
+  created_at: time,
+  updated_at: time,
 })
-export type SubscriptionPrice = z.infer<typeof subscriptionPriceSchema>
+export type Price = z.infer<typeof priceSchema>
 
 export const subscriptionProductSchema = z.object({
   id: z.string(),
@@ -107,6 +126,19 @@ export const paymentRecoverySchema = z.object({
 })
 export type PaymentRecovery = z.infer<typeof paymentRecoverySchema>
 
+/**
+ * A step the customer takes before an action completes. With
+ * `solana_sign_transactions` the wallet signs and sends `transactions` in
+ * order; the action is then repeated with the last signature.
+ */
+export const nextActionSchema = z.object({
+  /** `redirect_to_url | payment_authentication | solana_sign_transactions` */
+  type: z.string(),
+  redirect_to_url: z.object({ url: z.string().nullish() }).nullish(),
+  transactions: z.array(z.string()).nullish(),
+})
+export type NextAction = z.infer<typeof nextActionSchema>
+
 export const subscriptionSchema = z.object({
   id: z.string(),
   status: subscriptionStatusSchema,
@@ -119,7 +151,7 @@ export const subscriptionSchema = z.object({
   ended_at: time.nullish(),
   current_period_starts_at: time.nullish(),
   current_period_ends_at: time.nullish(),
-  cancelled_at: time.nullish(),
+  canceled_at: time.nullish(),
   cancel_type: z.string().nullish(),
   resumable: z.boolean().nullish(),
   cancel_scheduled: z.boolean().nullish(),
@@ -128,12 +160,14 @@ export const subscriptionSchema = z.object({
   cancel_portal_url: z.string().nullish(),
   grace_ends_at: time.nullish(),
   next_retry_at: time.nullish(),
-  price: subscriptionPriceSchema.nullish(),
+  price: priceSchema.nullish(),
   product: subscriptionProductSchema.nullish(),
-  scheduled_price: subscriptionPriceSchema.nullish(),
+  scheduled_price: priceSchema.nullish(),
   scheduled_product: subscriptionProductSchema.nullish(),
   card: cardSummarySchema.nullish(),
   recovery: paymentRecoverySchema.nullish(),
+  /** Set on an action's answer when the rail needs the customer's step. */
+  next_action: nextActionSchema.nullish(),
   created_at: time.nullish(),
   updated_at: time.nullish(),
 })
@@ -189,36 +223,6 @@ export const paymentMethodSchema = z.object({
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>
 
 /** A price's state on one PSP; public routes carry the status only. */
-export const pspLinkStateSchema = z.object({
-  /** `linked | pending_manual_link | sync_disabled | error` */
-  status: z.string(),
-  ids: z.record(z.string(), z.string()).nullish(),
-  sync_status: z.string().nullish(),
-})
-
-/**
- * A catalog price (`GET /prices`, embedded in a product): `unit_amount` of
- * `currency` for `access_duration_hours` of access (null: for good),
- * renewing when `auto_renew`.
- */
-export const priceSchema = z.object({
-  id: z.string(),
-  key: z.string(),
-  product_id: z.string(),
-  archived: z.boolean(),
-  unit_amount: amount,
-  currency: z.string(),
-  access_duration_hours: z.number().nullable(),
-  auto_renew: z.boolean(),
-  trial_unit_amount: amount.nullable(),
-  trial_duration_hours: z.number().nullable(),
-  /** Keyed by PSP key. */
-  psps: z.record(z.string(), pspLinkStateSchema).nullish(),
-  created_at: time,
-  updated_at: time,
-})
-export type Price = z.infer<typeof priceSchema>
-
 export const productSchema = z.object({
   id: z.string(),
   key: z.string(),
@@ -256,7 +260,7 @@ export const paymentSchema = z.object({
   rail: z.string().nullish(),
   created_at: time,
   /** What was bought. */
-  price: subscriptionPriceSchema.nullish(),
+  price: priceSchema.nullish(),
   product: subscriptionProductSchema.nullish(),
   card: cardSummarySchema.nullish(),
   /** Normalized decline of a failed payment. */
@@ -334,13 +338,8 @@ export const tierChangeSchema = z.object({
   /** The subscription now carrying the plan (an upgrade may open a successor). */
   subscription_id: z.string().nullish(),
   url: z.string().nullish(),
-  next_action: z
-    .object({
-      /** `payment_authentication` uses `operation_id`. */
-      type: z.string(),
-      redirect_to_url: z.object({ url: z.string().nullish() }).nullish(),
-    })
-    .nullish(),
+  /** `payment_authentication` uses `operation_id`. */
+  next_action: nextActionSchema.nullish(),
   /** When a scheduled downgrade takes effect. */
   delayed_start: time.nullish(),
   currency: z.string().nullish(),
@@ -352,11 +351,6 @@ export const tierChangeSchema = z.object({
   operation_id: z.string().nullish(),
 })
 export type TierChange = z.infer<typeof tierChangeSchema>
-
-export const solanaCancelTxSchema = z.object({
-  transaction: z.string().min(1),
-  subscription_pda: z.string().nullish(),
-})
 
 const tokenUnits = z.string().regex(/^\d+$/, "units must be a uint64 string")
 
@@ -438,27 +432,6 @@ export const checkoutConfigSchema = z.object({
     .nullish(),
 })
 export type CheckoutConfig = z.infer<typeof checkoutConfigSchema>
-
-export const solanaTierChangeTxSchema = z.object({
-  /** Base64; partially signed for an upgrade, unsigned for a downgrade. */
-  transaction: z.string().min(1),
-  /** `upgrade | downgrade` */
-  kind: z.string().nullish(),
-  new_subscription_pda: z.string().nullish(),
-})
-export type SolanaTierChangeTx = z.infer<typeof solanaTierChangeTxSchema>
-
-export const solanaTierChangeSchema = z.object({
-  /** The subscription now carrying the plan. */
-  subscription_id: z.string().nullish(),
-  new_subscription_id: z.string().nullish(),
-  /** `upgrade | downgrade` */
-  kind: z.string().nullish(),
-  status: z.string().nullish(),
-  /** An earlier confirm already recorded this change. */
-  already_confirmed: z.boolean().nullish(),
-})
-export type SolanaTierChange = z.infer<typeof solanaTierChangeSchema>
 
 /** An in-page card setup; `payment_method_id` is set once the card is saved. */
 export const cardSetupSchema = z.object({

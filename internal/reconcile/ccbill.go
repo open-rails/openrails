@@ -26,7 +26,7 @@ type ccbillDataLink interface {
 //
 // Provider quirks:
 //   - CCBill exposes no vault read => Vault=false.
-//   - DataLink is event-based for terminations: a subscription cancelled or
+//   - DataLink is event-based for terminations: a subscription canceled or
 //     expired inside the window appears as a CANCELLATION/EXPIRE row (emitted
 //     here as a RemoteSubscription with that terminal status) and is absent
 //     from ACTIVEMEMBERS. Terminations OUTSIDE the window are simply absent,
@@ -140,7 +140,7 @@ func normalizeCCBillActiveMember(rec ccbill.CCBillRecord) RemoteSubscription {
 }
 
 func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription {
-	status := SubscriptionStatusCancelled
+	status := SubscriptionStatusCanceled
 	if row.TransactionType == ccbill.DataLinkTxnExpire {
 		status = SubscriptionStatusExpired
 	}

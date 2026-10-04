@@ -114,10 +114,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
 | POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
 | GET | `/v1/me/payments` | Payment and refund history, newest first, a cursor page; each row embeds the `price` and `product` it bought. Query: `limit`, `cursor`, `kind`, `rail`, `price_id`, `subscription_id`, `transaction_id` |
-| GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
-| GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
-| GET | `/v1/me/products` | Products relevant to the subject |
-| GET | `/v1/me/products/{product_id}/access` | Whether the subject currently has access to a product |
+| GET | `/v1/me/entitlements` | The customer's active entitlement windows (`{data, next_cursor}`). Query: `at` |
 | GET | `/v1/me/notifications` | Notifications (`billing.Notification`: typed `data`, money as decimal strings, ids typed). Query: `limit`, `offset`, `seen` |
 | GET | `/v1/me/notifications/unread-count` | `{ unread_count }` |
 | POST | `/v1/me/notifications/{id}/read` | Mark one notification read |
@@ -141,34 +138,27 @@ responses are non-cacheable. Confirmation verifies the existing provider object.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/subscriptions` | Subscription history as the shared `Subscription` shape (typed ids, `price.unit_amount` string, `scheduled_price`/`scheduled_product`, `card`, `cancel_portal_url`, `access`). Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
+| GET | `/v1/me/subscriptions` | Subscription history as the shared `Subscription` shape (typed ids, `price.unit_amount` string, `scheduled_price`/`scheduled_product`, `card`, `cancel_portal_url`, `access`). Query: `status` (`pending`,`active`,`past_due`,`canceled`,`all`), `limit`, `offset` |
 | GET | `/v1/me/subscriptions/{id}` | One subscription, same shape (404 if not the caller's); `{id}` is the listed `sub_…` id |
-| POST | `/v1/me/subscriptions/{id}/provider-cutover/preview` | Validate a replacement card on an active NMI account without mutations |
-| POST | `/v1/me/subscriptions/{id}/provider-cutover` | Durable account cutover; Idempotency-Key plus target_payment_method_id and expected source/target PSP IDs |
-| GET | `/v1/me/subscriptions/{id}/provider-cutover` | Read one cutover using idempotency_key; 404 for another customer's subscription |
-| POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
+| POST | `/v1/me/subscriptions/{id}/cancel` | Cancel at period end. Body `{ "reason": "...", "signature": null }` (`reason` 4-500 chars). Answers the `Subscription`. A rail that needs the customer's own step (Solana: the wallet signs the on-chain cancel) answers the unchanged subscription with `next_action` (`solana_sign_transactions`); sign and send it, then repeat the request with `signature` |
 | POST | `/v1/me/subscriptions/{id}/retry-now` | Verified customer retry of a past-due supported native NMI or engine NMI/Stripe agreement through its shared durable operation. Requires Idempotency-Key; optional payment_method_id must match its current method. 200 complete, 202 unresolved, coded 402 card refusal. |
-| POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
-| POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
+| POST | `/v1/me/subscriptions/{id}/resume` | Undo a scheduled cancel on a reversible rail before period end. Answers the `Subscription`; 400 with a specific reason otherwise |
+| POST | `/v1/me/subscriptions/{id}/change-tier` | Upgrade or downgrade within the tier group. Body `{ "price_id": "...", "signature": null }`. Answers a `TierChange`; see below |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |
-| PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }`. A method vaulted by a different provider account is `409 payment_method_psp_mismatch` |
+| PUT | `/v1/me/subscriptions/{id}/payment-method` | Charge renewals to another saved method. Body `{ "payment_method_id": "..." }`. Answers the `Subscription`. A method vaulted by a different provider account is `409 payment_method_psp_mismatch` |
 
-Solana on-chain lifecycle (mounted only when OpenRails has a Solana signer;
-prepare → wallet signs → confirm):
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/v1/me/subscriptions/{id}/solana-cancel-tx` | Prepare the on-chain cancel transaction for wallet signing |
-| POST | `/v1/me/subscriptions/{id}/solana-cancel` | Confirm the signed on-chain cancel |
-| POST | `/v1/me/subscriptions/{id}/solana-tier-change` | Prepare the on-chain tier-change transaction |
-| POST | `/v1/me/subscriptions/{id}/solana-tier-change/confirm` | Confirm the signed tier change |
+A Solana subscription is changed and canceled in the customer's wallet: cancel
+and change-tier answer `next_action: { type: "solana_sign_transactions",
+transactions: [...] }`; the wallet signs and sends the transaction, and the
+same request repeated with `signature` mirrors the landed transaction. Nothing
+changes before the chain confirms it.
 
 Tier-change response: `{ object: "tier_change", status: "succeeded"|"processing"|"requires_action"|"blocked", action, effective: "now"|"period_end", price_id, url?, subscription_id?, next_action?, delayed_start?, amount_due_now, next_charge_amount, next_charge_date?, message?, operation_id? }`.
 **Engine-owned subscriptions** (Stripe and NMI, `collection_policy: "engine"`):
 an upgrade is effective `now` — one engine charge of `amount_due_now` (new price −
 unused credit, as previewed) on the subscription's saved card; on success a
 successor subscription (the returned `subscription_id`) opens a fresh period of the
-new cadence and the old one is cancelled (`cancel_type: "upgrade"`), and renewals
+new cadence and the old one is canceled (`cancel_type: "upgrade"`), and renewals
 bill the new price. A declined charge changes nothing (`402` with the decline
 reason); an issuer challenge answers `requires_action` with
 `next_action.type: "payment_authentication"` and `operation_id` (authenticate via
@@ -249,23 +239,22 @@ Server-to-server billing operations. Every route is gated on the listed
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| POST | `/v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` | Batch entitlement lookup by external subject |
+| POST | `/v1/merchant/entitlements/lookup` | `merchant:customer-settings:read` | Active entitlements of up to 500 customers: body `{customer_ids, at}`, answer `{customers: {id: [EntitlementRecord]}}` |
 | PUT | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:update` | Create the customer or replace its declared fields (`Client.EnsureCustomer`): `{ email? }`; returns `Customer` `{ id, email, created_at, last_seen_at }` |
-| GET | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:read` | Active entitlements for a customer. Query: `at` (RFC3339) for point-in-time |
 | GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:read` | The customer's spend delegations (`ListPage<SpendDelegation>`) |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy: `{ delegations }` |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Set one delegation: `{ windows, provenance? }`; siblings untouched |
 | DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
-| GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
-| GET | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:read` | A customer's product access |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 opaque entitlement keys; optional `at` instant |
+| GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | One page of the customers holding an entitlement. Query: `at`, `cursor`, `limit` |
+| GET | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:read` | One page of the products a customer has access to. Query: `cursor`, `limit` |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 entitlement keys; optional `at` instant |
 | POST | `/v1/merchant/customers/{customer_id}/product-access/check` | `merchant:customer-settings:read` | Check access for exactly one bounded product_ids or product_keys list without loading purchase history |
 | POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Mint a checkout session for the supplied customer and price; hand its id to that customer's browser |
 | POST | `/v1/merchant/checkout-attempts` | `merchant:checkout:create` | Charge now for the supplied customer identity: exactly one price_id or price_key, optional entitlement and offer_kind assertions, required Idempotency-Key header. Creating the attempt accepts the price's terms |
 | GET | `/v1/merchant/checkout-attempts/{id}` | `merchant:customer-settings:read` | Read a checkout attempt |
 | POST | `/v1/merchant/checkout-attempts/{id}/confirm` | `merchant:checkout:create` | Confirm a Solana attempt with the wallet's signature: `{signature, wallet?}`; `202` while it is processing |
 | GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant; with `price_id` or `price_key`, the `options` that can sell that price, locally ready, no provider request |
-| GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
+| GET | `/v1/merchant/customers/{customer_id}/tier` | `merchant:customer-settings:read` | The tier the customer holds in query `group`: `{group, tier}`, `tier` null when none |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Admit requests and place their holds: `{ items: [AdmitParams] }` → `{ items: [{ status, admission, error }] }`, one verdict per item. Each item's caller-chosen `request_id` identifies the admission: a retry with the same terms answers the same `Admission` (`replayed`), changed terms are `idempotency_key_reused`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (RFC3339): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
 | GET | `/v1/merchant/admissions/{request_id}` | `merchant:usage:read` | One `Admission` and its hold state (`open`, `captured`, `released`, `expired`); 404 `admission_not_found` |
 | POST | `/v1/merchant/admissions/{request_id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount, usage? }` (`amount` required; `"0"` completes at no cost; `usage.event_type` also records a usage event). Idempotent on the request id; an identical retry answers `replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |
@@ -322,10 +311,10 @@ for those routes.
 | GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | The customer's saved cards, a cursor page (`limit`, `cursor`); admins can never create or update them |
 | DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | `merchant:customer-settings:update` | Shared customer ownership and provider deletion; 204 completed or 202 pending reconciliation |
 | POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path: `201` with the `Payment`; the same `transaction_id` with the same terms answers it again (`200`), with other terms `409 idempotency_key_reused` |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger): `hours` (at most 2562047) or `end_at`; neither (no end) also needs `merchant:access:grant-permanent` |
-| DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Grant an entitlement as the merchant's own grant: `hours` (at most 2562047) or `ends_at`; neither (no end) also needs `merchant:access:grant-permanent` |
+| DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke one entitlement window (the merchant's own grant is revoked in the grant ledger); `204` |
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access; without `ends_at` (no end) also needs `merchant:access:grant-permanent` |
-| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
+| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant; `204` |
 | GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo; `404` when the customer has none |
 | PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:update` | Replace the profile used for future invoice snapshots (`201` created, `200` replaced); with `If-None-Match: *` only create it, answering an existing one unchanged |
 | GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | `merchant:customer-settings:read` | List the payer's negotiated meter rate cards |
@@ -347,12 +336,11 @@ for those routes.
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | `merchant:payments:refund` | `{decision: refund\|dismiss, notes}`; refund returns the remaining amount and ends the purchase's access; `Client.ResolvePurchaseReview` |
 | GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
-| POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately. An NMI-billed cancel while the destructive switch is off answers `409 provider_cancel_held` and raises `life.provider_cancel.held`; `account_deletion: true` cancels locally and holds the NMI delete instead |
-| POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
+| POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; answers the `Subscription`. `revoke_access` must be explicit to revoke entitlements immediately. A Solana subscription is canceled only by the customer's wallet (`403 customer_action_required`). An NMI-billed cancel while the destructive switch is off answers `409 provider_cancel_held` and raises `life.provider_cancel.held`; `account_deletion: true` cancels locally and holds the NMI delete instead |
+| POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Undo a scheduled cancel where the rail supports it; answers the `Subscription` |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier` | `merchant:subscriptions:update` | Apply a same-group tier change. Body `{ "price_id": "..." }` |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | `merchant:subscriptions:update` | Preview the same tier change without mutation |
-| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | `merchant:subscriptions:update` | Reassign to another saved method of the same customer |
-| POST | `/v1/merchant/subscriptions/{id}/reprice` | `merchant:subscriptions:update` | Schedule one subscription's price move at its next renewal on/after `effective_at` |
+| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | `merchant:subscriptions:update` | Reassign to another saved method of the same customer; answers the `Subscription` |
 
 ### Invoice administration
 
@@ -371,22 +359,28 @@ Full request and state-transition details are in
 
 ### Reprices & plan migrations
 
+A reprice moves one subscription to another price at its first renewal on or
+after `effective_at`. A reprice batch is one bulk move: every subscriber on a
+price key's prior versions (`kind: reprice`), or a plan migration
+(`kind: plan_change`). A batch reports `matched` and `skipped` from creation
+and counts its reprices by status now.
+
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| POST | `/v1/merchant/catalog/reprice-all-prior-versions` | `merchant:subscriptions:update` | Bulk-reprice all subscriptions on prior versions of a price key |
-| GET | `/v1/merchant/catalog/reprice-all-prior-versions/preview` | `merchant:subscriptions:read` | Read-only affected-count dry run |
-| GET | `/v1/merchant/reprices` | `merchant:subscriptions:read` | List scheduled reprices |
-| GET | `/v1/merchant/reprices/batches` | `merchant:subscriptions:read` | Bulk reprice batches for a price key |
+| POST | `/v1/merchant/reprice-batches` | `merchant:subscriptions:update` | Move every subscriber on a prior version of `price_key` to its current price |
+| POST | `/v1/merchant/reprice-batches/preview` | `merchant:subscriptions:read` | Affected-count dry run for `price_key` |
+| GET | `/v1/merchant/reprice-batches` | `merchant:subscriptions:read` | Batches and plan migrations, newest first (`?price_key=`) |
+| GET | `/v1/merchant/reprice-batches/{id}` | `merchant:subscriptions:read` | One batch |
+| POST | `/v1/merchant/reprice-batches/{id}/cancel` | `merchant:subscriptions:update` | Cancel the batch's still-scheduled reprices |
+| POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B); creates a `plan_change` batch |
+| POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
+| GET | `/v1/merchant/reprices` | `merchant:subscriptions:read` | Reprices, newest first (`?subscription_id=&reprice_batch_id=&status=`) |
 | GET | `/v1/merchant/reprices/{id}` | `merchant:subscriptions:read` | One reprice |
-| POST | `/v1/merchant/reprices/{id}/cancel` | `merchant:subscriptions:update` | Cancel a pending reprice |
+| POST | `/v1/merchant/reprices/{id}/cancel` | `merchant:subscriptions:update` | Cancel a scheduled reprice; answers the reprice |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | `merchant:subscriptions:read` | Validate per-user account cutover |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:update` | Execute or resume the original durable cutover |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:read` | Read cutover by idempotency_key |
 | POST | `/v1/merchant/provider-refresh` | `merchant:subscriptions:update` | Run the merchant's provider refresh now; `202 {status: queued\|already_running, job_id}`. `Client.RefreshProviders` |
-| POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B) |
-| POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
-| GET | `/v1/merchant/plan-migrations/{id}` | `merchant:subscriptions:read` | One migration |
-| POST | `/v1/merchant/plan-migrations/{id}/cancel` | `merchant:subscriptions:update` | Cancel a migration |
 
 ### Catalog (`/v1/merchant/catalog`)
 

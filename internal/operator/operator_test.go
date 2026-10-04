@@ -127,9 +127,9 @@ func TestOperatorWireShapes(t *testing.T) {
 		"mrr":[{"currency":"JPY","subscriptions":3,"monthly_amount":"297000"}]}`)
 	roundTrip(t, billing.FleetSeries{
 		Weeks:  12,
-		Points: []billing.FleetWeeklyPoint{{WeekStart: week, NewMerchants: 2, ActiveMerchants: 5, CancelledSubscriptions: 1}},
+		Points: []billing.FleetWeeklyPoint{{WeekStart: week, NewMerchants: 2, ActiveMerchants: 5, CanceledSubscriptions: 1}},
 		Volume: []billing.FleetWeeklyVolume{{WeekStart: week, Currency: "USD", Payments: 7, SettledAmount: 495000000}},
-	}, `{"weeks":12,"points":[{"week_start":"2026-09-14T00:00:00Z","new_merchants":2,"active_merchants":5,"cancelled_subscriptions":1}],
+	}, `{"weeks":12,"points":[{"week_start":"2026-09-14T00:00:00Z","new_merchants":2,"active_merchants":5,"canceled_subscriptions":1}],
 		"volume":[{"week_start":"2026-09-14T00:00:00Z","currency":"USD","payments":7,"settled_amount":"495000000"}]}`)
 	roundTrip(t, billing.MerchantRef{ID: id, Slug: "shop"}, `{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","slug":"shop"}`)
 }

@@ -294,7 +294,7 @@ func engineUpgradeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeRespo
 	default:
 		if authenticationRequired(in) {
 			resp.Status = "requires_action"
-			resp.NextAction = &CheckoutAttemptNextAction{Type: "payment_authentication"}
+			resp.NextAction = &billing.NextAction{Type: "payment_authentication"}
 			resp.Message = "The card issuer requires authentication; authenticate operation " + in.ID.String() + " to complete the upgrade"
 			return resp, nil
 		}

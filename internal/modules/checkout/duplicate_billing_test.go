@@ -79,7 +79,7 @@ func TestDuplicateBillingGuard(t *testing.T) {
 	}{
 		{"first subscribe", subscriptionRows{}, higherPrice, higher, false, "", false},
 		{"same exact price", subscriptionRows{byPrice: map[uuid.UUID]*models.Subscription{heldPrice.ID: heldSub(models.StatusPastDue, held)}}, heldPrice, held, true, ConflictCodeDuplicateSubscription, true},
-		{"cancelled exact price allows resubscribe", subscriptionRows{byPrice: map[uuid.UUID]*models.Subscription{heldPrice.ID: heldSub(models.StatusCancelled, held)}}, heldPrice, held, false, "", false},
+		{"canceled exact price allows resubscribe", subscriptionRows{byPrice: map[uuid.UUID]*models.Subscription{heldPrice.ID: heldSub(models.StatusCanceled, held)}}, heldPrice, held, false, "", false},
 		{"same product other price in group", subscriptionRows{byTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusActive, held)}}, &models.Price{ID: uuid.New(), ProductID: held.ID}, held, true, ConflictCodeDuplicateSubscription, false},
 		{"other tier in group", subscriptionRows{byTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusActive, held)}}, higherPrice, higher, true, ConflictCodeChangeTierRequired, false},
 		{"different group", subscriptionRows{byTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusActive, held)}}, otherPrice, other, false, "", false},
@@ -191,7 +191,7 @@ func TestTierChangeAdmission(t *testing.T) {
 		{models.Subscription{Status: models.StatusPastDue, Rail: models.RailStripe}, 0},
 		{models.Subscription{Status: models.StatusActive, Rail: models.RailNMI, CollectionPolicy: models.CollectionPolicyEngine}, 0},
 		{models.Subscription{Status: models.StatusPending, Rail: models.RailStripe}, http.StatusConflict},
-		{models.Subscription{Status: models.StatusCancelled, Rail: models.RailStripe}, http.StatusConflict},
+		{models.Subscription{Status: models.StatusCanceled, Rail: models.RailStripe}, http.StatusConflict},
 	} {
 		err := validateTierChangeSubscriptionStatus(&tc.sub)
 		if tc.want == 0 {

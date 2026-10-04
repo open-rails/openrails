@@ -172,19 +172,19 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.CheckoutAmount = *read.Amount
 
-	if err := client.CancelSubscription(ctx, in.SubscriptionID, billing.CancelSubscriptionRequest{Reason: "customer request"}); err != nil {
+	if _, err := client.CancelSubscription(ctx, in.SubscriptionID, billing.CancelSubscriptionParams{Reason: "customer request"}); err != nil {
 		return r, fmt.Errorf("cancel subscription: %w", err)
 	}
-	page, err := client.ListSubscriptions(ctx, billing.SubscriptionFilter{CustomerID: (in.SubscriberID).String(), PageOptions: billing.PageOptions{Limit: 10}})
+	page, err := client.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: in.SubscriberID, PageRequest: billing.PageRequest{Limit: 10}})
 	if err != nil {
 		return r, fmt.Errorf("list subscriptions: %w", err)
 	}
-	for _, sub := range page.Data {
+	for _, sub := range page.Items {
 		if sub.ID == in.SubscriptionID {
-			r.SubscriptionStatus, r.CancelScheduled = sub.Status, sub.CancelScheduled
+			r.SubscriptionStatus, r.CancelScheduled = string(sub.Status), sub.CancelScheduled
 		}
 	}
-	if err := client.ResumeSubscription(ctx, in.SubscriptionID); err != nil {
+	if _, err := client.ResumeSubscription(ctx, in.SubscriptionID); err != nil {
 		return r, fmt.Errorf("resume subscription: %w", err)
 	}
 	r.Resumed = true

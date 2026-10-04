@@ -321,7 +321,7 @@ func (r *SolanaSubscriptionRepo) listActiveWithSignatureScoped(ctx context.Conte
 	return out, nil
 }
 
-// SetStatus transitions the on-chain record's lifecycle (cancelled/expired).
+// SetStatus transitions the on-chain record's lifecycle (canceled/expired).
 func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {

@@ -228,7 +228,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 		switch {
 		case sub.PriceID == target.ID:
 			out.Disposition = "skipped"
-			out.Reason = "already on target price"
+			out.Reason = ref("already on target price")
 			rail(sub).Skipped++
 		case sub.ScheduledPriceID != nil:
 			// A self-scheduled TierChange downgrade is already moving this
@@ -239,26 +239,26 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 			// schedule push just fails). Skip; a re-run after the downgrade
 			// lands catches any sub that is somehow still on the source price.
 			out.Disposition = "skipped"
-			out.Reason = "self-scheduled downgrade pending"
+			out.Reason = ref("self-scheduled downgrade pending")
 			rail(sub).Skipped++
 		case capability == capabilityUserAction:
 			out.Disposition = "blocked"
-			out.Reason = migrationBlockedRailUserAction
+			out.Reason = ref(migrationBlockedRailUserAction)
 			rail(sub).RequiresAction++
 		case capability == capabilityAutoNMI && !nmiCyclesCompatible(source, target):
 			// #815: the rail-side flip is an amount-only update; a target on a
 			// different billing cycle cannot be expressed at NMI.
 			out.Disposition = "blocked"
-			out.Reason = migrationBlockedNMIIntervalMismatch
+			out.Reason = ref(migrationBlockedNMIIntervalMismatch)
 			rail(sub).RequiresAction++
 		case capability == capabilityAutoNMI && !railMinorRepresentable(target.Currency, target.Amount):
 			out.Disposition = "blocked"
-			out.Reason = migrationBlockedNMISubCentAmount
+			out.Reason = ref(migrationBlockedNMISubCentAmount)
 			rail(sub).RequiresAction++
 		default:
 			if err := s.reprice.scheduledConflict(ctx, sub.ID); err != nil {
 				out.Disposition = "skipped"
-				out.Reason = err.Error()
+				out.Reason = ref(err.Error())
 				rail(sub).Skipped++
 				break
 			}
@@ -268,7 +268,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 			}
 			if violates && !req.AcknowledgeShortNotice {
 				out.Disposition = "skipped"
-				out.Reason = (&RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: sub.ID, FromPriceID: source.ID, ToPriceID: target.ID}).Error()
+				out.Reason = ref((&RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: sub.ID, FromPriceID: source.ID, ToPriceID: target.ID}).Error())
 				rail(sub).Skipped++
 				break
 			}
@@ -297,8 +297,8 @@ func (s *PlanMigrationService) Preview(ctx context.Context, req PlanMigrationReq
 		return nil, err
 	}
 	res := &PlanMigrationResult{
-		SourcePriceID:  (billing.PriceID(source.ID)).String(),
-		TargetPriceID:  (billing.PriceID(target.ID)).String(),
+		SourcePriceID:  billing.PriceID(source.ID),
+		TargetPriceID:  billing.PriceID(target.ID),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -342,8 +342,8 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 	}
 
 	res := &PlanMigrationResult{
-		SourcePriceID:  (billing.PriceID(source.ID)).String(),
-		TargetPriceID:  (billing.PriceID(target.ID)).String(),
+		SourcePriceID:  billing.PriceID(source.ID),
+		TargetPriceID:  billing.PriceID(target.ID),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -364,36 +364,35 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 		}
 	}
 
-	batch, err := s.reprice.repo.CreatePlanMigrationBatch(ctx, source.ID, target.ID, req.EffectiveAt, fallback, res.Matched, res.Scheduled, res.Skipped, res.Blocked)
+	batchID, err := s.reprice.repo.CreatePlanMigrationBatch(ctx, source.ID, target.ID, req.EffectiveAt, fallback, res.Matched, res.Skipped)
 	if err != nil {
 		return nil, fmt.Errorf("plan migration: create batch: %w", err)
 	}
-	res.BatchID = &batch.ID
-	batchID := batch.ID
+	res.BatchID = ref(billing.RepriceBatchID(batchID))
 
 	for i := range outcomes {
 		o := &outcomes[i]
 		sub := subByID[o.SubscriptionID.UUID()]
 		switch o.Disposition {
 		case "blocked":
-			row, berr := s.reprice.repo.CreateBlockedReprice(ctx, sub.ID, sub.PriceID, target.ID, req.EffectiveAt, &batchID, models.RepriceKindPlanChange, o.Reason)
+			row, berr := s.reprice.repo.CreateBlockedReprice(ctx, sub.ID, sub.PriceID, target.ID, req.EffectiveAt, &batchID, models.RepriceKindPlanChange, *o.Reason)
 			if berr != nil {
 				return nil, fmt.Errorf("plan migration: record blocked subscription %s: %w", sub.ID, berr)
 			}
-			o.RepriceID = &row.ID
+			o.RepriceID = ref(billing.RepriceID(row.ID))
 		case "scheduled":
 			row, cerr := s.reprice.repo.CreatePlanChangeReprice(ctx, sub.ID, sub.PriceID, target.ID, req.EffectiveAt, &batchID, req.AcknowledgeShortNotice)
 			if cerr != nil {
 				return nil, fmt.Errorf("plan migration: schedule subscription %s: %w", sub.ID, cerr)
 			}
-			o.RepriceID = &row.ID
+			o.RepriceID = ref(billing.RepriceID(row.ID))
 			if perr := s.executeScheduled(ctx, &req, sub, source, target, targetProduct, row); perr != nil {
 				// Degrade this row to blocked; keep the batch going.
 				if berr := s.reprice.repo.BlockScheduledReprice(ctx, row.ID, migrationBlockedRailPushFailed+": "+perr.Error()); berr != nil {
 					return nil, fmt.Errorf("plan migration: block failed push for %s: %w", sub.ID, berr)
 				}
 				o.Disposition = "blocked"
-				o.Reason = migrationBlockedRailPushFailed + ": " + perr.Error()
+				o.Reason = ref(migrationBlockedRailPushFailed + ": " + perr.Error())
 				res.Scheduled--
 				res.Blocked++
 				if rc := byRail[string(sub.Rail)]; rc != nil {
@@ -412,12 +411,6 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 		}
 	}
 
-	// Rail pushes may have degraded scheduled rows to blocked — re-sync the
-	// batch header so it always agrees with its per-subscription rows.
-	if uerr := s.reprice.repo.UpdatePlanMigrationBatchCounts(ctx, batch.ID, res.Scheduled, res.Blocked); uerr != nil {
-		return nil, fmt.Errorf("plan migration: sync batch counts: %w", uerr)
-	}
-
 	// Archive the source price: the retired plan stops selling the moment the
 	// migration is committed (grandfathering of anything left behind — the
 	// blocked rows — is the archived-price billing path that already exists).
@@ -430,7 +423,7 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 
 	res.Outcomes = outcomes
 	log.WithContext(ctx).WithFields(log.Fields{
-		"batch_id":     batch.ID,
+		"batch_id":     batchID,
 		"source_price": source.ID,
 		"target_price": target.ID,
 		"effective_at": req.EffectiveAt,
@@ -567,56 +560,37 @@ func (s *PlanMigrationService) applyImmediately(ctx context.Context, sub *models
 	return nil
 }
 
-// GetBatch returns a migration batch header plus its per-subscription rows.
-func (s *PlanMigrationService) GetBatch(ctx context.Context, batchID uuid.UUID, limit, offset int) (*models.RepriceBatch, []*models.SubscriptionReprice, error) {
-	batch, err := s.reprice.repo.GetBatchByID(ctx, batchID)
-	if err != nil {
-		return nil, nil, err
+// CancelBatch cancels every still-scheduled reprice of a batch of either
+// kind; applied and blocked reprices are untouched, and a plan migration's
+// archived source price stays archived. A Stripe boundary push already
+// planted a subscription schedule that this does not release: those
+// subscriptions come back in RailReleaseRequired with a warning, for the
+// operator to release in Stripe.
+func (s *RepriceService) CancelBatch(ctx context.Context, batchID billing.RepriceBatchID) (*billing.RepriceBatchCancel, error) {
+	if _, err := s.repo.GetBatch(ctx, batchID.UUID()); err != nil {
+		return nil, err
 	}
-	rows, err := s.reprice.repo.List(ctx, SubscriptionRepriceFilter{RepriceBatchID: &batchID}, limit, offset)
-	if err != nil {
-		return nil, nil, err
-	}
-	return batch, rows, nil
-}
-
-// PlanMigrationCancelResult is the shared client cancel result.
-type PlanMigrationCancelResult = billing.PlanMigrationCancelResult
-
-// CancelBatch cancels every still-scheduled row in the batch (rows already
-// applied or blocked are untouched). It does NOT un-archive the source price.
-// A Stripe boundary push that already created a subscription schedule is not
-// rolled back here — those subscriptions are returned in RailReleaseRequired
-// with a loud warning so the operator releases the schedules out of band
-// (automated release is the filed follow-up on #813).
-func (s *PlanMigrationService) CancelBatch(ctx context.Context, batchID uuid.UUID) (*PlanMigrationCancelResult, error) {
-	rows, err := s.reprice.repo.List(ctx, SubscriptionRepriceFilter{RepriceBatchID: &batchID}, 10000, 0)
+	rows, err := s.repo.ListScheduledInBatch(ctx, batchID.UUID())
 	if err != nil {
 		return nil, err
 	}
-	res := &PlanMigrationCancelResult{}
+	res := &billing.RepriceBatchCancel{RailReleaseRequired: []billing.SubscriptionID{}}
 	for _, row := range rows {
-		if row.Status != models.RepriceStatusScheduled {
-			continue
-		}
-		if err := s.reprice.Cancel(ctx, row.ID); err != nil {
+		if err := s.repo.Cancel(ctx, row.ID); err != nil {
 			if errors.Is(err, ErrRepriceNotScheduled) || errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}
 			return res, err
 		}
 		res.Canceled++
-		// A scheduled (not yet applied) plan_change row on the stripe rail
-		// means the boundary push already planted a provider-side schedule
-		// that this cancel does not release.
 		if row.Kind == models.RepriceKindPlanChange {
-			if sub, serr := s.reprice.subscriptions.GetByID(ctx, row.SubscriptionID); serr == nil && sub != nil && sub.Rail == models.RailStripe {
+			if sub, serr := s.subscriptions.GetByID(ctx, row.SubscriptionID); serr == nil && sub != nil && sub.Rail == models.RailStripe {
 				res.RailReleaseRequired = append(res.RailReleaseRequired, billing.SubscriptionID(row.SubscriptionID))
 			}
 		}
 	}
 	if len(res.RailReleaseRequired) > 0 {
-		res.Warning = fmt.Sprintf("%d stripe subscription(s) still carry a provider-side schedule that WILL flip the price at period end unless released in the Stripe dashboard/API (subscription_schedules release)", len(res.RailReleaseRequired))
+		res.Warning = ref(fmt.Sprintf("%d stripe subscription(s) still carry a provider-side schedule that WILL flip the price at period end unless released in the Stripe dashboard/API (subscription_schedules release)", len(res.RailReleaseRequired)))
 	}
 	return res, nil
 }

@@ -278,7 +278,7 @@ func TestStripeFetcher(t *testing.T) {
 		require.Equal(t, "USD", active.Currency, "CUR-6: ingestion upper-cases")
 		require.Equal(t, time.Unix(1780709768, 0).UTC(), *active.LastBilledAt)
 		require.Equal(t, time.Unix(1783301768, 0).UTC(), *active.NextBillingAt)
-		require.Equal(t, SubscriptionStatusCancelled, snap.Subscriptions[1].Status)
+		require.Equal(t, SubscriptionStatusCanceled, snap.Subscriptions[1].Status)
 		require.Equal(t, "canceled", snap.Subscriptions[1].RawStatus)
 
 		require.Len(t, snap.PaymentMethods, 1, "only an expanded default payment method is vault evidence")
@@ -377,7 +377,7 @@ func TestCCBillFetcher(t *testing.T) {
 	require.Equal(t, []string{"u1@example.com", "user1", "0000007498"}, []string{active.Email, active.Username, active.PlanID})
 	require.Equal(t, time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC), *active.NextBillingAt)
 	require.Equal(t, SubscriptionStatusUnknown, snap.Subscriptions[1].Status, "a non-active roster flag is never guessed")
-	require.Equal(t, SubscriptionStatusCancelled, snap.Subscriptions[2].Status)
+	require.Equal(t, SubscriptionStatusCanceled, snap.Subscriptions[2].Status)
 	require.Equal(t, "CANCELLATION", snap.Subscriptions[2].RawStatus)
 	require.Equal(t, SubscriptionStatusExpired, snap.Subscriptions[3].Status)
 
