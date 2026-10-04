@@ -27,12 +27,12 @@ import (
 func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount int64, hours int) *billing.Price {
 	w.t.Helper()
 	client := w.client[tp]
-	product, err := client.Products.RetrieveByKey(w.t.Context(), productKey)
+	product, err := client.GetProductByKey(w.t.Context(), productKey)
 	if err != nil {
-		product, err = client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: productKey, DisplayName: "Cadence " + productKey, EntitlementsSpec: map[string]*int{entitlement: nil}})
+		product, err = client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: productKey, DisplayName: "Cadence " + productKey, EntitlementsSpec: map[string]*int{entitlement: nil}})
 	}
 	require.NoError(w.t, err)
-	price, err := client.Prices.Create(w.t.Context(), &billing.PriceCreateParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
@@ -55,53 +55,36 @@ func TestCadencePriceKeys(t *testing.T) {
 			for _, hours := range []int{1, 12, 24, 36, 720, 744} {
 				price := w.cadencePrice(tp, product, "content:keys", 1_000_000+int64(hours), hours)
 				require.Equal(t, product+"-"+want[hours], price.Key, "%dh", hours)
-				ids[hours] = price.ID
+				ids[hours] = price.ID.String()
 			}
 			for hours, id := range ids {
-				price, err := w.client[tp].Prices.Retrieve(t.Context(), id)
+				price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, id), billing.GetPriceParams{})
 				require.NoError(t, err)
 				require.False(t, price.Archived, "%dh price stays current", hours)
-				current, err := w.client[tp].Prices.RetrieveByKey(t.Context(), product+"-"+want[hours])
+				current, err := w.client[tp].GetPriceByKey(t.Context(), product+"-"+want[hours])
 				require.NoError(t, err)
-				require.Equal(t, id, current.ID, "%dh key names its own price", hours)
+				require.Equal(t, id, current.ID.String(), "%dh key names its own price", hours)
 			}
 
-			products, err := w.client[tp].Products.RetrieveByKey(t.Context(), product)
+			products, err := w.client[tp].GetProductByKey(t.Context(), product)
 			require.NoError(t, err)
 			explicit := 36
-			held, err := w.client[tp].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &explicit})
+			held, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &explicit})
 			require.NoError(t, err)
 			twoDays := 48
-			_, err = w.client[tp].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: products.ID, UnitAmount: 6_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &twoDays})
+			_, err = w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, UnitAmount: 6_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &twoDays})
 			require.ErrorIs(t, err, billing.ErrPriceKeyCadenceConflict)
 			require.ErrorIs(t, err, billing.ErrConflict)
 			var status *billing.StatusError
 			if errors.As(err, &status) {
 				require.Equal(t, "price_key_cadence_conflict", status.Code)
 			}
-			still, err := w.client[tp].Prices.RetrieveByKey(t.Context(), product+"-2d")
+			still, err := w.client[tp].GetPriceByKey(t.Context(), product+"-2d")
 			require.NoError(t, err)
 			require.Equal(t, held.ID, still.ID)
 			require.False(t, still.Archived)
 		})
 	}
-
-	// The schema trigger's label is the Go label for every cadence up to a
-	// leap year.
-	rows, err := w.pool.Query(t.Context(), w.sql(`SELECT h, billing.price_interval_label(h, true), billing.price_interval_label(h, false) FROM generate_series(1, 8784) h`))
-	require.NoError(t, err)
-	seen := map[string]int{}
-	for rows.Next() {
-		var hours int
-		var renew, once string
-		require.NoError(t, rows.Scan(&hours, &renew, &once))
-		require.Equal(t, cadence.PriceIntervalLabel(&hours, true), renew, "%dh", hours)
-		require.Equal(t, "onetime", once)
-		prev, dup := seen[renew]
-		require.False(t, dup, "%dh and %dh share label %q", prev, hours, renew)
-		seen[renew] = hours
-	}
-	require.NoError(t, rows.Err())
 }
 
 // renewedReceipts counts the customer's renewal receipts through /v1/me.
@@ -136,7 +119,7 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 			w := newWorld(t)
 			price := w.cadencePrice(embedded, "receipts", "content:receipts", 1_990_000, row.hours)
 			c := w.newCustomer()
-			sub := c.subscribe(embedded, "stripe", price.ID, "content:receipts", c.saveCard("stripe", visa))
+			sub := c.subscribe(embedded, "stripe", price.ID.String(), "content:receipts", c.saveCard("stripe", visa))
 			started := *w.subscription(embedded, sub).CurrentPeriodStartsAt
 			for i := 1; i <= row.renewals; i++ {
 				end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
@@ -220,7 +203,7 @@ func TestCadenceMetrics(t *testing.T) {
 	for _, row := range rows {
 		price := w.cadencePrice(embedded, fmt.Sprintf("metrics-%d", row.hours), "content:metrics", row.amount, row.hours)
 		c := w.newCustomer()
-		c.subscribe(embedded, "stripe", price.ID, "content:metrics", c.saveCard("stripe", visa))
+		c.subscribe(embedded, "stripe", price.ID.String(), "content:metrics", c.saveCard("stripe", visa))
 
 		var norm int64
 		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT billing.monthly_normalized_amount($1, $2)`), row.amount, row.hours).Scan(&norm))

@@ -296,6 +296,7 @@ var errorCodes = []ErrorCode{
 	{"rate_card_product_not_found", 404, invalid, "The rate card names a product that does not exist."},
 	{"allowance_meter_not_found", 404, invalid, "The rate card's allowance meter does not exist."},
 	{"usage_rate_card_invalid", 400, invalid, "The usage rate card is invalid."},
+	{"usage_meter_invalid", 400, invalid, "The meter definition is invalid."},
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
 	{"allowance_source_invalid", 409, invalid, "The allowance source cannot back this rate card."},

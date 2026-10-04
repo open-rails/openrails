@@ -124,15 +124,15 @@ func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 // recurring price and returns the HTTP status of the refusal (0 on success).
 func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool) int {
 	t.Helper()
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", EntitlementsSpec: map[string]*int{"content:sol": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", EntitlementsSpec: map[string]*int{"content:sol": nil}})
 	require.NoError(t, err)
-	params := &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
 	kind := billing.OfferPermanent
 	if recurring {
 		hours := 720
 		params.AccessDurationHours, params.AutoRenew, kind = &hours, true, billing.OfferRecurring
 	}
-	price, err := client.Prices.Create(t.Context(), params)
+	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
 	_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
 		Customer:       billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
@@ -159,9 +159,9 @@ func waitReady(t *testing.T, rt *openrails.Client) {
 
 func stripeCheckout(t *testing.T, client *openrails.Client) {
 	t.Helper()
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
 		Customer:       billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},

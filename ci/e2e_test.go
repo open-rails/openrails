@@ -106,13 +106,13 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "bootstrap-"+uuid.NewString()[:8])
 
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:              "welcome-" + uuid.NewString()[:8],
 		DisplayName:      "Welcome",
 		EntitlementsSpec: map[string]*int{"content:welcome": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{
 		ProductID:  product.ID,
 		Key:        "welcome-usd-" + uuid.NewString()[:8],
 		UnitAmount: 9_007_199_254_740_993,
@@ -121,14 +121,14 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, product.ID, price.ProductID)
 	require.EqualValues(t, 9_007_199_254_740_993, price.UnitAmount)
-	stored, err := client.Prices.Retrieve(t.Context(), price.ID)
+	stored, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
 	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
-	offers, err := client.ListOffersForEntitlements(t.Context(), []string{"content:welcome"}, billing.OfferListParams{Kind: billing.OfferPermanent})
+	offers, err := client.ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"content:welcome"}, Kind: billing.OfferPermanent})
 	require.NoError(t, err)
-	require.Len(t, offers["content:welcome"].Data, 1)
-	require.Equal(t, price.ID, offers["content:welcome"].Data[0].PriceID)
+	require.Len(t, offers["content:welcome"].Items, 1)
+	require.Equal(t, price.ID, offers["content:welcome"].Items[0].PriceID)
 }
 
 func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
@@ -136,16 +136,16 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	alice := f.runtime(t, "merchant-a-"+uuid.NewString()[:8])
 	bob := f.runtime(t, "merchant-b-"+uuid.NewString()[:8])
 
-	productA, err := alice.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "alice-post", DisplayName: "Alice post"})
+	productA, err := alice.CreateProduct(t.Context(), billing.CreateProductParams{Key: "alice-post", DisplayName: "Alice post"})
 	require.NoError(t, err)
-	productB, err := bob.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "bob-post", DisplayName: "Bob post"})
+	productB, err := bob.CreateProduct(t.Context(), billing.CreateProductParams{Key: "bob-post", DisplayName: "Bob post"})
 	require.NoError(t, err)
 
-	_, err = alice.Products.Retrieve(t.Context(), productB.ID)
+	_, err = alice.GetProduct(t.Context(), productB.ID)
 	require.ErrorIs(t, err, billing.ErrNotFound)
-	page, err := alice.Products.List(t.Context(), &billing.ProductListParams{})
+	page, err := alice.ListProducts(t.Context(), billing.ProductListParams{})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
 	require.Equal(t, productA.ID, page.Items[0].ID)
 
 	customerA := uuid.NewString()
@@ -170,14 +170,14 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 	client := f.runtime(t, "idempotent-"+uuid.NewString()[:8])
 	key := "stable-product-" + uuid.NewString()[:8]
 
-	first, err := client.Products.Ensure(t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: "First title"})
+	first, err := client.EnsureProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "First title"})
 	require.NoError(t, err)
-	second, err := client.Products.Ensure(t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: "Changed title"})
+	second, err := client.EnsureProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Changed title"})
 	require.NoError(t, err)
 	require.Equal(t, first.ID, second.ID)
 	require.Equal(t, first.DisplayName, second.DisplayName)
 
-	read, err := client.Products.RetrieveByKey(t.Context(), key)
+	read, err := client.GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, read.ID)
 	require.Equal(t, first.DisplayName, read.DisplayName)
@@ -189,7 +189,7 @@ func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	client := f.runtime(t, "metered-"+uuid.NewString()[:8])
 	key := "metered-" + uuid.NewString()[:8]
 	apply := func(unitAmount string) {
-		revision, err := client.Catalog.Revision(t.Context())
+		revision, err := client.GetCatalogRevision(t.Context())
 		require.NoError(t, err)
 		params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: gf-%[1]s-%[3]s
@@ -211,19 +211,19 @@ products:
         unit_amount: "%[3]s"
 `, key, revision.Revision, unitAmount)))
 		require.NoError(t, err)
-		_, err = client.Catalog.Apply(t.Context(), params)
+		_, err = client.ApplyCatalog(t.Context(), params)
 		require.NoError(t, err)
 	}
 	apply("10")
 	apply("20") // overwrites the stored card in place
 
-	meter, err := client.GetUsageMeter(t.Context(), key+"-runtime")
+	meter, err := client.GetMeter(t.Context(), key+"-runtime")
 	require.NoError(t, err)
 	require.Equal(t, "droplet.usage", meter.EventType)
-	require.NotNil(t, meter.DefaultRateCard)
-	require.Equal(t, key, meter.DefaultRateCard.ProductKey)
-	require.NotNil(t, meter.DefaultRateCard.Price.PerUnit)
-	require.EqualValues(t, 20, meter.DefaultRateCard.Price.PerUnit.UnitAmount)
+	require.NotNil(t, meter.RateCard)
+	require.Equal(t, key, meter.RateCard.ProductKey)
+	require.NotNil(t, meter.RateCard.Price.PerUnit)
+	require.EqualValues(t, 20, meter.RateCard.Price.PerUnit.UnitAmount)
 }
 
 func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
@@ -231,13 +231,13 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	provider := &stripeCheckoutFake{t: t}
 	client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
 
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:              "premium-post-" + uuid.NewString()[:8],
 		DisplayName:      "Premium post",
 		EntitlementsSpec: map[string]*int{"content:premium": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{
 		ProductID:  product.ID,
 		Key:        product.Key + "-usd",
 		UnitAmount: 1_000_000,
@@ -260,7 +260,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "stripe", first.RailData["rail"])
 	require.NotNil(t, first.PriceID)
-	require.Equal(t, price.ID, *first.PriceID)
+	require.Equal(t, price.ID.String(), *first.PriceID)
 
 	replay, err := client.CreateCheckoutSession(t.Context(), request)
 	require.NoError(t, err)

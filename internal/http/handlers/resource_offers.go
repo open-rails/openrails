@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -31,19 +32,21 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 	r.SuccessJSON(result)
 }
 
-func ListOffersForEntitlements(r *httprequest.Request) {
-	var body billing.OfferLookupRequest
-	if !r.BindJSON(&body) {
+// ListOffers looks up the live offers that grant each requested
+// entitlement: one page per entitlement.
+func ListOffers(r *httprequest.Request) {
+	var params billing.OfferListParams
+	if !r.BindJSON(&params) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	result, err := svc.ListOffersForEntitlements(r.Request.Context(), body.Entitlements, billing.OfferListParams{Kind: body.Kind, PreferredCurrency: body.PreferredCurrency, Limit: body.PageSize, Cursors: body.Cursors})
+	out, err := svc.ListOffers(r.Request.Context(), params)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.SuccessJSON(result)
+	r.JSON(http.StatusOK, out)
 }

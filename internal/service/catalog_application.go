@@ -39,7 +39,7 @@ var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference uncon
 // none); one that fails without a provider refusal is
 // ErrCatalogProviderUnconfirmed.
 func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params catalogwire.Application, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
-	verify := func(ctx context.Context, provider, rail, account, product string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+	verify := func(ctx context.Context, provider, rail, account, product string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 		if !deadline.IsZero() {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithDeadline(ctx, deadline)
@@ -190,9 +190,9 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, params catalogwire.Application, receipt *billing.CatalogApplicationReceipt) error {
 	// Enumerate all pages without public active/tier filtering. The merchant lock
 	// makes the stable pagination snapshot safe while the eventual apply mutates it.
-	existing := map[string]*CatalogProduct{}
-	for offset := 0; ; {
-		page, err := s.ListProducts(ctx, ListProductsOptions{CatalogID: &target, Limit: maxCatalogPageSize, Offset: offset})
+	existing := map[string]*billing.Product{}
+	for cursor := ""; ; {
+		page, err := s.ListProducts(ctx, billing.ProductListParams{CatalogID: billing.CatalogID(target), PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit, Cursor: cursor}})
 		if err != nil {
 			return err
 		}
@@ -200,13 +200,10 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			p := page.Items[i]
 			existing[p.Key] = &p
 		}
-		offset += len(page.Items)
-		if int64(offset) >= page.Total {
+		if page.Next == "" {
 			break
 		}
-		if len(page.Items) == 0 {
-			return fmt.Errorf("catalog pagination made no progress")
-		}
+		cursor = page.Next
 	}
 	keep := map[string]bool{}
 	for _, decl := range params.Products {
@@ -227,7 +224,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
 				return apperr.Invalidf("new product %q requires display_name", decl.Key)
 			}
-			req := CreateProductRequest{CatalogID: billing.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
+			req := billing.CreateProductParams{CatalogID: billing.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
 			if decl.TierGroup.Set && !decl.TierGroup.Null {
 				req.TierGroup = &decl.TierGroup.Value
 			}
@@ -263,7 +260,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			}
 			if productApplicationChanges(p, req) {
 				var err error
-				p, err = s.UpdateProduct(ctx, p.ID, req)
+				p, err = s.patchProduct(ctx, p.ID, req)
 				if err != nil {
 					return err
 				}
@@ -292,17 +289,17 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 	return nil
 }
 
-func productApplicationChanges(p *CatalogProduct, r UpdateProductRequest) bool {
+func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool {
 	return r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.EntitlementsSpec, p.EntitlementsSpec)
 }
 
-func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduct, declarations []catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations []catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
 	prices, err := s.ListPricesByProduct(ctx, product.ID, false)
 	if err != nil {
 		return err
 	}
-	byKey := map[string][]CatalogPrice{}
-	byID := map[string]CatalogPrice{}
+	byKey := map[string][]billing.Price{}
+	byID := map[string]billing.Price{}
 	for _, p := range prices {
 		byKey[p.Key] = append(byKey[p.Key], p)
 		byID[p.ID.String()] = p
@@ -467,7 +464,7 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 		return s.SyncCatalogSidecars(ctx, desired, CatalogMutationOptions{Insert: true, Overwrite: true, Prune: true})
 	})
 }
-func catalogApplicationPriceRequest(product *CatalogProduct, decl catalogwire.ApplyPrice, byKey map[string][]CatalogPrice, byID map[string]CatalogPrice) (current *CatalogPrice, req CreatePriceRequest, err error) {
+func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.ApplyPrice, byKey map[string][]billing.Price, byID map[string]billing.Price) (current *billing.Price, req billing.CreatePriceParams, err error) {
 	if decl.ID != "" {
 		p, ok := byID[decl.ID]
 		if !ok || p.Key != decl.Key {
@@ -492,7 +489,7 @@ func catalogApplicationPriceRequest(product *CatalogProduct, decl catalogwire.Ap
 			}
 		}
 	}
-	req = CreatePriceRequest{ProductID: product.ID, Key: decl.Key}
+	req = billing.CreatePriceParams{ProductID: product.ID, Key: decl.Key}
 	if current != nil {
 		req.UnitAmount = current.UnitAmount
 		req.Currency = current.Currency

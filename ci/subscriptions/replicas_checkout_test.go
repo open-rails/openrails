@@ -38,7 +38,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			}
 			request := func(c *customer, method, key string) billing.CreateCheckoutSessionRequest {
 				return billing.CreateCheckoutSessionRequest{
-					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
+					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID.String(),
 					IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
@@ -162,7 +162,7 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	charges := func() int { return len(f.base.nmi.ledger("")) }
 	request := func(c *customer, key, token string) billing.CreateCheckoutSessionRequest {
 		return billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: key, Confirm: true,
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: token, NameOnCard: "Pass Payer", Zip: "10001", Country: "US"},
 		}
 	}
@@ -261,7 +261,7 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	}
 	request := func(c *customer, key string) billing.CreateCheckoutSessionRequest {
 		return billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: key, Confirm: true,
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
 		}
 	}

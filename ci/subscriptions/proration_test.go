@@ -27,16 +27,16 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 	w.t.Helper()
 	client := w.client[embedded]
 	key := fmt.Sprintf("tier-%d-%s", rank, uuid.NewString()[:8])
-	product, err := client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank,
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank,
 		EntitlementsSpec: map[string]*int{"content:" + key: nil}})
 	require.NoError(w.t, err)
-	params := &billing.PriceCreateParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &cycle}
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &cycle}
 	out := tier{ent: "content:" + key}
 	if nmiPlan {
 		out.plan = "gf_plan_" + uuid.NewString()[:8]
 		params.PSPLinks = map[string]map[string]string{"nmi": {"plan_id": out.plan}}
 	}
-	out.Price, err = client.Prices.Create(w.t.Context(), params)
+	out.Price, err = client.CreatePrice(w.t.Context(), params)
 	require.NoError(w.t, err)
 	return out
 }
@@ -48,7 +48,7 @@ func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, billi
 	t := w.t
 	t.Helper()
 	c := w.newCustomer()
-	sub := c.subscribeAgain(embedded, "nmi", price.ID, price.ent, c.saveCard("nmi", visa))
+	sub := c.subscribeAgain(embedded, "nmi", price.ID.String(), price.ent, c.saveCard("nmi", visa))
 	paid := completed(w.payments(embedded, c.id))
 	require.Len(t, paid, 1)
 	sale, _ := w.nmi.Sale(paid[0].TransactionID)
@@ -108,8 +108,8 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 			require.Equal(t, time.Duration(row.oldCycle)*h, current.CurrentPeriodEndsAt.Sub(*current.CurrentPeriodStartsAt), "the actual current period")
 			sales := len(w.nmi.ledger(vault))
 
-			w.requirePreview(sub, next.ID, row.charge, row.newCyc)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
+			w.requirePreview(sub, next.ID.String(), row.charge, row.newCyc)
+			done, err := w.client[tp].ChangeTier(t.Context(), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, row.charge*10_000, done.AmountDueNow, "charged equals preview")
@@ -147,11 +147,11 @@ func TestUpgradeProrationHourlyQuotes(t *testing.T) {
 			old := w.tierPrice(group, 1, row.oldCents, 1, false)
 			next := w.tierPrice(group, 2, row.newCent, 24, true)
 			c := w.newCustomer()
-			sub := c.subscribeAgain(embedded, "nmi", old.ID, old.ent, c.saveCard("nmi", visa))
+			sub := c.subscribeAgain(embedded, "nmi", old.ID.String(), old.ent, c.saveCard("nmi", visa))
 			current := w.subscription(remote, sub)
 			require.Equal(t, time.Hour, current.CurrentPeriodEndsAt.Sub(*current.CurrentPeriodStartsAt))
 			w.advance(current.CurrentPeriodEndsAt.Sub(w.clock.Now()) - row.left)
-			w.requirePreview(sub, next.ID, row.charge, 24)
+			w.requirePreview(sub, next.ID.String(), row.charge, 24)
 		})
 	}
 }
@@ -183,15 +183,15 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 		{noCycle, billing.CodeTierChangeCycleUnknown, 422},
 	} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: tc.target.ID})
+			_, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: tc.target.ID.String()})
 			requireCode(t, err, tc.status, tc.code)
-			_, err = w.client[tp].ChangeTier(t.Context(), sub, "refused-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target.ID})
+			_, err = w.client[tp].ChangeTier(t.Context(), sub, "refused-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target.ID.String()})
 			requireCode(t, err, tc.status, tc.code)
 		}
 	}
 	w.settle()
 	require.Len(t, w.nmi.ledger(vault), sales, "a refused upgrade charges nothing")
-	require.Equal(t, old.ID, w.subscription(embedded, sub).PriceID)
+	require.Equal(t, old.ID.String(), w.subscription(embedded, sub).PriceID)
 }
 
 func requireCode(t *testing.T, err error, status int, code string) {

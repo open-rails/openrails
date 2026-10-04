@@ -335,11 +335,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		FXProvider:               serviceInstances.FXProvider,
 		FXRateRefresher:          serviceInstances.FXRateRefresher,
 
-		UserSubscriptionService:   serviceInstances.UserSubscriptionService,
-		PublicSubscriptionService: serviceInstances.PublicSubscriptionService,
-		AdminSubscriptionService:  serviceInstances.AdminSubscriptionService,
-		RepriceService:            serviceInstances.RepriceService,
-		PlanMigrationService:      serviceInstances.PlanMigrationService,
+		UserSubscriptionService:  serviceInstances.UserSubscriptionService,
+		AdminSubscriptionService: serviceInstances.AdminSubscriptionService,
+		RepriceService:           serviceInstances.RepriceService,
+		PlanMigrationService:     serviceInstances.PlanMigrationService,
 
 		EmailService:                 emailService,
 		SubscriptionLifecycleService: serviceInstances.SubscriptionLifecycleService,
@@ -632,9 +631,8 @@ type servicesInstances struct {
 		LastRefresh() time.Time
 	}
 
-	UserSubscriptionService   *subscriptions.UserSubscriptionService
-	PublicSubscriptionService *catalog.PublicSubscriptionService
-	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
+	UserSubscriptionService  *subscriptions.UserSubscriptionService
+	AdminSubscriptionService *subscriptions.AdminSubscriptionService
 	// RepriceService is the #773 reprice primitive (move subscribers to a
 	// different price at their next renewal).
 	RepriceService *subscriptions.RepriceService
@@ -808,11 +806,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		clock,
 	)
 
-	publicSubscriptionService := catalog.NewPublicSubscriptionService(
-		productService,
-		priceService,
-	)
-
 	adminSubscriptionService := subscriptions.NewAdminSubscriptionService(
 		subscriptionService,
 		productService,
@@ -917,7 +910,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		FXProvider:                   fxProvider,
 		FXRateRefresher:              fxRateRefresher,
 		UserSubscriptionService:      userSubscriptionService,
-		PublicSubscriptionService:    publicSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,
 		RepriceService:               repriceService,
 		PlanMigrationService:         planMigrationService,

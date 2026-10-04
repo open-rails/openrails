@@ -12,7 +12,8 @@ import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
-import { PaginationFooter } from "@/components/pagination-footer"
+import { CursorPaginationFooter } from "@/components/cursor-pagination"
+import { useCursorPages } from "@/hooks/use-cursor-pages"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,7 +39,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/client"
-import type { UsageMeter } from "@/lib/api/types"
+import type {
+  Meter,
+} from "@/lib/api/generated/wire"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -55,20 +58,21 @@ const PAGE_SIZE = 200
 
 export function CatalogMeteringPage() {
   const [search, setSearch] = React.useState("")
-  const [offset, setOffset] = React.useState(0)
+  const pages = useCursorPages()
   const { data, isPending, error, refetch } = useQuery(
-    adminQueries.usageMeters(PAGE_SIZE, offset)
+    adminQueries.usageMeters(PAGE_SIZE, pages.cursor)
   )
-  const meters = data?.items ?? []
+  const { data: capability } = useQuery(adminQueries.catalogRevision())
+  const meters = data?.data ?? []
   const normalizedSearch = search.trim().toLowerCase()
   const filtered = normalizedSearch
     ? meters.filter((meter) =>
         [
           meter.key,
-          meter.effective_event_type,
+          meter.event_type,
           meter.aggregation,
           meter.unit,
-          meter.default_rate_card?.product_key,
+          meter.rate_card?.product_key,
         ].some((value) => value?.toLowerCase().includes(normalizedSearch))
       )
     : meters
@@ -77,7 +81,7 @@ export function CatalogMeteringPage() {
     error: error instanceof ApiError ? error : error ? { status: 500 } : null,
     count: meters.length,
   })
-  const writesAllowed = data?.writes_allowed ?? false
+  const writesAllowed = capability?.writes_allowed ?? false
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -91,7 +95,9 @@ export function CatalogMeteringPage() {
             billing. Applications report the events separately.
           </p>
         </div>
-        {writesAllowed && state !== "permission" && <MeterFormDialog />}
+        {writesAllowed && state !== "permission" && (
+          <MeterFormDialog writesAllowed />
+        )}
       </div>
 
       {data && !writesAllowed && (
@@ -122,7 +128,7 @@ export function CatalogMeteringPage() {
         <PageMessage
           title="No usage meters yet"
           description="Create a meter to describe the events your application will report and bill."
-          action={writesAllowed ? <MeterFormDialog /> : undefined}
+          action={writesAllowed ? <MeterFormDialog writesAllowed /> : undefined}
         />
       ) : (
         <>
@@ -185,12 +191,10 @@ export function CatalogMeteringPage() {
               </TableBody>
             </Table>
           </div>
-          <PaginationFooter
-            total={data?.total ?? 0}
-            limit={data?.limit ?? PAGE_SIZE}
-            offset={data?.offset ?? offset}
+          <CursorPaginationFooter
+            pages={pages}
+            nextCursor={data?.next_cursor}
             loading={isPending}
-            onChange={setOffset}
           />
         </>
       )}
@@ -198,7 +202,7 @@ export function CatalogMeteringPage() {
   )
 }
 
-function MeterRow({ meter }: { meter: UsageMeter }) {
+function MeterRow({ meter }: { meter: Meter }) {
   return (
     <LinkedTableRow to={`/catalog/metering/${encodeURIComponent(meter.key)}`}>
       <TableCell>
@@ -212,14 +216,14 @@ function MeterRow({ meter }: { meter: UsageMeter }) {
           <p className="text-xs text-muted-foreground">{meter.unit}</p>
         )}
       </TableCell>
-      <TableCell>{meter.effective_event_type}</TableCell>
+      <TableCell>{meter.event_type}</TableCell>
       <TableCell>
         <Badge variant="secondary">{meter.aggregation}</Badge>
       </TableCell>
       <TableCell className="font-medium tabular-nums">
-        {summarizeRateCard(meter.default_rate_card)}
+        {summarizeRateCard(meter.rate_card)}
       </TableCell>
-      <TableCell>{meter.default_rate_card?.product_key ?? "—"}</TableCell>
+      <TableCell>{meter.rate_card?.product_key ?? "—"}</TableCell>
       <TableCell className="text-right tabular-nums">
         {meter.override_count.toLocaleString()}
       </TableCell>
@@ -248,14 +252,16 @@ export function MeterDetailPage() {
   const { key = "" } = useParams()
   const meterKey = key
   const navigate = useNavigate()
-  const [overrideOffset, setOverrideOffset] = React.useState(0)
+  const overridePages = useCursorPages()
   const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
+  const { data: capability } = useQuery(adminQueries.catalogRevision())
+  const writesAllowed = capability?.writes_allowed ?? false
   const metersQuery = useQuery(adminQueries.allUsageMeters())
   const productsQuery = useQuery(
     adminQueries.allProducts({ errorAction: "Load products for metering" })
   )
   const overridesQuery = useQuery(
-    adminQueries.usageMeterOverrides(meterKey, PAGE_SIZE, overrideOffset)
+    adminQueries.usageMeterOverrides(meterKey, PAGE_SIZE, overridePages.cursor)
   )
 
   if (meterQuery.isPending) return <MeterDetailSkeleton />
@@ -300,7 +306,7 @@ export function MeterDetailPage() {
   }
   const meter = meterQuery.data
   if (!meter) return null
-  const definitionLock = meterDefinitionLocked(meter)
+  const definitionLock = meterDefinitionLocked(meter, writesAllowed)
 
   return (
     <div className="flex min-w-0 flex-col gap-8">
@@ -318,21 +324,20 @@ export function MeterDetailPage() {
             <h1 className="truncate text-xl font-semibold tracking-tight">
               {meter.key}
             </h1>
-            {!meter.writes_allowed && (
-              <Badge variant="secondary">read-only</Badge>
-            )}
+            {!writesAllowed && <Badge variant="secondary">read-only</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {meter.effective_event_type} · {meter.aggregation}
+            {meter.event_type} · {meter.aggregation}
             {meter.unit ? ` · ${meter.unit}` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <MeterFormDialog meter={meter} />
+          <MeterFormDialog meter={meter} writesAllowed={writesAllowed} />
           <RateCardEditor
             meter={meter}
-            products={productsQuery.data?.items ?? []}
-            meters={metersQuery.data?.items ?? []}
+            writesAllowed={writesAllowed}
+            products={productsQuery.data?.data ?? []}
+            meters={metersQuery.data?.data ?? []}
             productsPending={productsQuery.isPending}
             productsError={Boolean(productsQuery.error)}
             productsForbidden={
@@ -343,7 +348,7 @@ export function MeterDetailPage() {
         </div>
       </header>
 
-      {!meter.writes_allowed && (
+      {!writesAllowed && (
         <ReadOnlyNotice>
           Catalog updates are disabled. The console is read-only.
         </ReadOnlyNotice>
@@ -360,7 +365,7 @@ export function MeterDetailPage() {
           </p>
         </div>
         <dl className="grid gap-x-8 gap-y-4 border-y py-4 sm:grid-cols-2 lg:grid-cols-4">
-          <ContractFact label="Event type" value={meter.effective_event_type} />
+          <ContractFact label="Event type" value={meter.event_type} />
           <ContractFact
             label="Aggregation"
             value={
@@ -374,7 +379,7 @@ export function MeterDetailPage() {
             label="Billing support"
             value={meter.billing_supported ? "Supported" : "Read only"}
           />
-          {Object.entries(meter.group_by).map(([name, property]) => (
+          {Object.entries(meter.group_by ?? {}).map(([name, property]) => (
             <ContractFact
               key={name}
               label={`Dimension: ${name}`}
@@ -382,7 +387,7 @@ export function MeterDetailPage() {
             />
           ))}
         </dl>
-        {definitionLock && meter.writes_allowed && (
+        {definitionLock && writesAllowed && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <HugeiconsIcon icon={Activity01Icon} className="size-4" />
             {definitionLock}
@@ -390,7 +395,7 @@ export function MeterDetailPage() {
         )}
       </section>
 
-      <DefaultRateSection meter={meter} />
+      <DefaultRateSection meter={meter} writesAllowed={writesAllowed} />
 
       <section className="grid gap-3">
         <div>
@@ -432,7 +437,7 @@ export function MeterDetailPage() {
             }
             compact
           />
-        ) : (overridesQuery.data?.items.length ?? 0) === 0 ? (
+        ) : (overridesQuery.data?.data.length ?? 0) === 0 ? (
           <p className="border-y py-6 text-sm text-muted-foreground">
             No customers have a negotiated rate for this meter.
           </p>
@@ -458,7 +463,7 @@ export function MeterDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {overridesQuery.data?.items.map((override) => (
+                  {overridesQuery.data?.data.map((override) => (
                     <LinkedTableRow
                       key={override.customer_id}
                       to={`/customers/${override.customer_id}`}
@@ -468,11 +473,9 @@ export function MeterDetailPage() {
                           className="font-medium underline-offset-3 hover:underline"
                           to={`/customers/${override.customer_id}`}
                         >
-                          {override.email ||
-                            override.subject ||
-                            override.customer_id}
+                          {override.customer_email || override.customer_id}
                         </Link>
-                        {(override.email || override.subject) && (
+                        {override.customer_email && (
                           <p className="text-xs text-muted-foreground">
                             {override.customer_id}
                           </p>
@@ -481,7 +484,7 @@ export function MeterDetailPage() {
                       <TableCell className="tabular-nums">
                         {summarizeRateCard({
                           price: override.price,
-                        } as NonNullable<UsageMeter["default_rate_card"]>)}
+                        } as NonNullable<Meter["rate_card"]>)}
                       </TableCell>
                       <TableCell>
                         {override.allowance?.included !== undefined
@@ -504,12 +507,10 @@ export function MeterDetailPage() {
                 </TableBody>
               </Table>
             </div>
-            <PaginationFooter
-              total={overridesQuery.data?.total ?? 0}
-              limit={overridesQuery.data?.limit ?? PAGE_SIZE}
-              offset={overridesQuery.data?.offset ?? overrideOffset}
+            <CursorPaginationFooter
+              pages={overridePages}
+              nextCursor={overridesQuery.data?.next_cursor}
               loading={overridesQuery.isPending}
-              onChange={setOverrideOffset}
             />
           </>
         )}
@@ -518,13 +519,19 @@ export function MeterDetailPage() {
   )
 }
 
-function DefaultRateSection({ meter }: { meter: UsageMeter }) {
+function DefaultRateSection({
+  meter,
+  writesAllowed,
+}: {
+  meter: Meter
+  writesAllowed: boolean
+}) {
   const [deleteOpen, setDeleteOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const remove = useMutation(
     adminMutations.deleteDefaultUsageRateCard(queryClient)
   )
-  const card = meter.default_rate_card
+  const card = meter.rate_card
   const blocked = meter.override_count > 0
   const handleDelete = async () => {
     try {
@@ -544,7 +551,7 @@ function DefaultRateSection({ meter }: { meter: UsageMeter }) {
             Used for every customer without a negotiated override.
           </p>
         </div>
-        {card && meter.writes_allowed && (
+        {card && writesAllowed && (
           <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
             <AlertDialogTrigger
               render={
@@ -608,8 +615,8 @@ function DefaultRateSection({ meter }: { meter: UsageMeter }) {
           <ContractFact
             label="Filter"
             value={
-              Object.keys(card.filter).length
-                ? Object.entries(card.filter)
+              Object.keys(card.filter ?? {}).length
+                ? Object.entries(card.filter ?? {})
                     .map(([key, values]) => `${key}: ${values.join(", ")}`)
                     .join(" · ")
                 : "All matching events"
@@ -628,7 +635,7 @@ function DefaultRateSection({ meter }: { meter: UsageMeter }) {
           <ContractFact label="Updated" value={formatDate(card.updated_at)} />
         </dl>
       )}
-      {blocked && card && meter.writes_allowed && (
+      {blocked && card && writesAllowed && (
         <p className="text-xs text-muted-foreground">
           Remove all {meter.override_count.toLocaleString()} negotiated override
           {meter.override_count === 1 ? "" : "s"} below before deleting the

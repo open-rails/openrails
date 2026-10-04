@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
@@ -223,64 +224,52 @@ func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice,
 // PriceFilter contains optional filters for listing prices
 type PriceFilter struct {
 	CatalogID *uuid.UUID // Optional administrator selector; owner scope always wins.
-	Archived  *bool      // Filter by archived flag (nil = all)
-	Currency  string     // Filter by currency (e.g., "usd")
-	ProductID *uuid.UUID // Filter by product ID
-	Type      string     // Filter by "recurring" or "one_time"
+	Archived  *bool
+	Currency  string
+	ProductID *uuid.UUID
+	AutoRenew *bool
 }
 
-// ListPaginated returns prices with pagination and optional filters
-func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, limit, offset int) ([]*models.Price, int64, error) {
+// List returns one keyset page of prices, newest first.
+func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billing.PageRequest) (billing.ListPage[*models.Price], error) {
 	queryMerchant, _, queryScopeErr := queryCatalogScope(ctx)
 	if queryScopeErr != nil {
-		return nil, 0, queryScopeErr
+		return billing.ListPage[*models.Price]{}, queryScopeErr
 	}
 	catalogID, err := selectCatalogFilter(ctx, s.db, filter.CatalogID)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.Price]{}, err
 	}
-
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return billing.ListPage[*models.Price]{}, err
+	}
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return billing.ListPage[*models.Price]{}, err
+	}
 	var currency *string
 	if filter.Currency != "" {
 		currency = &filter.Currency
 	}
-	onlyRecurring := filter.Type == "recurring"
-	onlyOneTime := filter.Type == "one_time"
-
-	q := s.db.Gen(ctx)
-	total, err := q.CountPricesFiltered(ctx, gen.CountPricesFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID,
-		Archived:      filter.Archived,
-		Currency:      currency,
-		ProductID:     filter.ProductID,
-		OnlyRecurring: onlyRecurring,
-		OnlyOneTime:   onlyOneTime,
-	})
+	rows, err := s.db.Gen(ctx).ListPricesFiltered(ctx, gen.ListPricesFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID,
+		Archived: filter.Archived, Currency: currency, ProductID: filter.ProductID, AutoRenew: filter.AutoRenew,
+		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
 	if err != nil {
-		return nil, 0, err
-	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListPricesFiltered(ctx, gen.ListPricesFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID,
-		Archived:      filter.Archived,
-		Currency:      currency,
-		ProductID:     filter.ProductID,
-		OnlyRecurring: onlyRecurring,
-		OnlyOneTime:   onlyOneTime,
-		PageLimit:     limit32,
-		PageOffset:    offset32,
-	})
-	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.Price]{}, err
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
 		price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
 		if err != nil {
-			return nil, 0, err
+			return billing.ListPage[*models.Price]{}, err
 		}
 		out = append(out, price)
 	}
-	return out, total, s.db.LoadPricePSPBindings(ctx, out, nil)
+	if err := s.db.LoadPricePSPBindings(ctx, out, nil); err != nil {
+		return billing.ListPage[*models.Price]{}, err
+	}
+	return pagination.Cut(out, limit, func(p *models.Price) any { return pagination.TimeID{At: p.CreatedAt, ID: p.ID} }), nil
 }
 
 func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string) (*models.Price, error) {
@@ -536,20 +525,53 @@ func (s *PriceService) RecordKeyMovement(ctx context.Context, merchantID, priceI
 	return nil
 }
 
-// ListKeyMovements returns the full movement history for a key, most-recent
-// first.
-func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.PriceKeyMovement, error) {
-	catalogID, err := queryCatalogMerchant(ctx, merchantID)
+// CurrentByProducts returns the current (non-archived) prices of each
+// product, cheapest first.
+func (s *PriceService) CurrentByProducts(ctx context.Context, productIDs []uuid.UUID) (map[uuid.UUID][]*models.Price, error) {
+	queryMerchant, catalogID, err := queryCatalogScope(ctx)
 	if err != nil {
 		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListCurrentPricesByProducts(ctx, gen.ListCurrentPricesByProductsParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, ProductIds: productIDs})
+	if err != nil {
+		return nil, err
+	}
+	prices, err := s.pricesFromGen(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID][]*models.Price, len(productIDs))
+	for _, p := range prices {
+		out[p.ProductID] = append(out[p.ProductID], p)
+	}
+	return out, nil
+}
+
+// ListKeyMovements returns one keyset page of a key's movement history,
+// most recent first.
+func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error) {
+	catalogID, err := queryCatalogMerchant(ctx, merchantID)
+	if err != nil {
+		return billing.ListPage[*models.PriceKeyMovement]{}, err
+	}
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return billing.ListPage[*models.PriceKeyMovement]{}, err
+	}
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return billing.ListPage[*models.PriceKeyMovement]{}, err
 	}
 	rows, err := s.db.Gen(ctx).ListPriceKeyMovements(ctx, gen.ListPriceKeyMovementsParams{
 		MerchantID: merchantID,
 		CatalogID:  catalogID,
 		Key:        key,
+		AfterAt:    afterAt,
+		AfterID:    afterID,
+		FetchLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
-		return nil, err
+		return billing.ListPage[*models.PriceKeyMovement]{}, err
 	}
-	return models.PriceKeyMovementsFromGen(rows), nil
+	return pagination.Cut(models.PriceKeyMovementsFromGen(rows), limit, func(m *models.PriceKeyMovement) any { return pagination.TimeID{At: m.EffectiveAt, ID: m.ID} }), nil
 }

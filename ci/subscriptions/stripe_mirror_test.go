@@ -27,18 +27,18 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	w.converge()
 	client := w.client[embedded]
 	premium := "content:premium"
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
 	w.stripe.legacyPrice(stripePrice, 1999)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 
 	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChange(l.railSub, stripePrice, 1999, 500))))
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, l.price.ID, sub.PriceID, "an open invoice pays for nothing")
+	require.Equal(t, l.price.ID.String(), sub.PriceID, "an open invoice pays for nothing")
 	require.Equal(t, "active", sub.Status)
 	require.False(t, l.c.entitled(premium))
 	require.True(t, l.c.entitled(l.ent), "the paid tier stands")
@@ -47,7 +47,7 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	w.advance(end.Sub(w.clock.Now()) + time.Hour)
 	require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(true)))
 	sub = w.subscription(embedded, l.sub)
-	require.Equal(t, price.ID, sub.PriceID, "Stripe's paid invoice for the new price")
+	require.Equal(t, price.ID.String(), sub.PriceID, "Stripe's paid invoice for the new price")
 	require.Equal(t, "active", sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.After(end))
 	require.True(t, l.c.entitled(premium))
@@ -64,12 +64,12 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	w.converge()
 	client := w.client[embedded]
 	premium := "content:premium"
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
 	w.stripe.legacyPrice(stripePrice, 1999)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 	paidBefore := len(completed(w.payments(embedded, l.c.id)))
@@ -78,7 +78,7 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChangePaid(l.railSub, stripePrice, 1999, 500))))
 	w.settle()
 	sub := w.subscription(embedded, l.sub)
-	require.Equal(t, price.ID, sub.PriceID, "a paid proration moves the tier")
+	require.Equal(t, price.ID.String(), sub.PriceID, "a paid proration moves the tier")
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a proration never moves the paid period")
 	require.True(t, l.c.entitled(premium))
 	paid := completed(w.payments(embedded, l.c.id))

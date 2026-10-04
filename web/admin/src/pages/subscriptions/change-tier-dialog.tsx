@@ -99,8 +99,8 @@ function ChangeTierForm({
     enabled: open,
   })
 
-  const products = productsQuery.data?.items ?? []
-  const prices = pricesQuery.data?.items ?? []
+  const products = productsQuery.data?.data ?? []
+  const prices = pricesQuery.data?.data ?? []
   const currentProduct = products.find((product) => product.id === productId)
   const currentPrice = prices.find((price) => price.id === priceId)
   const options = tierChangeOptions({

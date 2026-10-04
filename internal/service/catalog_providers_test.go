@@ -281,8 +281,8 @@ func TestCCBillAdapterAttach(t *testing.T) {
 func TestResolveProviders(t *testing.T) {
 	unconfigured := func() *Service { return &Service{rt: &app.Runtime{}} }
 	product := &models.Product{ID: uuid.New(), Key: "premium"}
-	recurring := func(psps ...string) CreatePriceRequest {
-		return CreatePriceRequest{ProductID: billing.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), AutoRenew: true, PSPs: psps}
+	recurring := func(psps ...string) billing.CreatePriceParams {
+		return billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), AutoRenew: true, PSPs: psps}
 	}
 
 	t.Run("unknown provider fails loudly", func(t *testing.T) {
@@ -294,7 +294,7 @@ func TestResolveProviders(t *testing.T) {
 		svc := &Service{rt: &app.Runtime{Config: &config.Config{}}}
 		oneTime := recurring("stripe", "nmi")
 		oneTime.AutoRenew, oneTime.AccessDurationHours = false, nil
-		for _, req := range []CreatePriceRequest{recurring("stripe", "nmi"), oneTime} {
+		for _, req := range []billing.CreatePriceParams{recurring("stripe", "nmi"), oneTime} {
 			links, states, pending, err := svc.resolveProviders(context.Background(), product, req, uuid.New())
 			require.NoError(t, err)
 			require.Empty(t, links)
@@ -313,7 +313,7 @@ func TestResolveProviders(t *testing.T) {
 		req.PSPLinks = map[string]map[string]string{"ccbill": {"form_name": "premium", "flex_id": "abc-123"}}
 		links, states, pending, err := unconfigured().resolveProviders(context.Background(), product, req, uuid.New())
 		require.NoError(t, err)
-		require.Equal(t, ProviderStatusLinked, states["ccbill"].Status)
+		require.Equal(t, billing.PSPLinkLinked, states["ccbill"].Status)
 		require.NotContains(t, states, "nmi")
 		require.NotContains(t, links, "nmi")
 		require.Empty(t, pending)
@@ -330,7 +330,7 @@ func TestResolveProviders(t *testing.T) {
 		require.Empty(t, links)
 		require.NotContains(t, states, "stripe")
 		require.NotContains(t, states, "nmi")
-		require.Equal(t, ProviderStatusPendingManualLink, states["solana"].Status)
+		require.Equal(t, billing.PSPLinkPendingManualLink, states["solana"].Status)
 		require.Equal(t, remoteWritesDisabledMessage, states["solana"].Message)
 		require.Len(t, pending, 1)
 	})
@@ -338,7 +338,7 @@ func TestResolveProviders(t *testing.T) {
 	// or#896: a trial on a rail with no first phase is refused, never
 	// silently dropped (which charged full price immediately).
 	t.Run("trial only on rails with a first phase", func(t *testing.T) {
-		withTrial := func(psp string) CreatePriceRequest {
+		withTrial := func(psp string) billing.CreatePriceParams {
 			req := recurring(psp)
 			req.TrialUnitAmount, req.TrialDurationHours = int64Ptr(0), intPtr(7*24)
 			return req

@@ -19,7 +19,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { PriceChangeDraft } from "@/lib/api/copilot"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import type { CatalogPrice } from "@/lib/api/types"
+import type {
+  Price,
+} from "@/lib/api/generated/wire"
 import {
   formatNativeAmount,
   nativeAmountFromInput,
@@ -43,7 +45,7 @@ import {
 const toDateInputValue = (d: Date) => d.toISOString().slice(0, 10)
 
 const priceChangeFormValues = (
-  price: CatalogPrice,
+  price: Price,
   draft?: PriceChangeDraft
 ) => ({
   amountInput: nativeAmountToInput(
@@ -74,7 +76,7 @@ export function PriceChangeWizard({
   draft,
   onDone,
 }: {
-  price: CatalogPrice
+  price: Price
   productName: string
   draft?: PriceChangeDraft
   onDone?: () => void
@@ -106,12 +108,12 @@ export function PriceChangeWizard({
             product_id: price.product_id,
             unit_amount: newAmount,
             currency: price.currency,
-            access_duration_hours: price.access_duration_hours,
+            access_duration_hours: price.access_duration_hours ?? undefined,
             auto_renew: price.auto_renew,
-            trial_unit_amount: price.trial_unit_amount,
-            trial_duration_hours: price.trial_duration_hours,
+            trial_unit_amount: price.trial_unit_amount ?? undefined,
+            trial_duration_hours: price.trial_duration_hours ?? undefined,
             key: price.key,
-            providers: Object.keys(price.providers ?? {}),
+            psps: Object.keys(price.psps ?? {}),
           },
           migration:
             value.mode === "migrate"
@@ -124,7 +126,7 @@ export function PriceChangeWizard({
         })
         if (created.pending_manual_actions?.length) {
           toast.warning(
-            `Price updated. One step is left for you: ${created.pending_manual_actions.map((action) => `${action.provider}: ${action.hint}`).join(". ")}`
+            `Price updated. One step is left for you: ${created.pending_manual_actions.map((action) => `${action.psp}: ${action.hint}`).join(". ")}`
           )
         } else {
           toast.success(

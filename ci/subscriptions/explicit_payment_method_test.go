@@ -31,7 +31,7 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 			for _, offer := range []struct {
 				price, entitlement string
 				kind               billing.OfferKind
-			}{{sale.ID, "content:post", billing.OfferPermanent}, {member.ID, "content:members", billing.OfferRecurring}} {
+			}{{sale.ID.String(), "content:post", billing.OfferPermanent}, {member.ID.String(), "content:members", billing.OfferRecurring}} {
 				_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
 					OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: offer.entitlement, PriceID: offer.price,
 					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi"}, Confirm: true,

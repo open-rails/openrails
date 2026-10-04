@@ -46,7 +46,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		{"plus", "membership", 1, 60_000_000},
 		{"lite", "membership", 3, 3_000_000},
 	}
-	revision, err := w.client[embedded].Catalog.Revision(t.Context())
+	revision, err := w.client[embedded].GetCatalogRevision(t.Context())
 	require.NoError(t, err)
 	var doc strings.Builder
 	fmt.Fprintf(&doc, "schema_version: 1\napplication_id: gf-tier-%s\nexpected_revision: %d\nproducts:\n", sfx, revision.Revision)
@@ -75,7 +75,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	}
 	params, err := catalog.ParseApplicationYAML([]byte(doc.String()))
 	require.NoError(t, err)
-	_, err = w.client[embedded].Catalog.Apply(t.Context(), params)
+	_, err = w.client[embedded].ApplyCatalog(t.Context(), params)
 	require.NoError(t, err)
 	price := func(key string) string { return priceID(t, w, key+"-"+sfx+"-monthly") }
 

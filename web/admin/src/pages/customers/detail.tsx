@@ -688,7 +688,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                       <SelectValue placeholder="Pick a product" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(products?.items ?? []).map((p) => (
+                      {(products?.data ?? []).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.display_name} ({p.key})
                         </SelectItem>
@@ -776,7 +776,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
   const receivedAmount = (value: string, priceId: string) =>
     nativeAmountFromInput(
       value,
-      prices?.items.find((price) => price.id === priceId)?.currency ?? ""
+      prices?.data.find((price) => price.id === priceId)?.currency ?? ""
     )
   const form = useForm({
     defaultValues: { priceId: "", transactionId: "", amount: "" },
@@ -861,7 +861,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                       <SelectValue placeholder="Pick a price" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(prices?.items ?? []).map((p) => (
+                      {(prices?.data ?? []).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {formatNativeAmount(p.unit_amount, p.currency)}
                           {p.auto_renew ? " · recurring" : ""} ({shortId(p.id)})

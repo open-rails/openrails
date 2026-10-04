@@ -21,14 +21,14 @@ import (
 
 // untypedBudget is how many routes still accept or answer a body no Go type
 // declares. It only goes down: a lane that types a route lowers it.
-const untypedBudget = 58
+const untypedBudget = 54
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 282)
+	require.Len(t, Catalog(), 269)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()

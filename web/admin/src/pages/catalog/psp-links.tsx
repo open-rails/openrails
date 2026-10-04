@@ -18,11 +18,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type {
-  CatalogPrice,
-  CatalogProviderState,
   CheckoutRoutingSkip,
 } from "@/lib/api/types"
-import { formatDate } from "@/lib/format"
+import type {
+  PSPLinkState,
+  Price,
+} from "@/lib/api/generated/wire"
 import { adminQueries } from "@/lib/queries"
 
 // or#812 — the frontend contract for catalog psp_links.
@@ -87,7 +88,7 @@ const OK_BADGE = "bg-settled-surface text-settled"
 const WARN_BADGE = "bg-held-surface text-held"
 const BAD_BADGE = "bg-failed-surface text-failed"
 
-function linkStatusClass(status: CatalogProviderState["status"]) {
+function linkStatusClass(status: PSPLinkState["status"]) {
   if (status === "linked") return OK_BADGE
   if (status === "error") return BAD_BADGE
   return WARN_BADGE
@@ -123,7 +124,7 @@ const LINK_ID_ORDER = [
   "provider",
 ]
 
-function linkEntries(ids?: Record<string, string>) {
+function linkEntries(ids?: Record<string, string> | null) {
   const rest = Object.entries(ids ?? {}).filter(
     ([k, v]) => k !== "rail" && v !== ""
   )
@@ -146,12 +147,12 @@ export function PSPLinksCard({
   verified,
   onVerify,
 }: {
-  price: CatalogPrice
+  price: Price
   verifying: boolean
   verified: boolean
   onVerify: () => void
 }) {
-  const links = Object.entries(price.providers ?? {}).sort(([a], [b]) =>
+  const links = Object.entries(price.psps ?? {}).sort(([a], [b]) =>
     a.localeCompare(b)
   )
   return (
@@ -226,11 +227,6 @@ export function PSPLinksCard({
                       >
                         {state.sync_status ?? "unknown"}
                       </Badge>
-                      {state.last_synced_at && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {formatDate(state.last_synced_at)}
-                        </p>
-                      )}
                       {state.drift?.map((d) => (
                         <p
                           key={d.field}
@@ -263,8 +259,8 @@ export function PSPLinksCard({
         {!!price.pending_manual_actions?.length && (
           <div className="rounded-md border border-held/40 p-3 text-xs">
             {price.pending_manual_actions.map((a) => (
-              <p key={`${a.provider}-${a.action}`}>
-                <span className="font-mono">{a.provider}</span>:{" "}
+              <p key={`${a.psp}-${a.action}`}>
+                <span className="font-mono">{a.psp}</span>:{" "}
                 {a.hint || a.action}
               </p>
             ))}
@@ -284,7 +280,7 @@ export function PSPLinksCard({
 // CheckoutReadinessCard answers the operator's real question — "can someone buy
 // this right now, and if not, why?" — with the or#288 dry run, so the console
 // and the routed checkout can never disagree.
-export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
+export function CheckoutReadinessCard({ price }: { price: Price }) {
   const {
     data: decision,
     isFetching: busy,

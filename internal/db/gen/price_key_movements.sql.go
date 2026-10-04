@@ -57,17 +57,29 @@ WHERE ($1::uuid IS NULL OR EXISTS (
  WHERE owned_price.merchant_id=price_key_movements.merchant_id AND owned_price.id=price_key_movements.price_id
  AND catalog_product.catalog_id=$1::uuid))
  AND merchant_id = $2::uuid AND key = $3::text
+ AND ($4::timestamptz IS NULL OR (effective_at, id) < ($4::timestamptz, $5::uuid))
 ORDER BY effective_at DESC, id DESC
+LIMIT $6::int
 `
 
 type ListPriceKeyMovementsParams struct {
 	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Key        string
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	FetchLimit int32
 }
 
 func (q *Queries) ListPriceKeyMovements(ctx context.Context, arg ListPriceKeyMovementsParams) ([]BillingPriceKeyMovement, error) {
-	rows, err := q.db.Query(ctx, listPriceKeyMovements, arg.CatalogID, arg.MerchantID, arg.Key)
+	rows, err := q.db.Query(ctx, listPriceKeyMovements,
+		arg.CatalogID,
+		arg.MerchantID,
+		arg.Key,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.FetchLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

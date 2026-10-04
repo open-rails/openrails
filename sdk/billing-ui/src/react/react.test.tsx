@@ -132,11 +132,11 @@ describe("useSubscriptions", () => {
 describe("plan change", () => {
   it("lists the catalog", async () => {
     const server = fakeBilling({
-      products: [product(), product({ id: "prod_pro", name: "Pro" })],
+      products: [product(), product({ id: "prod_pro", display_name: "Pro" })],
     })
     const { result } = setup(() => useProducts(), server)
     await waitFor(() => expect(result.current.products).toHaveLength(2))
-    expect(result.current.total).toBe(2)
+    expect(result.current.nextCursor).toBeNull()
     expect(result.current.products![0].prices[0]).toMatchObject({
       id: "price_plus",
       unit_amount: "19990000",

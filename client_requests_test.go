@@ -213,16 +213,20 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
-		"product key":        func(id string) error { _, err := c.Products.RetrieveByKey(ctx, id); return err },
-		"price key":          func(id string) error { _, err := c.Prices.RetrieveByKey(ctx, id); return err },
-		"set price key":      func(id string) error { _, err := c.Prices.SetKey(ctx, price.String(), id); return err },
-		"usage meter":        func(id string) error { _, err := c.GetUsageMeter(ctx, id); return err },
-		"ensure usage meter": func(id string) error { return c.EnsureUsageMeter(ctx, billing.UsageMeterSpec{Key: id}) },
+		"product key":   func(id string) error { _, err := c.GetProductByKey(ctx, id); return err },
+		"price key":     func(id string) error { _, err := c.GetPriceByKey(ctx, id); return err },
+		"price history": func(id string) error { _, err := c.ListPriceKeyHistory(ctx, id, billing.PageRequest{}); return err },
+		"meter":         func(id string) error { _, err := c.GetMeter(ctx, id); return err },
+		"set meter":     func(id string) error { _, err := c.SetMeter(ctx, id, billing.SetMeterParams{}); return err },
 		"set rate card": func(id string) error {
-			_, err := c.SetDefaultUsageRateCard(ctx, id, billing.DefaultUsageRateCardRequest{})
+			_, err := c.SetMeterRateCard(ctx, id, billing.SetMeterRateCardParams{})
 			return err
 		},
-		"delete rate card": func(id string) error { return c.DeleteDefaultUsageRateCard(ctx, id) },
+		"delete rate card": func(id string) error { return c.DeleteMeterRateCard(ctx, id) },
+		"rate override meter": func(id string) error {
+			_, err := c.SetRateOverride(ctx, billing.CustomerID(uuid.New()), id, billing.SetRateOverrideParams{})
+			return err
+		},
 		"delete delegation scope": func(id string) error {
 			return c.DeleteSpendDelegation(ctx, billing.CustomerID(uuid.New()), billing.SpendDelegationScope(id), "key")
 		},
@@ -312,14 +316,20 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"resume subscription": func() error { return c.ResumeSubscription(ctx, billing.SubscriptionID{}) },
 		"payment":             func() error { _, err := c.GetPayment(ctx, billing.PaymentID{}); return err },
-		"product":             func() error { _, err := c.Products.Retrieve(ctx, ""); return err },
-		"product wrong kind":  func() error { _, err := c.Products.Retrieve(ctx, price.String()); return err },
-		"update product":      func() error { _, err := c.Products.Update(ctx, "", &billing.ProductUpdateParams{}); return err },
-		"price":               func() error { _, err := c.Prices.Retrieve(ctx, ""); return err },
-		"update price":        func() error { _, err := c.Prices.Update(ctx, "", &billing.PriceUpdateParams{}); return err },
-		"set price key id":    func() error { _, err := c.Prices.SetKey(ctx, "", "key"); return err },
-		"checkout rails":      func() error { _, err := c.ListCheckoutRailOptions(ctx, noPrice); return err },
-		"checkout session":    func() error { _, err := c.GetCheckoutSession(ctx, customer, ""); return err },
+		"product":             func() error { _, err := c.GetProduct(ctx, billing.ProductID{}); return err },
+		"update product": func() error {
+			_, err := c.UpdateProduct(ctx, billing.ProductID{}, billing.UpdateProductParams{})
+			return err
+		},
+		"price":        func() error { _, err := c.GetPrice(ctx, billing.PriceID{}, billing.GetPriceParams{}); return err },
+		"update price": func() error { _, err := c.UpdatePrice(ctx, billing.PriceID{}, billing.UpdatePriceParams{}); return err },
+		"catalog":      func() error { _, err := c.GetCatalog(ctx, billing.CatalogID{}); return err },
+		"rate overrides": func() error {
+			_, err := c.ListRateOverrides(ctx, billing.CustomerID{}, billing.PageRequest{})
+			return err
+		},
+		"checkout rails":   func() error { _, err := c.ListCheckoutRailOptions(ctx, noPrice); return err },
+		"checkout session": func() error { _, err := c.GetCheckoutSession(ctx, customer, ""); return err },
 		"checkout session kind": func() error {
 			_, err := c.GetCheckoutSession(ctx, customer, subscription.String())
 			return err

@@ -60,7 +60,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 		t.Run(string(tp), func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
-			h := hostedPay{w: w, c: w.newCustomer(), tp: tp, price: w.membership("content:members", 9_990_000).ID}
+			h := hostedPay{w: w, c: w.newCustomer(), tp: tp, price: w.membership("content:members", 9_990_000).ID.String()}
 			token := w.nmi.Tokenize(visa)
 
 			session, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
@@ -109,7 +109,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: w.membership("content:members", 9_990_000).ID}
+	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: w.membership("content:members", 9_990_000).ID.String()}
 	vaults := w.vaultCount()
 
 	_, err := h.pay("pay-declined", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
@@ -142,7 +142,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
 			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
+				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: "saved-" + uuid.NewString(),
 				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method}, Confirm: true,
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
@@ -162,7 +162,7 @@ func TestHostedNewCardQuoteThenConfirm(t *testing.T) {
 	c := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)
 	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "quote-" + uuid.NewString(),
+		Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: "quote-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Quoted Payer", Zip: "10001", Country: "US"},
 	})
 	require.NoError(t, err)
@@ -179,11 +179,11 @@ func TestHostedNewCardOneTimeSale(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
-	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
+	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID.String()}
 	session, err := h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)

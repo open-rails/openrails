@@ -202,7 +202,7 @@ describe("money submitted by console forms", () => {
     expect([durationLabel(720), durationLabel(168), durationLabel(36)]).toEqual(["1 month", "1 week", "36 hours"])
     expect(priceIntervalLabel({ auto_renew: true, access_duration_hours: 744 })).toBe("every 31 days")
     expect(priceIntervalLabel({ auto_renew: false, access_duration_hours: 48 })).toBe("2 days once")
-    expect(priceIntervalLabel({ auto_renew: false, access_duration_hours: undefined })).toBe("one-time")
+    expect(priceIntervalLabel({ auto_renew: false, access_duration_hours: null })).toBe("one-time")
   })
 })
 

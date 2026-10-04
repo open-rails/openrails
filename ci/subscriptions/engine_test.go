@@ -70,11 +70,11 @@ func enroll(t *testing.T, w *world, rail string, tp topology) *engineCase {
 func enrollEvery(t *testing.T, w *world, rail string, tp topology, hours int) *engineCase {
 	t.Helper()
 	price := w.membershipEvery("content:members", 9_990_000, hours)
-	e := &engineCase{w: w, rail: rail, tp: tp, price: price.ID, amount: 999, ent: "content:members", started: w.clock.Now()}
+	e := &engineCase{w: w, rail: rail, tp: tp, price: price.ID.String(), amount: 999, ent: "content:members", started: w.clock.Now()}
 	e.c = w.newCustomer()
 	before := len(e.providerLedger())
 	e.method = e.c.saveCard(rail, visa)
-	e.sub = e.c.subscribe(tp, rail, price.ID, e.ent, e.method)
+	e.sub = e.c.subscribe(tp, rail, price.ID.String(), e.ent, e.method)
 	sub := w.subscription(tp, e.sub)
 	require.Equal(t, "engine", sub.CollectionPolicy)
 	require.Empty(t, sub.RailSubscriptionID)
@@ -483,20 +483,20 @@ func TestEngineRepricing(t *testing.T) {
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
 		old := enroll(t, w, rail, tp)
-		price, err := w.client[tp].Prices.Retrieve(t.Context(), old.price)
+		price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, old.price), billing.GetPriceParams{})
 		require.NoError(t, err)
 		hours := monthHours
-		bumped, err := w.client[tp].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		bumped, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		require.NotEqual(t, price.ID, bumped.ID)
-		archived, err := w.client[tp].Prices.Retrieve(t.Context(), price.ID)
+		archived, err := w.client[tp].GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 		require.NoError(t, err)
 		require.True(t, archived.Archived, "the previous version is grandfathered")
 
 		fresh := w.newCustomer()
 		method := fresh.saveCard(rail, mastercard)
-		newSub := fresh.subscribeAgain(tp, rail, bumped.ID, old.ent, method)
-		require.Equal(t, bumped.ID, w.subscription(tp, newSub).PriceID)
+		newSub := fresh.subscribeAgain(tp, rail, bumped.ID.String(), old.ent, method)
+		require.Equal(t, bumped.ID.String(), w.subscription(tp, newSub).PriceID)
 
 		for range 2 {
 			old.toPeriodEnd()
@@ -511,8 +511,8 @@ func TestEngineRepricing(t *testing.T) {
 		require.Equal(t, []int64{9_990_000, 9_990_000, 9_990_000}, byCustomer(old.c), "the existing member keeps the accepted 9.99")
 		require.Equal(t, []int64{14_990_000, 14_990_000, 14_990_000}, byCustomer(fresh), "the new member buys and renews at 14.99")
 		require.Len(t, old.providerLedger(), 6, "provider charges match local payments")
-		require.Equal(t, price.ID, w.subscription(tp, old.sub).PriceID)
-		require.Equal(t, bumped.ID, w.subscription(tp, newSub).PriceID)
+		require.Equal(t, price.ID.String(), w.subscription(tp, old.sub).PriceID)
+		require.Equal(t, bumped.ID.String(), w.subscription(tp, newSub).PriceID)
 	})
 }
 
@@ -576,9 +576,9 @@ func TestEngineRenewalRefunds(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
-			price, err := w.client[tp].Prices.Retrieve(t.Context(), e.price)
+			price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, e.price), billing.GetPriceParams{})
 			require.NoError(t, err)
-			archive, err := w.client[tp].ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: price.ProductID, Action: billing.PurchaseActionRefund, Window: 365 * day, Reason: "retired", IdempotencyKey: "archive-" + price.ProductID})
+			archive, err := w.client[tp].ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: price.ProductID.String(), Action: billing.PurchaseActionRefund, Window: 365 * day, Reason: "retired", IdempotencyKey: "archive-" + price.ProductID.String()})
 			require.NoError(t, err)
 			w.settle()
 			require.True(t, archive.Complete)
@@ -606,7 +606,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			c := w.newCustomer()
 			declined := c.saveCard(rail, card{Brand: "visa", Last4: "0002", Decline: map[string]string{"stripe": "insufficient_funds", "nmi": "202"}[rail]})
 			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
 				IdempotencyKey: "enroll-declined", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: declined},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
@@ -622,7 +622,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			require.Empty(t, subs.Data)
 			require.False(t, c.entitled("content:members"))
 			fresh := c.saveCard(rail, visa)
-			c.subscribeAgain(embedded, rail, price.ID, "content:members", fresh)
+			c.subscribeAgain(embedded, rail, price.ID.String(), "content:members", fresh)
 			require.True(t, c.entitled("content:members"))
 		})
 	}
@@ -638,7 +638,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	c := w.newCustomer()
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
 	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
 		IdempotencyKey: "enroll-3ds", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: challenged},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
@@ -653,7 +653,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	}, "the abandoned challenge fails the enrollment")
 	require.Len(t, w.stripe.mutations("/v1/payment_intents/"), 1, "the challenged payment itself is closed, once")
 	fresh := c.saveCard("stripe", visa)
-	c.subscribeAgain(embedded, "stripe", price.ID, "content:members", fresh)
+	c.subscribeAgain(embedded, "stripe", price.ID.String(), "content:members", fresh)
 	require.True(t, c.entitled("content:members"))
 	require.Len(t, w.stripe.ledger(""), 1, "only the second card was charged")
 }
@@ -712,7 +712,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		method := c.saveCard("nmi", visa)
 		w.nmi.RefuseDuplicates(1)
 		session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
 			IdempotencyKey: "enroll-dup", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 		})
@@ -721,7 +721,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		w.until(func() bool {
 			return unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))["status"] == "failed"
 		}, "the refused enrollment resolves")
-		c.subscribeAgain(embedded, "nmi", price.ID, "content:members", method)
+		c.subscribeAgain(embedded, "nmi", price.ID.String(), "content:members", method)
 		require.Len(t, w.nmi.ledger(""), 1)
 		require.True(t, c.entitled("content:members"))
 	})
@@ -929,14 +929,14 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	c := w.newCustomer()
 	buy := func(method, key string) *billing.CheckoutSession {
 		session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
+			OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID.String(),
 			IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 		})

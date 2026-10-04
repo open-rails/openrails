@@ -72,7 +72,7 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
 				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 			})

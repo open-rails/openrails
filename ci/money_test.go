@@ -83,13 +83,13 @@ func TestExactIntegerMoneyBoundaries(t *testing.T) {
 func TestMoneyJSONPreservesInt64(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, 0, 9007199254740993, math.MaxInt64} {
 		t.Run(strconv.FormatInt(amount, 10), func(t *testing.T) {
-			request := billing.PriceCreateParams{UnitAmount: amount}
+			request := billing.CreatePriceParams{UnitAmount: amount}
 			raw, err := json.Marshal(request)
 			require.NoError(t, err)
 			var wire map[string]any
 			require.NoError(t, json.Unmarshal(raw, &wire))
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["unit_amount"])
-			var read billing.PriceCreateParams
+			var read billing.CreatePriceParams
 			require.NoError(t, json.Unmarshal(raw, &read))
 			require.Equal(t, amount, read.UnitAmount)
 
@@ -106,7 +106,7 @@ func TestMoneyJSONPreservesInt64(t *testing.T) {
 		})
 	}
 	for _, value := range []string{`9007199254740993`, `"1.5"`, `"1e3"`, `"9223372036854775808"`, `"-9223372036854775809"`} {
-		var request billing.PriceCreateParams
+		var request billing.CreatePriceParams
 		require.Error(t, json.Unmarshal([]byte(`{"unit_amount":`+value+`}`), &request), value)
 	}
 }

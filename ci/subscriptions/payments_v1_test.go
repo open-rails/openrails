@@ -29,8 +29,7 @@ func TestOffChannelPaymentIdempotency(t *testing.T) {
 			w := newWorld(t)
 			c := w.newCustomer()
 			price := w.permanent("content:post")
-			priceID, err := billing.ParsePriceID(price.ID)
-			require.NoError(t, err)
+			priceID := price.ID
 			client := w.client[tp]
 			params := billing.CreateOffChannelPaymentParams{PriceID: priceID, TransactionID: "cash-" + uuid.NewString()}
 
@@ -63,8 +62,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	w := newWorld(t)
 	c := w.newCustomer()
 	price := w.permanent("content:post")
-	priceID, err := billing.ParsePriceID(price.ID)
-	require.NoError(t, err)
+	priceID := price.ID
 	client := w.client[remote]
 	var recorded []billing.PaymentID
 	for i := range 5 {
@@ -89,7 +87,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	}
 	require.Equal(t, recorded, read, "every payment once, newest first")
 
-	_, err = client.ListPayments(t.Context(), billing.ListPaymentsParams{Page: billing.PageRequest{Cursor: "not-a-cursor"}})
+	_, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{Page: billing.PageRequest{Cursor: "not-a-cursor"}})
 	requireCode(t, err, http.StatusBadRequest, "invalid_cursor")
 
 	// The customer's own list is the same page shape.

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -21,7 +22,7 @@ import (
 // the catalog transaction. The caller must revalidate its merchant revision and
 // selected PSP identity before committing these results. Nothing here creates,
 // updates, signs, or submits a provider object.
-func (s *Service) verifyCatalogProviderReference(ctx context.Context, providerKey, rail, accountID, productKey string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+func (s *Service) verifyCatalogProviderReference(ctx context.Context, providerKey, rail, accountID, productKey string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if s == nil || s.catalogWriteLocked || s.catalogTx != nil {
 		return nil, fmt.Errorf("provider reference verification must run outside the catalog transaction")
 	}
@@ -86,7 +87,7 @@ func catalogReferenceKeys(link map[string]string, allowed ...string) error {
 	return nil
 }
 
-func verifyNMICatalogReference(ctx context.Context, adapter *nmiAdapter, accountID string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+func verifyNMICatalogReference(ctx context.Context, adapter *nmiAdapter, accountID string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if err := catalogReferenceKeys(link, models.RailKeyPlanID); err != nil {
 		return nil, err
 	}
@@ -121,7 +122,7 @@ func verifyNMICatalogReference(ctx context.Context, adapter *nmiAdapter, account
 	return map[string]string{models.RailKeyPlanID: planID, models.RailKeyProvider: key}, nil
 }
 
-func verifyStripeCatalogReference(ctx context.Context, adapter *stripeAdapter, accountID string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+func verifyStripeCatalogReference(ctx context.Context, adapter *stripeAdapter, accountID string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if err := catalogReferenceKeys(link, models.RailKeyStripePriceID, models.RailKeyStripeProductID, providerLookupKey); err != nil {
 		return nil, err
 	}
@@ -177,7 +178,7 @@ type catalogReferenceChainReader interface {
 	GetAccountData(context.Context, solanago.PublicKey) ([]byte, error)
 }
 
-func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, defaultToken, productKey string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, defaultToken, productKey string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant); err != nil {
 		return nil, err
 	}

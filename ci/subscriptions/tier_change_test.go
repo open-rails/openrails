@@ -23,7 +23,7 @@ import (
 func (w *world) engineMember(rail string, tp topology, from tier) (*customer, billing.SubscriptionID) {
 	w.t.Helper()
 	c := w.newCustomer()
-	sub := c.subscribeAgain(tp, rail, from.ID, from.ent, c.saveCard(rail, visa))
+	sub := c.subscribeAgain(tp, rail, from.ID.String(), from.ent, c.saveCard(rail, visa))
 	require.Equal(w.t, "engine", w.subscription(tp, sub).CollectionPolicy)
 	return c, sub
 }
@@ -83,12 +83,12 @@ func TestEngineTierUpgrade(t *testing.T) {
 			group := "g" + uuid.NewString()[:8]
 			from := w.tierPrice(group, 1, row.oldCents, row.oldCycle, false)
 			to := w.tierPrice(group, 2, row.newCents, row.newCycle, false)
-			req := billing.ChangeTierRequest{PriceID: to.ID}
+			req := billing.ChangeTierRequest{PriceID: to.ID.String()}
 			c, sub := w.engineMember(rail, tp, from)
 			w.advance(w.subscription(tp, sub).CurrentPeriodEndsAt.Sub(w.clock.Now()) - row.left)
 			charges := len(w.railLedger(rail))
 
-			w.requirePreview(sub, to.ID, row.charge, row.newCycle)
+			w.requirePreview(sub, to.ID.String(), row.charge, row.newCycle)
 			key := "upgrade-" + uuid.NewString()
 			done, err := w.client[tp].ChangeTier(t.Context(), sub, key, req)
 			require.NoError(t, err, row.name)
@@ -106,7 +106,7 @@ func TestEngineTierUpgrade(t *testing.T) {
 			require.Equal(t, "cancelled", w.subscription(tp, sub).Status, "the old membership is superseded")
 			next := w.subscription(other(tp), successor)
 			require.Equal(t, "active", next.Status)
-			require.Equal(t, to.ID, next.PriceID)
+			require.Equal(t, to.ID.String(), next.PriceID)
 			require.Equal(t, "engine", next.CollectionPolicy)
 			require.True(t, w.clock.Now().Add(time.Duration(row.newCycle)*h).Equal(*next.CurrentPeriodEndsAt), "%s: a fresh period of the new cadence", row.name)
 			require.True(t, c.entitled(to.ent))
@@ -158,7 +158,7 @@ func TestEngineTierDowngrade(t *testing.T) {
 			low := w.tierPrice(group, 2, 1000, row.newCycle, false)
 			high := w.tierPrice(group, 3, 2000, row.oldCycle, false)
 			top := w.tierPrice(group, 4, 3000, row.oldCycle, false)
-			req := billing.ChangeTierRequest{PriceID: low.ID}
+			req := billing.ChangeTierRequest{PriceID: low.ID.String()}
 			c, sub := w.engineMember(rail, tp, high)
 			end := *w.subscription(tp, sub).CurrentPeriodEndsAt
 			w.advance(time.Hour)
@@ -183,24 +183,24 @@ func TestEngineTierDowngrade(t *testing.T) {
 			again, err := w.client[other(tp)].ChangeTier(t.Context(), sub, key, req)
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", again.Status, "the same downgrade replays")
-			_, err = w.client[tp].ChangeTier(t.Context(), sub, "downgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: lowest.ID})
+			_, err = w.client[tp].ChangeTier(t.Context(), sub, "downgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: lowest.ID.String()})
 			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeAlreadyScheduled)
 
 			current := w.subscription(tp, sub)
-			require.Equal(t, high.ID, current.PriceID, "the current plan stays until period end")
+			require.Equal(t, high.ID.String(), current.PriceID, "the current plan stays until period end")
 			require.Equal(t, "active", current.Status)
 			require.True(t, c.entitled(high.ent))
 			require.Len(t, w.railLedger(rail), charges, "nothing is charged or refunded now")
 
 			w.advance(end.Sub(w.clock.Now()) + time.Second)
-			_, err = w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: top.ID})
+			_, err = w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: top.ID.String()})
 			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRenewalDue)
 			w.runRenewals()
 			ledger := w.railLedger(rail)
 			require.Len(t, ledger, charges+1)
 			require.Equal(t, int64(1000), ledger[len(ledger)-1].Amount, "%s: the renewal bills the new price", row.name)
 			renewed := w.subscription(other(tp), sub)
-			require.Equal(t, low.ID, renewed.PriceID)
+			require.Equal(t, low.ID.String(), renewed.PriceID)
 			require.Equal(t, "active", renewed.Status)
 			require.True(t, end.Add(time.Duration(row.newCycle)*h).Equal(*renewed.CurrentPeriodEndsAt), "%s: a period of the new cadence", row.name)
 			require.True(t, c.entitled(low.ent))
@@ -225,7 +225,7 @@ func TestEngineTierUpgradeDecline(t *testing.T) {
 			group := "g" + uuid.NewString()[:8]
 			from := w.tierPrice(group, 1, 1000, 720, false)
 			to := w.tierPrice(group, 2, 2000, 720, false)
-			req := billing.ChangeTierRequest{PriceID: to.ID}
+			req := billing.ChangeTierRequest{PriceID: to.ID.String()}
 			c, sub := w.engineMember(rail, embedded, from)
 			end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
 			w.advance(360 * time.Hour)
@@ -245,7 +245,7 @@ func TestEngineTierUpgradeDecline(t *testing.T) {
 
 			current := w.subscription(embedded, sub)
 			require.Equal(t, "active", current.Status)
-			require.Equal(t, from.ID, current.PriceID)
+			require.Equal(t, from.ID.String(), current.PriceID)
 			require.True(t, end.Equal(*current.CurrentPeriodEndsAt))
 			require.True(t, c.entitled(from.ent))
 			require.False(t, c.entitled(to.ent))
@@ -278,13 +278,13 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 
 	w.stripe.setDecline(visa.Last4, "auth")
 	key := "challenged-" + uuid.NewString()
-	req := billing.ChangeTierRequest{PriceID: to.ID}
+	req := billing.ChangeTierRequest{PriceID: to.ID.String()}
 	pending, err := w.client[embedded].ChangeTier(t.Context(), sub, key, req)
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status, "%+v", pending)
 	require.Equal(t, "payment_authentication", pending.NextAction.Type)
 	op := pending.OperationID
-	require.Equal(t, from.ID, w.subscription(embedded, sub).PriceID)
+	require.Equal(t, from.ID.String(), w.subscription(embedded, sub).PriceID)
 	require.False(t, c.entitled(to.ent))
 	require.Len(t, w.stripe.ledger(""), charges)
 
@@ -302,7 +302,7 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 	require.Len(t, ledger, charges+1)
 	require.Equal(t, int64(1500), ledger[len(ledger)-1].Amount)
 	require.Equal(t, "cancelled", w.subscription(embedded, sub).Status)
-	require.Equal(t, to.ID, w.subscription(embedded, *done.SubscriptionID).PriceID)
+	require.Equal(t, to.ID.String(), w.subscription(embedded, *done.SubscriptionID).PriceID)
 	require.True(t, c.entitled(to.ent))
 	require.False(t, c.entitled(from.ent))
 }

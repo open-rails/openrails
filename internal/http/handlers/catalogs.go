@@ -2,62 +2,43 @@ package handlers
 
 import (
 	"errors"
-	"math"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
+// CatalogListQuery filters ListCatalogs.
+type CatalogListQuery struct {
+	OwnerSubject string `form:"owner_subject"`
+}
+
 func catalogView(row gen.BillingCatalog) billing.Catalog {
-	return billing.Catalog{ID: billing.CatalogID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), OwnerSubject: row.OwnerSubject, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return billing.Catalog{ID: billing.CatalogID(row.ID), OwnerSubject: row.OwnerSubject, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
-func OwnCatalog(r *request.Request) {
-	if r.Request.Method == http.MethodPut && r.Request.Body != nil && r.Request.Body != http.NoBody {
-		var body struct{}
-		if !bindCatalogJSON(r, &body) {
-			return
-		}
-	}
-	scope, ok := catalogscope.FromContext(r.Request.Context())
-	if !ok {
-		r.ErrorJSON(http.StatusForbidden, "catalog owner identity required")
-		return
-	}
-	row, err := catalog.NewCatalogRepo(r.State.DB).Get(r.Request.Context(), scope.CatalogID)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, catalogView(row))
-}
-
-func EnsureCatalogForOwner(r *request.Request) {
-	if r.State == nil || r.State.Config == nil {
-		writeCatalogError(r, catalogpolicy.ErrUpdatesDisabled)
-		return
-	}
+// EnsureCatalog returns the creator's catalog, creating it the first time.
+func EnsureCatalog(r *request.Request) {
 	if err := catalogpolicy.Check(r.Request.Context(), r.State.Config); err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	var body struct {
-		OwnerSubject string `json:"owner_subject"`
-	}
-	if !bindCatalogJSON(r, &body) {
+	var params billing.EnsureCatalogParams
+	if !r.BindJSON(&params) {
 		return
 	}
-	if err := catalogscope.ValidateSubject(body.OwnerSubject); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid owner_subject")
+	if err := catalogscope.ValidateSubject(params.OwnerSubject); err != nil {
+		r.APIError(invalidParam("owner_subject", "invalid owner_subject"))
 		return
 	}
-	row, err := catalog.NewCatalogRepo(r.State.DB).Ensure(r.Request.Context(), &body.OwnerSubject)
+	row, err := catalog.NewCatalogRepo(r.State.DB).Ensure(r.Request.Context(), &params.OwnerSubject)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -68,12 +49,12 @@ func EnsureCatalogForOwner(r *request.Request) {
 func GetCatalog(r *request.Request) {
 	id, err := billing.ParseCatalogID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid catalog_id")
+		r.APIError(invalidParam("id", "invalid catalog id"))
 		return
 	}
 	row, err := catalog.NewCatalogRepo(r.State.DB).Get(r.Request.Context(), id.UUID())
 	if errors.Is(err, pgx.ErrNoRows) {
-		r.ErrorJSON(http.StatusNotFound, "catalog not found")
+		r.ErrorCode("catalog_not_found", "")
 		return
 	}
 	if err != nil {
@@ -83,40 +64,21 @@ func GetCatalog(r *request.Request) {
 	r.JSON(http.StatusOK, catalogView(row))
 }
 
-func GetCatalogForOwner(r *request.Request) {
-	owner := r.Query("owner_subject")
-	if err := catalogscope.ValidateSubject(owner); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid owner_subject")
-		return
-	}
-	row, err := catalog.NewCatalogRepo(r.State.DB).GetByOwner(r.Request.Context(), owner)
-	if errors.Is(err, pgx.ErrNoRows) {
-		r.ErrorJSON(http.StatusNotFound, "catalog not found")
-		return
-	}
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, catalogView(row))
-}
-
+// ListCatalogs lists the merchant's catalogs, oldest first;
+// ?owner_subject= selects one creator's.
 func ListCatalogs(r *request.Request) {
-	limit, offset := parseIntDefault(r.Query("limit"), 50), parseIntDefault(r.Query("offset"), 0)
-	if limit < 1 || limit > 100 || offset < 0 || offset > math.MaxInt32 {
-		r.ErrorJSON(http.StatusBadRequest, "invalid catalog pagination")
+	page, ok := r.Page()
+	if !ok {
 		return
 	}
-	rows, err := catalog.NewCatalogRepo(r.State.DB).List(r.Request.Context(), int32(limit), int32(offset))
+	var query CatalogListQuery
+	if !r.BindQuery(&query) {
+		return
+	}
+	rows, err := catalog.NewCatalogRepo(r.State.DB).List(r.Request.Context(), query.OwnerSubject, page)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	items := make([]billing.Catalog, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, catalogView(row))
-	}
-	r.JSON(http.StatusOK, struct {
-		Items []billing.Catalog `json:"items"`
-	}{Items: items})
+	r.JSON(http.StatusOK, pagination.Map(rows, catalogView))
 }

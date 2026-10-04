@@ -24,9 +24,9 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 	w := prepareWorld(t, poolSize)
 	w.start()
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	customers := make([]*customer, requests)
 	for i := range customers {
@@ -44,13 +44,13 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for range 2 {
-				if _, err := client.ListCheckoutRailOptions(ctx, price.ID); err != nil {
+				if _, err := client.ListCheckoutRailOptions(ctx, price.ID.String()); err != nil {
 					errs[i] = err
 					return
 				}
 			}
 			session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
-				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "checkout:" + uuid.NewString() + ":1", Confirm: true,
+				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: "checkout:" + uuid.NewString() + ":1", Confirm: true,
 				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Pool Payer", Zip: "10001", Country: "US"},
 			})
 			if err == nil && session.Status != "succeeded" {

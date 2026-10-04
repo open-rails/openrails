@@ -1,33 +1,28 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons"
 import { Button } from "@/components/ui/button"
+import type { useCursorPages } from "@/hooks/use-cursor-pages"
 
-export function PaginationFooter({
-  total,
-  limit,
-  offset,
+export function CursorPaginationFooter({
+  pages,
+  nextCursor,
   loading,
-  onChange,
 }: {
-  total: number
-  limit: number
-  offset: number
+  pages: ReturnType<typeof useCursorPages>
+  nextCursor: string | null | undefined
   loading: boolean
-  onChange: (offset: number) => void
 }) {
-  if (total <= limit) return null
+  if (pages.page === 1 && !nextCursor) return null
   return (
     <div className="flex items-center justify-between text-sm text-muted-foreground">
-      <span className="tabular-nums">
-        {offset + 1}–{Math.min(offset + limit, total)} of {total}
-      </span>
+      <span className="tabular-nums">Page {pages.page}</span>
       <div className="flex gap-1">
         <Button
           variant="ghost"
           size="icon"
           aria-label="Previous page"
-          disabled={offset <= 0 || loading}
-          onClick={() => onChange(Math.max(0, offset - limit))}
+          disabled={pages.page <= 1 || loading}
+          onClick={pages.previous}
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
@@ -35,8 +30,8 @@ export function PaginationFooter({
           variant="ghost"
           size="icon"
           aria-label="Next page"
-          disabled={offset + limit >= total || loading}
-          onClick={() => onChange(offset + limit)}
+          disabled={!nextCursor || loading}
+          onClick={() => nextCursor && pages.next(nextCursor)}
         >
           <HugeiconsIcon icon={ArrowRight01Icon} className="size-4" />
         </Button>

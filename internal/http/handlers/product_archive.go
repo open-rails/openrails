@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -305,7 +306,7 @@ func archiveProductRow(ctx context.Context, r *httprequest.Request, productID uu
 		return nil
 	}
 	archived := true
-	_, err = svc.UpdateProduct(ctx, billing.ProductID(productID), billing.UpdateProductRequest{Archived: &archived})
+	_, err = svc.UpdateProduct(ctx, billing.ProductID(productID), billing.UpdateProductParams{Archived: catalog.Value(archived)})
 	return err
 }
 

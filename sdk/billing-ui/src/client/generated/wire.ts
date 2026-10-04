@@ -101,7 +101,7 @@ export type CheckoutSessionCreateRequest = {
 export type CheckoutSessionMembershipQuote = {
   product_name: string
   cycle_hours: number
-  entitlements: Record<string, number> | null
+  entitlements: Record<string, number | null> | null
 }
 
 export type CheckoutSessionNextAction = {
@@ -225,6 +225,12 @@ export type CustodianCaptureReference = {
   custodian_id?: string
   session_id?: string
   token?: string
+}
+
+export type DriftField = {
+  field: string
+  openrails_value: string
+  remote_value: string
 }
 
 export type EffectiveTierBody = {
@@ -473,22 +479,13 @@ export type NotificationData = {
   metadata?: Record<string, unknown>
 }
 
-export type PageOfProductObject = {
-  object: string
-  data: ProductObject[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
-export type PageOfPublicPrice = {
-  object: string
-  data: PublicPrice[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
+export type PSPLinkState = {
+  status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
+  ids: Record<string, string> | null
+  lookup_key: string
+  sync_status: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
+  drift: DriftField[] | null
+  message: string
 }
 
 export type PathPageOfNotification = {
@@ -588,12 +585,47 @@ export type PaymentRecovery = {
   operation?: PaymentOperation
 }
 
+export type PendingAction = {
+  psp: string
+  action: string
+  hint: string
+  patch_required: Record<string, Record<string, Record<string, string>>> | null
+}
+
 export type PortalResponse = {
   url: string
 }
 
-export type PriceRecurrence = {
-  interval: string
+export type Price = {
+  id: string
+  key: string
+  product_id: string
+  archived: boolean
+  unit_amount: string
+  currency: string
+  access_duration_hours: number | null
+  auto_renew: boolean
+  trial_unit_amount: string | null
+  trial_duration_hours: number | null
+  psps: Record<string, PSPLinkState> | null
+  pending_manual_actions: PendingAction[] | null
+  created_at: string
+  updated_at: string
+}
+
+export type Product = {
+  id: string
+  catalog_id: string
+  key: string
+  display_name: string
+  description: string
+  entitlements_spec: Record<string, number | null> | null
+  tier_group: string | null
+  tier_rank: number
+  archived: boolean
+  prices: Price[] | null
+  created_at: string
+  updated_at: string
 }
 
 export type ProductAccessCheck = {
@@ -627,22 +659,6 @@ export type ProductAccessList = {
   next_cursor?: string
 }
 
-export type ProductObject = {
-  id: string
-  object: string
-  key: string
-  name: string
-  description: string
-  entitlements_spec?: Record<string, number>
-  tier_group?: string
-  tier_rank: number
-  active: boolean
-  metadata?: Record<string, string>
-  created_at: string
-  updated_at: string
-  prices?: PublicPrice[]
-}
-
 export type ProductSummary = {
   id: string
   key: string
@@ -671,21 +687,6 @@ export type ProviderCutoverRequest = {
   target_payment_method_id?: string
   expected_source_psp_id?: string
   expected_target_psp_id?: string
-}
-
-export type PublicPrice = {
-  id: string
-  key?: string
-  object: string
-  unit_amount: string
-  currency: string
-  type?: string
-  recurring?: PriceRecurrence
-  product: string
-  active: boolean
-  providers?: string[]
-  metadata?: Record<string, string>
-  created_at: string
 }
 
 export type ReplacePaymentMethodCardParams = {

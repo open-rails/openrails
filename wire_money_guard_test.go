@@ -127,7 +127,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/reconcile/stripe.go:func normalizeStripeRefund.Amount amount":                                                  notHTTPProviderWire,
 	"internal/reconcile/stripe.go:stripeSubscriptionJSON.UnitAmount unit_amount":                                             notHTTPProviderWire,
 	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                   notHTTPInternalRow,
-	"internal/service/service_definition_catalog_admin.go:CatalogPage.Limit limit":                                           notMoneyPageSize,
 
 	"billing/invoices.go:Invoice.Tax tax": notMoneyTaxFacts,
 
@@ -137,7 +136,7 @@ var pendingNumericMoney = map[string]string{
 
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
-	"billing/catalog_page.go:CatalogPage.Limit limit": notMoneyPageSize,
+	"billing/resource_offers.go:OfferListParams.Limit limit": notMoneyPageSize,
 
 	"billing/subscriptions.go:Page.Limit limit": notMoneyPageSize,
 }

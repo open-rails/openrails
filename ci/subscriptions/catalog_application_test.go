@@ -43,13 +43,13 @@ products:
 	}
 	apply := func(tp topology, params *catalog.Application) *billing.CatalogApplicationReceipt {
 		t.Helper()
-		receipt, err := w.client[tp].Catalog.Apply(t.Context(), params)
+		receipt, err := w.client[tp].ApplyCatalog(t.Context(), params)
 		require.NoError(t, err)
 		return receipt
 	}
 	revision := func() int64 {
 		t.Helper()
-		r, err := w.client[embedded].Catalog.Revision(t.Context())
+		r, err := w.client[embedded].GetCatalogRevision(t.Context())
 		require.NoError(t, err)
 		return r.Revision
 	}
@@ -82,16 +82,16 @@ products:
 	require.Equal(t, first.AppliedRevision, edited.BaseRevision)
 	require.NotEqual(t, first.ApplicationID, edited.ApplicationID)
 	require.Equal(t, 1, edited.PricesChanged)
-	price, err := w.client[embedded].Prices.RetrieveByKey(t.Context(), key+"-monthly")
+	price, err := w.client[embedded].GetPriceByKey(t.Context(), key+"-monthly")
 	require.NoError(t, err)
 	require.EqualValues(t, 12_000_000, price.UnitAmount)
 
 	// A console edit outside any application moves the revision; the next boot
 	// applies the unchanged file again and the file wins.
-	product, err := w.client[embedded].Products.RetrieveByKey(t.Context(), key)
+	product, err := w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
 	console := "Console title"
-	_, err = w.client[remote].Products.Update(t.Context(), product.ID, &billing.ProductUpdateParams{DisplayName: &console})
+	_, err = w.client[remote].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value(console)})
 	require.NoError(t, err)
 	require.Greater(t, revision(), edited.AppliedRevision)
 	boot := apply(embedded, file("Gold", 12_000_000))
@@ -99,7 +99,7 @@ products:
 	require.False(t, boot.Replayed)
 	require.Equal(t, 1, boot.ProductsChanged)
 	require.Zero(t, boot.PricesChanged)
-	product, err = w.client[embedded].Products.RetrieveByKey(t.Context(), key)
+	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, "Gold", product.DisplayName)
 	require.True(t, apply(remote, file("Gold", 12_000_000)).Replayed, "converged again, the file replays")
@@ -112,7 +112,7 @@ products:
 	}
 	conflict := func(params *catalog.Application, code string) {
 		t.Helper()
-		_, err := w.client[remote].Catalog.Apply(t.Context(), params)
+		_, err := w.client[remote].ApplyCatalog(t.Context(), params)
 		var status *billing.StatusError
 		require.True(t, errors.As(err, &status), "%v", err)
 		require.Equal(t, http.StatusConflict, status.Status)
@@ -138,7 +138,7 @@ products:
 	}
 	half := file("Gold", 12_000_000)
 	half.ApplicationID = "half-" + key
-	_, err = w.client[embedded].Catalog.Apply(t.Context(), half)
+	_, err = w.client[embedded].ApplyCatalog(t.Context(), half)
 	require.ErrorContains(t, err, "go together")
 	require.Equal(t, base+1, revision(), "refusals and replays change nothing")
 
@@ -147,7 +147,7 @@ products:
 	require.True(t, strings.HasPrefix(after.ApplicationID, "sha256:"))
 	require.False(t, after.Replayed)
 	require.Equal(t, base+1, after.BaseRevision)
-	product, err = w.client[embedded].Products.RetrieveByKey(t.Context(), key)
+	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, "Gold", product.DisplayName)
 }

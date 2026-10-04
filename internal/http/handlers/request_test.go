@@ -19,7 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -170,53 +169,6 @@ func TestPaymentMethodHealth(t *testing.T) {
 			require.Equal(t, tc.outcome, *h.LastChargeOutcome)
 		}
 	}
-}
-
-func TestUsageMeterAndRateCardInput(t *testing.T) {
-	spec, err := usageMeterSpec(" Storage.GB ", AdminUsageMeterRequest{
-		EventType: " storage.used ", ValueProperty: " bytes ", Aggregation: " SUM ", Unit: " GB ",
-		GroupBy: map[string]string{" region ": " metadata.region "},
-	})
-	require.NoError(t, err)
-	require.Equal(t, billingservice.UsageMeterSpec{
-		Key: "storage-gb", EventType: "storage.used", ValueProperty: "bytes", Aggregation: catalog.AggregationSum,
-		Unit: "GB", GroupBy: map[string]string{"region": "metadata.region"},
-	}, spec)
-	_, err = usageMeterSpec("requests", AdminUsageMeterRequest{Aggregation: catalog.AggregationMax})
-	require.EqualError(t, err, "usage meter aggregation must be sum or count")
-
-	product := uuid.New()
-	price := func(currency string) catalog.RatePrice {
-		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: currency, PerUnit: &catalog.PerUnitPrice{UnitAmount: 100}}
-	}
-	meter := billingservice.UsageMeterDTO{Key: "storage-gb", GroupBy: map[string]string{"region": "metadata.region"}}
-	input, err := defaultUsageRateCardInput(meter, AdminDefaultUsageRateCardRequest{
-		ProductID: billing.ProductID(product).String(), Filter: map[string][]string{" region ": {" eu ", "eu"}}, Price: price("usd"),
-	})
-	require.NoError(t, err)
-	require.Equal(t, product, *input.ProductID)
-	require.Equal(t, "storage-gb", input.MeterKey)
-	require.Equal(t, "USD", input.Price.Currency)
-	require.Equal(t, map[string][]string{"region": {"eu"}}, input.Filter)
-
-	_, err = defaultUsageRateCardInput(meter, AdminDefaultUsageRateCardRequest{ProductID: billing.ProductID(product).String(), Price: price("GBP")})
-	require.EqualError(t, err, `money: unknown currency "GBP"`)
-	_, err = defaultUsageRateCardInput(meter, AdminDefaultUsageRateCardRequest{ProductID: "nope", Price: price("USD")})
-	require.EqualError(t, err, "product_id required")
-}
-
-// Metering catalog writes follow the catalog policy, never the secret backend.
-func TestAdminCatalogOwnership(t *testing.T) {
-	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
-		for _, allow := range []bool{false, true} {
-			r, _ := newTestRequest(http.MethodGet, "/", nil, &app.Runtime{Config: &config.Config{SecretBackend: backend, AllowCatalogUpdates: allow}})
-			meter := adminUsageMeterDTO(r, billingservice.UsageMeterDTO{Key: "requests"})
-			require.Equal(t, []any{"database", allow}, []any{meter.ConfigurationSource, meter.WritesAllowed}, backend)
-		}
-	}
-	r, _ := newTestRequest(http.MethodGet, "/", nil, nil)
-	source, allow := adminCatalogOwnership(r)
-	require.Equal(t, []any{"database", false}, []any{source, allow})
 }
 
 func TestUsageWindow(t *testing.T) {

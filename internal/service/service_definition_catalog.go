@@ -23,53 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// ProviderStatus is the per-provider attachment state surfaced in admin
-// responses. Issue #208 defines these four values.
-type ProviderStatus = billing.ProviderStatus
-
-const (
-	ProviderStatusLinked            ProviderStatus = "linked"
-	ProviderStatusPendingManualLink ProviderStatus = "pending_manual_link"
-	ProviderStatusSyncDisabled      ProviderStatus = "sync_disabled"
-	ProviderStatusError             ProviderStatus = "error"
-)
-
-// SyncStatus is the per-provider freshness/drift state. Populated only by
-// paths that perform a live retrieve (?verify=true reads or reconcile);
-// otherwise defaults to "unknown".
-type SyncStatus = billing.SyncStatus
-
-const (
-	SyncStatusUnknown      SyncStatus = "unknown"
-	SyncStatusInSync       SyncStatus = "in_sync"
-	SyncStatusDrifted      SyncStatus = "drifted"
-	SyncStatusMissing      SyncStatus = "missing"
-	SyncStatusNeverSynced  SyncStatus = "never_synced"
-	SyncStatusSyncDisabled SyncStatus = "sync_disabled"
-)
-
-// ProviderState is the uniform per-provider response surface. Replaces the
-// pre-#208 stripe-specific StripeRailState.
-type ProviderState = billing.ProviderState
-
-// DriftField describes a single divergent field discovered by verify/reconcile.
-// Replaces the pre-#208 RailDriftField (Stripe-only).
-type DriftField = billing.DriftField
-
-// CatalogProduct is the OpenRails-side view of a product. Products are pure
-// OpenRails concepts and have NO direct provider linkage in the user-facing
-// shape — provider state lives on CatalogPrice (issue #208).
-//
-// The Stripe Product ID some prices carry is purely an artifact of Stripe's
-// requirement that every Stripe Price attach to a Stripe Product; it is
-// denormalized onto price rows and managed implicitly by price-level
-// operations. There is no product-level provider field, no product-level
-// verify/reconcile, no product-level reconcile route.
-type CatalogProduct = billing.CatalogProduct
-
-type CreateProductRequest = billing.CreateProductRequest
-
-func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
+func (s *Service) CreateProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
@@ -80,12 +34,12 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if owned && !req.CatalogID.IsZero() && req.CatalogID.UUID() != *catalogscope.QueryID(ctx) {
 		return nil, catalog.ErrOwnerScope
 	}
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.createProduct(ctx, req)
 	})
 }
 
-func (s *Service) createProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
+func (s *Service) createProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -136,14 +90,63 @@ func (s *Service) createProduct(ctx context.Context, req CreateProductRequest) (
 // ErrProductTierGroupInUse reports a product identity conflict with live subscriptions.
 var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 
-// UpdateProductRequest is a field-selective patch. Nil scalar pointers (including
-// JSON null) leave fields unchanged; an empty description clears it. Definitions
-// change only with their Set flag: true plus nil sets SQL NULL, true plus an empty
-// map sets an empty definition, and false omits the field regardless of its value.
-// Same-field concurrent patches use last-committed-write wins.
-type UpdateProductRequest = billing.UpdateProductRequest
+// UpdateProductRequest is the engine's product patch: a nil field is left
+// as it is, and a Set flag writes its nullable field (nil clears it). An
+// empty description clears it. SkipRailSync keeps the change local; the
+// catalog application reconciles PSPs itself.
+type UpdateProductRequest struct {
+	DisplayName      *string
+	Description      *string
+	EntitlementsSpec map[string]*int
+	SetEntitlements  bool
+	TierGroup        *string
+	SetTierGroup     bool
+	TierRank         *int
+	Archived         *bool
+	SkipRailSync     bool
+}
 
-func (s *Service) UpdateProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
+// productPatch reads a merge patch: null clears description,
+// entitlements_spec and tier_group, and is refused elsewhere.
+func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
+	var req UpdateProductRequest
+	if p.DisplayName.Null || p.TierRank.Null || p.Archived.Null {
+		return req, apperr.Invalidf("display_name, tier_rank and archived cannot be null")
+	}
+	if p.DisplayName.Set {
+		req.DisplayName = &p.DisplayName.Value
+	}
+	if p.Description.Set {
+		req.Description = &p.Description.Value
+	}
+	if p.EntitlementsSpec.Set {
+		req.SetEntitlements, req.EntitlementsSpec = true, p.EntitlementsSpec.Value
+	}
+	if p.TierGroup.Set {
+		req.SetTierGroup = true
+		if !p.TierGroup.Null {
+			req.TierGroup = &p.TierGroup.Value
+		}
+	}
+	if p.TierRank.Set {
+		req.TierRank = &p.TierRank.Value
+	}
+	if p.Archived.Set {
+		req.Archived = &p.Archived.Value
+	}
+	return req, nil
+}
+
+// UpdateProduct applies a merge patch to a product.
+func (s *Service) UpdateProduct(ctx context.Context, id billing.ProductID, params billing.UpdateProductParams) (*billing.Product, error) {
+	req, err := productPatch(params)
+	if err != nil {
+		return nil, err
+	}
+	return s.patchProduct(ctx, id, req)
+}
+
+func (s *Service) patchProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*billing.Product, error) {
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
@@ -151,12 +154,12 @@ func (s *Service) UpdateProduct(ctx context.Context, id billing.ProductID, req U
 	if owned && (req.EntitlementsSpec != nil || req.SetEntitlements || req.TierGroup != nil || req.SetTierGroup || req.TierRank != nil || req.SkipRailSync) {
 		return nil, catalog.ErrOwnerOperation
 	}
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.updateProduct(ctx, id, req)
 	})
 }
 
-func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
+func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*billing.Product, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -282,38 +285,10 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 	return ""
 }
 
-func productToCatalogProduct(p *models.Product) *CatalogProduct {
-	return &CatalogProduct{
-		ID:               billing.ProductID(p.ID),
-		CatalogID:        billing.CatalogID(p.CatalogID),
-		Key:              p.Key,
-		DisplayName:      p.DisplayName,
-		Description:      p.Description,
-		EntitlementsSpec: p.EntitlementsSpec,
-		TierGroup:        p.TierGroup,
-		TierRank:         p.TierRank,
-		Archived:         p.Archived,
-		CreatedAt:        p.CreatedAt,
-		UpdatedAt:        p.UpdatedAt,
-	}
+func productToCatalogProduct(p *models.Product) *billing.Product {
+	v := p.View()
+	return &v
 }
-
-// CatalogPrice is the OpenRails-side view of a price. The declarative
-// `providers` shape is the only rail configuration surface.
-type CatalogPrice = billing.CatalogPrice
-
-// CreatePriceRequest is the declarative-shape create request introduced in
-// issue #208. Callers state which providers a price should exist in (Providers)
-// and, optionally, pre-supply provider-specific link ids (ProviderLinks). For
-// each provider:
-//   - if a non-empty link map is supplied: the adapter validates and stores it.
-//   - if no link is supplied and the adapter SupportsAutoCreate: the adapter
-//     mints a new external object (today: stripe only).
-//   - if no link is supplied and the adapter does not SupportsAutoCreate: the
-//     price is created in OpenRails with a pending_manual_link status for
-//     that provider; the response carries a PendingAction telling the operator
-//     what to do.
-type CreatePriceRequest = billing.CreatePriceRequest
 
 // priceNaturalKeyNull is the canonical encoding of a SQL NULL price field for
 // id derivation (#662). The unique_prices_product_amount_window index is
@@ -357,7 +332,7 @@ func priceDeterministicID(productID uuid.UUID, amount int64, currency string, ac
 // RecurringCycleDays returns the recurring billing cadence in WHOLE DAYS for an
 // auto-renewing request, or nil for a one-off/durable price (#622). The window
 // is in hours; providers bill in days, so the cadence is hours/24.
-func priceRequestCycleDays(req CreatePriceRequest) *int {
+func priceRequestCycleDays(req billing.CreatePriceParams) *int {
 	if !req.AutoRenew || req.AccessDurationHours == nil {
 		return nil
 	}
@@ -365,7 +340,7 @@ func priceRequestCycleDays(req CreatePriceRequest) *int {
 	return &days
 }
 
-func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
@@ -393,14 +368,14 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		return nil, apperr.Invalidf("exactly one of product_id, product_key and product_data is required")
 	}
 	if req.ProductData != nil {
-		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
 			return scoped.createPrice(ctx, req, owned)
 		})
 	}
 	return s.createPrice(ctx, req, owned)
 }
 
-func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned bool) (*CatalogPrice, error) {
+func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams, owned bool) (*billing.Price, error) {
 	if req.ProductData != nil {
 		return s.createPriceWithProduct(ctx, req)
 	}
@@ -449,8 +424,8 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 	}
 
 	var rails map[string]map[string]string
-	var providerStates map[string]ProviderState
-	var pending []PendingAction
+	var providerStates map[string]billing.PSPLinkState
+	var pending []billing.PendingAction
 	if prepared, ok := s.catalogPreparedLinks[req.Key]; s.localCatalogOnly && ok {
 		rails = cloneRails(prepared)
 	} else {
@@ -514,7 +489,7 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 	// alone can only see what's in the row; the dispatcher also knows which
 	// providers came back as pending_manual_link and why.
 	if len(providerStates) > 0 {
-		out.Providers = providerStates
+		out.PSPs = providerStates
 	}
 	if len(pending) > 0 {
 		out.PendingManualActions = pending
@@ -522,17 +497,56 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 	return out, nil
 }
 
-// UpdatePriceRequest is the declarative-shape PATCH for a price. Add or rotate
-// PSP links via `psp_links` (partial merge into the existing map). To clear a
-// PSP entirely, supply an empty inner map for it and set ReplacePSPLinks=true.
-type UpdatePriceRequest = billing.UpdatePriceRequest
+// UpdatePriceRequest is the engine's price patch: nil fields are left as
+// they are. PSPLinks merges into the price's links; an empty link unlinks
+// its PSP. SkipRailSync keeps the change local.
+type UpdatePriceRequest struct {
+	Key          *string
+	Archived     *bool
+	PSPLinks     map[string]map[string]string
+	SkipRailSync bool
+}
 
-func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
+// pricePatch reads a merge patch: a PSP link set to null is unlinked.
+func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
+	var req UpdatePriceRequest
+	if p.Key.Null || p.Archived.Null {
+		return req, apperr.Invalidf("key and archived cannot be null")
+	}
+	if p.Key.Set {
+		req.Key = &p.Key.Value
+	}
+	if p.Archived.Set {
+		req.Archived = &p.Archived.Value
+	}
+	if p.PSPLinks != nil {
+		req.PSPLinks = make(map[string]map[string]string, len(p.PSPLinks))
+		for psp, link := range p.PSPLinks {
+			if link.Null || len(link.Value) == 0 {
+				req.PSPLinks[psp] = map[string]string{}
+				continue
+			}
+			req.PSPLinks[psp] = link.Value
+		}
+	}
+	return req, nil
+}
+
+// UpdatePrice applies a merge patch to a price.
+func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams) (*billing.Price, error) {
+	req, err := pricePatch(params)
+	if err != nil {
+		return nil, err
+	}
+	return s.patchPrice(ctx, id, req)
+}
+
+func (s *Service) patchPrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*billing.Price, error) {
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if owned && (req.PSPLinks != nil || req.ReplacePSPLinks || req.SkipRailSync) {
+	if owned && (req.PSPLinks != nil || req.SkipRailSync) {
 		return nil, catalog.ErrOwnerOperation
 	}
 	if err := s.checkCatalogWritePolicy(ctx); err != nil {
@@ -547,7 +561,7 @@ func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, req Updat
 	return s.updatePrice(ctx, id, req)
 }
 
-func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*billing.Price, error) {
 
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -557,16 +571,15 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 		return nil, apperr.Invalidf("price_id required")
 	}
 	priceID := id.UUID()
-	// Declarative PSP link rotation. ReplacePSPLinks=true overwrites the
-	// entire psp_links map; otherwise the supplied entries are merged
-	// into the existing map (partial PATCH). Empty inner maps clear a provider.
+	// Declarative PSP link rotation: the supplied entries merge into the
+	// existing links; an empty link clears its PSP.
 	existing, getErr := prices.GetByID(ctx, priceID)
 	if getErr != nil {
 		return nil, priceLookup(getErr)
 	}
 	var preparedProduct *models.Product
 	var next map[string]map[string]string
-	var pending []PendingAction
+	var pending []billing.PendingAction
 	if req.PSPLinks != nil {
 		// The existing price + its product give the substance (product key + money terms)
 		// each adapter's Attach validates the supplied link against. Fetch it
@@ -587,13 +600,9 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 		if ctxErr != nil {
 			return nil, ctxErr
 		}
-		if req.ReplacePSPLinks {
+		next = cloneRails(existing.PSPLinks)
+		if next == nil {
 			next = map[string]map[string]string{}
-		} else {
-			next = cloneRails(existing.PSPLinks)
-			if next == nil {
-				next = map[string]map[string]string{}
-			}
 		}
 		adapters := s.providerAdapters()
 		accountRails := s.merchantAccountRails(ctx)
@@ -623,13 +632,12 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 			ids, attachErr := adapter.Attach(ctx, normalized, pctx)
 			if errors.Is(attachErr, errPendingManualLink) || errors.Is(attachErr, errRemoteWritesDisabled) {
 				template := adapter.PendingActionTemplate(priceID)
-				if template.Provider == "" {
-					template.Provider = rail
+				if template.PSP == "" {
+					template.PSP = rail
 				}
 				pending = append(pending, template)
 				// The rotation did NOT take effect. Keep the previously stored
-				// (verified) link so a ReplacePSPLinks pass never deletes it
-				// while the response only reports a pending action.
+				// (verified) link while the response reports a pending action.
 				if prev, ok := existing.PSPLinks[psp]; ok {
 					if _, kept := next[psp]; !kept {
 						next[psp] = maps.Clone(prev)
@@ -677,6 +685,11 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 				return nil, priceLookup(err)
 			}
 		}
+		if req.Key != nil {
+			if _, err := scoped.setPriceKey(ctx, id, *req.Key); err != nil {
+				return nil, err
+			}
+		}
 		if req.Archived != nil {
 			// This method propagates once, after its complete local commit and
 			// only when SkipRailSync permits it; nested lifecycle work is local.
@@ -721,45 +734,15 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	return out, nil
 }
 
-// priceToCatalogPrice maps the DB row into the response shape, including the
-// per-provider Providers map. SyncStatus defaults to "unknown" — only paths
-// that perform a live retrieve (?verify=true, reconcile) populate richer
-// values.
-func priceToCatalogPrice(p *models.Price) *CatalogPrice {
-	cp := &CatalogPrice{
-		ID:                  billing.PriceID(p.ID),
-		Key:                 p.Key,
-		ProductID:           billing.ProductID(p.ProductID),
-		Archived:            p.Archived,
-		UnitAmount:          p.Amount,
-		Currency:            p.Currency,
-		AccessDurationHours: p.AccessDurationHours,
-		AutoRenew:           p.AutoRenew,
-		TrialUnitAmount:     p.TrialUnitAmount,
-		TrialDurationHours:  p.TrialDurationHours,
-		CreatedAt:           p.CreatedAt,
-		UpdatedAt:           p.UpdatedAt,
-	}
-	if len(p.PSPLinks) == 0 {
-		return cp
-	}
-	cp.Providers = make(map[string]ProviderState, len(p.PSPLinks))
-	for name, ids := range p.PSPLinks {
-		if len(ids) == 0 {
-			continue
-		}
-		state := ProviderState{
-			Status:     ProviderStatusLinked,
-			IDs:        copyStringMap(ids),
-			LookupKey:  strings.TrimSpace(ids[providerLookupKey]),
-			SyncStatus: SyncStatusUnknown,
-		}
-		cp.Providers[name] = state
-	}
-	return cp
+// priceToCatalogPrice maps the DB row into the response shape, including its
+// state on each linked PSP. SyncStatus is unknown until a verifying read or a
+// reconciliation fills it.
+func priceToCatalogPrice(p *models.Price) *billing.Price {
+	v := p.View()
+	return &v
 }
 
-func validateCatalogPriceTerms(req CreatePriceRequest) error {
+func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 	if req.UnitAmount < 0 {
 		return apperr.Invalidf("unit_amount must be non-negative")
 	}

@@ -22,12 +22,12 @@ import (
 )
 
 type CatalogMeterSpec struct {
-	Key           string            `json:"key"`
-	EventType     string            `json:"event_type,omitempty"`
-	ValueProperty string            `json:"value_property,omitempty"`
+	Key           string              `json:"key"`
+	EventType     string              `json:"event_type,omitempty"`
+	ValueProperty string              `json:"value_property,omitempty"`
 	Aggregation   catalog.Aggregation `json:"aggregation,omitempty"`
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
+	Unit          string              `json:"unit,omitempty"`
+	GroupBy       map[string]string   `json:"group_by,omitempty"`
 }
 
 type CatalogRateCardSpec struct {

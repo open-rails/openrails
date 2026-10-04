@@ -22,10 +22,11 @@ type offerCursor struct {
 	PriceID  uuid.UUID `json:"price_id"`
 }
 
-// ListOffersForEntitlements is a bounded exact reverse catalog lookup: one
-// query returns a page of offers for every requested key. Access is checked
-// separately against retained grants, never against this live catalog.
-func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []string, params billing.OfferListParams) (map[string]billing.OfferList, error) {
+// ListOffers is a bounded exact reverse catalog lookup: one query returns a
+// page of offers for every requested entitlement. Access is checked separately
+// against retained grants, never against this live catalog.
+func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListParams) (billing.OfferPages, error) {
+	keys := params.Entitlements
 	if len(keys) > billing.MaxEntitlementChecks {
 		return nil, apperr.Invalidf("at most 100 entitlements are allowed")
 	}
@@ -46,7 +47,7 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]billing.OfferList, len(keys))
+	result := make(billing.OfferPages, len(keys))
 	scopes := make(map[string]string, len(keys))
 	arg := gen.ListOffersForEntitlementsParams{MerchantID: mid.UUID(), CatalogID: catalogID, Kind: string(params.Kind), PreferredCurrency: preferred, PageLimit: int32(params.Limit + 1)}
 	for _, key := range keys {
@@ -56,7 +57,7 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 		if _, seen := result[key]; seen {
 			continue
 		}
-		result[key] = billing.OfferList{Data: []billing.CatalogOffer{}}
+		result[key] = billing.ListPage[billing.Offer]{Items: []billing.Offer{}}
 		rawScope, _ := json.Marshal([]any{mid.String(), catalogID, key, params.Kind, preferred})
 		digest := sha256.Sum256(rawScope)
 		scopes[key] = hex.EncodeToString(digest[:])
@@ -87,15 +88,14 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 	last := make(map[string]offerCursor, len(arg.Entitlements))
 	for _, row := range rows {
 		page := result[row.Entitlement]
-		if len(page.Data) == params.Limit {
-			page.HasMore = true
+		if len(page.Items) == params.Limit {
 			raw, _ := json.Marshal(last[row.Entitlement])
-			page.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+			page.Next = base64.RawURLEncoding.EncodeToString(raw)
 			result[row.Entitlement] = page
 			continue
 		}
 		last[row.Entitlement] = offerCursor{Scope: scopes[row.Entitlement], Currency: row.Currency, PriceID: row.PriceID}
-		offer := billing.CatalogOffer{Kind: params.Kind, ProductID: billing.ProductID(row.ProductID).String(), ProductKey: row.ProductKey, ProductName: row.ProductName, PriceID: billing.PriceID(row.PriceID).String(), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency, AutoRenew: row.AutoRenew}
+		offer := billing.Offer{Kind: params.Kind, ProductID: billing.ProductID(row.ProductID), ProductKey: row.ProductKey, ProductDisplayName: row.ProductName, PriceID: billing.PriceID(row.PriceID), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency, AutoRenew: row.AutoRenew}
 		if row.AccessDurationHours != nil {
 			value := int(*row.AccessDurationHours)
 			offer.AccessDurationHours = &value
@@ -105,7 +105,7 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 				return nil, err
 			}
 		}
-		page.Data = append(page.Data, offer)
+		page.Items = append(page.Items, offer)
 		result[row.Entitlement] = page
 	}
 	return result, nil

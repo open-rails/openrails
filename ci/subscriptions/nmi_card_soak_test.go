@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -145,7 +146,7 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 	product := w.subscription(embedded, e.sub).ProductID
 	for i, tp := range []topology{embedded, remote} {
 		group, rank := fmt.Sprintf("g%d-%s", i, uuid.NewString()[:6]), i+1
-		updated, err := w.client[tp].Products.Update(t.Context(), product, &billing.ProductUpdateParams{TierGroup: &group, SetTierGroup: true, TierRank: &rank})
+		updated, err := w.client[tp].UpdateProduct(t.Context(), typedProductID(t, product), billing.UpdateProductParams{TierGroup: catalog.Value(group), TierRank: catalog.Value(rank)})
 		require.NoError(t, err, "a live product takes a tier group")
 		require.NotNil(t, updated.TierGroup)
 		require.Equal(t, group, *updated.TierGroup)
@@ -155,10 +156,10 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 	}
 
 	other := w.membership("content:other", 4_990_000)
-	e.c.subscribeAgain(embedded, "nmi", other.ID, "content:other", e.method)
+	e.c.subscribeAgain(embedded, "nmi", other.ID.String(), "content:other", e.method)
 	group := "joined-" + uuid.NewString()[:6]
-	_, err := w.client[remote].Products.Update(t.Context(), product, &billing.ProductUpdateParams{TierGroup: &group, SetTierGroup: true})
+	_, err := w.client[remote].UpdateProduct(t.Context(), typedProductID(t, product), billing.UpdateProductParams{TierGroup: catalog.Value(group)})
 	require.NoError(t, err)
-	_, err = w.client[remote].Products.Update(t.Context(), other.ProductID, &billing.ProductUpdateParams{TierGroup: &group, SetTierGroup: true})
+	_, err = w.client[remote].UpdateProduct(t.Context(), other.ProductID, billing.UpdateProductParams{TierGroup: catalog.Value(group)})
 	requireCode(t, err, http.StatusConflict, "product_tier_group_conflict")
 }

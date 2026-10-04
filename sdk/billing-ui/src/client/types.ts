@@ -20,6 +20,7 @@ export const pageSchema = <T extends z.ZodType>(item: T) =>
     limit: z.number().nullish(),
     offset: z.number().nullish(),
     has_more: z.boolean().nullish(),
+    next_cursor: z.string().nullish(),
   })
 
 export interface Page<T> {
@@ -28,6 +29,8 @@ export interface Page<T> {
   limit?: number | null
   offset?: number | null
   has_more?: boolean | null
+  /** The next page's cursor; null on the last page of a cursor list. */
+  next_cursor?: string | null
 }
 
 /** One page of a cursor list; `next_cursor` is null on the last page. */
@@ -183,6 +186,57 @@ export const paymentMethodSchema = z.object({
 })
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>
 
+/** A price's state on one PSP; public routes carry the status only. */
+export const pspLinkStateSchema = z.object({
+  /** `linked | pending_manual_link | sync_disabled | error` */
+  status: z.string(),
+  ids: z.record(z.string(), z.string()).nullish(),
+  sync_status: z.string().nullish(),
+})
+
+/**
+ * A catalog price (`GET /prices`, embedded in a product): `unit_amount` of
+ * `currency` for `access_duration_hours` of access (null: for good),
+ * renewing when `auto_renew`.
+ */
+export const priceSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  product_id: z.string(),
+  archived: z.boolean(),
+  unit_amount: amount,
+  currency: z.string(),
+  access_duration_hours: z.number().nullable(),
+  auto_renew: z.boolean(),
+  trial_unit_amount: amount.nullable(),
+  trial_duration_hours: z.number().nullable(),
+  /** Keyed by PSP key. */
+  psps: z.record(z.string(), pspLinkStateSchema).nullish(),
+  created_at: time,
+  updated_at: time,
+})
+export type Price = z.infer<typeof priceSchema>
+
+export const productSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  display_name: z.string(),
+  description: z.string(),
+  /** Keyed by the entitlements the product grants. */
+  entitlements_spec: z.record(z.string(), z.number().nullable()).nullish(),
+  /** Products sharing a group are tiers a subscription can change between. */
+  tier_group: z.string().nullable(),
+  tier_rank: z.number(),
+  archived: z.boolean(),
+  prices: z
+    .array(priceSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+  created_at: time,
+  updated_at: time,
+})
+export type Product = z.infer<typeof productSchema>
+
 export const paymentSchema = z.object({
   id: z.string(),
   /** `charge | refund | chargeback | dispute_reversal` */
@@ -248,46 +302,6 @@ export const currencyRegistrySchema = z.object({
   currencies: z.array(currencySchema),
 })
 
-/** A catalog price (`GET /prices`, embedded in `GET /products`). */
-export const priceSchema = z.object({
-  id: z.string(),
-  key: z.string().nullish(),
-  unit_amount: amount,
-  currency: z.string(),
-  /** `one_time | recurring` */
-  type: z.string().nullish(),
-  /** Exact hours, e.g. `"720h"`; absent on a one-time price. */
-  recurring: z.object({ interval: z.string() }).nullish(),
-  /** Product id. */
-  product: z.string().nullish(),
-  active: z.boolean().nullish(),
-  /** PSP keys the price is linked to. */
-  providers: z.array(z.string()).nullish(),
-  metadata: z.record(z.string(), z.string()).nullish(),
-  created_at: time.nullish(),
-})
-export type Price = z.infer<typeof priceSchema>
-
-export const productSchema = z.object({
-  id: z.string(),
-  key: z.string().nullish(),
-  name: z.string(),
-  description: z.string().nullish(),
-  /** Keyed by the entitlements the product grants. */
-  entitlements_spec: z.record(z.string(), z.number().nullable()).nullish(),
-  /** Products sharing a group are tiers a subscription can change between. */
-  tier_group: z.string().nullish(),
-  tier_rank: z.number().nullish(),
-  active: z.boolean().nullish(),
-  metadata: z.record(z.string(), z.string()).nullish(),
-  created_at: time.nullish(),
-  updated_at: time.nullish(),
-  prices: z
-    .array(priceSchema)
-    .nullish()
-    .transform((v) => v ?? []),
-})
-export type Product = z.infer<typeof productSchema>
 
 export const tierChangePreviewSchema = z.object({
   /** `upgrade | downgrade` */

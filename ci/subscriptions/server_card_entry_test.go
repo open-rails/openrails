@@ -168,7 +168,7 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	_, message = errorOf(body)
 	require.Contains(t, message, refusal)
 
-	status, body = w.relayPay(c, price.ID, "refused-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
+	status, body = w.relayPay(c, price.ID.String(), "refused-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	_, message = errorOf(body)
 	require.Contains(t, message, refusal)
@@ -208,7 +208,7 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 		raw, _ := json.Marshal(out)
 		require.NotContains(t, string(raw), "4111", "%s: a refusal never echoes the card", name)
 	}
-	status, out := w.relayPay(c, price.ID, "both-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa), "payment_token": "tok-1234"})
+	status, out := w.relayPay(c, price.ID.String(), "both-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa), "payment_token": "tok-1234"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 
 	// A Client re-encodes a card as its redaction, so it refuses to send one.
@@ -216,7 +216,7 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 		typed, err := billing.NewCard(entryVisa, 10, 2027, entryCVC)
 		require.NoError(t, err)
 		_, err = w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "client-" + uuid.NewString(),
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: "client-" + uuid.NewString(),
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", Card: typed},
 		})
 		require.ErrorIs(t, err, billing.ErrInvalid, string(tp))
@@ -435,7 +435,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 
 	// Checkout: a one-time purchase with a new card, in one hosted pay call.
 	post := w.permanent("content:post")
-	status, paid := w.relayPay(c, post.ID, "pay-"+uuid.NewString(), map[string]any{"card": entryCard(entryMastercard)})
+	status, paid := w.relayPay(c, post.ID.String(), "pay-"+uuid.NewString(), map[string]any{"card": entryCard(entryMastercard)})
 	require.Equal(t, http.StatusOK, status, "%v", paid)
 	require.Equal(t, "succeeded", unwrap(paid)["status"], "%v", paid)
 	w.settle()
@@ -455,7 +455,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	// Subscription start with a new card, then a renewal on the vaulted card.
 	member := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)
-	status, enrolled := w.relayPay(member, price.ID, "sub-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
+	status, enrolled := w.relayPay(member, price.ID.String(), "sub-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusOK, status, "%v", enrolled)
 	require.Equal(t, "succeeded", unwrap(enrolled)["status"], "%v", enrolled)
 	w.settle()
@@ -485,7 +485,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	// the firewall refuses and one lost in transit.
 	declined := w.newCustomer()
 	w.nmi.Issue(entryVisa, card{Decline: "200"})
-	status, refusedPay := w.relayPay(declined, post.ID, "declined-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
+	status, refusedPay := w.relayPay(declined, post.ID.String(), "declined-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", refusedPay)
 	w.nmi.Issue(entryVisa, card{Decline: "vault"})
 	status, body := declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})

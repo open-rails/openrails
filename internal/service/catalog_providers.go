@@ -27,15 +27,10 @@ import (
 // This file defines the small interface every catalog provider implements, the
 // dispatch helpers that route a CreatePrice/UpdatePrice/Verify call across the
 // configured providers, and the shared types those calls speak (mutableUpdate,
-// priceVerifyContext, PendingAction).
+// priceVerifyContext, billing.PendingAction).
 //
 // Each provider lives in its own catalog_provider_<name>.go file and contributes
 // one implementation of providerAdapter.
-
-// PendingAction describes a manual step the operator must complete to bring a
-// pending_manual_link provider to linked status. Surfaced on CreatePrice and on
-// GetPrice/Reconcile responses when at least one provider is still pending.
-type PendingAction = billing.PendingAction
 
 // providerLookupKey is the conventional key under which an adapter stores its
 // canonical lookup key on the rails[provider] map (when one exists).
@@ -45,7 +40,7 @@ const providerLookupKey = "lookup_key"
 // errPendingManualLink is the sentinel an adapter returns from AutoCreate when
 // it cannot mint a remote object on its own. The dispatcher catches it and
 // converts the provider's slot to a pending_manual_link status (with the
-// adapter's PendingAction template) rather than failing the whole call.
+// adapter's billing.PendingAction template) rather than failing the whole call.
 var errPendingManualLink = errors.New("provider requires a manual link")
 
 // errProviderNotArmed is a Verify answered without a provider round trip: no
@@ -117,7 +112,7 @@ type providerAdapter interface {
 	// `providers` but did not supply pre-existing IDs. Adapters that cannot
 	// auto-create return errPendingManualLink and the dispatcher converts the
 	// provider's slot to pending_manual_link with the adapter's
-	// PendingAction template (see PendingActionTemplate).
+	// billing.PendingAction template (see PendingActionTemplate).
 	AutoCreate(ctx context.Context, ctxData autoCreateContext) (map[string]string, error)
 
 	// Verify performs a live retrieve against the remote object and computes
@@ -125,8 +120,8 @@ type providerAdapter interface {
 	// in sync), missing=true when the remote object 404s, and any transport /
 	// adapter-specific error. Adapters without a read API return
 	// (nil, false, nil) to signal sync_disabled (the dispatcher maps this to
-	// SyncStatusSyncDisabled).
-	Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) (drift []DriftField, missing bool, err error)
+	// billing.SyncStatusSyncDisabled).
+	Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) (drift []billing.DriftField, missing bool, err error)
 
 	// Update propagates mutable fields to the remote object. Adapters without a
 	// write API return nil (no-op).
@@ -135,9 +130,9 @@ type providerAdapter interface {
 	// PendingActionTemplate returns the manual-action surface for this adapter
 	// when AutoCreate is not supported. Called by the dispatcher to populate
 	// the pending_manual_link state + the response's pending_manual_actions
-	// list. Returning a zero PendingAction means no template (the dispatcher
+	// list. Returning a zero billing.PendingAction means no template (the dispatcher
 	// emits a generic "supply link via PATCH" hint).
-	PendingActionTemplate(priceID uuid.UUID) PendingAction
+	PendingActionTemplate(priceID uuid.UUID) billing.PendingAction
 }
 
 // autoCreateContext is the input to AutoCreate. It carries enough OpenRails-side
@@ -234,23 +229,23 @@ func internalStripeLookupKey(productKey, currency string, unitAmount int64, bill
 //
 // A pending_manual_link result is NOT an error: the price is still created in
 // OpenRails with the corresponding provider slot empty, and the response carries
-// a PendingAction telling the operator what to do.
+// a billing.PendingAction telling the operator what to do.
 //
 // Unknown providers are silently dropped (the same way an unknown rail in
 // rails[] was previously ignored by the catalog layer).
-func (s *Service) resolveProviders(ctx context.Context, product *models.Product, req CreatePriceRequest, priceID uuid.UUID) (
+func (s *Service) resolveProviders(ctx context.Context, product *models.Product, req billing.CreatePriceParams, priceID uuid.UUID) (
 	rails map[string]map[string]string,
-	states map[string]ProviderState,
-	pending []PendingAction,
+	states map[string]billing.PSPLinkState,
+	pending []billing.PendingAction,
 	err error,
 ) {
 	return s.resolveProvidersWithAdapters(ctx, product, req, priceID, s.providerAdapters())
 }
 
-func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *models.Product, req CreatePriceRequest, priceID uuid.UUID, adapters map[string]providerAdapter) (
+func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *models.Product, req billing.CreatePriceParams, priceID uuid.UUID, adapters map[string]providerAdapter) (
 	rails map[string]map[string]string,
-	states map[string]ProviderState,
-	pending []PendingAction,
+	states map[string]billing.PSPLinkState,
+	pending []billing.PendingAction,
 	err error,
 ) {
 	// Build the unique attach set: union of req.PSPs and the keys of
@@ -272,7 +267,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	}
 
 	rails = map[string]map[string]string{}
-	states = map[string]ProviderState{}
+	states = map[string]billing.PSPLinkState{}
 
 	// Sort for deterministic ordering in tests / pending action lists.
 	names := make([]string, 0, len(want))
@@ -388,15 +383,15 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	// mode rather than the provider itself.
 	deferPending := func(t attachTarget, message string) {
 		template := t.adapter.PendingActionTemplate(priceID)
-		if template.Provider == "" {
-			template.Provider = t.rail
+		if template.PSP == "" {
+			template.PSP = t.rail
 		}
 		if message == "" {
 			message = template.Hint
 		}
-		states[t.declared] = ProviderState{
-			Status:     ProviderStatusPendingManualLink,
-			SyncStatus: SyncStatusNeverSynced,
+		states[t.declared] = billing.PSPLinkState{
+			Status:     billing.PSPLinkPendingManualLink,
+			SyncStatus: billing.SyncStatusNeverSynced,
 			Message:    message,
 		}
 		pending = append(pending, template)
@@ -429,11 +424,11 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 			}
 			ids = stampRail(ids, t)
 			rails[t.declared] = ids
-			states[t.declared] = ProviderState{
-				Status:     ProviderStatusLinked,
+			states[t.declared] = billing.PSPLinkState{
+				Status:     billing.PSPLinkLinked,
 				IDs:        copyStringMap(ids),
 				LookupKey:  ids[providerLookupKey],
-				SyncStatus: SyncStatusUnknown,
+				SyncStatus: billing.SyncStatusUnknown,
 			}
 			continue
 		}
@@ -459,11 +454,11 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		default:
 			ids = stampRail(ids, t)
 			rails[t.declared] = ids
-			states[t.declared] = ProviderState{
-				Status:     ProviderStatusLinked,
+			states[t.declared] = billing.PSPLinkState{
+				Status:     billing.PSPLinkLinked,
 				IDs:        copyStringMap(ids),
 				LookupKey:  ids[providerLookupKey],
-				SyncStatus: SyncStatusUnknown,
+				SyncStatus: billing.SyncStatusUnknown,
 			}
 		}
 	}

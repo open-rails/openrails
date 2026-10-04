@@ -31,13 +31,13 @@ type Catalog struct {
 
 func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, merchant solanago.PublicKey) (Catalog, error) {
 	month := 720
-	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", &billing.PriceCreateParams{
+	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", billing.CreatePriceParams{
 		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, AutoRenew: true,
 	})
 	if err != nil {
 		return Catalog{}, err
 	}
-	once, oncePrice, err := product(ctx, c, "e2e-lifetime", "Lifetime pass", &billing.PriceCreateParams{
+	once, oncePrice, err := product(ctx, c, "e2e-lifetime", "Lifetime pass", billing.CreatePriceParams{
 		Key: "e2e-lifetime-once", UnitAmount: 19_990_000, Currency: "USD",
 	})
 	if err != nil {
@@ -56,7 +56,7 @@ func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Nod
 
 // seedCards applies prices only the armed card PSP sells.
 func seedCards(ctx context.Context, c *openrails.Client) (string, string, error) {
-	revision, err := c.Catalog.Revision(ctx)
+	revision, err := c.GetCatalogRevision(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -85,18 +85,18 @@ products:
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := c.Catalog.Apply(ctx, params); err != nil {
+	if _, err := c.ApplyCatalog(ctx, params); err != nil {
 		return "", "", err
 	}
-	once, err := c.Prices.RetrieveByKey(ctx, "e2e-card-once")
+	once, err := c.GetPriceByKey(ctx, "e2e-card-once")
 	if err != nil {
 		return "", "", err
 	}
-	monthly, err := c.Prices.RetrieveByKey(ctx, "e2e-card-monthly")
+	monthly, err := c.GetPriceByKey(ctx, "e2e-card-monthly")
 	if err != nil {
 		return "", "", err
 	}
-	return once.ID, monthly.ID, nil
+	return once.ID.String(), monthly.ID.String(), nil
 }
 
 // seedCrypto applies Solana-sold prices the way a host's catalog does: a
@@ -106,7 +106,7 @@ func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node
 	if err != nil {
 		return "", "", err
 	}
-	revision, err := c.Catalog.Revision(ctx)
+	revision, err := c.GetCatalogRevision(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -139,31 +139,31 @@ products:
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := c.Catalog.Apply(ctx, params); err != nil {
+	if _, err := c.ApplyCatalog(ctx, params); err != nil {
 		return "", "", err
 	}
-	pass, err := c.Prices.RetrieveByKey(ctx, "e2e-crypto-pass")
+	pass, err := c.GetPriceByKey(ctx, "e2e-crypto-pass")
 	if err != nil {
 		return "", "", err
 	}
-	monthly, err := c.Prices.RetrieveByKey(ctx, "e2e-crypto-monthly")
+	monthly, err := c.GetPriceByKey(ctx, "e2e-crypto-monthly")
 	if err != nil {
 		return "", "", err
 	}
-	return pass.ID, monthly.ID, nil
+	return pass.ID.String(), monthly.ID.String(), nil
 }
 
-func product(ctx context.Context, c *openrails.Client, key, name string, price *billing.PriceCreateParams) (string, string, error) {
-	p, err := c.Products.Create(ctx, &billing.ProductCreateParams{Key: key, DisplayName: name, EntitlementsSpec: map[string]*int{key: nil}})
+func product(ctx context.Context, c *openrails.Client, key, name string, price billing.CreatePriceParams) (string, string, error) {
+	p, err := c.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: name, EntitlementsSpec: map[string]*int{key: nil}})
 	if err != nil {
 		return "", "", err
 	}
 	price.ProductID = p.ID
-	pr, err := c.Prices.Create(ctx, price)
+	pr, err := c.CreatePrice(ctx, price)
 	if err != nil {
 		return "", "", err
 	}
-	return p.ID, pr.ID, nil
+	return p.ID.String(), pr.ID.String(), nil
 }
 
 type User struct {

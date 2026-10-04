@@ -18,7 +18,7 @@ import (
 func TestHostedNewCardSecurityCodeMismatch(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: w.membership("content:members", 9_990_000).ID}
+	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: w.membership("content:members", 9_990_000).ID.String()}
 
 	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
 	require.ErrorIs(t, err, billing.ErrPaymentRefused)

@@ -100,7 +100,11 @@ func (m *model) schema(t reflect.Type) *obj {
 	case kindArray:
 		return newObj("type", "array", "items", m.schema(t.Elem()))
 	case kindMap:
-		return newObj("type", "object", "additionalProperties", m.schema(t.Elem()))
+		value := m.schema(t.Elem())
+		if t.Elem().Kind() == reflect.Pointer {
+			value = newObj("oneOf", []any{value, newObj("type", "null")})
+		}
+		return newObj("type", "object", "additionalProperties", value)
 	case kindPage:
 		return newObj("type", "object",
 			"properties", newObj(

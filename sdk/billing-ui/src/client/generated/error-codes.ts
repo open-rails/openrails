@@ -221,6 +221,7 @@ export type OpenRailsErrorCode =
   | "unknown_field"
   | "unknown_role"
   | "unsupported_media_type"
+  | "usage_meter_invalid"
   | "usage_meter_not_found"
   | "usage_rate_card_invalid"
   | "webhook_account_mismatch"
@@ -454,6 +455,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   unknown_field: { status: 400, type: "invalid_request_error", meaning: "The JSON body names a field the route does not accept; param is the field." },
   unknown_role: { status: 400, type: "invalid_request_error", meaning: "The role is not one this merchant defines." },
   unsupported_media_type: { status: 415, type: "invalid_request_error", meaning: "The request body is not application/json." },
+  usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },
   usage_rate_card_invalid: { status: 400, type: "invalid_request_error", meaning: "The usage rate card is invalid." },
   webhook_account_mismatch: { status: 400, type: "invalid_request_error", meaning: "The webhook's account does not match its payload." },

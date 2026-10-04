@@ -34,11 +34,15 @@ func TestValidateMeter(t *testing.T) {
 }
 
 func TestValidateUsagePrice(t *testing.T) {
-	perUnit := func(pu catalog.PerUnitPrice) catalog.RatePrice { return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "usd", PerUnit: &pu} }
+	perUnit := func(pu catalog.PerUnitPrice) catalog.RatePrice {
+		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "usd", PerUnit: &pu}
+	}
 	tiered := func(mode catalog.TierMode, tiers ...catalog.RateTier) catalog.RatePrice {
 		return catalog.RatePrice{Model: catalog.ModelTiered, Currency: "eur", Tiered: &catalog.TieredPrice{Mode: mode, Tiers: tiers}}
 	}
-	pkg := func(pp catalog.PackagePrice) catalog.RatePrice { return catalog.RatePrice{Model: catalog.ModelPackage, Currency: "jpy", Package: &pp} }
+	pkg := func(pp catalog.PackagePrice) catalog.RatePrice {
+		return catalog.RatePrice{Model: catalog.ModelPackage, Currency: "jpy", Package: &pp}
+	}
 	matrix := &catalog.Matrix{Dimension: " size ", Cells: map[string]catalog.MatrixCell{"small": {UnitAmount: 1}}}
 
 	for name, price := range map[string]catalog.RatePrice{

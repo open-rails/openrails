@@ -53,7 +53,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
-	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
+	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID.String()}
 
 	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
 	require.ErrorIs(t, err, billing.ErrPaymentRefused)
@@ -72,7 +72,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	require.Equal(t, []string{"initial", "approved", "engine"}, []string{charged.Kind, charged.Category, charged.Owner})
 	for _, a := range rows {
 		require.Equal(t, "new", a.CardEntry)
-		require.Equal(t, strings.TrimPrefix(price.ID, "price_"), str(a.Target))
+		require.Equal(t, strings.TrimPrefix(price.ID.String(), "price_"), str(a.Target))
 		require.Equal(t, *rows[0].Checkout, *a.Checkout, "one checkout")
 	}
 	paid := completed(w.payments(embedded, h.c.id))
@@ -86,7 +86,7 @@ func TestNewCardAttemptsSaleDeclined(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
-	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: price.ID}
+	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: price.ID.String()}
 
 	_, err := h.pay("pay-nsf", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
 	require.ErrorIs(t, err, billing.ErrPaymentRefused)
@@ -124,12 +124,12 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	require.Equal(t, "approved", rows[1].Category)
 	require.Equal(t, *rows[0].Checkout, *rows[1].Checkout)
 
-	product, err := w.client[embedded].Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := w.client[embedded].CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	post, err := w.client[embedded].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	post, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	buyer := w.newCustomer()
-	h := hostedPay{w: w, c: buyer, tp: embedded, price: post.ID}
+	h := hostedPay{w: w, c: buyer, tp: embedded, price: post.ID.String()}
 	_, err = h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	w.settle()

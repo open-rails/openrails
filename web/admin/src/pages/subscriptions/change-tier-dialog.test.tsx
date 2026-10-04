@@ -65,7 +65,7 @@ beforeEach(async () => {
   selectMerchant("merchant-one")
   const queryClient = client({ staleTime: Infinity })
   const plans = ["basic", "pro", "plus"]
-  const page = <T,>(items: T[]) => ({ total: 3, limit: 3, offset: 0, items })
+  const page = <T,>(data: T[]) => ({ data, next_cursor: null })
   queryClient.setQueryData(
     adminQueries.allProducts().queryKey,
     page(plans.map((id, rank) => aProduct(id, rank)))

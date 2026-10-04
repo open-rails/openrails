@@ -156,8 +156,6 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"DELETE /v1/merchant/catalog/meters/{key}/rate-card":                                billing.MerchantCatalogUpdate,
 		"POST /v1/merchant/catalog/product-archives":                                        billing.MerchantCatalogUpdate,
 		"POST /v1/merchant/catalogs":                                                        billing.MerchantCatalogUpdate,
-		"GET /v1/catalog":                                                                   billing.MerchantCatalogOwnRead,
-		"PUT /v1/catalog":                                                                   billing.MerchantCatalogOwnUpdate,
 		"POST /v1/catalog/offers/lookup":                                                    billing.MerchantCatalogOwnRead,
 		"POST /v1/catalog/products":                                                         billing.MerchantCatalogOwnUpdate,
 	} {
@@ -222,7 +220,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 				keys = append(keys, key)
 			}
 		}
-		for _, key := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /catalog", "GET /catalog/products", "GET /merchant/catalogs"}, reads...) {
+		for _, key := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /catalog/products", "GET /merchant/catalogs"}, reads...) {
 			require.Contains(t, keys, key)
 		}
 		mutations := 0
@@ -234,7 +232,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 		}
 		require.Equal(t, allow, mutations > 0)
 		if allow {
-			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{key}", "POST /merchant/catalog/prices/{id}/key", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "PUT /catalog", "POST /catalog/prices", "POST /merchant/catalogs"} {
+			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /catalog/prices", "POST /merchant/catalogs"} {
 				require.Contains(t, keys, key)
 			}
 		}

@@ -2,7 +2,11 @@
 // amount is scaled to server units here, so a wrong scale is a wrong bill.
 import { describe, expect, it } from "vitest"
 
-import type { DefaultUsageRateCard, UsageMeter } from "@/lib/api/types"
+import type {
+  Meter,
+  MeterRateCard,
+  RateOverride,
+} from "@/lib/api/generated/wire"
 import {
   buildMeterRequest, buildRateCardRequest, customerUsageRateRows,
   negotiatedRateFormValues, negotiatedRateRequest, rateCardFormValues,
@@ -12,11 +16,11 @@ import {
 const rate = (overrides: Partial<RateCardFormValues>): RateCardFormValues =>
   Object.assign(rateCardFormValues(), { productId: "prod_1" }, overrides)
 const WHEN = "2026-08-17T00:00:00Z"
-const defaults = {
-  id: "rate-1", product_id: "prod_1", product_key: "pro", filter: { region: ["us"] },
+const defaults: MeterRateCard = {
+  product_id: "prod_1", product_key: "pro", filter: { region: ["us"] },
   price: { model: "per_unit" as const, currency: "USD", per_unit: { unit_amount: "1000000", divide_by: 1 } },
-  created_at: WHEN, updated_at: WHEN,
-} as DefaultUsageRateCard
+  allowance: null, created_at: WHEN, updated_at: WHEN,
+}
 
 describe("meter definition", () => {
   it("slugs the key, structures dimensions and clears an unused property", () => {
@@ -103,8 +107,8 @@ describe("usage rate amounts", () => {
 })
 
 describe("negotiated rates", () => {
-  const override = {
-    meter_key: "tokens",
+  const override: RateOverride = {
+    customer_id: "cus_1", customer_email: null, meter_key: "tokens",
     price: { model: "package" as const, currency: "USD", package: { amount: "5000000", package_size: 1000 } },
     allowance: { included: 50 },
     created_at: WHEN, updated_at: WHEN,
@@ -123,7 +127,7 @@ describe("negotiated rates", () => {
     const inherited = { ...defaults, allowance: { included: 100 } }
     expect(negotiatedRateFormValues(inherited).allowanceMode).toBe("included")
     expect(negotiatedRateFormValues(inherited).allowanceIncluded).toBe("100")
-    const cleared = negotiatedRateFormValues(inherited, { ...override, price: defaults.price, allowance: undefined })
+    const cleared = negotiatedRateFormValues(inherited, { ...override, price: defaults.price, allowance: null })
     expect([cleared.allowanceMode, cleared.allowanceIncluded]).toEqual(["none", ""])
   })
 
@@ -138,9 +142,12 @@ describe("negotiated rates", () => {
   })
 
   it("offers a negotiated rate only where the meter can bill one", () => {
-    const ready = { key: "tokens", billing_supported: true, default_rate_card: { price: {} } } as UsageMeter
-    const unsupported = { key: "unused", billing_supported: false } as UsageMeter
-    const negotiated = { meter_key: "tokens", price: { model: "per_unit", currency: "USD" }, created_at: WHEN, updated_at: WHEN } as const
+    const ready = { key: "tokens", billing_supported: true, rate_card: { price: {} } } as Meter
+    const unsupported = { key: "unused", billing_supported: false } as Meter
+    const negotiated: RateOverride = {
+      customer_id: "cus_1", customer_email: null, meter_key: "tokens", price: { model: "per_unit", currency: "USD" },
+      allowance: null, created_at: WHEN, updated_at: WHEN,
+    }
     expect(customerUsageRateRows([unsupported, ready], [negotiated])).toEqual([
       { meter: ready, override: negotiated },
     ])

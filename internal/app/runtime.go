@@ -154,9 +154,8 @@ type Runtime struct {
 	PaymentSourceUpdateIntents *intents.PaymentSourceUpdateThrough
 	ProviderCutovers           *intents.NMIProviderCutover
 
-	UserSubscriptionService   *subscriptions.UserSubscriptionService
-	PublicSubscriptionService *catalog.PublicSubscriptionService
-	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
+	UserSubscriptionService  *subscriptions.UserSubscriptionService
+	AdminSubscriptionService *subscriptions.AdminSubscriptionService
 
 	EmailService *subscriptions.EmailService
 

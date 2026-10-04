@@ -78,17 +78,6 @@ func (s *Service) requirePriceService() (*catalog.PriceService, error) {
 	return rt.PriceService, nil
 }
 
-func (s *Service) requirePublicSubscriptionService() (*catalog.PublicSubscriptionService, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	if rt.PublicSubscriptionService == nil {
-		return nil, fmt.Errorf("billing service: not initialized")
-	}
-	return rt.PublicSubscriptionService, nil
-}
-
 func (s *Service) requireCheckoutSessionService() (*checkout.CheckoutSessionService, error) {
 	rt, err := s.runtime()
 	if err != nil {

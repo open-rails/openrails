@@ -1,5 +1,5 @@
 // Catalog, plan-change and Solana calls. Bodies mirror the Go wire types
-// (api.ProductObject, billing.PublicPrice, billing.TierChange*Response,
+// (billing.Product, billing.Price, billing.TierChange*Response,
 // handlers.SolanaRuntimeConfigResponse).
 import { describe, expect, it, vi } from "vitest"
 
@@ -30,28 +30,25 @@ function served(...responses: Response[]) {
   return { client: createBillingClient({ fetch }), fetch, request }
 }
 
-const list = (data: unknown[]) => ({
-  object: "list",
+const list = (data: unknown[], next: string | null = null) => ({
   data,
-  total: data.length,
-  limit: 100,
-  offset: 0,
-  has_more: false,
+  next_cursor: next,
 })
 
 const price = {
   id: "price_1",
   key: "pro-monthly",
-  object: "price",
+  product_id: "prod_1",
+  archived: false,
   unit_amount: MAX,
   currency: "USD",
-  type: "recurring",
-  recurring: { interval: "720h" },
-  product: "prod_1",
-  active: true,
-  providers: ["cards", "solana"],
-  metadata: {},
+  access_duration_hours: 720,
+  auto_renew: true,
+  trial_unit_amount: null,
+  trial_duration_hours: null,
+  psps: { cards: { status: "linked", ids: null, sync_status: "unknown" } },
   created_at: "2026-09-16T00:00:00.123456789Z",
+  updated_at: "2026-09-16T00:00:00.123456789Z",
 }
 
 describe("catalog", () => {
@@ -59,10 +56,13 @@ describe("catalog", () => {
     const { client, request } = served(
       json(
         200,
-        list([
-          product({ id: "prod_1", prices: [price] }),
-          { id: "prod_2", object: "product", name: "Bare", tier_rank: 0 },
-        ])
+        list(
+          [
+            product({ id: "prod_1", display_name: "Plus", prices: [price] }),
+            product({ id: "prod_2", display_name: "Bare", prices: [] }),
+          ],
+          "next"
+        )
       ),
       json(200, list([]))
     )
@@ -71,25 +71,26 @@ describe("catalog", () => {
       url: "/billing/v1/products?limit=100",
       method: "GET",
     })
-    expect(page.total).toBe(2)
+    expect(page.next_cursor).toBe("next")
     expect(page.data[0]).toMatchObject({
       id: "prod_1",
-      name: "Plus",
+      display_name: "Plus",
       tier_group: "membership",
       tier_rank: 2,
       prices: [
         {
           id: "price_1",
           unit_amount: MAX,
-          recurring: { interval: "720h" },
-          providers: ["cards", "solana"],
+          access_duration_hours: 720,
+          auto_renew: true,
+          psps: { cards: { status: "linked" } },
         },
       ],
     })
     expect(page.data[1].prices).toEqual([])
 
-    await client.listProducts({ limit: 5, offset: 10 })
-    expect(request(1).url).toBe("/billing/v1/products?limit=5&offset=10")
+    await client.listProducts({ limit: 5, cursor: "next" })
+    expect(request(1).url).toBe("/billing/v1/products?limit=5&cursor=next")
   })
 
   it("rejects a price whose amount is not an exact string", async () => {
@@ -101,27 +102,27 @@ describe("catalog", () => {
     })
   })
 
-  it("lists prices by currency, product and type", async () => {
+  it("lists prices by currency, product and renewal", async () => {
     const { client, request } = served(
-      json(200, list([price, { ...price, id: "price_2", type: "one_time" }])),
-      apiError(400, "invalid_param", "Invalid product ID format")
+      json(200, list([price, { ...price, id: "price_2", auto_renew: false }])),
+      apiError(400, "invalid_query", "product_id is invalid")
     )
     const page = await client.listPrices({
       currency: "USD",
-      product: "prod_1",
-      type: "recurring",
+      productId: "prod_1",
+      autoRenew: true,
     })
     expect(request().url).toBe(
-      "/billing/v1/prices?currency=USD&product=prod_1&type=recurring&limit=100"
+      "/billing/v1/prices?currency=USD&product_id=prod_1&auto_renew=true&limit=100"
     )
     expect(page.data.map((p) => p.id)).toEqual(["price_1", "price_2"])
-    expect(page.data[0]).toMatchObject({ unit_amount: MAX, product: "prod_1" })
+    expect(page.data[0]).toMatchObject({ unit_amount: MAX, product_id: "prod_1" })
 
     const err = await client
-      .listPrices({ product: "nope" })
+      .listPrices({ productId: "nope" })
       .catch((e: unknown) => e)
     expect(err).toBeInstanceOf(BillingError)
-    expect(err).toMatchObject({ status: 400, code: "invalid_param" })
+    expect(err).toMatchObject({ status: 400, code: "invalid_query" })
   })
 
   it("reads the currency registry", async () => {

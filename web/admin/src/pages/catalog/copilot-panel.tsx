@@ -194,7 +194,7 @@ function DraftCard({ draft }: { draft: CopilotDraft }) {
   return null
 }
 
-// PriceChangeDraftCard: "Review in wizard" fetches the live CatalogPrice +
+// PriceChangeDraftCard: "Review in wizard" fetches the live Price +
 // product name, then opens the SAME #777 wizard used everywhere else,
 // pre-filled at Step 3 — the human reviews and clicks Confirm exactly as
 // they would for a hand-typed change.

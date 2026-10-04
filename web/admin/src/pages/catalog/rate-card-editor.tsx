@@ -47,11 +47,11 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import type {
-  CatalogProduct,
-  CustomerUsageRateOverride,
-  UsageAllowance,
-  UsageMeter,
-} from "@/lib/api/types"
+  Allowance,
+  Meter,
+  Product,
+  RateOverride,
+} from "@/lib/api/generated/wire"
 import type { DefaultUsageRateCardRequest } from "@/lib/api/endpoints"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
@@ -74,6 +74,7 @@ const RateCardIssueContext = React.createContext<FormIssue | null>(null)
 
 export function RateCardEditor({
   meter,
+  writesAllowed = false,
   products,
   meters,
   productsPending = false,
@@ -82,14 +83,15 @@ export function RateCardEditor({
   customerId,
   override,
 }: {
-  meter: UsageMeter
-  products: CatalogProduct[]
-  meters: UsageMeter[]
+  meter: Meter
+  writesAllowed?: boolean
+  products: Product[]
+  meters: Meter[]
   productsPending?: boolean
   productsError?: boolean
   productsForbidden?: boolean
   customerId?: string
-  override?: CustomerUsageRateOverride
+  override?: RateOverride
 }) {
   const [open, setOpen] = React.useState(false)
   const [submitError, setSubmitError] = React.useState<FormIssue | null>(null)
@@ -104,7 +106,7 @@ export function RateCardEditor({
   )
   const activeProducts = products.filter((product) => !product.archived)
   const isNegotiated = Boolean(customerId)
-  const defaultCard = meter.default_rate_card
+  const defaultCard = meter.rate_card
   const existing = isNegotiated ? override : defaultCard
   const initialValues =
     isNegotiated && defaultCard
@@ -166,7 +168,7 @@ export function RateCardEditor({
 
   if (
     (isNegotiated && !defaultCard) ||
-    (!isNegotiated && !meter.writes_allowed) ||
+    (!isNegotiated && !writesAllowed) ||
     !meter.billing_supported
   ) {
     return null
@@ -249,11 +251,11 @@ export function RateCardEditor({
                   />
                   <InheritedFact
                     label="Currency"
-                    value={defaultCard.price.currency}
+                    value={defaultCard.price.currency ?? ""}
                   />
                   <InheritedFact
                     label="Event filter"
-                    value={summarizeFilter(defaultCard.filter)}
+                    value={summarizeFilter(defaultCard.filter ?? {})}
                   />
                   <InheritedFact
                     label="Default rate"
@@ -261,7 +263,7 @@ export function RateCardEditor({
                   />
                   <InheritedFact
                     label="Default allowance"
-                    value={summarizeAllowance(defaultCard.allowance)}
+                    value={summarizeAllowance(defaultCard.allowance ?? undefined)}
                   />
                   <PricingModelField form={form} />
                 </div>
@@ -493,7 +495,7 @@ function summarizeFilter(filter: Record<string, string[]>): string {
     .join(" · ")
 }
 
-function summarizeAllowance(allowance?: UsageAllowance): string {
+function summarizeAllowance(allowance?: Allowance): string {
   if (!allowance) return "None"
   if (allowance.included !== undefined) {
     return `${allowance.included.toLocaleString()} included`
@@ -506,7 +508,7 @@ function PerUnitFields({
   meter,
 }: {
   form: MeteringForm
-  meter: UsageMeter
+  meter: Meter
 }) {
   return (
     <>
@@ -523,7 +525,7 @@ function PerUnitFields({
               id="rate-matrix"
               checked={field.state.value}
               onCheckedChange={field.handleChange}
-              disabled={Object.keys(meter.group_by).length === 0}
+              disabled={Object.keys(meter.group_by ?? {}).length === 0}
             />
           </div>
         )}
@@ -603,7 +605,7 @@ function MatrixFields({
   meter,
 }: {
   form: MeteringForm
-  meter: UsageMeter
+  meter: Meter
 }) {
   const formIssue = React.useContext(RateCardIssueContext)
   return (
@@ -624,7 +626,7 @@ function MatrixFields({
                 <SelectValue placeholder="Select dimension" />
               </SelectTrigger>
               <SelectContent>
-                {Object.keys(meter.group_by).map((key) => (
+                {Object.keys(meter.group_by ?? {}).map((key) => (
                   <SelectItem key={key} value={key}>
                     {key}
                   </SelectItem>
@@ -887,7 +889,7 @@ function FilterFields({
   meter,
 }: {
   form: MeteringForm
-  meter: UsageMeter
+  meter: Meter
 }) {
   const formIssue = React.useContext(RateCardIssueContext)
   return (
@@ -938,7 +940,7 @@ function FilterFields({
                       <SelectValue placeholder="Dimension" />
                     </SelectTrigger>
                     <SelectContent>
-                      {Object.keys(meter.group_by).map((key) => (
+                      {Object.keys(meter.group_by ?? {}).map((key) => (
                         <SelectItem key={key} value={key}>
                           {key}
                         </SelectItem>
@@ -967,7 +969,7 @@ function FilterFields({
               variant="outline"
               size="sm"
               className="w-fit"
-              disabled={Object.keys(meter.group_by).length === 0}
+              disabled={Object.keys(meter.group_by ?? {}).length === 0}
               onClick={() => field.pushValue({ key: "", value: "" })}
             >
               <HugeiconsIcon icon={Add01Icon} className="size-4" />
@@ -986,7 +988,7 @@ function AllowanceFields({
   meterKey,
 }: {
   form: MeteringForm
-  meters: UsageMeter[]
+  meters: Meter[]
   meterKey: string
 }) {
   const formIssue = React.useContext(RateCardIssueContext)
@@ -1085,7 +1087,7 @@ function RateSummary({ values }: { values: RateCardFormValuesCompat }) {
     const request = buildRateCardRequest(values)
     summary = summarizeRateCard({
       price: request.price,
-    } as UsageMeter["default_rate_card"])
+    } as Meter["rate_card"])
     if (request.allowance?.included !== undefined) {
       summary += ` · ${request.allowance.included.toLocaleString()} included`
     } else if (request.allowance?.accrue_from) {

@@ -27,15 +27,11 @@ type Client struct {
 	// engine is the in-process engine behind New; nil for NewRemote.
 	engine                *engine.Engine
 	ProductAccess         *ProductAccessClient
-	Products              *ProductClient
-	Prices                *PriceClient
-	Catalog               *CatalogClient
 	PaymentProviders      *PaymentProviderClient
 	MerchantConfiguration *MerchantConfigurationClient
 	baseURL               string
 	merchantID            billing.MerchantID
 	merchantSlug          string
-	ownCatalog            bool
 	catalogOwner          string
 	// derived marks a Client made from another (With, ForCatalogOwner): it
 	// shares the engine and transport and does not own their lifecycle.
@@ -53,20 +49,6 @@ type Client struct {
 
 // ClientOption configures a Client: New, NewRemote and Client.With take them.
 type ClientOption func(*Client)
-
-// WithOwnCatalog selects creator-catalog endpoints for the catalog methods.
-// It grants no authority and carries no owner identity: the server's Gate must
-// resolve a verified Subject and the corresponding owner permissions.
-func WithOwnCatalog() ClientOption {
-	return func(c *Client) { c.ownCatalog = true }
-}
-
-func (c *Client) catalogPath() string {
-	if c.ownCatalog {
-		return "/v1/catalog"
-	}
-	return "/v1/merchant/catalog"
-}
 
 // WithMerchantID supplies an immutable default merchant UUID. Request options
 // may override it, but the server still enforces credential and runtime scope.

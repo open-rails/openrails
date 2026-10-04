@@ -59,7 +59,7 @@ export interface RawPrice {
   currency?: string
   archived?: boolean
   // Key (#774): the durable, movable-pointer handle for this price's
-  // version chain — see CatalogPrice.key.
+  // version chain — see Price.key.
   key?: string
   access_duration_hours?: number
   auto_renew?: boolean
@@ -153,135 +153,10 @@ export interface TierChangeResult {
 
 // --- Catalog ---
 
-export interface CatalogProduct {
-  id: string
-  key: string
-  display_name: string
-  description: string
-  entitlements_spec?: Record<string, number | null>
-  tier_group?: string
-  tier_rank: number
-  archived: boolean
-  created_at: string
-  updated_at: string
-}
-
 export type UsageAggregation =
   "sum" | "count" | "max" | "min" | "unique_count" | "latest"
 export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
-export interface UsageRateTier {
-  up_to: number | null
-  unit_amount?: string
-  flat_amount?: string
-}
-
-export interface UsageRateMatrixCell {
-  unit_amount: string
-  maximum_amount?: string
-  included?: number
-}
-
-export interface UsageRatePrice {
-  model: UsagePriceModel
-  currency: string
-  per_unit?: {
-    unit_amount?: string
-    divide_by?: number
-    round?: "up" | "down" | "half_up"
-    maximum_amount?: string
-    matrix?: {
-      dimension: string
-      cells: Record<string, UsageRateMatrixCell>
-    }
-  }
-  tiered?: {
-    mode: "volume" | "graduated"
-    tiers: UsageRateTier[]
-  }
-  package?: {
-    amount: string
-    package_size: number
-    free_units?: number
-  }
-}
-
-export interface UsageAllowance {
-  included?: number
-  accrue_from?: string
-  cap?: string
-}
-
-export interface DefaultUsageRateCard {
-  id: string
-  product_id: string
-  product_key: string
-  filter: Record<string, string[]>
-  price: UsageRatePrice
-  allowance?: UsageAllowance
-  created_at: string
-  updated_at: string
-}
-
-export interface UsageMeter {
-  key: string
-  event_type?: string
-  effective_event_type: string
-  value_property?: string
-  aggregation: UsageAggregation
-  unit?: string
-  group_by: Record<string, string>
-  billing_supported: boolean
-  default_rate_card?: DefaultUsageRateCard
-  override_count: number
-  has_activity: boolean
-  last_event_at?: string
-  created_at: string
-  updated_at: string
-  configuration_source: "database"
-  writes_allowed: boolean
-}
-
-export interface UsageMeterOverride {
-  customer_id: string
-  subject?: string
-  email?: string
-  price: UsageRatePrice
-  allowance?: UsageAllowance
-  created_at: string
-  updated_at: string
-}
-
-export interface CustomerUsageRateOverride {
-  meter_key: string
-  price: UsageRatePrice
-  allowance?: UsageAllowance
-  created_at: string
-  updated_at: string
-}
-
-export interface UsageMeterPage {
-  items: UsageMeter[]
-  total: number
-  limit: number
-  offset: number
-  configuration_source: "database"
-  writes_allowed: boolean
-}
-
-// CatalogProviderState is one entry of prices.psp_links as the API projects it
-// (or#812): the map is keyed by PSP key ("mobius"), and `ids` is the stored
-// link entry verbatim — including `ids.rail`, the gateway the entry lives on.
-// sync_status is "unknown" until a live retrieve runs (GET price ?verify=true).
-export interface CatalogProviderState {
-  status: "linked" | "pending_manual_link" | "sync_disabled" | "error"
-  ids?: Record<string, string>
-  lookup_key?: string
-  last_synced_at?: string
-  sync_status?: string
-  drift?: { field: string; openrails_value: string; remote_value: string }[]
-  message?: string
-}
 
 // CheckoutRoutingSkip mirrors the or#288 skip vocabulary
 // (internal/db/models/checkout_session.go). "" / absent = the candidate is
@@ -317,39 +192,7 @@ export interface CheckoutRoutingDecision {
   routing_reason?: unknown
 }
 
-export interface CatalogPrice {
-  id: string
-  // Key (#774): the durable, per-merchant-unique MOVABLE POINTER to this
-  // price's substance-version chain — stable across amount edits, unlike id
-  // (which stays the immutable substance UUID). The wizard bumps the amount
-  // under the SAME key; archived predecessors keep the key as a
-  // back-reference to the chain they belong to.
-  key: string
-  product_id: string
-  archived: boolean
-  unit_amount: string
-  currency: string
-  access_duration_hours?: number
-  auto_renew: boolean
-  trial_unit_amount?: string
-  trial_duration_hours?: number
-  created_at: string
-  updated_at: string
-  providers?: Record<string, CatalogProviderState>
-  pending_manual_actions?: { provider: string; action: string; hint: string }[]
-}
-
-// --- Price repricing / migration (#773 primitive, #777 console wizard) ---
-
-// PriceKeyHistoryEntry is one entry of a price key's version chain, resolved
-// from the #774 pointer-movement log — GET .../prices/by-key/{key}/history.
-// Most-recent-first.
-export interface PriceKeyHistoryEntry {
-  // Availability at this event, independent of the price row's current state.
-  archived: boolean
-  price: CatalogPrice
-  effective_at: string
-}
+// --- Price repricing / migration ---
 
 export type RepriceStatus = "scheduled" | "applied" | "canceled"
 
@@ -405,30 +248,6 @@ export interface RepricePreviewResult {
   price_key: string
   to_price_id: string
   matched: number
-}
-
-export interface CatalogDriftEvent {
-  id: string
-  provider: string
-  kind: string
-  openrails_resource_type: string
-  openrails_resource_id?: string
-  external_resource_id?: string
-  field?: string
-  openrails_value?: string
-  external_value?: string
-  detected_at: string
-  resolved_at?: string
-}
-
-export interface CatalogDriftReport {
-  scanned_products: number
-  scanned_prices: number
-  scanned_nmi_plans: number
-  scanned_solana_plans: number
-  open_events: CatalogDriftEvent[]
-  new_events: number
-  resolved_events: number
 }
 
 // --- Ops: findings / repair alerts / worker health ---

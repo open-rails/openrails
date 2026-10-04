@@ -242,7 +242,8 @@ export function useSubscriptions(
 
 export interface ProductsState {
   products: Product[] | null
-  total: number | null
+  /** The cursor of the next page; null on the last. */
+  nextCursor: string | null
   loading: boolean
   error: BillingError | null
   refetch: () => void
@@ -257,7 +258,7 @@ export function useProducts(options: { limit?: number } = {}): ProductsState {
   )
   return {
     products: remote.data?.data ?? null,
-    total: remote.data?.total ?? null,
+    nextCursor: remote.data?.next_cursor ?? null,
     loading: remote.loading,
     error: remote.error,
     refetch: remote.refetch,

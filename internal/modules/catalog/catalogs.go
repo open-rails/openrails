@@ -11,6 +11,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // CatalogRepo persists business ownership within the selected merchant. It
@@ -86,18 +88,34 @@ func (r *CatalogRepo) Get(ctx context.Context, id uuid.UUID) (gen.BillingCatalog
 	return r.db.Gen(ctx).GetCatalog(ctx, gen.GetCatalogParams{MerchantID: mid.UUID(), ID: id, CatalogID: catalogscope.QueryID(ctx)})
 }
 
-func (r *CatalogRepo) List(ctx context.Context, limit, offset int32) ([]gen.BillingCatalog, error) {
+// List returns one keyset page of the merchant's catalogs, oldest first;
+// ownerSubject selects one creator's.
+func (r *CatalogRepo) List(ctx context.Context, ownerSubject string, page billing.PageRequest) (billing.ListPage[gen.BillingCatalog], error) {
 	mid, err := catalogMerchant(ctx)
 	if err != nil {
-		return nil, err
+		return billing.ListPage[gen.BillingCatalog]{}, err
 	}
-	if limit < 0 || offset < 0 {
-		return nil, fmt.Errorf("catalog pagination must be nonnegative")
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return billing.ListPage[gen.BillingCatalog]{}, err
 	}
-	if limit == 0 {
-		limit = 100
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return billing.ListPage[gen.BillingCatalog]{}, err
 	}
-	return r.db.Gen(ctx).ListCatalogs(ctx, gen.ListCatalogsParams{MerchantID: mid.UUID(), CatalogID: catalogscope.QueryID(ctx), PageLimit: limit, PageOffset: offset})
+	var owner *string
+	if ownerSubject != "" {
+		if err := catalogscope.ValidateSubject(ownerSubject); err != nil {
+			return billing.ListPage[gen.BillingCatalog]{}, apperr.Invalidf("invalid owner_subject")
+		}
+		owner = &ownerSubject
+	}
+	rows, err := r.db.Gen(ctx).ListCatalogs(ctx, gen.ListCatalogsParams{MerchantID: mid.UUID(), CatalogID: catalogscope.QueryID(ctx), OwnerSubject: owner,
+		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
+	if err != nil {
+		return billing.ListPage[gen.BillingCatalog]{}, err
+	}
+	return pagination.Cut(rows, limit, func(c gen.BillingCatalog) any { return pagination.TimeID{At: c.CreatedAt, ID: c.ID} }), nil
 }
 
 // GetByOwner is an exact, side-effect-free lookup in the authorized merchant.

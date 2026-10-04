@@ -2,7 +2,6 @@ package money
 
 import (
 	"context"
-	"math"
 	"testing"
 	"time"
 
@@ -105,21 +104,6 @@ func TestRateCardFilterRules(t *testing.T) {
 
 	_, err = rateCardFilterRules(catalogRateCardRow{ID: uuid.New(), Filter: map[string][]string{"region": {"eu"}}})
 	require.ErrorContains(t, err, `filter dimension "region" has no meter property`)
-}
-
-func TestMeteringPageBounds(t *testing.T) {
-	for _, tt := range []struct{ limit, offset, wantLimit, wantOffset int }{
-		{0, -1, defaultMeteringPageSize, 0},
-		{maxMeteringPageSize + 1, 1, maxMeteringPageSize, 1},
-		{1, math.MaxInt, 1, math.MaxInt32},
-	} {
-		limit, offset := normalizeMeteringPage(tt.limit, tt.offset)
-		require.Equal(t, tt.wantLimit, limit)
-		require.Equal(t, tt.wantOffset, offset)
-		require.Equal(t, int32(tt.wantOffset), meteringPageInt32(offset))
-	}
-	require.Equal(t, int32(0), meteringPageInt32(-5))
-	require.Equal(t, int32(math.MaxInt32), meteringPageInt32(math.MaxInt))
 }
 
 func TestAllowanceSourcePrice(t *testing.T) {

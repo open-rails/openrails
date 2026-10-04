@@ -24,135 +24,41 @@ var (
 	ErrUsageRateCardInvalid     = money.ErrUsageRateCardInvalid
 )
 
-// UsageMeterDTO is one merchant-scoped usage stream and its billing state.
-type UsageMeterDTO = billing.UsageMeterDTO
-
-// DefaultUsageRateCardDTO is the merchant-default in-arrears price for a meter.
-type DefaultUsageRateCardDTO = billing.DefaultUsageRateCardDTO
-
-// UsageMeterOverrideDTO is one negotiated payer price for a meter.
-type UsageMeterOverrideDTO = billing.UsageMeterOverrideDTO
-
-// ListUsageMeters returns a deterministic page of merchant meters.
-func (s *Service) ListUsageMeters(
-	ctx context.Context,
-	options PaginationOptions,
-) (PaginatedResult[UsageMeterDTO], error) {
+// ListUsageMeters returns one page of the merchant's meters, by key.
+func (s *Service) ListUsageMeters(ctx context.Context, page billing.PageRequest) (billing.ListPage[billing.Meter], error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return PaginatedResult[UsageMeterDTO]{}, pinErr
+		return billing.ListPage[billing.Meter]{}, pinErr
 	}
 	defer release()
-
 	if s == nil || s.rt == nil {
-		return PaginatedResult[UsageMeterDTO]{}, fmt.Errorf("service not initialized")
+		return billing.ListPage[billing.Meter]{}, fmt.Errorf("service not initialized")
 	}
-	page, err := s.moneyService().ListUsageMeters(ctx, options.Limit, options.Offset)
-	if err != nil {
-		return PaginatedResult[UsageMeterDTO]{}, err
-	}
-	items := make([]UsageMeterDTO, 0, len(page.Items))
-	for _, meter := range page.Items {
-		items = append(items, usageMeterDTO(meter))
-	}
-	return PaginatedResult[UsageMeterDTO]{
-		Data:       items,
-		TotalItems: page.Total,
-		Limit:      page.Limit,
-		Offset:     page.Offset,
-	}, nil
+	return s.moneyService().ListUsageMeters(ctx, page)
 }
 
 // GetUsageMeter returns one merchant meter by canonical key.
-func (s *Service) GetUsageMeter(ctx context.Context, meterKey string) (*UsageMeterDTO, error) {
+func (s *Service) GetUsageMeter(ctx context.Context, meterKey string) (*billing.Meter, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
 	}
 	defer release()
-
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	meter, err := s.moneyService().GetUsageMeter(ctx, meterKey)
-	if err != nil {
-		return nil, err
-	}
-	dto := usageMeterDTO(*meter)
-	return &dto, nil
+	return s.moneyService().GetUsageMeter(ctx, meterKey)
 }
 
-// ListUsageMeterOverrides returns negotiated payer prices for one meter.
-func (s *Service) ListUsageMeterOverrides(
-	ctx context.Context,
-	meterKey string,
-	options PaginationOptions,
-) (PaginatedResult[UsageMeterOverrideDTO], error) {
+// ListUsageMeterOverrides returns one page of a meter's customer overrides.
+func (s *Service) ListUsageMeterOverrides(ctx context.Context, meterKey string, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return PaginatedResult[UsageMeterOverrideDTO]{}, pinErr
+		return billing.ListPage[billing.RateOverride]{}, pinErr
 	}
 	defer release()
-
 	if s == nil || s.rt == nil {
-		return PaginatedResult[UsageMeterOverrideDTO]{}, fmt.Errorf("service not initialized")
+		return billing.ListPage[billing.RateOverride]{}, fmt.Errorf("service not initialized")
 	}
-	page, err := s.moneyService().ListUsageMeterOverrides(
-		ctx,
-		meterKey,
-		options.Limit,
-		options.Offset,
-	)
-	if err != nil {
-		return PaginatedResult[UsageMeterOverrideDTO]{}, err
-	}
-	items := make([]UsageMeterOverrideDTO, 0, len(page.Items))
-	for _, override := range page.Items {
-		items = append(items, UsageMeterOverrideDTO{
-			CustomerID: billing.CustomerID(override.CustomerID).String(),
-			Subject:    override.Subject,
-			Email:      override.Email,
-			Price:      override.Price,
-			Allowance:  override.Allowance,
-			CreatedAt:  override.CreatedAt,
-			UpdatedAt:  override.UpdatedAt,
-		})
-	}
-	return PaginatedResult[UsageMeterOverrideDTO]{
-		Data:       items,
-		TotalItems: page.Total,
-		Limit:      page.Limit,
-		Offset:     page.Offset,
-	}, nil
-}
-
-func usageMeterDTO(meter money.UsageMeter) UsageMeterDTO {
-	dto := UsageMeterDTO{
-		Key:                meter.Key,
-		EventType:          meter.EventType,
-		EffectiveEventType: meter.EffectiveEventType,
-		ValueProperty:      meter.ValueProperty,
-		Aggregation:        meter.Aggregation,
-		Unit:               meter.Unit,
-		GroupBy:            meter.GroupBy,
-		BillingSupported:   meter.BillingSupported,
-		OverrideCount:      meter.OverrideCount,
-		HasActivity:        meter.HasActivity,
-		LastEventAt:        meter.LastEventAt,
-		CreatedAt:          meter.CreatedAt,
-		UpdatedAt:          meter.UpdatedAt,
-	}
-	if meter.DefaultRateCard != nil {
-		dto.DefaultRateCard = &DefaultUsageRateCardDTO{
-			ID:         meter.DefaultRateCard.ID,
-			ProductID:  billing.ProductID(meter.DefaultRateCard.ProductID).String(),
-			ProductKey: meter.DefaultRateCard.ProductKey,
-			Filter:     meter.DefaultRateCard.Filter,
-			Price:      meter.DefaultRateCard.Price,
-			Allowance:  meter.DefaultRateCard.Allowance,
-			CreatedAt:  meter.DefaultRateCard.CreatedAt,
-			UpdatedAt:  meter.DefaultRateCard.UpdatedAt,
-		}
-	}
-	return dto
+	return s.moneyService().ListUsageMeterOverrides(ctx, meterKey, page)
 }

@@ -40,7 +40,7 @@ products:
 `, key, strings.ReplaceAll(prices, "{key}", key), key)
 	params, err := catalog.ParseApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)
-	_, err = client.Catalog.Apply(w.t.Context(), params)
+	_, err = client.ApplyCatalog(w.t.Context(), params)
 	return key, err
 }
 
@@ -237,7 +237,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 
 func priceID(t *testing.T, w *world, key string) string {
 	t.Helper()
-	price, err := w.client[embedded].Prices.RetrieveByKey(t.Context(), key)
+	price, err := w.client[embedded].GetPriceByKey(t.Context(), key)
 	require.NoError(t, err)
-	return price.ID
+	return price.ID.String()
 }

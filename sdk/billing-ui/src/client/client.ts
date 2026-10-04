@@ -80,6 +80,8 @@ export interface BillingClientOptions {
 export interface ListOptions {
   limit?: number
   offset?: number
+  /** A cursor list's next page: the previous page's `next_cursor`. */
+  cursor?: string
   signal?: AbortSignal
 }
 
@@ -110,7 +112,7 @@ export class WalletRejectedError extends Error {
 export const CANCEL_FEEDBACK_MIN = 4
 export const CANCEL_FEEDBACK_MAX = 500
 
-type Query = Record<string, string | number | undefined>
+type Query = Record<string, string | number | boolean | undefined>
 
 interface RequestOptions {
   method?: string
@@ -562,29 +564,29 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(invoiceSchema, `/me/invoices/${id(invoiceId)}`, { signal })
     },
 
-    /** Active products with their active prices. */
+    /** Products on sale, each with its current prices. */
     listProducts(opts: ListOptions = {}): Promise<Page<Product>> {
       return json(productPage, "/products", {
-        query: { limit: opts.limit ?? 100, offset: opts.offset },
+        query: { limit: opts.limit ?? 100, cursor: opts.cursor },
         signal: opts.signal,
       })
     },
 
-    /** Active prices. `product` is a `prod_` id; `type` is `recurring | one_time`. */
+    /** Prices on sale. `productId` is a `prod_` id; `autoRenew` selects subscriptions or one-time prices. */
     listPrices(
       opts: ListOptions & {
         currency?: string
-        product?: string
-        type?: string
+        productId?: string
+        autoRenew?: boolean
       } = {}
     ): Promise<Page<Price>> {
       return json(pricePage, "/prices", {
         query: {
           currency: opts.currency,
-          product: opts.product,
-          type: opts.type,
+          product_id: opts.productId,
+          auto_renew: opts.autoRenew,
           limit: opts.limit ?? 100,
-          offset: opts.offset,
+          cursor: opts.cursor,
         },
         signal: opts.signal,
       })

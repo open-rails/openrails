@@ -6,23 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-)
-
-const (
-	defaultMeteringPageSize = 50
-	maxMeteringPageSize     = 200
-	maxMeteringPageOffset   = math.MaxInt32
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
 var (
@@ -40,107 +35,64 @@ var (
 	ErrUsageRateCardInvalid     = errors.New("usage rate card is invalid")
 )
 
-// UsageMeter is one merchant-scoped usage stream and its optional default
-// rate card, projected with billing activity and override state.
-type UsageMeter struct {
-	Key                string                `json:"key"`
-	EventType          string                `json:"event_type,omitempty"`
-	EffectiveEventType string                `json:"effective_event_type"`
-	ValueProperty      string                `json:"value_property,omitempty"`
-	Aggregation        catalog.Aggregation   `json:"aggregation"`
-	Unit               string                `json:"unit,omitempty"`
-	GroupBy            map[string]string     `json:"group_by"`
-	BillingSupported   bool                  `json:"billing_supported"`
-	DefaultRateCard    *DefaultUsageRateCard `json:"default_rate_card,omitempty"`
-	OverrideCount      int64                 `json:"override_count"`
-	HasActivity        bool                  `json:"has_activity"`
-	LastEventAt        *time.Time            `json:"last_event_at,omitempty"`
-	CreatedAt          time.Time             `json:"created_at"`
-	UpdatedAt          time.Time             `json:"updated_at"`
+// meterKeyPosition is the keyset position of a list ordered by one key.
+type meterKeyPosition struct {
+	Key string `json:"k"`
 }
 
-// DefaultUsageRateCard is the merchant-default in-arrears price for a meter.
-type DefaultUsageRateCard struct {
-	ID         uuid.UUID           `json:"id"`
-	ProductID  uuid.UUID           `json:"product_id"`
-	ProductKey string              `json:"product_key"`
-	Filter     map[string][]string `json:"filter"`
-	Price      catalog.RatePrice   `json:"price"`
-	Allowance  *catalog.Allowance  `json:"allowance,omitempty"`
-	CreatedAt  time.Time           `json:"created_at"`
-	UpdatedAt  time.Time           `json:"updated_at"`
-}
-
-// UsageMeterPage is a bounded offset page of meters.
-type UsageMeterPage struct {
-	Items  []UsageMeter
-	Total  int64
-	Limit  int
-	Offset int
-}
-
-// UsageMeterOverride is one negotiated payer price for a meter.
-type UsageMeterOverride struct {
-	CustomerID uuid.UUID          `json:"customer_id"`
-	Subject    string             `json:"subject,omitempty"`
-	Email      string             `json:"email,omitempty"`
-	Price      catalog.RatePrice  `json:"price"`
-	Allowance  *catalog.Allowance `json:"allowance,omitempty"`
-	CreatedAt  time.Time          `json:"created_at"`
-	UpdatedAt  time.Time          `json:"updated_at"`
-}
-
-// UsageMeterOverridePage is a bounded offset page of payer overrides.
-type UsageMeterOverridePage struct {
-	Items  []UsageMeterOverride
-	Total  int64
-	Limit  int
-	Offset int
-}
-
-// ListUsageMeters returns meters ordered by their canonical key.
-func (s *MoneyService) ListUsageMeters(ctx context.Context, limit, offset int) (UsageMeterPage, error) {
-	page := UsageMeterPage{}
-	if s == nil || s.db == nil {
-		return page, fmt.Errorf("money service not initialized")
+func afterMeterKey(cursor string) (*string, error) {
+	var position meterKeyPosition
+	present, err := pagination.Decode(cursor, &position)
+	if err != nil || !present {
+		return nil, err
 	}
-	page.Limit, page.Offset = normalizeMeteringPage(limit, offset)
+	if position.Key == "" {
+		return nil, pagination.ErrInvalidCursor
+	}
+	return &position.Key, nil
+}
+
+// ListUsageMeters returns one keyset page of meters, by key.
+func (s *MoneyService) ListUsageMeters(ctx context.Context, page billing.PageRequest) (billing.ListPage[billing.Meter], error) {
+	var out billing.ListPage[billing.Meter]
+	if s == nil || s.db == nil {
+		return out, fmt.Errorf("money service not initialized")
+	}
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return out, err
+	}
+	after, err := afterMeterKey(page.Cursor)
+	if err != nil {
+		return out, err
+	}
 	tenant, err := merchant.Require(ctx)
 	if err != nil {
-		return page, err
+		return out, err
 	}
-
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		queries := gen.New(s.db.Qx(ctx))
-		page.Total, err = queries.CountUsageMeters(ctx, tenant.UUID())
-		if err != nil {
-			return fmt.Errorf("count usage meters: %w", err)
-		}
-
-		rows, err := queries.ListUsageMetersWithCatalog(ctx, gen.ListUsageMetersWithCatalogParams{
-			MerchantID: tenant.UUID(),
-			PageLimit:  meteringPageInt32(page.Limit),
-			PageOffset: meteringPageInt32(page.Offset),
+		rows, err := gen.New(s.db.Qx(ctx)).ListUsageMetersWithCatalog(ctx, gen.ListUsageMetersWithCatalogParams{
+			MerchantID: tenant.UUID(), AfterKey: after, FetchLimit: pagination.Fetch(limit),
 		})
 		if err != nil {
 			return fmt.Errorf("list usage meters: %w", err)
 		}
-
-		page.Items = make([]UsageMeter, 0, len(rows))
+		meters := make([]billing.Meter, 0, len(rows))
 		for _, row := range rows {
 			meter, err := usageMeterFromListRow(row)
 			if err != nil {
 				return err
 			}
-			page.Items = append(page.Items, meter)
+			meters = append(meters, meter)
 		}
+		out = pagination.Cut(meters, limit, func(m billing.Meter) any { return meterKeyPosition{Key: m.Key} })
 		return nil
 	})
-	return page, err
+	return out, err
 }
 
 // GetUsageMeter returns one meter and its optional default rate card.
-func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*UsageMeter, error) {
+func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*billing.Meter, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -153,7 +105,7 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*Usa
 		return nil, err
 	}
 
-	var meter UsageMeter
+	var meter billing.Meter
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		row, queryErr := gen.New(s.db.Qx(ctx)).GetUsageMeterWithCatalog(
 			ctx,
@@ -174,80 +126,80 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*Usa
 	return &meter, nil
 }
 
-// ListUsageMeterOverrides returns negotiated payer prices for one meter.
-func (s *MoneyService) ListUsageMeterOverrides(
-	ctx context.Context,
-	meterKey string,
-	limit int,
-	offset int,
-) (UsageMeterOverridePage, error) {
-	page := UsageMeterOverridePage{}
+// ListUsageMeterOverrides returns one keyset page of a meter's customer
+// overrides, by customer.
+func (s *MoneyService) ListUsageMeterOverrides(ctx context.Context, meterKey string, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
+	var out billing.ListPage[billing.RateOverride]
 	if s == nil || s.db == nil {
-		return page, fmt.Errorf("money service not initialized")
+		return out, fmt.Errorf("money service not initialized")
 	}
 	meterKey = catalogrules.NormalizeKey(meterKey)
 	if meterKey == "" {
-		return page, fmt.Errorf("meter key required")
+		return out, fmt.Errorf("meter key required")
 	}
-	page.Limit, page.Offset = normalizeMeteringPage(limit, offset)
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return out, err
+	}
+	var position struct {
+		Customer uuid.UUID `json:"c"`
+	}
+	var after *uuid.UUID
+	if present, err := pagination.Decode(page.Cursor, &position); err != nil {
+		return out, err
+	} else if present {
+		if position.Customer == uuid.Nil {
+			return out, pagination.ErrInvalidCursor
+		}
+		after = &position.Customer
+	}
 	tenant, err := merchant.Require(ctx)
 	if err != nil {
-		return page, err
+		return out, err
 	}
-
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		queries := gen.New(s.db.Qx(ctx))
-		exists, err := queries.UsageMeterExists(ctx, gen.UsageMeterExistsParams{
-			MerchantID: tenant.UUID(),
-			MeterKey:   meterKey,
-		})
+		exists, err := queries.UsageMeterExists(ctx, gen.UsageMeterExistsParams{MerchantID: tenant.UUID(), MeterKey: meterKey})
 		if err != nil {
 			return fmt.Errorf("check usage meter: %w", err)
 		}
 		if !exists {
 			return ErrUsageMeterNotFound
 		}
-
-		page.Total, err = queries.CountUsageMeterOverrides(ctx, gen.CountUsageMeterOverridesParams{
-			MerchantID: tenant.UUID(),
-			MeterKey:   meterKey,
-		})
-		if err != nil {
-			return fmt.Errorf("count usage meter overrides: %w", err)
-		}
-
 		rows, err := queries.ListUsageMeterOverrides(ctx, gen.ListUsageMeterOverridesParams{
-			MerchantID: tenant.UUID(),
-			MeterKey:   meterKey,
-			PageLimit:  meteringPageInt32(page.Limit),
-			PageOffset: meteringPageInt32(page.Offset),
+			MerchantID: tenant.UUID(), MeterKey: meterKey, AfterCustomer: after, FetchLimit: pagination.Fetch(limit),
 		})
 		if err != nil {
 			return fmt.Errorf("list usage meter overrides: %w", err)
 		}
-
-		page.Items = make([]UsageMeterOverride, 0, len(rows))
+		items := make([]billing.RateOverride, 0, len(rows))
 		for _, row := range rows {
-			if row.CustomerID == nil {
-				return fmt.Errorf("usage meter override has no customer")
+			item, err := rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.CreatedAt, row.UpdatedAt)
+			if err != nil {
+				return err
 			}
-			item := UsageMeterOverride{
-				CustomerID: *row.CustomerID,
-				Subject:    row.Subject,
-				CreatedAt:  row.CreatedAt,
-				UpdatedAt:  row.UpdatedAt,
-			}
-			if row.Email != nil {
-				item.Email = *row.Email
-			}
-			if err := decodeRateCard(row.Price, row.Allowance, &item.Price, &item.Allowance); err != nil {
-				return fmt.Errorf("decode usage meter override for customer %s: %w", item.CustomerID, err)
-			}
-			page.Items = append(page.Items, item)
+			items = append(items, item)
 		}
+		out = pagination.Cut(items, limit, func(o billing.RateOverride) any {
+			return struct {
+				Customer uuid.UUID `json:"c"`
+			}{o.CustomerID.UUID()}
+		})
 		return nil
 	})
-	return page, err
+	return out, err
+}
+
+// rateOverride reads one customer rate card row.
+func rateOverride(customer *uuid.UUID, meterKey *string, price, allowance []byte, createdAt, updatedAt time.Time) (billing.RateOverride, error) {
+	if customer == nil || meterKey == nil {
+		return billing.RateOverride{}, fmt.Errorf("rate override has no customer or meter")
+	}
+	out := billing.RateOverride{CustomerID: billing.CustomerID(*customer), MeterKey: *meterKey, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	if err := decodeRateCard(price, allowance, &out.Price, &out.Allowance); err != nil {
+		return out, fmt.Errorf("decode rate override for customer %s meter %q: %w", *customer, *meterKey, err)
+	}
+	return out, nil
 }
 
 type usageMeterRecord struct {
@@ -273,7 +225,7 @@ type usageMeterRecord struct {
 	cardUpdatedAt      *time.Time
 }
 
-func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (UsageMeter, error) {
+func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (billing.Meter, error) {
 	return usageMeterFromRecord(usageMeterRecord{
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
@@ -285,7 +237,7 @@ func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (UsageMeter, e
 	})
 }
 
-func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (UsageMeter, error) {
+func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (billing.Meter, error) {
 	return usageMeterFromRecord(usageMeterRecord{
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
@@ -297,19 +249,15 @@ func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (UsageMeter, erro
 	})
 }
 
-func usageMeterFromRecord(row usageMeterRecord) (UsageMeter, error) {
-	var meter UsageMeter
-	meter.Key = row.key
-	meter.EventType = row.eventType
-	meter.EffectiveEventType = row.effectiveEventType
-	meter.ValueProperty = row.valueProperty
-	meter.Aggregation = catalog.Aggregation(row.aggregation)
-	meter.Unit = row.unit
-	meter.CreatedAt = row.createdAt
-	meter.UpdatedAt = row.updatedAt
-	meter.OverrideCount = row.overrideCount
-	meter.HasActivity = row.hasActivity
-	meter.LastEventAt = row.lastEventAt
+// usageMeterFromRecord reads a meter row; its event type is the effective
+// one (the key when none is declared).
+func usageMeterFromRecord(row usageMeterRecord) (billing.Meter, error) {
+	meter := billing.Meter{
+		Key: row.key, EventType: row.effectiveEventType, ValueProperty: row.valueProperty,
+		Aggregation: catalog.Aggregation(row.aggregation), Unit: row.unit,
+		OverrideCount: row.overrideCount, HasActivity: row.hasActivity, LastEventAt: row.lastEventAt,
+		CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
+	}
 	if err := json.Unmarshal(row.groupBy, &meter.GroupBy); err != nil {
 		return meter, fmt.Errorf("decode meter %q group_by: %w", meter.Key, err)
 	}
@@ -321,11 +269,10 @@ func usageMeterFromRecord(row usageMeterRecord) (UsageMeter, error) {
 		return meter, nil
 	}
 	if row.productID == nil || row.productKey == nil || row.cardCreatedAt == nil || row.cardUpdatedAt == nil {
-		return meter, fmt.Errorf("meter %q default rate card is incomplete", meter.Key)
+		return meter, fmt.Errorf("meter %q rate card is incomplete", meter.Key)
 	}
-	card := DefaultUsageRateCard{
-		ID:         *row.cardID,
-		ProductID:  *row.productID,
+	card := billing.MeterRateCard{
+		ProductID:  billing.ProductID(*row.productID),
 		ProductKey: *row.productKey,
 		CreatedAt:  *row.cardCreatedAt,
 		UpdatedAt:  *row.cardUpdatedAt,
@@ -337,9 +284,9 @@ func usageMeterFromRecord(row usageMeterRecord) (UsageMeter, error) {
 		card.Filter = map[string][]string{}
 	}
 	if err := decodeRateCard(row.price, row.allowance, &card.Price, &card.Allowance); err != nil {
-		return meter, fmt.Errorf("decode meter %q default rate card: %w", meter.Key, err)
+		return meter, fmt.Errorf("decode meter %q rate card: %w", meter.Key, err)
 	}
-	meter.DefaultRateCard = &card
+	meter.RateCard = &card
 	return meter, nil
 }
 
@@ -363,34 +310,8 @@ func decodeRateCard(
 	return nil
 }
 
-func normalizeMeteringPage(limit, offset int) (int, int) {
-	if limit <= 0 {
-		limit = defaultMeteringPageSize
-	}
-	if limit > maxMeteringPageSize {
-		limit = maxMeteringPageSize
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > maxMeteringPageOffset {
-		offset = maxMeteringPageOffset
-	}
-	return limit, offset
-}
-
-func meteringPageInt32(value int) int32 {
-	if value < 0 {
-		return 0
-	}
-	if value > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	return int32(value)
-}
-
 func usageMeterSemanticsEqual(left, right catalogrules.Meter) bool {
-	return left.EventType == right.EventType &&
+	return effectiveMeterEventType(left) == effectiveMeterEventType(right) &&
 		left.ValueProperty == right.ValueProperty &&
 		left.Aggregation == right.Aggregation &&
 		left.Unit == right.Unit &&

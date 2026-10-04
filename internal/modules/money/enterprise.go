@@ -9,11 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
 // Enterprise arrears seams (#798): host-driven sweep, past-due marking,
@@ -100,29 +102,10 @@ func (s *MoneyService) ListPendingCharges(ctx context.Context, payer identity.Cu
 	return out, err
 }
 
-// UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
-type UsageMeterSpec struct {
-	Key           string
-	EventType     string
-	ValueProperty string
-	Aggregation   catalog.Aggregation
-	Unit          string
-	GroupBy       map[string]string
-}
-
-// EnsureUsageMeter idempotently upserts a catalog meter. Host-owned catalogs
-// (no manifest push) use this to declare their metered dimensions.
-func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
+// EnsureUsageMeter idempotently upserts a catalog meter.
+func (s *MoneyService) EnsureUsageMeter(ctx context.Context, meter catalogrules.Meter) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
-	}
-	meter := catalogrules.Meter{
-		Key:           spec.Key,
-		EventType:     spec.EventType,
-		ValueProperty: spec.ValueProperty,
-		Aggregation:   spec.Aggregation,
-		Unit:          spec.Unit,
-		GroupBy:       spec.GroupBy,
 	}
 	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
 		return err
@@ -414,60 +397,71 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 	})
 }
 
-// PayerRateCard is one negotiated per-payer override: the price (and optional
-// included allowance, netted before overage at rating time) applied over the
-// merchant-default card for MeterKey when rating this payer.
-type PayerRateCard struct {
-	MeterKey  string             `json:"meter_key"`
-	Price     catalog.RatePrice  `json:"price"`
-	Allowance *catalog.Allowance `json:"allowance,omitempty"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
-}
-
-// ListPayerRateCards returns a payer's negotiated overrides (or#909).
-func (s *MoneyService) ListPayerRateCards(ctx context.Context, payer identity.CustomerID) ([]PayerRateCard, error) {
+// ListPayerRateCards returns one keyset page of a customer's rate overrides,
+// by meter.
+func (s *MoneyService) ListPayerRateCards(ctx context.Context, payer identity.CustomerID, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
+	var out billing.ListPage[billing.RateOverride]
 	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
+		return out, fmt.Errorf("money service not initialized")
 	}
 	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+		return out, fmt.Errorf("payer required")
+	}
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return out, err
+	}
+	after, err := afterMeterKey(page.Cursor)
+	if err != nil {
+		return out, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return out, err
+	}
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		rows, err := s.db.Gen(ctx).ListPayerRateCards(ctx, gen.ListPayerRateCardsParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), AfterKey: after, FetchLimit: pagination.Fetch(limit),
+		})
+		if err != nil {
+			return err
+		}
+		items := make([]billing.RateOverride, 0, len(rows))
+		for _, row := range rows {
+			item, err := rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.CreatedAt, row.UpdatedAt)
+			if err != nil {
+				return err
+			}
+			items = append(items, item)
+		}
+		out = pagination.Cut(items, limit, func(o billing.RateOverride) any { return meterKeyPosition{Key: o.MeterKey} })
+		return nil
+	})
+	return out, err
+}
+
+// GetPayerRateCard reads a customer's rate override for one meter.
+func (s *MoneyService) GetPayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) (*billing.RateOverride, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	payerID := payer.UUID()
-	var rows []gen.ListPayerRateCardsRow
+	var out billing.RateOverride
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var e error
-		rows, e = s.db.Gen(ctx).ListPayerRateCards(ctx, gen.ListPayerRateCardsParams{
-			MerchantID: tid.UUID(), CustomerID: &payerID,
-		})
-		return e
+		row, err := s.db.Gen(ctx).GetPayerRateCard(ctx, gen.GetPayerRateCardParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), MeterKey: meterKey})
+		if err != nil {
+			return err
+		}
+		out, err = rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.CreatedAt, row.UpdatedAt)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]PayerRateCard, 0, len(rows))
-	for _, row := range rows {
-		card := PayerRateCard{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
-		if row.MeterKey != nil {
-			card.MeterKey = *row.MeterKey
-		}
-		if err := json.Unmarshal(row.Price, &card.Price); err != nil {
-			return nil, fmt.Errorf("decode rate card price for meter %q: %w", card.MeterKey, err)
-		}
-		if len(row.Allowance) > 0 {
-			var a catalog.Allowance
-			if err := json.Unmarshal(row.Allowance, &a); err != nil {
-				return nil, fmt.Errorf("decode rate card allowance for meter %q: %w", card.MeterKey, err)
-			}
-			card.Allowance = &a
-		}
-		out = append(out, card)
-	}
-	return out, nil
+	return &out, nil
 }
 
 // DeletePayerRateCard removes a payer's negotiated override for a meter,

@@ -7,13 +7,15 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
-func MerchantApplyCatalog(r *httprequest.Request) {
+// ApplyCatalog applies a catalog document, JSON or YAML.
+func ApplyCatalog(r *httprequest.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Request.Body, catalog.MaxApplicationBytes+1))
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "could not read catalog application")
+		r.ErrorCode(billing.CodeInvalidRequestBody, "could not read catalog application")
 		return
 	}
 	var application *catalog.Application
@@ -24,11 +26,11 @@ func MerchantApplyCatalog(r *httprequest.Request) {
 	case "application/json", "":
 		application, err = catalog.ParseApplicationJSON(body)
 	default:
-		r.ErrorJSON(http.StatusUnsupportedMediaType, "catalog applications require JSON or YAML")
+		r.ErrorCode(billing.CodeUnsupportedMediaType, "catalog applications require JSON or YAML")
 		return
 	}
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidRequestBody, err.Error())
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -43,7 +45,9 @@ func MerchantApplyCatalog(r *httprequest.Request) {
 	r.JSON(http.StatusOK, receipt)
 }
 
-func MerchantCatalogRevision(r *httprequest.Request) {
+// GetCatalogRevision reads the catalog revision and whether catalog writes
+// are accepted.
+func GetCatalogRevision(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
@@ -53,6 +57,7 @@ func MerchantCatalogRevision(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	_, allowed := adminCatalogOwnership(r)
+	ctx, cfg := r.Request.Context(), r.State.Config
+	allowed := catalogpolicy.Check(ctx, cfg) == nil && catalogpolicy.CheckDeclared(ctx, cfg) == nil
 	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision, WritesAllowed: allowed})
 }

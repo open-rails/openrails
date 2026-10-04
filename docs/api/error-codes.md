@@ -226,6 +226,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
 | `unknown_role` | 400 | `invalid_request_error` | The role is not one this merchant defines. |
 | `unsupported_media_type` | 415 | `invalid_request_error` | The request body is not application/json. |
+| `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
 | `usage_rate_card_invalid` | 400 | `invalid_request_error` | The usage rate card is invalid. |
 | `webhook_account_mismatch` | 400 | `invalid_request_error` | The webhook's account does not match its payload. |

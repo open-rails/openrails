@@ -5,240 +5,179 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
-
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-type AdminUsageMeterResponse struct {
-	billingservice.UsageMeterDTO
-	ConfigurationSource string `json:"configuration_source"`
-	WritesAllowed       bool   `json:"writes_allowed"`
-}
-
-type AdminUsageMeterPageResponse struct {
-	PaginatedResponse[AdminUsageMeterResponse]
-	ConfigurationSource string `json:"configuration_source"`
-	WritesAllowed       bool   `json:"writes_allowed"`
-}
-
-type AdminUsageMeterRequest = billing.UsageMeterRequest
-
-type AdminDefaultUsageRateCardRequest = billing.DefaultUsageRateCardRequest
-
-func AdminListUsageMeters(r *httprequest.Request) {
-	svc, ok := newAdminBillingService(r)
+func ListMeters(r *httprequest.Request) {
+	page, ok := r.Page()
 	if !ok {
-		return
-	}
-	page, err := svc.ListUsageMeters(r.Request.Context(), billingservice.PaginationOptions{
-		Limit:  parseIntDefault(r.Query("limit"), 50),
-		Offset: parseIntDefault(r.Query("offset"), 0),
-	})
-	if err != nil {
-		writeMeteringError(r, err)
-		return
-	}
-	items := make([]AdminUsageMeterResponse, 0, len(page.Data))
-	for _, meter := range page.Data {
-		items = append(items, adminUsageMeterDTO(r, meter))
-	}
-	r.JSON(
-		http.StatusOK,
-		adminUsageMeterPageDTO(
-			r,
-			items,
-			page.TotalItems,
-			page.Limit,
-			page.Offset,
-		),
-	)
-}
-
-func AdminGetUsageMeter(r *httprequest.Request) {
-	meter, ok := loadAdminUsageMeter(r, r.Param("key"))
-	if !ok {
-		return
-	}
-	r.SuccessJSON(adminUsageMeterDTO(r, *meter))
-}
-
-func AdminListUsageMeterOverrides(r *httprequest.Request) {
-	meterKey := catalogrules.NormalizeKey(r.Param("key"))
-	if meterKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, "meter key required")
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	page, err := svc.ListUsageMeterOverrides(
-		r.Request.Context(),
-		meterKey,
-		billingservice.PaginationOptions{
-			Limit:  parseIntDefault(r.Query("limit"), 50),
-			Offset: parseIntDefault(r.Query("offset"), 0),
-		},
-	)
+	out, err := svc.ListUsageMeters(r.Request.Context(), page)
 	if err != nil {
 		writeMeteringError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, PaginatedResponse[billingservice.UsageMeterOverrideDTO]{
-		Items:  page.Data,
-		Total:  page.TotalItems,
-		Limit:  page.Limit,
-		Offset: page.Offset,
-	})
+	r.JSON(http.StatusOK, out)
 }
 
-func AdminPutUsageMeter(r *httprequest.Request) {
-	var req AdminUsageMeterRequest
-	if !r.BindJSON(&req) {
+func GetMeter(r *httprequest.Request) {
+	meter, ok := loadMeter(r)
+	if !ok {
 		return
 	}
-	spec, err := usageMeterSpec(r.Param("key"), req)
+	r.JSON(http.StatusOK, meter)
+}
+
+// ListMeterRateOverrides lists the customers whose negotiated price replaces
+// the meter's rate card.
+func ListMeterRateOverrides(r *httprequest.Request) {
+	key, ok := meterKeyParam(r, "key")
+	if !ok {
+		return
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.ListUsageMeterOverrides(r.Request.Context(), key, page)
 	if err != nil {
+		writeMeteringError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
+// SetMeter declares the meter under the path's key.
+func SetMeter(r *httprequest.Request) {
+	var params billing.SetMeterParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	meter := catalogrules.Meter{Key: r.Param("key"), EventType: params.EventType, ValueProperty: params.ValueProperty, Aggregation: params.Aggregation, Unit: params.Unit, GroupBy: params.GroupBy}
+	if err := catalogrules.ValidateMeter("meter", &meter); err != nil {
 		writeMeteringValidationError(r, "usage_meter_invalid", err)
 		return
 	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	if err := svc.EnsureUsageMeter(r.Request.Context(), spec); err != nil {
-		writeMeteringError(r, err)
-		return
-	}
-	meter, err := svc.GetUsageMeter(r.Request.Context(), spec.Key)
-	if err != nil {
-		r.InternalError("usage meter stored but read-back failed", err)
-		return
-	}
-	r.SuccessJSON(adminUsageMeterDTO(r, *meter))
-}
-
-func AdminPutDefaultUsageRateCard(r *httprequest.Request) {
-	var req AdminDefaultUsageRateCardRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	meter, ok := loadAdminUsageMeter(r, r.Param("key"))
-	if !ok {
-		return
-	}
-	input, err := defaultUsageRateCardInput(*meter, req)
-	if err != nil {
-		writeMeteringValidationError(r, "usage_rate_card_invalid", err)
+	if !catalogrules.BillingSupported(meter.Aggregation) {
+		writeMeteringValidationError(r, "usage_meter_invalid", errors.New("meter aggregation must be sum or count"))
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	if err := svc.SetUsageRateCard(r.Request.Context(), input); err != nil {
+	if err := svc.EnsureUsageMeter(r.Request.Context(), meter); err != nil {
 		writeMeteringError(r, err)
 		return
 	}
 	stored, err := svc.GetUsageMeter(r.Request.Context(), meter.Key)
 	if err != nil {
-		r.InternalError("usage rate card stored but read-back failed", err)
+		writeMeteringError(r, err)
 		return
 	}
-	r.SuccessJSON(adminUsageMeterDTO(r, *stored))
+	r.JSON(http.StatusOK, stored)
 }
 
-func AdminDeleteDefaultUsageRateCard(r *httprequest.Request) {
-	meterKey := catalogrules.NormalizeKey(r.Param("key"))
-	if meterKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, "meter key required")
+// SetMeterRateCard sets the rate card that prices the meter's usage.
+func SetMeterRateCard(r *httprequest.Request) {
+	var params billing.SetMeterRateCardParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	meter, ok := loadMeter(r)
+	if !ok {
+		return
+	}
+	if params.ProductID.IsZero() {
+		writeMeteringValidationError(r, "usage_rate_card_invalid", errors.New("product_id required"))
+		return
+	}
+	if params.Filter == nil {
+		params.Filter = map[string][]string{}
+	}
+	for _, check := range []func() error{
+		func() error { return catalogrules.ValidateUsagePrice("rate card", &params.Price) },
+		func() error { return moneyutil.ValidateCurrency(params.Price.Currency) },
+		func() error { return catalogrules.ValidateFilter("rate card", &params.Filter) },
+		func() error { return catalogrules.ValidateAllowance("rate card", params.Allowance) },
+		func() error {
+			return catalogrules.ValidateDimensions("rate card", meter.GroupBy, params.Filter, &params.Price)
+		},
+	} {
+		if err := check(); err != nil {
+			writeMeteringValidationError(r, "usage_rate_card_invalid", err)
+			return
+		}
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	productID := params.ProductID.UUID()
+	if err := svc.SetUsageRateCard(r.Request.Context(), billingservice.UsageRateCardInput{
+		ProductID: &productID, MeterKey: meter.Key, Filter: params.Filter, Price: params.Price, Allowance: params.Allowance,
+	}); err != nil {
+		writeMeteringError(r, err)
+		return
+	}
+	stored, err := svc.GetUsageMeter(r.Request.Context(), meter.Key)
+	if err != nil {
+		writeMeteringError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, stored)
+}
+
+// DeleteMeterRateCard removes the meter's rate card once no customer has an
+// override of it.
+func DeleteMeterRateCard(r *httprequest.Request) {
+	key, ok := meterKeyParam(r, "key")
+	if !ok {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	if err := svc.DeleteDefaultUsageRateCard(r.Request.Context(), meterKey); err != nil {
+	if err := svc.DeleteDefaultUsageRateCard(r.Request.Context(), key); err != nil {
 		writeMeteringError(r, err)
 		return
 	}
 	r.Status(http.StatusNoContent)
 }
 
-func usageMeterSpec(pathKey string, req AdminUsageMeterRequest) (billingservice.UsageMeterSpec, error) {
-	meter := catalogrules.Meter{
-		Key:           pathKey,
-		EventType:     req.EventType,
-		ValueProperty: req.ValueProperty,
-		Aggregation:   req.Aggregation,
-		Unit:          req.Unit,
-		GroupBy:       req.GroupBy,
+func meterKeyParam(r *httprequest.Request, name string) (string, bool) {
+	key := catalogrules.NormalizeKey(r.Param(name))
+	if key == "" {
+		r.APIError(invalidParam(name, "meter key required"))
+		return "", false
 	}
-	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
-		return billingservice.UsageMeterSpec{}, err
-	}
-	if !catalogrules.BillingSupported(meter.Aggregation) {
-		return billingservice.UsageMeterSpec{}, errors.New("usage meter aggregation must be sum or count")
-	}
-	return billingservice.UsageMeterSpec{
-		Key:           meter.Key,
-		EventType:     meter.EventType,
-		ValueProperty: meter.ValueProperty,
-		Aggregation:   meter.Aggregation,
-		Unit:          meter.Unit,
-		GroupBy:       meter.GroupBy,
-	}, nil
+	return key, true
 }
 
-func defaultUsageRateCardInput(
-	meter billingservice.UsageMeterDTO,
-	req AdminDefaultUsageRateCardRequest,
-) (billingservice.UsageRateCardInput, error) {
-	typedProductID, err := billing.ParseProductID(req.ProductID)
-	if err != nil || typedProductID.IsZero() {
-		return billingservice.UsageRateCardInput{}, errors.New("product_id required")
-	}
-	if err := catalogrules.ValidateUsagePrice("usage rate card", &req.Price); err != nil {
-		return billingservice.UsageRateCardInput{}, err
-	}
-	if err := moneyutil.ValidateCurrency(req.Price.Currency); err != nil {
-		return billingservice.UsageRateCardInput{}, err
-	}
-	if err := catalogrules.ValidateFilter("usage rate card", &req.Filter); err != nil {
-		return billingservice.UsageRateCardInput{}, err
-	}
-	if err := catalogrules.ValidateAllowance("usage rate card", req.Allowance); err != nil {
-		return billingservice.UsageRateCardInput{}, err
-	}
-	if err := catalogrules.ValidateDimensions("usage rate card", meter.GroupBy, req.Filter, &req.Price); err != nil {
-		return billingservice.UsageRateCardInput{}, err
-	}
-	productID := typedProductID.UUID()
-	return billingservice.UsageRateCardInput{
-		ProductID: &productID,
-		MeterKey:  meter.Key,
-		Filter:    req.Filter,
-		Price:     req.Price,
-		Allowance: req.Allowance,
-	}, nil
-}
-
-func loadAdminUsageMeter(r *httprequest.Request, rawKey string) (*billingservice.UsageMeterDTO, bool) {
-	meterKey := catalogrules.NormalizeKey(rawKey)
-	if meterKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, "meter key required")
+func loadMeter(r *httprequest.Request) (*billing.Meter, bool) {
+	key, ok := meterKeyParam(r, "key")
+	if !ok {
 		return nil, false
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return nil, false
 	}
-	meter, err := svc.GetUsageMeter(r.Request.Context(), meterKey)
+	meter, err := svc.GetUsageMeter(r.Request.Context(), key)
 	if err != nil {
 		writeMeteringError(r, err)
 		return nil, false
@@ -246,50 +185,8 @@ func loadAdminUsageMeter(r *httprequest.Request, rawKey string) (*billingservice
 	return meter, true
 }
 
-func adminUsageMeterDTO(r *httprequest.Request, meter billingservice.UsageMeterDTO) AdminUsageMeterResponse {
-	source, writesAllowed := adminCatalogOwnership(r)
-	return AdminUsageMeterResponse{
-		UsageMeterDTO:       meter,
-		ConfigurationSource: source,
-		WritesAllowed:       writesAllowed,
-	}
-}
-
-func adminUsageMeterPageDTO(
-	r *httprequest.Request,
-	items []AdminUsageMeterResponse,
-	total int64,
-	limit int,
-	offset int,
-) AdminUsageMeterPageResponse {
-	source, writesAllowed := adminCatalogOwnership(r)
-	return AdminUsageMeterPageResponse{
-		PaginatedResponse: PaginatedResponse[AdminUsageMeterResponse]{
-			Items:  items,
-			Total:  total,
-			Limit:  limit,
-			Offset: offset,
-		},
-		ConfigurationSource: source,
-		WritesAllowed:       writesAllowed,
-	}
-}
-
-func adminCatalogOwnership(r *httprequest.Request) (string, bool) {
-	if r.State == nil {
-		return "database", false
-	}
-	ctx, cfg := r.Request.Context(), r.State.Config
-	return "database", catalogpolicy.Check(ctx, cfg) == nil && catalogpolicy.CheckDeclared(ctx, cfg) == nil
-}
-
 func writeMeteringValidationError(r *httprequest.Request, code string, err error) {
-	r.APIError(api.NewAPIError(
-		http.StatusBadRequest,
-		api.ErrorTypeInvalidRequest,
-		code,
-		err.Error(),
-	))
+	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, code, err.Error()))
 }
 
 func writeMeteringError(r *httprequest.Request, err error) {

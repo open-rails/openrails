@@ -163,10 +163,9 @@ func TestUnknownCadenceFailsClosed(t *testing.T) {
 	w.armDestructive()
 	l := importLegacy(t, w, "nmi", embedded)
 	w.converge()
-	priceID, err := billing.ParsePriceID(l.price.ID)
-	require.NoError(t, err)
+	priceID := l.price.ID
 	schema := pgx.Identifier{w.schema}.Sanitize()
-	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE id = $1`, uuid.UUID(priceID))
+	_, err := w.pool.Exec(t.Context(), `UPDATE `+schema+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE id = $1`, uuid.UUID(priceID))
 	require.NoError(t, err)
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 	// Mid-dunning when the cadence went missing: a retry is due now.
