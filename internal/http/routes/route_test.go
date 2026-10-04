@@ -28,7 +28,7 @@ var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 287)
+	require.Len(t, Catalog(), 282)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()

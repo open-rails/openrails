@@ -38,7 +38,6 @@ pkg openrails, func WithTimeout(time.Duration) ClientOption
 pkg openrails, func WithTokenProvider(func(context.Context) (string, error)) ClientOption
 pkg openrails, method (*CatalogClient) Apply(context.Context, *billing.CatalogApplyParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*CatalogClient) Revision(context.Context, ...RequestOption) (*billing.CatalogRevision, error)
-pkg openrails, method (*Client) AbandonEngineTakeover(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.EngineTakeover, error)
 pkg openrails, method (*Client) AcknowledgeHostEvent(context.Context, uuid.UUID, ...RequestOption) error
 pkg openrails, method (*Client) AdminConsole() http.Handler
 pkg openrails, method (*Client) Admit(context.Context, []billing.AdmitParams, ...RequestOption) ([]billing.AdmissionVerdict, error)
@@ -91,7 +90,6 @@ pkg openrails, method (*Client) GetCustomer(context.Context, billing.CustomerID,
 pkg openrails, method (*Client) GetCustomerBillingPolicy(context.Context, billing.CustomerID, ...RequestOption) (*billing.CustomerBillingPolicy, error)
 pkg openrails, method (*Client) GetCustomerBillingProfile(context.Context, billing.CustomerID, ...RequestOption) (*billing.CustomerBillingProfile, error)
 pkg openrails, method (*Client) GetCustomerInvoiceProfile(context.Context, billing.CustomerID, ...RequestOption) (*billing.InvoiceProfile, error)
-pkg openrails, method (*Client) GetEngineTakeover(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.EngineTakeover, error)
 pkg openrails, method (*Client) GetInvoice(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) GetMerchantAPIHost(context.Context, billing.MerchantID) (string, error)
 pkg openrails, method (*Client) GetMerchantSettings(context.Context, ...RequestOption) (*billing.MerchantSettings, error)
@@ -147,7 +145,6 @@ pkg openrails, method (*Client) MarkInvoiceUncollectible(context.Context, billin
 pkg openrails, method (*Client) MerchantID() billing.MerchantID
 pkg openrails, method (*Client) OpenOperationAuthorization(context.Context, billing.OperationAuthorizationParams, ...RequestOption) (*billing.OperationAuthorization, error)
 pkg openrails, method (*Client) OpenOperationAuthorizationTx(context.Context, pgx.Tx, billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error)
-pkg openrails, method (*Client) PreviewEngineTakeover(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.EngineTakeover, error)
 pkg openrails, method (*Client) PreviewPlanMigration(context.Context, billing.PlanMigrationRequest, ...RequestOption) (*billing.PlanMigrationResult, error)
 pkg openrails, method (*Client) PreviewProviderCutover(context.Context, billing.SubscriptionID, billing.ProviderCutoverRequest, ...RequestOption) (*billing.ProviderCutover, error)
 pkg openrails, method (*Client) PreviewTierChange(context.Context, billing.SubscriptionID, billing.ChangeTierRequest, ...RequestOption) (*billing.TierChangePreviewResponse, error)
@@ -189,8 +186,6 @@ pkg openrails, method (*Client) SetSpendDelegations(context.Context, billing.Cus
 pkg openrails, method (*Client) SetTrustLevel(context.Context, billing.CustomerID, billing.TrustLevelParams, ...RequestOption) (*billing.TrustLevel, error)
 pkg openrails, method (*Client) Start(context.Context) error
 pkg openrails, method (*Client) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
-pkg openrails, method (*Client) TakeOverBilling(context.Context, billing.SubscriptionID, string, ...RequestOption) (*billing.EngineTakeover, error)
-pkg openrails, method (*Client) TakeOverBillingBatch(context.Context, billing.EngineTakeoverBatchRequest, ...RequestOption) (*billing.EngineTakeoverBatchResult, error)
 pkg openrails, method (*Client) UpdateSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.UpdateSubscriptionPaymentMethodRequest, ...RequestOption) error
 pkg openrails, method (*Client) Verify(context.Context, ...RequestOption) error
 pkg openrails, method (*Client) VoidInvoice(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
@@ -672,14 +667,6 @@ pkg openrails/billing, const CodeDelegatedTokenExpired untyped string = "delegat
 pkg openrails/billing, const CodeDelegatedTokenInvalid untyped string = "delegated_token_invalid"
 pkg openrails/billing, const CodeDelegatedTokenRevoked untyped string = "delegated_token_revoked"
 pkg openrails/billing, const CodeDelegatedVerificationUnavailable untyped string = "delegated_verification_unavailable"
-pkg openrails/billing, const CodeEngineTakeoverBoundaryTooClose untyped string = "engine_takeover_boundary_too_close"
-pkg openrails/billing, const CodeEngineTakeoverCommitted untyped string = "engine_takeover_committed"
-pkg openrails/billing, const CodeEngineTakeoverConflict untyped string = "engine_takeover_conflict"
-pkg openrails/billing, const CodeEngineTakeoverInFlight untyped string = "engine_takeover_in_flight"
-pkg openrails/billing, const CodeEngineTakeoverIneligible untyped string = "engine_takeover_ineligible"
-pkg openrails/billing, const CodeEngineTakeoverNoAgreement untyped string = "engine_takeover_no_recurring_agreement"
-pkg openrails/billing, const CodeEngineTakeoverNotFound untyped string = "engine_takeover_not_found"
-pkg openrails/billing, const CodeEngineTakeoverRateLimited untyped string = "engine_takeover_rate_limited"
 pkg openrails/billing, const CodeHostMerchantMismatch untyped string = "host_merchant_mismatch"
 pkg openrails/billing, const CodeHostPrincipalInvalid untyped string = "host_principal_invalid"
 pkg openrails/billing, const CodeIdempotencyKeyReused untyped string = "idempotency_key_reused"
@@ -1710,28 +1697,6 @@ pkg openrails/billing, type EffectiveTier struct, Group string `json:"group"`
 pkg openrails/billing, type EffectiveTier struct, ProductID string `json:"product_id"`
 pkg openrails/billing, type EffectiveTier struct, ProductKey string `json:"product_key"`
 pkg openrails/billing, type EffectiveTier struct, TierRank int `json:"tier_rank"`
-pkg openrails/billing, type EngineTakeover struct
-pkg openrails/billing, type EngineTakeover struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type EngineTakeover struct, Anchor time.Time `json:"anchor"`
-pkg openrails/billing, type EngineTakeover struct, Currency string `json:"currency"`
-pkg openrails/billing, type EngineTakeover struct, Cutoff time.Time `json:"cutoff"`
-pkg openrails/billing, type EngineTakeover struct, ID uuid.UUID `json:"id,omitzero"`
-pkg openrails/billing, type EngineTakeover struct, RailSubscriptionID string `json:"rail_subscription_id"`
-pkg openrails/billing, type EngineTakeover struct, Reason string `json:"reason,omitempty"`
-pkg openrails/billing, type EngineTakeover struct, Stage string `json:"stage"`
-pkg openrails/billing, type EngineTakeover struct, Status string `json:"status"`
-pkg openrails/billing, type EngineTakeover struct, SubscriptionID SubscriptionID `json:"subscription_id"`
-pkg openrails/billing, type EngineTakeover struct, SuccessorSubscriptionID *SubscriptionID `json:"successor_subscription_id,omitempty"`
-pkg openrails/billing, type EngineTakeoverBatchRequest struct
-pkg openrails/billing, type EngineTakeoverBatchRequest struct, MaxSubscriptions int `json:"max_subscriptions"`
-pkg openrails/billing, type EngineTakeoverBatchRequest struct, PriceID string `json:"price_id,omitempty"`
-pkg openrails/billing, type EngineTakeoverBatchResult struct
-pkg openrails/billing, type EngineTakeoverBatchResult struct, Admitted []EngineTakeover `json:"admitted"`
-pkg openrails/billing, type EngineTakeoverBatchResult struct, Refused []EngineTakeoverRefusal `json:"refused"`
-pkg openrails/billing, type EngineTakeoverRefusal struct
-pkg openrails/billing, type EngineTakeoverRefusal struct, Code string `json:"code"`
-pkg openrails/billing, type EngineTakeoverRefusal struct, Reason string `json:"reason"`
-pkg openrails/billing, type EngineTakeoverRefusal struct, SubscriptionID SubscriptionID `json:"subscription_id"`
 pkg openrails/billing, type EntitlementRecord struct
 pkg openrails/billing, type EntitlementRecord struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type EntitlementRecord struct, CustomerID string `json:"customer_id,omitzero"`

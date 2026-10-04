@@ -13,8 +13,7 @@ import (
 
 // subscriptionsRoutes is recurring agreements: reading, cancelling, resuming
 // and changing a subscription as the customer or as merchant staff, and the
-// merchant's bulk moves (reprices, plan migrations, PSP cutovers, engine
-// takeovers).
+// merchant's bulk moves (reprices, plan migrations, PSP cutovers).
 var subscriptionsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/effective-tier", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
 		Query: params(text("group")), Responses: []Reply{{200, service.EffectiveTier{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.ServiceResolveEffectiveTier)},
@@ -38,16 +37,6 @@ var subscriptionsRoutes = []Route{
 		Query: params(text("idempotency_key")), Responses: []Reply{{200, billing.ProviderCutover{}}, {202, billing.ProviderCutover{}}}, Errors: codes("rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.ProviderCutover)},
 	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/provider-cutover/preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,
 		Query: params(text("idempotency_key")), Request: billing.ProviderCutoverRequest{}, Responses: []Reply{{200, billing.ProviderCutover{}}}, Errors: codes("rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.PreviewProviderCutover)},
-	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/engine-takeover/preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,
-		Responses: []Reply{{200, billing.EngineTakeover{}}}, Errors: codes("catalog_scope_mismatch", "rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.PreviewEngineTakeover)},
-	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/engine-takeover", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
-		Responses: []Reply{{200, billing.EngineTakeover{}}, {202, billing.EngineTakeover{}}}, Errors: codes("catalog_scope_mismatch", "rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.EngineTakeover)},
-	{Method: GET, Path: "/v1/merchant/subscriptions/{id}/engine-takeover", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,
-		Responses: []Reply{{200, billing.EngineTakeover{}}}, Errors: codes("catalog_scope_mismatch", "rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.GetEngineTakeover)},
-	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/engine-takeover/abandon", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
-		Responses: []Reply{{200, billing.EngineTakeover{}}, {202, billing.EngineTakeover{}}}, Errors: codes("catalog_scope_mismatch", "rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.AbandonEngineTakeover)},
-	{Method: POST, Path: "/v1/merchant/engine-takeovers", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
-		Request: billing.EngineTakeoverBatchRequest{}, Responses: []Reply{{200, billing.EngineTakeoverBatchResult{}}}, Errors: codes("catalog_scope_mismatch", "rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.EngineTakeoverBatch)},
 	{Method: POST, Path: "/v1/merchant/provider-refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
 		Responses: []Reply{{202, billing.ProviderRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshProviders)},
 	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/reprice", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,

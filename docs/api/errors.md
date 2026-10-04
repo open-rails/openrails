@@ -77,11 +77,6 @@ cycle is `409 tier_change_cadence_unsupported` (NMI's billing date is kept); a
 change of a schedule on a named NMI plan to a price without a linked NMI plan of
 the same amount and cycle is `409 tier_change_requires_linked_plan` (NMI changes
 named-plan schedules only by switching plans; nothing was charged).
-Engine takeovers answer
-`engine_takeover_ineligible`, `engine_takeover_no_recurring_agreement`,
-`engine_takeover_boundary_too_close`, `engine_takeover_in_flight`,
-`engine_takeover_committed`, `engine_takeover_conflict` (409) and
-`engine_takeover_not_found` (404).
 
 A method moved into third-party custody is refused with `409
 payment_method_not_psp_vaulted` on the same route, even when its PSP id still

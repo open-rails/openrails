@@ -476,7 +476,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// execute it inline through the SAME registry/runner the scheduled
 	// executor/verifier drains — one primitive, identical semantics.
 	runtime.ProviderCutovers = &intents.NMIProviderCutover{DB: database, Resolver: runtime.CollectionResolver, Clock: clock}
-	runtime.EngineTakeovers = &intents.NMIEngineTakeover{DB: database, Resolver: runtime.CollectionResolver, Clock: clock}
 	intentRunner := runtime.IntentRunner()
 	if runtime.CheckoutService != nil {
 		runtime.CheckoutService.Intents = intentRunner

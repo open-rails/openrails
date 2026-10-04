@@ -1030,36 +1030,6 @@ export type EffectiveTierResponse = {
   tier: EffectiveTierBody | null
 }
 
-export type EngineTakeover = {
-  id?: string
-  subscription_id: string
-  successor_subscription_id?: string
-  rail_subscription_id: string
-  anchor: string
-  cutoff: string
-  amount: string
-  currency: string
-  status: string
-  stage: string
-  reason?: string
-}
-
-export type EngineTakeoverBatchRequest = {
-  max_subscriptions?: number
-  price_id?: string
-}
-
-export type EngineTakeoverBatchResult = {
-  admitted: EngineTakeover[] | null
-  refused: EngineTakeoverRefusal[] | null
-}
-
-export type EngineTakeoverRefusal = {
-  subscription_id: string
-  code: string
-  reason: string
-}
-
 export type EntitlementRecord = {
   id: string
   customer_id?: string

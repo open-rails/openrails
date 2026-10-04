@@ -750,10 +750,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
         AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
     OR (intent_type='subscription_collection'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
-    OR (intent_type='nmi_engine_takeover'
-        AND payload->'agreement'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
-        AND (payload->'agreement'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
+        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
 ORDER BY id LIMIT 2;
 -- name: ExpireRailIntentByID :execrows
 UPDATE billing.rail_intents pi
@@ -870,27 +867,3 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(inten
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
--- Only before the schedule delete was submitted.
--- name: AbandonNMIEngineTakeover :execrows
-UPDATE billing.rail_intents
-SET status = 'failed_terminal', last_failure_reason = 'abandoned before any NMI change',
-    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || sqlc.arg(evidence)::jsonb,
-    claimed_until = NULL, updated_at = now()
-WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
-  AND intent_type = 'nmi_engine_takeover' AND status IN ('pending', 'failed_retryable')
-  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'delete_submitted');
-
--- name: ListNMIEngineTakeoverCandidates :many
-SELECT s.id, s.current_period_ends_at
-FROM billing.subscriptions s
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail = 'nmi' AND s.collection_policy = 'nmi_schedule'
-  AND s.status = 'active' AND s.deleted_at IS NULL AND s.rail_subscription_id <> ''
-  AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
-  AND s.current_period_ends_at > sqlc.arg(ends_after)::timestamptz
-  AND (sqlc.narg(price_id)::uuid IS NULL OR s.price_id = sqlc.narg(price_id)::uuid)
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rail_intents i
-      WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
-        AND i.status NOT IN ('succeeded', 'failed_terminal', 'superseded', 'expired'))
-ORDER BY s.current_period_ends_at, s.id
-LIMIT sqlc.arg(row_limit)::bigint;

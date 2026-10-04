@@ -412,12 +412,7 @@ Full request and state-transition details are in
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | `merchant:subscriptions:read` | Validate per-user account cutover |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:update` | Execute or resume the original durable cutover |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:read` | Read cutover by idempotency_key |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/preview` | `merchant:subscriptions:read` | Check an NMI-billed subscription for takeover to OpenRails billing; no mutation |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover` | `merchant:subscriptions:update` | Durable takeover (Idempotency-Key): delete the NMI schedule at least 24h before the period end, then an engine successor bills the same card from that boundary; `202` while held |
-| GET | `/v1/merchant/subscriptions/{id}/engine-takeover` | `merchant:subscriptions:read` | Latest takeover and its stage |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/abandon` | `merchant:subscriptions:update` | Abandon before the NMI delete is sent; afterwards `409 engine_takeover_committed` |
 | POST | `/v1/merchant/provider-refresh` | `merchant:subscriptions:update` | Run the merchant's provider refresh now; `202 {status: queued\|already_running, job_id}`. `Client.RefreshProviders` |
-| POST | `/v1/merchant/engine-takeovers` | `merchant:subscriptions:update` | Admit takeovers for up to `max_subscriptions` (1-50) eligible NMI-billed subscriptions, earliest boundary first; executions obey the destructive switch and volume breaker |
 | POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B) |
 | POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
 | GET | `/v1/merchant/plan-migrations/{id}` | `merchant:subscriptions:read` | One migration |

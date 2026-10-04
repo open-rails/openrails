@@ -12,31 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const abandonNMIEngineTakeover = `-- name: AbandonNMIEngineTakeover :execrows
-UPDATE billing.rail_intents
-SET status = 'failed_terminal', last_failure_reason = 'abandoned before any NMI change',
-    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || $1::jsonb,
-    claimed_until = NULL, updated_at = now()
-WHERE id = $2::uuid AND merchant_id = $3::uuid
-  AND intent_type = 'nmi_engine_takeover' AND status IN ('pending', 'failed_retryable')
-  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'delete_submitted')
-`
-
-type AbandonNMIEngineTakeoverParams struct {
-	Evidence   []byte
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-// Only before the schedule delete was submitted.
-func (q *Queries) AbandonNMIEngineTakeover(ctx context.Context, arg AbandonNMIEngineTakeoverParams) (int64, error) {
-	result, err := q.db.Exec(ctx, abandonNMIEngineTakeover, arg.Evidence, arg.ID, arg.MerchantID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const advanceRailIntentVerification = `-- name: AdvanceRailIntentVerification :execrows
 UPDATE billing.rail_intents
 SET next_attempt_at = LEAST(next_attempt_at, $1::timestamptz), updated_at = now()
@@ -1601,59 +1576,6 @@ func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg L
 	return items, nil
 }
 
-const listNMIEngineTakeoverCandidates = `-- name: ListNMIEngineTakeoverCandidates :many
-SELECT s.id, s.current_period_ends_at
-FROM billing.subscriptions s
-WHERE s.merchant_id = $1::uuid AND s.rail = 'nmi' AND s.collection_policy = 'nmi_schedule'
-  AND s.status = 'active' AND s.deleted_at IS NULL AND s.rail_subscription_id <> ''
-  AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
-  AND s.current_period_ends_at > $2::timestamptz
-  AND ($3::uuid IS NULL OR s.price_id = $3::uuid)
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.rail_intents i
-      WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
-        AND i.status NOT IN ('succeeded', 'failed_terminal', 'superseded', 'expired'))
-ORDER BY s.current_period_ends_at, s.id
-LIMIT $4::bigint
-`
-
-type ListNMIEngineTakeoverCandidatesParams struct {
-	MerchantID uuid.UUID
-	EndsAfter  time.Time
-	PriceID    *uuid.UUID
-	RowLimit   int64
-}
-
-type ListNMIEngineTakeoverCandidatesRow struct {
-	ID                  uuid.UUID
-	CurrentPeriodEndsAt *time.Time
-}
-
-func (q *Queries) ListNMIEngineTakeoverCandidates(ctx context.Context, arg ListNMIEngineTakeoverCandidatesParams) ([]ListNMIEngineTakeoverCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, listNMIEngineTakeoverCandidates,
-		arg.MerchantID,
-		arg.EndsAfter,
-		arg.PriceID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListNMIEngineTakeoverCandidatesRow
-	for rows.Next() {
-		var i ListNMIEngineTakeoverCandidatesRow
-		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.rail_intents
 WHERE merchant_id=$1::uuid AND status='succeeded'
@@ -1662,10 +1584,7 @@ WHERE merchant_id=$1::uuid AND status='succeeded'
         AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz)
     OR (intent_type='subscription_collection'
         AND subscription_id=$2::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz)
-    OR (intent_type='nmi_engine_takeover'
-        AND payload->'agreement'->>'subscription_id'=$2::uuid::text
-        AND (payload->'agreement'->>'period_end')::timestamptz=$3::timestamptz))
+        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz))
 ORDER BY id LIMIT 2
 `
 

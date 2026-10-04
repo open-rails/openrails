@@ -128,8 +128,6 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/merchant/subscriptions":                                                    billing.MerchantSubscriptionsRead,
 		"POST /v1/merchant/subscriptions/{id}/cancel":                                       billing.MerchantSubscriptionsUpdate,
 		"POST /v1/merchant/subscriptions/{id}/change-tier":                                  billing.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/subscriptions/{id}/engine-takeover/preview":                      billing.MerchantSubscriptionsRead,
-		"POST /v1/merchant/engine-takeovers":                                                billing.MerchantSubscriptionsUpdate,
 		"POST /v1/merchant/catalog/reprice-all-prior-versions":                              billing.MerchantSubscriptionsUpdate,
 		"GET /v1/merchant/invoices":                                                         billing.MerchantInvoicesRead,
 		"POST /v1/merchant/invoices/{id}/void":                                              billing.MerchantInvoicesUpdate,

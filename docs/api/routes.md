@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (287), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (282), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -163,11 +163,6 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:update` | `ProviderCutoverRequest` | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:read` | — | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | merchant | `merchant:subscriptions:read` | `ProviderCutoverRequest` | 200 `ProviderCutover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/preview` | merchant | `merchant:subscriptions:read` | — | 200 `EngineTakeover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover` | merchant | `merchant:subscriptions:update` | — | 200 `EngineTakeover`<br>202 `EngineTakeover` |  |
-| GET | `/v1/merchant/subscriptions/{id}/engine-takeover` | merchant | `merchant:subscriptions:read` | — | 200 `EngineTakeover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/abandon` | merchant | `merchant:subscriptions:update` | — | 200 `EngineTakeover`<br>202 `EngineTakeover` |  |
-| POST | `/v1/merchant/engine-takeovers` | merchant | `merchant:subscriptions:update` | `EngineTakeoverBatchRequest` | 200 `EngineTakeoverBatchResult` |  |
 | POST | `/v1/merchant/provider-refresh` | merchant | `merchant:subscriptions:update` | — | 202 `ProviderRefresh` |  |
 | POST | `/v1/merchant/subscriptions/{id}/reprice` | merchant | `merchant:subscriptions:update` | `CreateSubscriptionRepriceRequest` | 201 `SubscriptionRepriceView` |  |
 | POST | `/v1/merchant/catalog/reprice-all-prior-versions` | merchant | `merchant:subscriptions:update` | `RepriceAllPriorVersionsRequest` | 201 `RepriceBatchResult` |  |

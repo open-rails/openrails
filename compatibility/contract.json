@@ -7,7 +7,6 @@
       "func (InvoiceSweepArgs) Kind() string",
       "func (c *CatalogClient) Apply(ctx context.Context, params *billing.CatalogApplyParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error)",
       "func (c *CatalogClient) Revision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error)",
-      "func (c *Client) AbandonEngineTakeover(ctx context.Context, subscriptionID billing.SubscriptionID, requestOptions ...RequestOption) (*billing.EngineTakeover, error)",
       "func (c *Client) AcknowledgeHostEvent(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) error",
       "func (c *Client) AdminConsole() http.Handler",
       "func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error)",
@@ -60,7 +59,6 @@
       "func (c *Client) GetCustomerBillingPolicy(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.CustomerBillingPolicy, error)",
       "func (c *Client) GetCustomerBillingProfile(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.CustomerBillingProfile, error)",
       "func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID billing.CustomerID, requestOptions ...RequestOption) (*billing.InvoiceProfile, error)",
-      "func (c *Client) GetEngineTakeover(ctx context.Context, subscriptionID billing.SubscriptionID, requestOptions ...RequestOption) (*billing.EngineTakeover, error)",
       "func (c *Client) GetInvoice(ctx context.Context, id billing.InvoiceID, requestOptions ...RequestOption) (*billing.Invoice, error)",
       "func (c *Client) GetMerchantAPIHost(ctx context.Context, id billing.MerchantID) (string, error)",
       "func (c *Client) GetMerchantSettings(ctx context.Context, requestOptions ...RequestOption) (*billing.MerchantSettings, error)",
@@ -116,7 +114,6 @@
       "func (c *Client) MerchantID() billing.MerchantID",
       "func (c *Client) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error)",
       "func (c *Client) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error)",
-      "func (c *Client) PreviewEngineTakeover(ctx context.Context, subscriptionID billing.SubscriptionID, requestOptions ...RequestOption) (*billing.EngineTakeover, error)",
       "func (c *Client) PreviewPlanMigration(ctx context.Context, request billing.PlanMigrationRequest, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error)",
       "func (c *Client) PreviewProviderCutover(ctx context.Context, subscriptionID billing.SubscriptionID, req billing.ProviderCutoverRequest, requestOptions ...RequestOption) (*billing.ProviderCutover, error)",
       "func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionID, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangePreviewResponse, error)",
@@ -158,8 +155,6 @@
       "func (c *Client) SetTrustLevel(ctx context.Context, customer billing.CustomerID, params billing.TrustLevelParams, requestOptions ...RequestOption) (*billing.TrustLevel, error)",
       "func (c *Client) Start(ctx context.Context) error",
       "func (c *Client) SubjectHasVaultedPaymentMethod(ctx context.Context, vaultMerchant billing.MerchantID, subject string) (bool, error)",
-      "func (c *Client) TakeOverBilling(ctx context.Context, subscriptionID billing.SubscriptionID, idempotencyKey string, requestOptions ...RequestOption) (*billing.EngineTakeover, error)",
-      "func (c *Client) TakeOverBillingBatch(ctx context.Context, request billing.EngineTakeoverBatchRequest, requestOptions ...RequestOption) (*billing.EngineTakeoverBatchResult, error)",
       "func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, request billing.UpdateSubscriptionPaymentMethodRequest, requestOptions ...RequestOption) error",
       "func (c *Client) Verify(ctx context.Context, requestOptions ...RequestOption) error",
       "func (c *Client) VoidInvoice(ctx context.Context, id billing.InvoiceID, requestOptions ...RequestOption) (*billing.Invoice, error)",
@@ -298,7 +293,6 @@
       "const (\n\tChargeSucceeded ChargeOutcome = \"succeeded\"\n\tChargeFailed    ChargeOutcome = \"failed\"\n)",
       "const (\n\tCodeCardDeclined = \"card_declined\"\n\n\tCodePaymentMethodStale = \"payment_method_stale\"\n\n\tCodePaymentProviderRejected = \"payment_provider_rejected\"\n\n\tCodePaymentMethodRequired = \"payment_method_required\"\n)",
       "const (\n\tCodeCredentialExpired                     = \"credential_expired\"\n\tCodeCredentialRevoked                     = \"credential_revoked\"\n\tCodeCredentialIdentityMismatch            = \"credential_identity_mismatch\"\n\tCodeSenderProofRequired                   = \"sender_proof_required\"\n\tCodeServiceCredentialInvalid              = \"service_credential_invalid\"\n\tCodeServiceCredentialMerchantUnresolved   = \"service_credential_merchant_unresolved\"\n\tCodeServiceCredentialResourceScopeDenied  = \"service_credential_resource_scope_denied\"\n\tCodeServiceCredentialCustomerScopeDenied  = \"service_credential_customer_scope_denied\"\n\tCodeDelegatedTokenInvalid                 = \"delegated_token_invalid\"\n\tCodeDelegatedTokenExpired                 = \"delegated_token_expired\"\n\tCodeDelegatedTokenRevoked                 = \"delegated_token_revoked\"\n\tCodeDelegatedPrincipalInvalid             = \"delegated_principal_invalid\"\n\tCodeDelegatedMerchantUnresolved           = \"delegated_merchant_unresolved\"\n\tCodeDelegatedVerificationUnavailable      = \"delegated_verification_unavailable\"\n\tCodeHostPrincipalInvalid                  = \"host_principal_invalid\"\n\tCodePermissionRequired                    = \"permission_required\"\n\tCodeMerchantUnresolved                    = \"merchant_unresolved\"\n\tCodeHostMerchantMismatch                  = \"host_merchant_mismatch\"\n\tCodeMerchantContextMismatch               = \"merchant_context_mismatch\"\n\tCodeInvokerScopedPrincipal                = \"invoker_scoped_principal\"\n\tCodeCatalogOwnerRequired                  = \"catalog_owner_required\"\n\tCodeStepUpRequired                        = \"step_up_required\"\n\tCodeStepUpUnavailable                     = \"step_up_unavailable\"\n\tCodeAuthenticationUnavailable             = \"authentication_unavailable\"\n\tCodeAuthorizationUnavailable              = \"authorization_unavailable\"\n\tCodeMerchantCreationPaymentMethodRequired = \"merchant_creation_payment_method_required\"\n)",
-      "const (\n\tCodeEngineTakeoverIneligible       = \"engine_takeover_ineligible\"\n\tCodeEngineTakeoverNoAgreement      = \"engine_takeover_no_recurring_agreement\"\n\tCodeEngineTakeoverBoundaryTooClose = \"engine_takeover_boundary_too_close\"\n\tCodeEngineTakeoverInFlight         = \"engine_takeover_in_flight\"\n\tCodeEngineTakeoverCommitted        = \"engine_takeover_committed\"\n\tCodeEngineTakeoverConflict         = \"engine_takeover_conflict\"\n\tCodeEngineTakeoverNotFound         = \"engine_takeover_not_found\"\n\tCodeEngineTakeoverRateLimited      = \"engine_takeover_rate_limited\"\n)",
       "const (\n\tCodeInvalidParam           = \"invalid_param\"\n\tCodeAuthenticationRequired = \"authentication_required\"\n\tCodeResourceAccessDenied   = \"resource_access_denied\"\n\tCodeResourceNotFound       = \"resource_not_found\"\n\tCodeResourceConflict       = \"resource_conflict\"\n\tCodePaymentFailed          = \"payment_failed\"\n\tCodeRateLimitExceeded      = \"rate_limit_exceeded\"\n\tCodeInternalError          = \"internal_error\"\n\tCodeServiceUnavailable     = \"service_unavailable\"\n\tCodeIdempotencyKeyReused   = \"idempotency_key_reused\"\n\tCodeInsufficientCredits    = \"insufficient_credits\"\n\tCodeInsufficientFunds      = \"insufficient_funds\"\n)",
       "const (\n\tCodeInvoiceActionNotAllowed         = \"invoice_action_not_allowed\"\n\tCodeInvoiceNotRetryable             = \"invoice_not_retryable\"\n\tCodeInvoiceRetryInProgress          = \"invoice_retry_in_progress\"\n\tCodeInvoiceRetryOutcomeUnknown      = \"invoice_retry_outcome_unknown\"\n\tCodeInvoiceRetryIdempotencyConflict = \"invoice_retry_idempotency_conflict\"\n\tCodeInvoicePaymentReferenceUsed     = \"invoice_payment_reference_used\"\n\tCodeInvoicePaymentExceedsDue        = \"invoice_payment_exceeds_due\"\n\tCodeInvoicePaymentInvalid           = \"invoice_payment_invalid\"\n\tCodeCollectionPaymentMethodRequired = \"collection_payment_method_required\"\n\tCodeCollectionPaymentMethodInvalid  = \"collection_payment_method_invalid\"\n)",
       "const (\n\tCodeProviderCancelHeld = \"provider_cancel_held\"\n\n\tCodePaymentMethodSameVault = \"payment_method_same_vault\"\n\n\tCodePaymentDuplicateRefused = \"payment_duplicate_refused\"\n)",
@@ -600,10 +594,6 @@
       "type DunningPolicy struct {\n\tTiers                 []DunningTier `json:\"tiers\"`\n\tTransientRetryMinutes []int         `json:\"transient_retry_minutes,omitempty\"`\n\n\tAccessDuringDunning string `json:\"access_during_dunning,omitempty\"`\n\n\tAccessWhileRenewalHeld string `json:\"access_while_renewal_held,omitempty\"`\n}",
       "type DunningTier struct {\n\tMaxCycleHours   int   `json:\"max_cycle_hours,omitempty\"`\n\tRetryAfterHours []int `json:\"retry_after_hours,omitempty\"`\n}",
       "type EffectiveTier struct {\n\tGroup       string `json:\"group\"`\n\tEntitlement string `json:\"entitlement\"`\n\tDisplayName string `json:\"display_name\"`\n\tTierRank    int    `json:\"tier_rank\"`\n\tProductID   string `json:\"product_id\"`\n\tProductKey  string `json:\"product_key\"`\n}",
-      "type EngineTakeover struct {\n\tID                      uuid.UUID       `json:\"id,omitzero\"`\n\tSubscriptionID          SubscriptionID  `json:\"subscription_id\"`\n\tSuccessorSubscriptionID *SubscriptionID `json:\"successor_subscription_id,omitempty\"`\n\tRailSubscriptionID      string          `json:\"rail_subscription_id\"`\n\tAnchor                  time.Time       `json:\"anchor\"`\n\tCutoff                  time.Time       `json:\"cutoff\"`\n\tAmount                  int64           `json:\"amount,string\"`\n\tCurrency                string          `json:\"currency\"`\n\tStatus                  string          `json:\"status\"`\n\tStage                   string          `json:\"stage\"`\n\tReason                  string          `json:\"reason,omitempty\"`\n}",
-      "type EngineTakeoverBatchRequest struct {\n\tMaxSubscriptions int    `json:\"max_subscriptions\"`\n\tPriceID          string `json:\"price_id,omitempty\"`\n}",
-      "type EngineTakeoverBatchResult struct {\n\tAdmitted []EngineTakeover        `json:\"admitted\"`\n\tRefused  []EngineTakeoverRefusal `json:\"refused\"`\n}",
-      "type EngineTakeoverRefusal struct {\n\tSubscriptionID SubscriptionID `json:\"subscription_id\"`\n\tCode           string         `json:\"code\"`\n\tReason         string         `json:\"reason\"`\n}",
       "type EntitlementRecord struct {\n\tID           string     `json:\"id\"`\n\tCustomerID   string     `json:\"customer_id,omitzero\"`\n\tEntitlement  string     `json:\"entitlement\"`\n\tStartAt      time.Time  `json:\"start_at\"`\n\tEndAt        *time.Time `json:\"end_at,omitempty\"`\n\tSourceID     *string    `json:\"source_id,omitempty\"`\n\tSourceType   string     `json:\"source_type\"`\n\tRevokedAt    *time.Time `json:\"revoked_at,omitempty\"`\n\tRevokeReason *string    `json:\"revoke_reason,omitempty\"`\n\tCreatedAt    time.Time  `json:\"created_at\"`\n\tUpdatedAt    time.Time  `json:\"updated_at\"`\n}",
       "type ErrorCode struct {\n\tCode    string\n\tStatus  int\n\tType    string\n\tMeaning string\n}",
       "type ErrorDetails struct {\n\tType      string         `json:\"type\"`\n\tCode      string         `json:\"code\"`\n\tMessage   string         `json:\"message\"`\n\tRequestID string         `json:\"request_id,omitempty\"`\n\tParam     *string        `json:\"param,omitempty\"`\n\tMetadata  map[string]any `json:\"metadata,omitempty\"`\n}",
@@ -1233,7 +1223,6 @@
       "type InvoiceCollectionPayload struct {\n\tInitiator           charge.Initiator           `json:\"initiator\"`\n\tInvoiceID           uuid.UUID                  `json:\"invoice_id\"`\n\tCustomerID          uuid.UUID                  `json:\"customer_id\"`\n\tAttemptID           uuid.UUID                  `json:\"attempt_id\"`\n\tPaymentMethodID     uuid.UUID                  `json:\"payment_method_id\"`\n\tRail                string                     `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument    `json:\"instrument\"`\n\tHyperSwitch         *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tCurrency            string                     `json:\"currency\"`\n\tAmount              int64                      `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents            `json:\"amount_minor\"`\n\tProviderCustomerRef string                     `json:\"provider_customer_ref\"`\n\tDescription         string                     `json:\"description\"`\n}",
       "type NMICardVaultPayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tCard            nmiCard   `json:\"card\"`\n}",
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
-      "type NMIEngineTakeoverPayload struct {\n\tLegacySubscriptionID uuid.UUID               `json:\"legacy_subscription_id\"`\n\tLegacyPolicy         models.CollectionPolicy `json:\"legacy_policy\"`\n\tRailSubscriptionID   string                  `json:\"rail_subscription_id\"`\n\tPaymentMethodID      uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument           charge.FrozenInstrument `json:\"instrument\"`\n\tLegacyPaymentID      uuid.UUID               `json:\"legacy_payment_id\"`\n\tAmountMinor          int64                   `json:\"amount_minor,string\"`\n\tAnchor               time.Time               `json:\"anchor\"`\n\tCutoff               time.Time               `json:\"cutoff\"`\n\n\tAgreement subscriptions.RenewalTerms `json:\"agreement\"`\n}",
       "type NMIPaymentMethodDeletePayload struct {\n\tBillingEntryOnly bool      `json:\"billing_entry_only\"`\n\tUserID           string    `json:\"user_id\"`\n\tPaymentMethodID  uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef  string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef    string    `json:\"rail_method_ref,omitempty\"`\n}",
       "type NMIPaymentMethodUpdatePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n\tPaymentToken    string    `json:\"payment_token\"`\n\tNameOnCard      string    `json:\"name_on_card,omitempty\"`\n\tFirstName       string    `json:\"first_name,omitempty\"`\n\tLastName        string    `json:\"last_name,omitempty\"`\n\tAddress1        string    `json:\"address1,omitempty\"`\n\tCity            string    `json:\"city,omitempty\"`\n\tState           string    `json:\"state,omitempty\"`\n\tZip             string    `json:\"zip,omitempty\"`\n\tCountry         string    `json:\"country,omitempty\"`\n\tPhone           string    `json:\"phone,omitempty\"`\n\tEmail           string    `json:\"email,omitempty\"`\n\tCompany         string    `json:\"company,omitempty\"`\n\tAddress2        string    `json:\"address2,omitempty\"`\n\n\tTargetCard nmiCard `json:\"target_card\"`\n\n\tCardEntry  bool   `json:\"card_entry,omitempty\"`\n\tAttemptKey string `json:\"attempt_key,omitempty\"`\n}",
       "type NMIPaymentSourceUpdatePayload struct {\n\tUserID             string     `json:\"user_id\"`\n\tRailSubscriptionID string     `json:\"rail_subscription_id,omitempty\"`\n\tNewPaymentMethodID uuid.UUID  `json:\"new_payment_method_id\"`\n\tNewRailCustomerRef string     `json:\"new_vault_id\"`\n\tNewPspID           uuid.UUID  `json:\"new_psp_id\"`\n\tOldPaymentMethodID *uuid.UUID `json:\"old_payment_method_id,omitempty\"`\n\tOldRailCustomerRef string     `json:\"old_vault_id,omitempty\"`\n}",
@@ -1245,7 +1234,6 @@
       "type collectedReceipt struct {\n\tVersion      int                                    `json:\"version\"`\n\tFamily       string                                 `json:\"family\"`\n\tBinding      receiptBinding                         `json:\"binding\"`\n\tNMI          *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe       *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n\tStripeEngine *subscriptions.StripeEngineReceipt     `json:\"stripe_engine,omitempty\"`\n}",
       "type collectionNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
       "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
-      "type engineTakeoverProgress struct {\n\tDeleteSubmitted bool   `json:\"delete_submitted,omitempty\"`\n\tNotExecuted     string `json:\"not_executed,omitempty\"`\n\tAbandoned       bool   `json:\"abandoned,omitempty\"`\n\tCompleted       bool   `json:\"completed,omitempty\"`\n}",
       "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
       "type initialMembershipRefusal struct {\n\tBinding               receiptBinding `json:\"binding\"`\n\tKind                  string         `json:\"kind\"`\n\tResponseCode          int            `json:\"response_code\"`\n\tLocalizationID        string         `json:\"localization_id\"`\n\tStripePaymentIntentID string         `json:\"stripe_payment_intent_id,omitempty\"`\n\tStripeFailureCode     string         `json:\"stripe_failure_code,omitempty\"`\n\tStripeDeclineCode     string         `json:\"stripe_decline_code,omitempty\"`\n\n\tTransactionID string `json:\"transaction_id,omitempty\"`\n\tAVS           string `json:\"avs,omitempty\"`\n\tCVV           string `json:\"cvv,omitempty\"`\n\tText          string `json:\"text,omitempty\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
@@ -1663,10 +1651,6 @@
       "errors": "errors",
       "slices": "slices"
     },
-    "billing/engine_takeovers.go": {
-      "time": "time",
-      "uuid": "github.com/google/uuid"
-    },
     "billing/entitlements.go": {
       "time": "time"
     },
@@ -1901,11 +1885,6 @@
       "riverjobs": "github.com/open-rails/openrails/internal/river",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "engine_takeovers.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
     },
     "internal/adminconsole/adminconsole.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -2902,31 +2881,6 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "uuid": "github.com/google/uuid"
-    },
-    "internal/intents/nmi_engine_takeover.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
-      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
-      "clockwork": "github.com/jonboulle/clockwork",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
-      "errors": "errors",
-      "failpoint": "github.com/open-rails/openrails/internal/failpoint",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "http": "net/http",
-      "json": "encoding/json",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "strings": "strings",
-      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/intents/nmi_payment_method_delete.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
