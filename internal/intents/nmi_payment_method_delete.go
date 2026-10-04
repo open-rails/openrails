@@ -15,11 +15,11 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 // TypeNMIPaymentMethodDelete is the durable NMI customer-vault delete (#674 tail): a

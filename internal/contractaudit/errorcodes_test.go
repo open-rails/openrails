@@ -29,7 +29,7 @@ var dynamicCodeFiles = map[string]bool{
 	"internal/billingauth/gate.go":                     true,
 	"internal/http/request/request.go":                 true,
 	"internal/http/handlers/refusal.go":                true,
-	"internal/http/handlers/admin_invoices.go":         true,
+	"internal/http/handlers/invoices.go":               true,
 	"internal/http/handlers/admin_metering.go":         true,
 	"internal/http/handlers/admissions.go":             true,
 	"internal/http/handlers/admin_payments.go":         true,

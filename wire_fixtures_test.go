@@ -87,9 +87,9 @@ func canonicalWireFixtures() map[string]any {
 		"payment.json": paymentFixtureValue(when, maxMoney, card),
 		"payment_method.json": billing.PaymentMethod{
 			ID: methodFixture, CustomerID: customerFixture, Rail: "nmi", PSPID: ptr("55555555-5555-5555-5555-555555555555"), Card: card,
-			BillingDetails: &billing.BillingDetails{Name: ptr("Ada Lovelace"), Address: &billing.BillingAddress{PostalCode: ptr("80202"), Country: ptr("US")}},
-			Health:         billing.PaymentMethodHealth{ExpiryStatus: ptr(billing.CardExpiryValid), LastChargedAt: &when, LastChargeOutcome: ptr(billing.ChargeSucceeded), Active: true},
-			Subscriptions:  []billing.PaymentMethodSubscription{{ID: subscriptionFixture, DisplayName: "Pro", CreatedAt: when}},
+			BillingDetails:       &billing.BillingDetails{Name: ptr("Ada Lovelace"), Address: &billing.BillingAddress{PostalCode: ptr("80202"), Country: ptr("US")}},
+			Health:               billing.PaymentMethodHealth{ExpiryStatus: ptr(billing.CardExpiryValid), LastChargedAt: &when, LastChargeOutcome: ptr(billing.ChargeSucceeded), Active: true},
+			Subscriptions:        []billing.PaymentMethodSubscription{{ID: subscriptionFixture, DisplayName: "Pro", CreatedAt: when}},
 			CollectionCurrencies: []string{"USD"}, CreatedAt: when,
 		},
 		"page_invoices.json": billing.ListPage[billing.Invoice]{Next: "cursor-2", Items: []billing.Invoice{{
@@ -127,7 +127,7 @@ func paymentFixtureValue(when time.Time, maxMoney int64, card *billing.CardDetai
 	return billing.Payment{
 		ID: paymentFixture, Kind: billing.PaymentCharge, Status: billing.PaymentSucceeded, Amount: maxMoney, Currency: "USD", CustomerID: customerFixture,
 		SubscriptionID: &subscriptionFixture, PriceID: priceFixture, Product: &billing.ProductSummary{ID: (productFixture).String(), Key: "pro", DisplayName: "Pro"},
-		Price: &billing.SubscriptionPrice{ID: priceFixture.String(), Key: "pro-monthly", ProductID: productFixture.String(), UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, AccessDurationHours: ptr(720)},
+		Price:   &billing.SubscriptionPrice{ID: priceFixture.String(), Key: "pro-monthly", ProductID: productFixture.String(), UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, AccessDurationHours: ptr(720)},
 		Channel: billing.ChannelRail, Rail: ptr("nmi"), PSPID: ptr("55555555-5555-5555-5555-555555555555"), TransactionID: "txn-1", Card: card, CreatedAt: when,
 	}
 }

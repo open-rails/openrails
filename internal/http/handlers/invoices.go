@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/mail"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -382,27 +381,6 @@ func permittedInvoiceActions(invoice *billing.Invoice, update, collect bool) {
 		}
 		return !update
 	})
-}
-
-// invoicePage reads an offset page; lists not yet on the cursor envelope use
-// it.
-func invoicePage(r *httprequest.Request) (int, int, bool) {
-	limit, offset := 50, 0
-	for name, target := range map[string]*int{"limit": &limit, "offset": &offset} {
-		if raw := r.Query(name); raw != "" {
-			n, err := strconv.Atoi(raw)
-			if err != nil || n < 0 || n > 2147483647 {
-				r.ErrorJSON(http.StatusBadRequest, "invalid "+name)
-				return 0, 0, false
-			}
-			*target = n
-		}
-	}
-	if limit < 1 || limit > 100 {
-		r.ErrorJSON(http.StatusBadRequest, "limit must be between 1 and 100")
-		return 0, 0, false
-	}
-	return limit, offset, true
 }
 
 func invoiceProfileCustomer(r *httprequest.Request) (identity.CustomerID, bool) {

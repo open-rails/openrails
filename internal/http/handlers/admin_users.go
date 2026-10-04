@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -116,7 +117,7 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {
-	limit, offset, ok := invoicePage(r)
+	limit, offset, ok := offsetPage(r)
 	if !ok {
 		return
 	}
@@ -225,4 +226,24 @@ func AdminResumeSubscription(r *httprequest.Request) {
 		return
 	}
 	r.JSON(http.StatusAccepted, map[string]any{"status": "queued"})
+}
+
+// offsetPage reads an offset page: limit 1-100 (default 50) and offset.
+func offsetPage(r *httprequest.Request) (int, int, bool) {
+	limit, offset := 50, 0
+	for name, target := range map[string]*int{"limit": &limit, "offset": &offset} {
+		if raw := r.Query(name); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				r.APIError(api.Coded(billing.CodeInvalidQuery, "invalid "+name).WithParam(name))
+				return 0, 0, false
+			}
+			*target = n
+		}
+	}
+	if limit < 1 || limit > 100 {
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "limit must be between 1 and 100").WithParam("limit"))
+		return 0, 0, false
+	}
+	return limit, offset, true
 }

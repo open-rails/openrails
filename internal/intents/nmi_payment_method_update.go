@@ -124,10 +124,10 @@ type nmiPaymentMethodUpdateProgress struct {
 	// PriorBillingIDs are the vault's entries before staging: an entry not
 	// among them is the staged one.
 	PriorBillingIDs       []string `json:"prior_billing_ids,omitempty"`
-	StagedBillingID       string  `json:"staged_billing_id,omitempty"`
-	VerificationSubmitted bool    `json:"verification_submitted,omitempty"`
-	AgreementRef          string  `json:"agreement_ref,omitempty"`
-	Finalized             bool    `json:"finalized,omitempty"`
+	StagedBillingID       string   `json:"staged_billing_id,omitempty"`
+	VerificationSubmitted bool     `json:"verification_submitted,omitempty"`
+	AgreementRef          string   `json:"agreement_ref,omitempty"`
+	Finalized             bool     `json:"finalized,omitempty"`
 }
 
 func decodeNMIPaymentMethodUpdatePayload(intent gen.BillingRailIntent) (NMIPaymentMethodUpdatePayload, error) {

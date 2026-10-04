@@ -440,7 +440,7 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 	if err != nil {
 		return nil, err
 	}
-	now := r.Clock.Now().UTC()
+	now := time.Now().UTC()
 	for _, pm := range methods {
 		var charge *models.PaymentMethodCharge
 		if c, ok := charges[pm.ID]; ok {

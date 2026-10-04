@@ -81,16 +81,16 @@ func TestInitialMembershipQuote(t *testing.T) {
 	require.Nil(t, restored.PaymentID, "quoting claims no payment")
 
 	for name, mutate := range map[string]func(*models.Price, *gen.BillingPaymentMethod){
-		"free":             func(p *models.Price, _ *gen.BillingPaymentMethod) { p.Amount = 0 },
-		"trial":            func(p *models.Price, _ *gen.BillingPaymentMethod) { p.TrialUnitAmount = new(int64(0)) },
-		"not recurring":    func(p *models.Price, _ *gen.BillingPaymentMethod) { p.AutoRenew = false },
-		"archived":         func(p *models.Price, _ *gen.BillingPaymentMethod) { p.Archived = true },
-		"foreign method":   func(_ *models.Price, m *gen.BillingPaymentMethod) { m.CustomerID = uuid.New() },
+		"free":           func(p *models.Price, _ *gen.BillingPaymentMethod) { p.Amount = 0 },
+		"trial":          func(p *models.Price, _ *gen.BillingPaymentMethod) { p.TrialUnitAmount = new(int64(0)) },
+		"not recurring":  func(p *models.Price, _ *gen.BillingPaymentMethod) { p.AutoRenew = false },
+		"archived":       func(p *models.Price, _ *gen.BillingPaymentMethod) { p.Archived = true },
+		"foreign method": func(_ *models.Price, m *gen.BillingPaymentMethod) { m.CustomerID = uuid.New() },
 		"other PSP method": func(_ *models.Price, m *gen.BillingPaymentMethod) {
 			other := uuid.New()
 			m.Custodian, m.CustodianID, m.PspID = models.CustodianPSP, nil, &other
 		},
-		"parked method":    func(_ *models.Price, m *gen.BillingPaymentMethod) { m.ParkReason = "pending deletion" },
+		"parked method": func(_ *models.Price, m *gen.BillingPaymentMethod) { m.ParkReason = "pending deletion" },
 	} {
 		candidate := session
 		candidate.RailState = nil

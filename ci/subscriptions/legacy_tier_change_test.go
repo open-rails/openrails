@@ -41,7 +41,7 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	require.NoError(t, err)
 	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
 	result, err := w.client[tp].ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
-		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
+		Customers:      []billing.DeclaredCustomer{{Customer: customerID}},
 		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef, Card: declaredCard(visa)}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "tier-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
