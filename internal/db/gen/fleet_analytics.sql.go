@@ -17,7 +17,7 @@ SELECT pr.currency::text AS currency, count(*)::bigint AS subscriptions,
        COALESCE(sum(billing.monthly_normalized_amount(pr.amount, pr.access_duration_hours)), 0)::bigint AS monthly_amount
 FROM billing.subscriptions s
 JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
-WHERE s.status = 'active' AND pr.auto_renew AND pr.access_duration_hours > 0
+WHERE s.status = 'active' AND s.deleted_at IS NULL AND pr.auto_renew AND pr.access_duration_hours > 0
   AND ($1::uuid IS NULL OR s.merchant_id <> $1::uuid)
 GROUP BY pr.currency
 ORDER BY pr.currency
@@ -59,11 +59,11 @@ SELECT count(*)::bigint AS total,
        (count(*) FILTER (WHERE EXISTS (
            SELECT 1 FROM billing.payments pay
             WHERE pay.merchant_id = m.id AND pay.status = 'completed'
-              AND pay.reversal_kind IS NULL)))::bigint AS first_revenue,
+              AND pay.reversal_kind IS NULL AND pay.deleted_at IS NULL)))::bigint AS first_revenue,
        (count(*) FILTER (WHERE EXISTS (
            SELECT 1 FROM billing.payments pay
             WHERE pay.merchant_id = m.id AND pay.status = 'completed'
-              AND pay.reversal_kind IS NULL
+              AND pay.reversal_kind IS NULL AND pay.deleted_at IS NULL
               AND pay.purchased_at >= $1::timestamptz)))::bigint AS active_revenue
 FROM billing.merchants m
 WHERE m.deleted_at IS NULL AND m.status = 'active'
@@ -109,6 +109,7 @@ WITH charges AS (
     SELECT p.rail AS r, count(*) AS n
       FROM billing.payments p
      WHERE p.purchased_at >= $1::timestamptz AND p.reversal_kind = 'chargeback' AND p.status = 'completed'
+       AND p.deleted_at IS NULL
        AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
      GROUP BY p.rail
 )
@@ -160,7 +161,7 @@ func (q *Queries) FleetRailHealth(ctx context.Context, arg FleetRailHealthParams
 const fleetRevenueByCurrency = `-- name: FleetRevenueByCurrency :many
 SELECT p.currency::text AS currency, count(*)::bigint AS payments, COALESCE(sum(p.amount), 0)::bigint AS settled_amount
 FROM billing.payments p
-WHERE p.status = 'completed' AND p.reversal_kind IS NULL
+WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
   AND p.purchased_at >= $1::timestamptz
   AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
 GROUP BY p.currency
@@ -203,7 +204,7 @@ func (q *Queries) FleetRevenueByCurrency(ctx context.Context, arg FleetRevenueBy
 const fleetWeeklyActiveMerchants = `-- name: FleetWeeklyActiveMerchants :many
 SELECT date_trunc('week', p.purchased_at)::timestamptz AS week_start, count(DISTINCT p.merchant_id)::bigint AS merchants
 FROM billing.payments p
-WHERE p.status = 'completed' AND p.reversal_kind IS NULL
+WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
   AND p.purchased_at >= date_trunc('week', $1::timestamptz)
   AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
 GROUP BY 1
@@ -243,7 +244,7 @@ func (q *Queries) FleetWeeklyActiveMerchants(ctx context.Context, arg FleetWeekl
 const fleetWeeklyCancelledSubscriptions = `-- name: FleetWeeklyCancelledSubscriptions :many
 SELECT date_trunc('week', s.cancelled_at)::timestamptz AS week_start, count(*)::bigint AS cancellations
 FROM billing.subscriptions s
-WHERE s.cancelled_at IS NOT NULL
+WHERE s.cancelled_at IS NOT NULL AND s.deleted_at IS NULL
   AND s.cancelled_at >= date_trunc('week', $1::timestamptz)
   AND ($2::uuid IS NULL OR s.merchant_id <> $2::uuid)
 GROUP BY 1
@@ -323,7 +324,7 @@ const fleetWeeklyVolume = `-- name: FleetWeeklyVolume :many
 SELECT date_trunc('week', p.purchased_at)::timestamptz AS week_start, p.currency::text AS currency,
        count(*)::bigint AS payments, COALESCE(sum(p.amount), 0)::bigint AS settled_amount
 FROM billing.payments p
-WHERE p.status = 'completed' AND p.reversal_kind IS NULL
+WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
   AND p.purchased_at >= date_trunc('week', $1::timestamptz)
   AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
 GROUP BY 1, 2

@@ -240,7 +240,7 @@ WITH cf AS (
       LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
                           WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
-      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id
+      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
      WHERE c.merchant_id = $12::uuid
        AND ($13::uuid IS NULL OR c.id = $13::uuid)
 )

@@ -25,6 +25,7 @@ const (
 var policedTables = []string{"checkout_sessions", "entitlements", "payments", "subscriptions"}
 
 var allow = map[string]string{
+	"CountErrorEpisodeTotals":                 "episode analytics end an entitlement window at its tombstone (deleted_at), so tombstoned windows are read on purpose",
 	"GetInitialMembershipForUpdate":           "completion inspects tombstones to preserve later cancellation and never recreate the accepted ID",
 	"GetInitialMembershipForArchive":          "archive validates retained membership identity including later tombstones",
 	"ListObservedInitialMembershipPayments":   "archive validates observed first-payment history including tombstones",

@@ -445,7 +445,7 @@ const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner
 		FROM billing.payment_attempts a
 		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
 		ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
-	LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id) cy`
+	LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL) cy`
 
 // #1116: a checkout is one buyer's attempts on one target (checkout_id). It
 // is approved when its target is: a verification for a card save, an initial
