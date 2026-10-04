@@ -310,6 +310,23 @@ func (r *Request) DecodeJSON(data any) error {
 	return nil
 }
 
+// Page reads a list route's ?limit= and ?cursor=: the page size
+// (billing.DefaultPageLimit when absent) and the opaque cursor a previous
+// page returned. A limit that is not an integer in 1..billing.MaxPageLimit is
+// answered 400 invalid_query and Page returns false.
+func (r *Request) Page() (billing.PageRequest, bool) {
+	page := billing.PageRequest{Cursor: r.Query("cursor"), Limit: billing.DefaultPageLimit}
+	if raw := r.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > billing.MaxPageLimit {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "limit is invalid").WithParam("limit"))
+			return billing.PageRequest{}, false
+		}
+		page.Limit = n
+	}
+	return page, true
+}
+
 // BindQuery reads the query string into data's `form` fields. A value that
 // does not parse as its field's type is 400 invalid_query on that parameter.
 func (r *Request) BindQuery(data any) bool {

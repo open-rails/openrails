@@ -295,6 +295,7 @@
       "const (\n\tCodeUnknownField = \"unknown_field\"\n\n\tCodeInvalidQuery = \"invalid_query\"\n\n\tCodeInvalidCursor                = \"invalid_cursor\"\n\tCodeUnsupportedMediaType         = \"unsupported_media_type\"\n\tCodeRouteNotFound                = \"route_not_found\"\n\tCodeMethodNotAllowed             = \"method_not_allowed\"\n\tCodeMerchantSelectorInvalid      = \"merchant_selector_invalid\"\n\tCodeMerchantNotFound             = \"merchant_not_found\"\n\tCodeMerchantBindingMismatch      = \"merchant_binding_mismatch\"\n\tCodeMerchantDirectoryUnavailable = \"merchant_directory_unavailable\"\n)",
       "const (\n\tCustomerBalanceRead            = \"customer:balance:read\"\n\tCustomerBillingUpdate          = \"customer:billing:update\"\n\tCustomerPaymentMethodsUpdate   = \"customer:payment-methods:update\"\n\tCustomerCheckoutCreate         = \"customer:checkout:create\"\n\tCustomerSpendDelegationsRead   = \"customer:spend-delegations:read\"\n\tCustomerSpendDelegationsUpdate = \"customer:spend-delegations:update\"\n)",
       "const (\n\tDeclineGeneric           DeclineReason = \"generic_decline\"\n\tDeclineDoNotHonor        DeclineReason = \"do_not_honor\"\n\tDeclineInsufficientFunds DeclineReason = \"insufficient_funds\"\n\tDeclineOverLimit         DeclineReason = \"over_limit\"\n\tDeclineCallIssuer        DeclineReason = \"call_issuer\"\n\tDeclineRetryLater        DeclineReason = \"retry_later\"\n\tDeclineTryAgainLater     DeclineReason = \"try_again_later\"\n\tDeclineSecurityViolation DeclineReason = \"security_violation\"\n\tDeclineRestrictedCard    DeclineReason = \"restricted_card\"\n\n\tDeclineIncorrectNumber      DeclineReason = \"incorrect_number\"\n\tDeclineNoSuchIssuer         DeclineReason = \"no_such_issuer\"\n\tDeclineInvalidAccount       DeclineReason = \"invalid_account\"\n\tDeclineExpiredCard          DeclineReason = \"expired_card\"\n\tDeclineInvalidExpiry        DeclineReason = \"invalid_expiry\"\n\tDeclineIncorrectCVC         DeclineReason = \"incorrect_cvc\"\n\tDeclineIncorrectZip         DeclineReason = \"incorrect_zip\"\n\tDeclineIncorrectAddress     DeclineReason = \"incorrect_address\"\n\tDeclineInvalidPIN           DeclineReason = \"invalid_pin\"\n\tDeclineUpdateCardholderData DeclineReason = \"update_cardholder_data\"\n\n\tDeclineTransactionNotAllowed  DeclineReason = \"transaction_not_allowed\"\n\tDeclineCardNotSupported       DeclineReason = \"card_not_supported\"\n\tDeclineCurrencyNotSupported   DeclineReason = \"currency_not_supported\"\n\tDeclineAuthenticationRequired DeclineReason = \"authentication_required\"\n\tDeclinePickupCard             DeclineReason = \"pickup_card\"\n\tDeclineLostCard               DeclineReason = \"lost_card\"\n\tDeclineStolenCard             DeclineReason = \"stolen_card\"\n\tDeclineFraudulent             DeclineReason = \"fraudulent\"\n\tDeclineStopRecurring          DeclineReason = \"stop_recurring\"\n\n\tDeclineGatewayRejected DeclineReason = \"gateway_rejected\"\n\tDeclineBlockedByPSP    DeclineReason = \"blocked_by_psp\"\n\n\tDeclineProcessingError      DeclineReason = \"processing_error\"\n\tDeclineCommunicationError   DeclineReason = \"communication_error\"\n\tDeclineIssuerUnavailable    DeclineReason = \"issuer_unavailable\"\n\tDeclineInvalidRequest       DeclineReason = \"invalid_request\"\n\tDeclineMerchantConfig       DeclineReason = \"merchant_config\"\n\tDeclineDuplicateTransaction DeclineReason = \"duplicate_transaction\"\n\n\tDeclineUnknown DeclineReason = \"unknown\"\n)",
+      "const (\n\tDefaultPageLimit = 50\n\tMaxPageLimit     = 500\n)",
       "const (\n\tDunningAccessKeep    = \"keep\"\n\tDunningAccessSuspend = \"suspend\"\n)",
       "const (\n\tErrorTypeInvalidRequest = \"invalid_request_error\"\n\tErrorTypeAuthentication = \"authentication_error\"\n\tErrorTypeAuthorization  = \"authorization_error\"\n\tErrorTypeCard           = \"card_error\"\n\tErrorTypeRateLimit      = \"rate_limit_error\"\n\tErrorTypeAPI            = \"api_error\"\n)",
       "const (\n\tHostEventPaymentSettled     HostEventType = \"payment.settled\"\n\tHostEventDelinquencyGrace   HostEventType = \"delinquency.grace\"\n\tHostEventDelinquencyEntered HostEventType = \"delinquency.entered\"\n\tHostEventDelinquencyCleared HostEventType = \"delinquency.cleared\"\n)",
@@ -399,6 +400,8 @@
       "func (m AmountMap) MarshalJSON() ([]byte, error)",
       "func (m CheckoutRoutingMatch) IsCatchAll() bool",
       "func (o PaymentOperation) Unresolved() bool",
+      "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error",
+      "func (p ListPage[T]) MarshalJSON() ([]byte, error)",
       "func (p MerchantConfigurationApplyParams) MarshalJSON() ([]byte, error)",
       "func (r *AdmitResponse) Active() bool",
       "func (r DeclineReason) Failure() PaymentFailure",
@@ -556,6 +559,7 @@
       "type InvoicePayNowResult struct {\n\tInvoice   InvoiceDTO               `json:\"invoice\"`\n\tAttempt   InvoicePaymentAttemptDTO `json:\"attempt\"`\n\tOperation PaymentOperation         `json:\"operation\"`\n\tReplayed  bool                     `json:\"replayed\"`\n}",
       "type InvoicePaymentAttemptDTO struct {\n\tID              uuid.UUID        `json:\"id\"`\n\tInvoiceID       uuid.UUID        `json:\"invoice_id\"`\n\tCurrency        string           `json:\"currency\"`\n\tAmount          int64            `json:\"amount,string\"`\n\tStatus          string           `json:\"status\"`\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id,omitempty\"`\n\tRail            *string          `json:\"rail,omitempty\"`\n\tRailPaymentID   *string          `json:\"rail_payment_id,omitempty\"`\n\tFailureCode     *string          `json:\"failure_code,omitempty\"`\n\tFailureReason   *string          `json:\"failure_reason,omitempty\"`\n\tAttemptedAt     time.Time        `json:\"attempted_at\"`\n\tSettledAt       *time.Time       `json:\"settled_at,omitempty\"`\n}",
       "type InvoiceProfileDTO struct {\n\tNetTermsDays     int                 `json:\"net_terms_days\"`\n\tCollectionMethod string              `json:\"collection_method\"`\n\tPONumber         string              `json:\"po_number,omitempty\"`\n\tTax              map[string]any      `json:\"tax,omitempty\"`\n\tBillingContacts  []InvoiceContactDTO `json:\"billing_contacts,omitempty\"`\n\tMemo             string              `json:\"memo,omitempty\"`\n}",
+      "type ListPage[T any] struct {\n\tItems []T\n\tNext  string\n}",
       "type MerchantBillingImportResult struct {\n\tMerchantID      MerchantID `json:\"merchant_id\"`\n\tDigest          string     `json:\"digest\"`\n\tRows            int64      `json:\"rows,string\"`\n\tAlreadyImported bool       `json:\"already_imported\"`\n}",
       "type MerchantConfigurationApplyParams struct {\n\tApplicationID    string            `json:\"application_id\"`\n\tExpectedRevision *string           `json:\"expected_revision\"`\n\tSettings         *MerchantSettings `json:\"settings,omitempty\"`\n\tDisplayName      *string           `json:\"display_name,omitempty\"`\n\tAPIHost          *string           `json:\"api_host,omitempty\"`\n}",
       "type MerchantConfigurationReceipt struct {\n\tApplicationID string `json:\"application_id\"`\n\tRevision      string `json:\"revision\"`\n\tReplayed      bool   `json:\"replayed\"`\n}",
@@ -585,6 +589,7 @@
       "type PSPDeclaration struct {\n\tKey       string\n\tRail      string\n\tAccountID string\n}",
       "type PSPRef struct {\n\tID  *uuid.UUID `json:\"id,omitempty\"`\n\tKey string     `json:\"key,omitempty\"`\n}",
       "type PageOptions struct{ Limit, Offset int }",
+      "type PageRequest struct {\n\tLimit  int\n\tCursor string\n}",
       "type Page[T any] struct {\n\tObject  string `json:\"object\"`\n\tData    []T    `json:\"data\"`\n\tTotal   int64  `json:\"total\"`\n\tLimit   int    `json:\"limit\"`\n\tOffset  int    `json:\"offset\"`\n\tHasMore bool   `json:\"has_more\"`\n}",
       "type PayInvoiceNowRequest struct {\n\tInvoiceID       uuid.UUID       `json:\"-\"`\n\tIdempotencyKey  string          `json:\"-\"`\n\tPaymentMethodID PaymentMethodID `json:\"payment_method_id\"`\n}",
       "type Payment struct {\n\tID             PaymentID       `json:\"id\"`\n\tObject         string          `json:\"object\"`\n\tStatus         string          `json:\"status,omitempty\"`\n\tAmount         int64           `json:\"amount,string\"`\n\tAmountRefunded int64           `json:\"amount_refunded,string\"`\n\tCurrency       string          `json:\"currency\"`\n\tCustomerID     string          `json:\"customer_id\"`\n\tSubscriptionID *SubscriptionID `json:\"subscription_id,omitempty\"`\n\tRail           string          `json:\"rail\"`\n\tTransactionID  string          `json:\"transaction_id\"`\n\tRefunded       bool            `json:\"refunded\"`\n\tCaptured       bool            `json:\"captured,omitempty\"`\n\tRefunds        *PaymentList    `json:\"refunds,omitempty\"`\n\n\tProduct *ProductSummary `json:\"product,omitempty\"`\n\n\tRefundedPaymentID *PaymentID   `json:\"refunded_payment_id,omitempty\"`\n\tReason            string       `json:\"reason,omitempty\"`\n\tCreatedAt         time.Time    `json:\"created_at\"`\n\tPrice             *PublicPrice `json:\"price,omitempty\"`\n}",
@@ -905,6 +910,8 @@
       "func (id SubscriptionID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }",
       "func (m *AmountMap) UnmarshalJSON(raw []byte) error {\n\tvar values map[string]string\n\tif err := json.Unmarshal(raw, \u0026values); err != nil {\n\t\treturn err\n\t}\n\tif values == nil {\n\t\t*m = nil\n\t\treturn nil\n\t}\n\tout := make(AmountMap, len(values))\n\tfor key, encoded := range values {\n\t\tvalue, err := strconv.ParseInt(encoded, 10, 64)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount %q: %w\", key, err)\n\t\t}\n\t\tout[key] = value\n\t}\n\t*m = out\n\treturn nil\n}",
       "func (m AmountMap) MarshalJSON() ([]byte, error) {\n\tif m == nil {\n\t\treturn []byte(\"null\"), nil\n\t}\n\tout := make(map[string]string, len(m))\n\tfor key, value := range m {\n\t\tout[key] = strconv.FormatInt(value, 10)\n\t}\n\treturn json.Marshal(out)\n}",
+      "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error {\n\tvar in listPageJSON[T]\n\tif err := json.Unmarshal(raw, \u0026in); err != nil {\n\t\treturn err\n\t}\n\tp.Items, p.Next = in.Data, \"\"\n\tif in.NextCursor != nil {\n\t\tp.Next = *in.NextCursor\n\t}\n\treturn nil\n}",
+      "func (p ListPage[T]) MarshalJSON() ([]byte, error) {\n\tout := listPageJSON[T]{Data: p.Items}\n\tif out.Data == nil {\n\t\tout.Data = []T{}\n\t}\n\tif p.Next != \"\" {\n\t\tout.NextCursor = \u0026p.Next\n\t}\n\treturn json.Marshal(out)\n}",
       "func (p MerchantConfigurationApplyParams) MarshalJSON() ([]byte, error) {\n\ttype plain MerchantConfigurationApplyParams\n\tbody, err := json.Marshal(plain(p))\n\tif err != nil || p.Settings == nil {\n\t\treturn body, err\n\t}\n\tvar document map[string]json.RawMessage\n\tif err := json.Unmarshal(body, \u0026document); err != nil {\n\t\treturn nil, err\n\t}\n\tvar settings map[string]json.RawMessage\n\tif err := json.Unmarshal(document[\"settings\"], \u0026settings); err != nil {\n\t\treturn nil, err\n\t}\n\tfor name, present := range map[string]bool{\n\t\t\"billing_policies\":                      p.Settings.BillingPolicies != nil,\n\t\t\"billing_policy_bindings\":               p.Settings.BillingPolicyBindings != nil,\n\t\t\"delegated_invoker_wasted_spend_limits\": p.Settings.DelegatedInvokerWastedSpendLimits != nil,\n\t} {\n\t\tif _, exists := settings[name]; present \u0026\u0026 !exists {\n\t\t\tsettings[name] = json.RawMessage(\"[]\")\n\t\t}\n\t}\n\tdocument[\"settings\"], err = json.Marshal(settings)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn json.Marshal(document)\n}"
     ],
     "catalog": [
@@ -1407,6 +1414,9 @@
     "internal/operator": [
       "type ProviderAccountCutoverReport struct {\n\tSubscriptionID billing.SubscriptionID     `json:\"subscription_id\"`\n\tSourcePSPID    uuid.UUID                  `json:\"source_psp_id\"`\n\tTargetPSPID    uuid.UUID                  `json:\"target_psp_id\"`\n\tPlan           ProviderAccountCutoverPlan `json:\"plan\"`\n}"
     ],
+    "internal/pagination": [
+      "type TimeID struct {\n\tAt time.Time `json:\"t\"`\n\tID uuid.UUID `json:\"i\"`\n}"
+    ],
     "internal/providerqualification": [
       "type BoundRecord struct {\n\tRecord\n\tCredentialFingerprint string `json:\"credential_fingerprint\"`\n\tCredentialVersion     *int   `json:\"credential_version\"`\n}",
       "type Record struct {\n\tPSPID       uuid.UUID `json:\"psp_id\"`\n\tEnvironment string    `json:\"environment\"`\n\tContract    string    `json:\"contract\"`\n\tEvidenceRef string    `json:\"evidence_ref\"`\n}"
@@ -1590,6 +1600,9 @@
     "billing/invoices.go": {
       "time": "time",
       "uuid": "github.com/google/uuid"
+    },
+    "billing/list_page.go": {
+      "json": "encoding/json"
     },
     "billing/merchant_configuration.go": {
       "json": "encoding/json"
@@ -4274,6 +4287,16 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/pagination/pagination.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "base64": "encoding/base64",
+      "billing": "github.com/open-rails/openrails/billing",
+      "bytes": "bytes",
+      "http": "net/http",
+      "json": "encoding/json",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/providerqualification/cutover.go": {
       "bytes": "bytes",
       "cardguard": "github.com/open-rails/openrails/internal/cardguard",
@@ -4990,7 +5013,7 @@
     "internal/http/middleware/route_path.go": "5eb9a4e5bb88ebd3b2d6fbf785ec39ef929a6e05fdda718ccc586f8481195005",
     "internal/http/middleware/velocity.go": "908e778930a967e267791c8da3f9fa08e5d55f76f788c39317ca5a74220954fb",
     "internal/http/paths.go": "8b0e6d00c9e926c204f5d6b5146aee6fccd1ba586e625e0877593fee5d158b5a",
-    "internal/http/request/request.go": "9e4b41774cd13b522caf8f01c4b4c3d0292952a963f14563955abddb431b0e44",
+    "internal/http/request/request.go": "7a8ddaf805fac9a885401debfaba57f49052c782a88e5386c24f4a7de2dd0e5e",
     "internal/http/request/stream.go": "cc15d534e028f3ed8b4c4c725bffe33466ebc633f359207e045fbebdb9f5b755",
     "internal/http/routebundle/routes.go": "886ec91797c6342db1fcfb087eb85aa2c55a712f43d2a3e4a325a038e2987a81",
     "internal/http/router/merchant_selectors.go": "61ab79a0994bd724322aa23c2c10815e3e9258b9fee1751fcba16e91fab8ea1e",
