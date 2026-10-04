@@ -232,7 +232,7 @@ func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
 				"latency":    time.Since(start).String(),
 				"ip":         r.RemoteAddr,
 				"request_id": requestID,
-			}).Info(r.Method + " " + r.URL.Path)
+			}).Info(r.Method + " " + LogPath(r))
 		})
 	}
 }

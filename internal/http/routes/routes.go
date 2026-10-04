@@ -167,12 +167,32 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
 	checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
 
+	// Hosted checkout (#1124): the session id is the only credential, limited
+	// per id here and per address by the surface's rate limiter. The noun is
+	// hyphenated because /checkout/sessions/{id} collides with /checkout/{id}/confirm.
+	sessions := group.Group("/checkout-sessions")
+	sessions.Handle(http.MethodGet, "/:id", h(httphandlers.GetHostedCheckoutSession),
+		middleware.CheckoutSessionRateLimit(rt, "checkout-session-read", middleware.CheckoutSessionReadsPerMinute))
+	sessions.Handle(http.MethodPost, "/:id/pay", h(httphandlers.PayHostedCheckoutSession),
+		middleware.CheckoutSessionRateLimit(rt, "checkout-session-pay", middleware.CheckoutSessionPaysPerMinute))
+
 	if providerRoutes.Solana {
 		// One-off Solana Pay: the BUYER signs and pushes funds, so this needs only a
 		// configured recipient — not an OpenRails signer.
 		group.Handle(http.MethodGet, "/checkout/:id/solana-pay", h(httphandlers.GetSolanaPay))
 		group.Handle(http.MethodPost, "/checkout/:id/solana-pay", h(httphandlers.PostSolanaPay))
 	}
+}
+
+// HostedCheckoutPublished reports whether this runtime serves hosted checkout
+// sessions: the standalone surface always, an embedded host with
+// Config.HTTP.Checkout.
+func HostedCheckoutPublished(rt *app.Runtime) bool {
+	if rt == nil || rt.Config == nil {
+		return true
+	}
+	cfg := rt.Config
+	return cfg.ControlPlane != nil || cfg.HTTP == nil || cfg.HTTP.Checkout != nil
 }
 
 // RegisterMerchantArchiveRoutes mounts the complete portable billing archive
@@ -266,6 +286,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCheckoutCreate)}, dbMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions", h(httphandlers.ServiceCreateCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions/lookup", h(httphandlers.ServiceLookupCheckoutSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/hosted-checkout-sessions", h(httphandlers.ServiceCreateHostedCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/payment-method-sessions", h(httphandlers.ServiceCreatePaymentMethodSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/solana-cancel-sessions", h(httphandlers.ServiceCreateSolanaCancelSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/solana-tier-change-sessions", h(httphandlers.ServiceCreateSolanaTierChangeSession), checkoutWriteMW...)

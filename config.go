@@ -21,6 +21,7 @@ type (
 	CredentialPosture      = config.CredentialPosture
 	RiverOwnership         = config.RiverOwnership
 	HTTPConfig             = config.HTTPConfig
+	CheckoutConfig         = config.CheckoutConfig
 	CustomerRoutesConfig   = config.CustomerRoutesConfig
 	CustomerHTTPScope      = config.CustomerHTTPScope
 	ControlPlaneConfig     = config.ControlPlaneConfig

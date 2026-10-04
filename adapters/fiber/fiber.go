@@ -74,3 +74,14 @@ func nativePath(path string) string {
 	}
 	return strings.Join(parts, "/")
 }
+
+// CheckoutFramePolicy is middleware for the route serving the hosted checkout
+// page (billing-ui's <CheckoutPage>): only Config.HTTP.Checkout.EmbedOrigins
+// may frame it.
+func CheckoutFramePolicy(client *openrails.Client) fiber.Handler {
+	policy := client.CheckoutFrameAncestors()
+	return func(c fiber.Ctx) error {
+		c.Set("Content-Security-Policy", policy)
+		return c.Next()
+	}
+}

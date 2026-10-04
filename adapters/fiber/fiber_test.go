@@ -68,7 +68,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 		}),
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &config.HTTPConfig{Checkout: true, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: denyDelegated(new(int))}},
+	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: denyDelegated(new(int))}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
@@ -219,4 +219,17 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		}
 		require.Equal(t, 1, calls)
 	}
+}
+
+// A client that serves no payment page lets nobody frame one.
+func TestCheckoutFramePolicy(t *testing.T) {
+	engine := strictApp()
+	engine.Get("/checkout", CheckoutFramePolicy(nil), func(c fiber.Ctx) error { return c.SendString("page") })
+	response, err := engine.Test(httptest.NewRequest(http.MethodGet, "/checkout", nil))
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, "frame-ancestors 'none'", response.Header.Get("Content-Security-Policy"))
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, "page", string(body))
 }

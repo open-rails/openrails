@@ -128,7 +128,7 @@ func TestCustomerRouteInventories(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, []string{
-		"POST /me/checkout", "POST /me/billing-portal",
+		"POST /me/checkout", "POST /me/checkout/sessions", "POST /me/billing-portal",
 		"POST /me/subscriptions/{id}/change-tier", "POST /me/subscriptions/{id}/change-tier/preview",
 		"POST /me/subscriptions/{id}/provider-cutover", "GET /me/subscriptions/{id}/provider-cutover", "POST /me/subscriptions/{id}/provider-cutover/preview",
 		"POST /me/subscriptions/{id}/solana-tier-change", "POST /me/subscriptions/{id}/solana-tier-change/confirm",

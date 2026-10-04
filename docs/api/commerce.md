@@ -41,23 +41,50 @@ instants like every other wire timestamp ([errors and wire rules](errors.md)).
 This is a pre-v1 contract; remaining whole-API money/list qualification is tracked
 in #983/#1002 before the final freeze.
 
-## Hosted checkout document
+## Hosted checkout
 
-A host that sells through the `openrails-checkout` browser package serves that
-package one session document (`GET .../checkout/sessions/{id}`) and accepts
-its pay request. The Go shape is `billing.HostedCheckoutSession` (with
-`HostedCheckoutPayRequest`/`HostedCheckoutPayResult`); the canonical fixture
-is `testdata/wire/hosted_checkout_session.json` and the package decodes the
-same file. The host owns the session (id, expiry, attempts, Redis or SQL);
-OpenRails owns the shape so every host renders the same checkout.
+A signed-in customer mints a session for one price; the session id then reads
+and pays it with no other credential. OpenRails owns the session (id, expiry,
+attempts) in `billing.hosted_checkout_sessions`; apps sharing a merchant and
+database share it, so one of them can serve the payment page for all.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/v1/me/checkout/sessions` | customer session | Mint: `{price_key \| price_id, success_url?}` → `201 {id, url?, expires_at}` |
+| GET | `/v1/checkout-sessions/{id}` | the id | The session document (`billing.HostedCheckoutSession`) |
+| POST | `/v1/checkout-sessions/{id}/pay` | the id | Pay (`billing.HostedCheckoutPayRequest` → `HostedCheckoutPayResult`) |
+| POST | `/v1/merchant/hosted-checkout-sessions` | `merchant:checkout:create` | Mint for a customer server-side (`Client.CreateHostedCheckoutSession`) |
+
+- The id is `ocs_` + 256 random bits, stored as its SHA-256 and never logged.
+  Hand it only to that customer's browser; put it in a URL fragment, not a
+  query. It is payable for 30 minutes and readable for 24 hours more, so a
+  late provider return still learns its outcome.
+- Config: `HTTP.Checkout` publishes the routes. `PageURL` is the shared payment
+  page (the mint answers `url = PageURL#id`); `EmbedOrigins` are the sites
+  allowed to frame the page this host serves. Both empty is the single-site
+  case: the app renders `<Checkout source={client.checkoutSource(id)}>` itself.
+- Paying runs the engine's checkout with one idempotency key per attempt, so a
+  double click or a retry charges once. The attempt advances only after a
+  terminal failure; a session has 10 attempts. A decline answers
+  `200 {status: "failed", failure}`; a purchase the buyer cannot make (already a
+  member) answers `status: "blocked"`.
+- `success_url` must be on one of the minting app's `ReturnOrigins`. The
+  payment host accepts its `EmbedOrigins` as return origins too.
+- The buyer is checked on every read and pay through `Deps.CheckoutCustomer`
+  (default with AuthKit: a banned or deleted user is refused with 403).
+- The session records the minting app's origin from that app's configuration
+  (the `success_url` origin, else `ReturnOrigins[0]`, else the origin of
+  `PublicBillingBaseURL`) and the document carries it as `embed_origin` only
+  when the serving host lists it in `EmbedOrigins`.
+- The host serving the page wraps it with the adapter's `CheckoutFramePolicy`
+  (`Content-Security-Policy: frame-ancestors <EmbedOrigins>`).
+- Limits: per address as any checkout route, and per session id 120 reads and
+  10 pays a minute.
 
 Money is exact: `plan.unit_amount`, `line_items[].amount`, `tax` and
 `due_today` are int64 decimal strings of `plan.currency`'s native unit, and
-`plan.unit_decimals` is that currency's registered scale. Build the plan with
-`billing.NewHostedCheckoutPlan(product, price)`, which stamps the scale from
-the registry (`billing.LookupCurrency`, the same table as
-`GET /v1/currencies`) and refuses an unregistered currency; never hardcode a
-scale. `ListCheckoutRailOptions` lists exactly the armed PSPs whose rail can
-make this sale, each with its browser `driver` and `public_config`; copy them
-into the session's `rails` and skip an option without a driver. The package (0.3.0 and later) rejects a
-numeric amount or a missing `unit_decimals` as an unavailable session.
+`plan.unit_decimals` is that currency's registered scale
+(`billing.LookupCurrency`, the same table as `GET /v1/currencies`). The
+canonical fixture is `testdata/wire/hosted_checkout_session.json`; billing-ui
+decodes the same file and rejects a numeric amount or a missing
+`unit_decimals` as an unavailable session.

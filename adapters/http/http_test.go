@@ -66,7 +66,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 		}),
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &config.HTTPConfig{Checkout: true, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: deny}},
+	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: deny}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
@@ -176,4 +176,13 @@ func TestMountRefusesInvalidTargets(t *testing.T) {
 	for _, prefix := range []string{"api", "/api/{id}", "/api?x", "/a b", "/a#b"} {
 		require.Error(t, b.Mount(http.NewServeMux(), prefix), prefix)
 	}
+}
+
+// A client that serves no payment page lets nobody frame one.
+func TestCheckoutFramePolicy(t *testing.T) {
+	page := CheckoutFramePolicy(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "page") }))
+	w := httptest.NewRecorder()
+	page.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/checkout", nil))
+	require.Equal(t, "frame-ancestors 'none'", w.Header().Get("Content-Security-Policy"))
+	require.Equal(t, "page", w.Body.String())
 }

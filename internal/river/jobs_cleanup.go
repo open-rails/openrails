@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -32,6 +33,10 @@ const (
 
 	// cleanupDeleteBatch bounds ONE delete statement, and so one transaction.
 	cleanupDeleteBatch = 1000
+
+	// cleanupHostedCheckoutMaxBatches bounds one pass's hosted checkout
+	// session deletes; a larger backlog drains over the following passes.
+	cleanupHostedCheckoutMaxBatches = 50
 
 	// cleanupMerchantRowBudget bounds one merchant's share of one pass across
 	// all its sweeps. A merchant with years of unswept rows drains over
@@ -127,6 +132,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
 	CheckoutSessionsExpired int64
+	HostedCheckoutSessions  int64
 	NotificationsSeen       int64
 	NotificationsAll        int64
 	WebhookEvents           int64
@@ -195,6 +201,21 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	}
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
+
+	// Hosted checkout sessions past their reconciliation window (#1124): one
+	// indexed, bounded delete across merchants, so it needs no due-work walk.
+	for range cleanupHostedCheckoutMaxBatches {
+		n, err := hostedcheckout.DeleteExpired(ctx, w.DB, now, cleanupDeleteBatch)
+		if err != nil {
+			logger.WithError(err).Error("Cleanup: delete hosted checkout sessions failed")
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete hosted checkout sessions: %w", err))
+			break
+		}
+		result.HostedCheckoutSessions += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+	}
 
 	directory := w.DB.GenDirectory()
 	cursorRow, err := loadSweepCursor(ctx, directory, KindCleanupExpiredData)
@@ -275,6 +296,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"more_work_queued":          nextCursor != nil,
 		"duration_ms":               clock.Now().Sub(started).Milliseconds(),
 		"checkout_sessions_expired": result.CheckoutSessionsExpired,
+		"hosted_checkout_sessions":  result.HostedCheckoutSessions,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,

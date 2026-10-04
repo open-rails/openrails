@@ -14,9 +14,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -102,6 +105,9 @@ func TestClassifyBucket(t *testing.T) {
 		{"POST", "/v1/customers/customer_123/checkout", "checkout"},
 		{"POST", "/billing/v1/customers/customer_123/checkout/checkout_123/confirm", "checkout"},
 		{"GET", "/v1/me/checkout/checkout_123", "default"},
+		{"POST", "/v1/me/checkout/sessions", "checkout"},
+		{"POST", "/billing/v1/checkout-sessions/ocs_1/pay", "checkout"},
+		{"GET", "/v1/checkout-sessions/ocs_1", "default"},
 		{"POST", "/v1/checkout-config", "default"},
 		{"POST", "/v1/customers/customer_123/checkout-settings", "default"},
 		{"POST", "/v1/customers//checkout", "default"},
@@ -351,5 +357,39 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 	h := WithRoutePath("/billing/v1/checkout")(engine(newDeps(limits, captchaOn, &stubVerifier{}), okHandler()))
 	for _, want := range []int{200, 429, 403} {
 		call{path: "/api/pay/v1/checkout", ip: "203.0.113.88", want: want}.do(t, h)
+	}
+}
+
+// A hosted checkout session id is limited whatever address presents it, and
+// never reaches a log line.
+func TestCheckoutSessionRateLimit(t *testing.T) {
+	limits := config.RateLimitsConfig{"default": {RequestsPerMinute: 1000}}
+	rt := &app.Runtime{Config: &config.Config{RateLimits: &limits}}
+	table := &router.Table{}
+	router.NewMux(table, "", rt).Handle(http.MethodGet, "/v1/checkout-sessions/:id", func(r *request.Request) { r.SuccessJSON(map[string]string{}) },
+		CheckoutSessionRateLimit(rt, "checkout-session-read", 2))
+	h := table.Handler()
+	get := func(id, ip string) int {
+		req := httptest.NewRequest(http.MethodGet, "/v1/checkout-sessions/"+id, nil)
+		req.RemoteAddr = ip + ":1234"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	a, b := "ocs_"+strings.Repeat("a", 64), "ocs_"+strings.Repeat("b", 64)
+	require.Equal(t, http.StatusOK, get(a, "203.0.113.1"))
+	require.Equal(t, http.StatusOK, get(a, "203.0.113.2"))
+	require.Equal(t, http.StatusTooManyRequests, get(a, "203.0.113.3"), "the id is limited across addresses")
+	require.Equal(t, http.StatusOK, get(b, "203.0.113.3"), "another id has its own window")
+
+	rt.Config.RateLimits = nil
+	require.Equal(t, http.StatusOK, get(a, "203.0.113.3"), "RateLimitsDisabled turns the id limit off too")
+
+	for path, want := range map[string]string{
+		"/billing/v1/checkout-sessions/" + a:          "/billing/v1/checkout-sessions/ocs_redacted",
+		"/billing/v1/checkout-sessions/" + a + "/pay": "/billing/v1/checkout-sessions/ocs_redacted/pay",
+		"/v1/me/checkout/sessions":                    "/v1/me/checkout/sessions",
+	} {
+		require.Equal(t, want, LogPath(httptest.NewRequest(http.MethodGet, path, nil)))
 	}
 }

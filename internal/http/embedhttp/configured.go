@@ -22,7 +22,7 @@ func ValidateHTTPConfig(cfg *config.HTTPConfig, auth *billingauth.Integration) e
 	if err := validateCustomerRoutes(cfg.CustomerRoutes, auth); err != nil {
 		return err
 	}
-	if cfg.Checkout && (auth == nil || auth.Authentication == nil) {
+	if cfg.Checkout != nil && (auth == nil || auth.Authentication == nil) {
 		return fmt.Errorf("openrails HTTP: Checkout requires Deps.AuthKit or Deps.Authenticate")
 	}
 	if (cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
@@ -37,7 +37,7 @@ func routeSets(cfg config.HTTPConfig) []RouteSet {
 		enabled bool
 		set     RouteSet
 	}{
-		{cfg.Checkout, RouteSetCheckout},
+		{cfg.Checkout != nil, RouteSetCheckout},
 		{cfg.MerchantAdmin, RouteSetMerchantAdmin}, {cfg.Catalog, RouteSetCatalog},
 		{cfg.MerchantConfig, RouteSetMerchantConfig}, {cfg.MerchantAPI, RouteSetMerchantAPI},
 	} {
@@ -70,7 +70,7 @@ func ConfiguredRoutes(a *app.App, policy *config.HTTPConfig) (*router.Table, err
 
 func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*router.Table, error) {
 	active := routeSets(cfg)
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || len(cfg.CustomerRoutes) > 0)
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout != nil || len(cfg.CustomerRoutes) > 0)
 	if err != nil {
 		return nil, err
 	}

@@ -113,7 +113,7 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 		}
 	}
 
-	full := &config.HTTPConfig{Checkout: true, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true,
+	full := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true,
 		CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: rejectDelegated}}}
 	rt := httpRuntime(full, true)
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot

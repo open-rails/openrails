@@ -91,8 +91,8 @@ func TestHTTPConfigValidation(t *testing.T) {
 		ok   bool
 	}{
 		{"no HTTP", nil, nil, true},
-		{"checkout without authentication", &config.HTTPConfig{Checkout: true}, nil, false},
-		{"checkout", &config.HTTPConfig{Checkout: true}, authn, true},
+		{"checkout without authentication", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, nil, false},
+		{"checkout", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, authn, true},
 		{"management without authorization", &config.HTTPConfig{MerchantAdmin: true}, authn, false},
 		{"merchant API without authorization", &config.HTTPConfig{MerchantAPI: true}, authn, false},
 		{"management", &config.HTTPConfig{MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}, full, true},

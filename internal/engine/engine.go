@@ -144,6 +144,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(err)
 	}
 	rt.Auth = auth
+	rt.CheckoutCustomer = checkoutCustomer(deps)
 	signerPending, err := configureMerchant(ctx, application, e.merchant)
 	if err != nil {
 		return fail(err)
@@ -292,8 +293,16 @@ func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPC
 			return nil, fmt.Errorf("openrails: Config.HTTP.CookieOrigin: %w", err)
 		}
 	}
+	if out.Checkout != nil {
+		checkout := *out.Checkout
+		checkout.EmbedOrigins = append([]string(nil), checkout.EmbedOrigins...)
+		if err := checkout.Validate(); err != nil {
+			return nil, fmt.Errorf("openrails: Config.HTTP.Checkout: %w", err)
+		}
+		out.Checkout = &checkout
+	}
 	if cfg.ControlPlane != nil {
-		if out.Checkout || out.MerchantAdmin || out.Catalog || out.MerchantConfig || out.MerchantAPI {
+		if out.Checkout != nil || out.MerchantAdmin || out.Catalog || out.MerchantConfig || out.MerchantAPI {
 			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes serves the standalone surface; Config.HTTP may only add CustomerRoutes")
 		}
 		for _, routes := range out.CustomerRoutes {

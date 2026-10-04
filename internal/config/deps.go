@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/cache"
 )
@@ -59,6 +60,13 @@ type Deps struct {
 	// enough to move money or grant access. Nil refuses those operations to
 	// native users.
 	RecentSignIn func(*http.Request) error
+
+	// CheckoutCustomer is the buyer's current identity, asked on every hosted
+	// checkout action, which carries no user token: return ErrForbidden for a
+	// customer who may no longer buy. Default with AuthKit (and no
+	// CustomerFor): the AuthKit user, refused when banned or deleted.
+	// Otherwise nil keeps the identity given when the session was minted.
+	CheckoutCustomer func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error)
 
 	// UserExists and UserEmail let OpenRails address billing notices; nil
 	// sends none.

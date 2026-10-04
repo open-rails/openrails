@@ -501,6 +501,22 @@ type BillingHostOutbox struct {
 	DedupeKey string
 }
 
+// #1124: one hosted checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt is the current payment attempt and engine_session_id the checkout session it created; attempt advances only after that session failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then openrails.cleanup_expired_data deletes it.
+type BillingHostedCheckoutSession struct {
+	MerchantID      uuid.UUID
+	IDHash          []byte
+	CustomerID      uuid.UUID
+	PriceID         uuid.UUID
+	Offer           []byte
+	SuccessUrl      string
+	Origin          string
+	Attempt         int32
+	EngineSessionID *uuid.UUID
+	ExpiresAt       time.Time
+	PurgeAt         time.Time
+	CreatedAt       time.Time
+}
+
 // #1099: one claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by openrails.idempotency_gc.
 type BillingIdempotencyKey struct {
 	MerchantID     uuid.UUID

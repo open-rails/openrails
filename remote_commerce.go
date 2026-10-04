@@ -39,6 +39,24 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 	return &out, nil
 }
 
+// CreateHostedCheckoutSession mints a hosted checkout session for a host that
+// starts checkout server-side: one customer, one price. The returned ID reads
+// and pays the session with no other credential (billing-ui's
+// checkoutSource), so it goes to that customer's browser only.
+func (c *Client) CreateHostedCheckoutSession(ctx context.Context, request billing.CreateHostedCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.HostedCheckoutSessionLink, error) {
+	if _, err := requireCustomerID(request.Customer.ID); err != nil {
+		return nil, err
+	}
+	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
+		return nil, invalidErr("exactly one of price_id or price_key is required")
+	}
+	var out billing.HostedCheckoutSessionLink
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/hosted-checkout-sessions", request, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // LookupCheckoutSession is a read-only idempotency probe for thin host
 // wrappers. It never creates, routes, or contacts a provider.
 func (c *Client) LookupCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
