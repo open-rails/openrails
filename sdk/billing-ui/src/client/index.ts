@@ -27,6 +27,7 @@ export type {
   CardSummary,
   Currency,
   CurrencyScales,
+  HostedCheckoutLink,
   Invoice,
   NewCard,
   Page,

@@ -59,6 +59,7 @@ import {
 } from "#orck/lib/billing"
 import { cardEntryDisplay, useCardEntry } from "#orck/lib/card-entry"
 import { amountToDecimal, formatAmount } from "#orck/lib/money"
+import { safeRedirectURL } from "#orck/lib/redirect"
 import { everyLabel } from "#orck/lib/period"
 import { isCardRail, railPsp } from "#orck/psp"
 import { useOptionalBillingContext } from "#orck/react/context"
@@ -92,6 +93,11 @@ export interface CheckoutProps {
   cardSetupReturnURL?: (setupId: string) => string
   // Embedded hosts get the result via callback; page hosts also redirect.
   onComplete?: (result: PayResult) => void
+  /**
+   * Leaves for a redirect rail's page. Default: navigate the top window,
+   * which a nested frame may not do; <CheckoutPage> asks its app instead.
+   */
+  onRedirect?: (url: string) => void
   onPhaseChange?: (phase: CheckoutPhase) => void
   // Redirect hosts can announce the short return transition after success;
   // embedded/modal hosts stay put and use the settled confirmation copy.
@@ -109,15 +115,13 @@ const STATUS_UNAVAILABLE =
   "Payment status is unavailable right now (service error). Still checking."
 
 function navigateTop(redirectURL: string): void {
-  const parsed = new URL(redirectURL)
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+  const href = safeRedirectURL(redirectURL)
+  if (!href)
     throw new Error("The payment provider returned an invalid redirect")
-  }
-
   // Cross-origin frames may navigate their top-level browsing context, but
   // cannot read methods such as Location.assign from the top window.
   const target = window.top ?? window
-  target.location.href = parsed.href
+  target.location.href = href
 }
 
 function solanaAmountLabel(
@@ -170,6 +174,7 @@ export function Checkout({
   defaultCountry,
   cardSetupReturnURL,
   onComplete,
+  onRedirect,
   onPhaseChange,
   completionMode = "embedded",
   className,
@@ -217,6 +222,10 @@ export function Checkout({
   const onCompleteRef = React.useRef(onComplete)
   React.useEffect(() => {
     onCompleteRef.current = onComplete
+  })
+  const onRedirectRef = React.useRef(onRedirect)
+  React.useEffect(() => {
+    onRedirectRef.current = onRedirect
   })
   const changePhase = React.useCallback((next: CheckoutPhase) => {
     phaseRef.current = next
@@ -569,7 +578,8 @@ export function Checkout({
       if (!mounted.current || sourceRef.current !== source) return
       if (active.driver === "redirect" && result.redirect_url) {
         onCompleteRef.current?.(result)
-        navigateTop(result.redirect_url)
+        if (onRedirectRef.current) onRedirectRef.current(result.redirect_url)
+        else navigateTop(result.redirect_url)
         return
       }
       if (

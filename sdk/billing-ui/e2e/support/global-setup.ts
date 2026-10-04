@@ -42,6 +42,9 @@ export default async function globalSetup() {
         `127.0.0.1:${port}`,
         "-base-url",
         baseURL,
+        // Another origin on the same server: the payment page is framed.
+        "-page-url",
+        `http://127.0.0.1:${port}/pay.html`,
         "-static",
         path.join(root, "e2e/openrails/fixtures"),
         "-lifetime",
@@ -61,7 +64,7 @@ export default async function globalSetup() {
   }
 }
 
-// Bundles the account and checkout host pages against a fresh package build (dist/).
+// Bundles the account, checkout and payment pages against a fresh package build (dist/).
 async function buildHostApp() {
   execFileSync("pnpm", ["build"], { cwd: root, stdio: "inherit" })
   await build({
@@ -77,6 +80,7 @@ async function buildHostApp() {
         input: {
           account: path.join(root, "e2e/openrails/app/main.tsx"),
           checkout: path.join(root, "e2e/openrails/app/checkout.tsx"),
+          pay: path.join(root, "e2e/openrails/app/pay.tsx"),
         },
         output: { entryFileNames: "[name].js" },
       },

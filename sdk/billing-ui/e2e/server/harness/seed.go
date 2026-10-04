@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/open-rails/authkit/iam"
 	"time"
@@ -233,83 +232,6 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 		return Seeded{}, fmt.Errorf("import blocked: %v", result.Reasons)
 	}
 	return Seeded{SubscriptionSourceID: railSub, PaymentMethodRef: railMethod, TransactionID: txn, Import: result}, nil
-}
-
-// CheckoutOffer is what a host serves its checkout page for one price: the
-// plan and OpenRails' advertised options, passed through unchanged.
-type CheckoutOffer struct {
-	Plan    billing.HostedCheckoutPlan   `json:"plan"`
-	Options []billing.CheckoutRailOption `json:"options"`
-}
-
-func (r *Runtime) CheckoutOffer(ctx context.Context, priceID string) (CheckoutOffer, error) {
-	price, err := r.Client.Prices.Retrieve(ctx, priceID)
-	if err != nil {
-		return CheckoutOffer{}, err
-	}
-	product, err := r.Client.Products.Retrieve(ctx, price.ProductID)
-	if err != nil {
-		return CheckoutOffer{}, err
-	}
-	plan, err := billing.NewHostedCheckoutPlan(product, price)
-	if err != nil {
-		return CheckoutOffer{}, err
-	}
-	options, err := r.Client.ListCheckoutRailOptions(ctx, priceID)
-	if err != nil {
-		return CheckoutOffer{}, err
-	}
-	return CheckoutOffer{Plan: plan, Options: options}, nil
-}
-
-type CheckoutPay struct {
-	CustomerID  string `json:"customer_id"`
-	PriceID     string `json:"price_id"`
-	Selector    string `json:"selector"`
-	PSPID       string `json:"psp_id"`
-	TokenSymbol string `json:"token_symbol"`
-	// Card fields from billing-ui's PayRequest.
-	PaymentToken string `json:"payment_token"`
-	NameOnCard   string `json:"name_on_card"`
-	Zip          string `json:"zip"`
-	Country      string `json:"country"`
-	// IdempotencyKey is the host's attempt key; a retry reuses it.
-	IdempotencyKey string `json:"idempotency_key"`
-}
-
-// Pay is a host's pay endpoint: it relays the customer's pay action
-// (Confirm) and answers billing-ui's PayResult.
-func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, error) {
-	if _, err := r.Client.EnsureCustomer(ctx, in.CustomerID); err != nil {
-		return nil, err
-	}
-	key := in.IdempotencyKey
-	if key == "" {
-		key = uuid.NewString()
-	}
-	session, err := r.Client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: in.CustomerID}, PriceID: in.PriceID, IdempotencyKey: key, Confirm: true,
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: in.Selector, PSPID: in.PSPID, TokenSymbol: in.TokenSymbol, Flow: "transaction_request",
-			PaymentToken: in.PaymentToken, NameOnCard: in.NameOnCard, Zip: in.Zip, Country: in.Country},
-		SuccessURL: r.BaseURL + "/done", CancelURL: r.BaseURL + "/cancel",
-	})
-	if errors.Is(err, billing.ErrPaymentRefused) {
-		return map[string]any{"status": "failed", "failure_message": "Your card was declined. Try another card."}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{"status": session.Status}
-	if session.PaymentID != nil {
-		out["payment_id"] = *session.PaymentID
-	}
-	if session.SubscriptionID != nil {
-		out["subscription_id"] = *session.SubscriptionID
-	}
-	if url, ok := session.RailData["solana_pay_url"].(string); ok && url != "" {
-		out["transaction_url"] = url
-	}
-	return out, nil
 }
 
 // CustomerBilling is what the customer holds after checkout.

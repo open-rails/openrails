@@ -1,13 +1,16 @@
+// The payment page on its own origin, over a fixture client. ?app= names the
+// origin the session records as its app.
 import { createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { Checkout, createHttpSource, fixtureSession } from "../../src/index"
+import { CheckoutPage, fixtureSession } from "../../src/index"
+import { createBillingClient } from "../../src/client"
 
 const redirectURL = "https://merchant.example/ccbill/complete"
+const app =
+  new URLSearchParams(location.search).get("app") ?? "http://127.0.0.1:4173"
 
-const source = createHttpSource({
-  baseUrl: "",
-  sessionId: "ocs_browser_redirect",
+const client = createBillingClient({
   fetch: async (_input, init) => {
     if (init?.method === "POST") {
       return Response.json({
@@ -17,6 +20,7 @@ const source = createHttpSource({
     }
     return Response.json(
       fixtureSession({
+        id: "ocs_browser_redirect",
         rails: [
           {
             id: "option_ccbill",
@@ -26,11 +30,12 @@ const source = createHttpSource({
           },
         ],
         saved_methods: [],
+        embed_origin: app,
       })
     )
   },
 })
 
 createRoot(document.getElementById("root")!).render(
-  createElement(Checkout, { source })
+  createElement(CheckoutPage, { client })
 )

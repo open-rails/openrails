@@ -189,3 +189,93 @@ describe("server errors", () => {
     expect(Date.now() - started).toBeLessThan(RETRY_BUDGET_MS)
   })
 })
+
+describe("hosted checkout", () => {
+  it("mints with the customer's bearer and pays with the id alone", async () => {
+    const calls: { url: string; init: RequestInit }[] = []
+    const replies = [
+      Response.json(
+        {
+          id: `ocs_${"a".repeat(64)}`,
+          url: "https://pay.example/checkout#ocs_x",
+          expires_at: "2026-10-03T00:00:00Z",
+        },
+        { status: 201 }
+      ),
+      Response.json({ status: "succeeded", subscription_id: "sub_1" }),
+    ]
+    const client = createBillingClient({
+      getToken: () => "user-token",
+      fetch: async (url, init) => {
+        calls.push({ url, init })
+        return replies.shift()!
+      },
+    })
+    const link = await client.createCheckoutSession({
+      priceKey: "monthly",
+      successUrl: "https://host-one.example/welcome",
+    })
+    expect(link.url).toBe("https://pay.example/checkout#ocs_x")
+    const paid = await client
+      .checkoutSource(link.id)
+      .pay({ option_id: "option_1" })
+    expect(paid.status).toBe("succeeded")
+
+    expect(calls[0].url).toBe("/billing/v1/me/checkout/sessions")
+    expect(new Headers(calls[0].init.headers).get("Authorization")).toBe(
+      "Bearer user-token"
+    )
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      price_key: "monthly",
+      success_url: "https://host-one.example/welcome",
+    })
+    expect(calls[1].url).toBe(`/billing/v1/checkout-sessions/${link.id}/pay`)
+    expect(new Headers(calls[1].init.headers).get("Authorization")).toBeNull()
+  })
+
+  it("answers refusals the buyer can act on as results", async () => {
+    const refusal = (status: number, code: string) =>
+      Response.json(
+        {
+          error: {
+            type: "invalid_request_error",
+            code,
+            message: `refused ${code}`,
+          },
+        },
+        { status }
+      )
+    for (const [reply, want] of [
+      [refusal(410, "checkout_session_expired"), { status: "expired" }],
+      [refusal(404, "checkout_session_not_found"), { status: "expired" }],
+      [
+        refusal(403, "checkout_session_unavailable"),
+        {
+          status: "blocked",
+          failure_message: "refused checkout_session_unavailable",
+        },
+      ],
+      [
+        refusal(422, "checkout_request_invalid"),
+        {
+          status: "failed",
+          failure_message: "refused checkout_request_invalid",
+        },
+      ],
+    ] as const) {
+      const client = createBillingClient({ fetch: async () => reply })
+      await expect(
+        client.checkoutSource("ocs_1").pay({ option_id: "o" })
+      ).resolves.toEqual(want)
+    }
+    const busy = createBillingClient({
+      fetch: async () => refusal(409, "checkout_payment_in_progress"),
+    })
+    await expect(
+      busy.checkoutSource("ocs_1").pay({ option_id: "o" })
+    ).rejects.toMatchObject({ status: 409 })
+    await expect(busy.createCheckoutSession({})).rejects.toMatchObject({
+      code: "invalid_request",
+    })
+  })
+})
