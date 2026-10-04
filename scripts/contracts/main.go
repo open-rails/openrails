@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -27,7 +28,7 @@ func run(write bool) error {
 		return err
 	}
 	defer root.Close()
-	surface, err := apisurface.Load()
+	surface, err := apisurface.Load(context.Background())
 	if err != nil {
 		return err
 	}

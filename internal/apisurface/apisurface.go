@@ -7,6 +7,7 @@ package apisurface
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"go/importer"
@@ -46,12 +47,12 @@ type Surface struct {
 // Load type-checks the covered packages from their export data (go list
 // -export) and lists their features. It runs the go command in the working
 // directory, which must be inside the module.
-func Load() (*Surface, error) {
+func Load(ctx context.Context) (*Surface, error) {
 	paths := make([]string, len(Packages))
 	for i, rel := range Packages {
 		paths[i] = importPath(rel)
 	}
-	cmd := exec.Command("go", append([]string{"list", "-export", "-deps", "-f", "{{.ImportPath}}\t{{.Export}}"}, paths...)...)
+	cmd := exec.CommandContext(ctx, "go", append([]string{"list", "-export", "-deps", "-f", "{{.ImportPath}}\t{{.Export}}"}, paths...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

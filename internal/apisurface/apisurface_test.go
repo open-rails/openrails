@@ -23,7 +23,7 @@ var methodTypes = []string{
 // reach an internal type only through an alias a public package declares, and
 // such an alias brings no helper methods.
 func TestGoAPISurface(t *testing.T) {
-	s, err := Load()
+	s, err := Load(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
