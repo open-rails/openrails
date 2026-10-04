@@ -800,7 +800,7 @@ CREATE TABLE billing.customer_delinquency (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT customer_delinquency_amount_chk CHECK (((overdue_amount >= 0) AND (overdue_invoices >= 0))),
-    CONSTRAINT customer_delinquency_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT customer_delinquency_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT customer_delinquency_since_chk CHECK ((((state = 'current'::text) AND (overdue_since IS NULL)) OR ((state <> 'current'::text) AND (overdue_since IS NOT NULL)))),
     CONSTRAINT customer_delinquency_state_chk CHECK ((state = ANY (ARRAY['current'::text, 'grace'::text, 'delinquent'::text])))
 );
@@ -1074,7 +1074,6 @@ CREATE TABLE billing.products (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
     catalog_id uuid NOT NULL,
-    CONSTRAINT products_catalog_present CHECK (catalog_id IS NOT NULL),
     CONSTRAINT products_catalog_fk FOREIGN KEY (merchant_id, catalog_id) REFERENCES billing.catalogs(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT products_entitlement_hours_nonnegative CHECK (NOT jsonb_path_exists(coalesce(entitlements_spec, '{}'::jsonb), '$.* ? (@.type() == "number" && @ < 0)'))
 );
@@ -1180,7 +1179,7 @@ CREATE TABLE billing.prices (
     CONSTRAINT prices_access_duration_positive_chk CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0))),
     CONSTRAINT prices_amount_nonneg_chk CHECK ((amount >= 0)),
     CONSTRAINT prices_auto_renew_needs_duration_chk CHECK (((NOT auto_renew) OR (access_duration_hours IS NOT NULL))),
-    CONSTRAINT prices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT prices_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT prices_trial_amount_nonneg_chk CHECK (((trial_unit_amount IS NULL) OR (trial_unit_amount >= 0))),
     CONSTRAINT prices_trial_both_or_neither_chk CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL))),
     CONSTRAINT prices_trial_needs_auto_renew_chk CHECK (((trial_unit_amount IS NULL) OR auto_renew)),
@@ -2071,7 +2070,7 @@ CREATE TABLE billing.payments (
     CONSTRAINT chk_payments_money_movement CHECK ((money_movement = ANY (ARRAY['rail'::text, 'none'::text]))),
     CONSTRAINT chk_payments_reversal_kind CHECK (((reversal_kind IS NULL) OR (reversal_kind = ANY (ARRAY['refund'::text, 'chargeback'::text, 'dispute_reversal'::text])))),
     CONSTRAINT chk_payments_token_type CHECK (((token_type IS NULL) OR (token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))),
-    CONSTRAINT payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT payments_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text]))))
 );
 COMMENT ON TABLE billing.payments IS 'Records of all payment transactions (formerly purchases table)';
@@ -2233,8 +2232,8 @@ CREATE TABLE billing.solana_pay_references (
     scan_below text,
     built_transaction text,
     built_valid_height bigint,
-    created_at timestamp with time zone NOT NULL,
-    updated_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT solana_pay_references_pkey PRIMARY KEY (merchant_id, reference),
     CONSTRAINT solana_pay_references_session_key UNIQUE (merchant_id, checkout_session_id),
     CONSTRAINT solana_pay_references_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
@@ -2265,7 +2264,7 @@ CREATE TABLE billing.solana_pay_receipts (
     payment_id uuid,
     resolved_at timestamp with time zone,
     resolution text,
-    created_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT solana_pay_receipts_pkey PRIMARY KEY (merchant_id, reference, signature),
     CONSTRAINT solana_pay_receipts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT chk_solana_pay_receipts_disposition CHECK (
@@ -2462,7 +2461,7 @@ CREATE TABLE billing.ledger_accounts (
     credits_posted bigint DEFAULT 0 NOT NULL,
     debits_posted bigint DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT ledger_accounts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT ledger_accounts_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text])))
 );
 COMMENT ON TABLE billing.ledger_accounts IS 'Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits).';
@@ -2567,9 +2566,8 @@ CREATE TABLE billing.ledger_transfers (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     operation text NOT NULL,
     CONSTRAINT chk_ledger_transfers_coordinate_not_blank CHECK (((operation <> ''::text) AND (source <> ''::text) AND (source_id <> ''::text))),
-    CONSTRAINT chk_ledger_transfers_source_present CHECK (((source IS NOT NULL) AND (source_id IS NOT NULL))),
     CONSTRAINT ledger_transfers_amount_positive CHECK ((amount > 0)),
-    CONSTRAINT ledger_transfers_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT ledger_transfers_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT ledger_transfers_debit_floor_nonnegative CHECK ((allow_debit_negative_up_to >= 0)),
     CONSTRAINT ledger_transfers_distinct_accounts CHECK ((debit_account_id <> credit_account_id)),
     CONSTRAINT ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text])))
@@ -2688,7 +2686,6 @@ CREATE TABLE billing.entitlements (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at timestamp with time zone,
-    period tstzrange GENERATED ALWAYS AS (tstzrange(start_at, COALESCE(end_at, 'infinity'::timestamp with time zone), '[)'::text)) STORED,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     grant_id uuid,
@@ -2794,7 +2791,7 @@ CREATE TABLE billing.money_settings (
     collection_payment_method_id uuid,
     CONSTRAINT money_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
     CONSTRAINT money_settings_credit_limit_amount_nonneg_chk CHECK ((credit_limit_amount >= 0)),
-    CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
+    CONSTRAINT money_settings_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
 );
 COMMENT ON TABLE billing.money_settings IS 'Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in invoker_spend_limits; arrears owed exposure is derived from open invoices.';
 COMMENT ON COLUMN billing.money_settings.currency IS 'System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.';
@@ -2857,7 +2854,7 @@ CREATE TABLE billing.usage_events (
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT usage_events_amount_check CHECK ((amount >= 0)),
-    CONSTRAINT usage_events_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
+    CONSTRAINT usage_events_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
 );
 COMMENT ON TABLE billing.usage_events IS 'Append-only multi-dimensional metered usage. Source of truth for usage reporting + invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table.';
 COMMENT ON COLUMN billing.usage_events.invoker_id IS 'Caller-supplied principal string that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.';
@@ -2893,7 +2890,7 @@ CREATE TABLE billing.metered_rating_watermarks (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT metered_rating_watermarks_accrued_nonneg CHECK ((accrued_amount >= 0)),
-    CONSTRAINT metered_rating_watermarks_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
+    CONSTRAINT metered_rating_watermarks_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
 );
 COMMENT ON TABLE billing.metered_rating_watermarks IS 'Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.';
 COMMENT ON COLUMN billing.metered_rating_watermarks.source IS 'Meter accrual source key (metered:<meter>[:rate_card:<id>][:dim:<value>]).';
@@ -3479,7 +3476,7 @@ CREATE TABLE billing.invoices (
     CONSTRAINT invoices_amounts_nonneg_chk CHECK (((subtotal_amount >= 0) AND (total_amount >= 0) AND (amount_paid >= 0) AND (amount_due >= 0))),
     CONSTRAINT invoices_collection_failure_count_nonneg CHECK ((collection_failure_count >= 0)),
     CONSTRAINT invoices_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text]))),
-    CONSTRAINT invoices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT invoices_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text])))
 );
 COMMENT ON TABLE billing.invoices IS 'Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.';
@@ -3524,7 +3521,7 @@ CREATE TABLE billing.invoice_items (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT invoice_items_amount_nonneg_chk CHECK ((amount >= 0)),
-    CONSTRAINT invoice_items_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT invoice_items_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT invoice_items_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'invoiced'::text, 'voided'::text])))
 );
 COMMENT ON TABLE billing.invoice_items IS 'Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.';
@@ -3565,7 +3562,7 @@ CREATE TABLE billing.invoice_payments (
     payment_method_id uuid,
     idempotency_key text,
     CONSTRAINT invoice_payments_amount_positive_chk CHECK ((amount > 0)),
-    CONSTRAINT invoice_payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT invoice_payments_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT invoice_payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text])))),
     CONSTRAINT invoice_payments_status_check CHECK ((status = ANY (ARRAY['attempted'::text, 'settled'::text, 'failed'::text])))
 );

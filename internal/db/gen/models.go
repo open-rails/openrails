@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
@@ -330,7 +329,6 @@ type BillingEntitlement struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
-	Period       pgtype.Range[pgtype.Timestamptz]
 	MerchantID   uuid.UUID
 	// The customer this entitlement window belongs to.
 	CustomerID          uuid.UUID
