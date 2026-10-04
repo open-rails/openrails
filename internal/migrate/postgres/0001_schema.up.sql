@@ -44,21 +44,6 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION billing.price_interval_label(p_hours integer, p_auto_renew boolean) RETURNS text
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE
-    AS $$
-SELECT CASE
-    WHEN NOT coalesce(p_auto_renew, false) OR p_hours IS NULL THEN 'onetime'
-    WHEN p_hours = 168 THEN 'weekly'
-    WHEN p_hours = 720 THEN 'monthly'
-    WHEN p_hours = 2160 THEN 'quarterly'
-    WHEN p_hours = 8760 THEN 'yearly'
-    WHEN p_hours > 0 AND p_hours % 24 = 0 THEN (p_hours / 24)::text || 'd'
-    ELSE p_hours::text || 'h'
-END
-$$;
-COMMENT ON FUNCTION billing.price_interval_label(p_hours integer, p_auto_renew boolean) IS 'Default price-key interval label: exact and collision-free (<n>h, or <n>d on whole days; weekly/monthly/quarterly/yearly only for exactly 168/720/2160/8760 hours).';
-
 CREATE FUNCTION billing.billing_cycle_label(p_hours integer) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
     AS $$
@@ -979,6 +964,7 @@ COMMENT ON TABLE billing.catalogs IS 'Immutable catalog identity within one merc
 
 CREATE UNIQUE INDEX catalogs_one_default ON billing.catalogs (merchant_id) WHERE owner_subject IS NULL;
 CREATE UNIQUE INDEX catalogs_one_owner ON billing.catalogs (merchant_id, owner_subject) WHERE owner_subject IS NOT NULL;
+CREATE INDEX catalogs_merchant_created ON billing.catalogs (merchant_id, created_at, id);
 
 CREATE TRIGGER immutable_catalog_identity BEFORE UPDATE OR DELETE ON billing.catalogs
 FOR EACH ROW EXECUTE FUNCTION billing.guard_catalog_identity();
@@ -1091,6 +1077,7 @@ ALTER TABLE ONLY billing.products
 
 CREATE INDEX idx_products_archived ON billing.products USING btree (archived);
 CREATE INDEX idx_products_key ON billing.products USING btree (key);
+CREATE INDEX products_merchant_created ON billing.products (merchant_id, created_at DESC, id DESC);
 CREATE INDEX idx_products_tier_group ON billing.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
 CREATE INDEX products_catalog_id ON billing.products(merchant_id,catalog_id);
 CREATE INDEX products_active_entitlements_spec
@@ -1137,24 +1124,6 @@ CREATE TRIGGER immutable_product_archive_operation BEFORE UPDATE OR DELETE ON bi
  FOR EACH ROW EXECUTE FUNCTION billing.guard_product_archive_operation();
 CREATE INDEX product_archive_operations_product_id_idx ON billing.product_archive_operations USING btree (merchant_id, product_id);
 
-CREATE FUNCTION billing.prices_default_key() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-DECLARE
-    product_key text;
-BEGIN
-    IF NEW.key IS NOT NULL AND btrim(NEW.key) <> '' THEN
-        RETURN NEW;
-    END IF;
-    SELECT key INTO product_key FROM billing.products WHERE id = NEW.product_id AND merchant_id = NEW.merchant_id;
-    IF product_key IS NULL THEN
-        RAISE EXCEPTION 'prices_default_key: product % not found for price %', NEW.product_id, NEW.id;
-    END IF;
-    NEW.key := product_key || '-' || billing.price_interval_label(NEW.access_duration_hours, NEW.auto_renew);
-    RETURN NEW;
-END;
-$$;
-
 -- An unassigned pointer is a real historical state, not the previous active
 -- offer. UUIDv7 movement IDs give deterministic tie ordering within a timestamp.
 CREATE FUNCTION billing.catalog_price_retired() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -1186,7 +1155,8 @@ CREATE TABLE billing.prices (
     CONSTRAINT prices_trial_amount_nonneg_chk CHECK (((trial_unit_amount IS NULL) OR (trial_unit_amount >= 0))),
     CONSTRAINT prices_trial_both_or_neither_chk CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL))),
     CONSTRAINT prices_trial_needs_auto_renew_chk CHECK (((trial_unit_amount IS NULL) OR auto_renew)),
-    CONSTRAINT prices_trial_period_positive_chk CHECK (((trial_duration_hours IS NULL) OR (trial_duration_hours > 0)))
+    CONSTRAINT prices_trial_period_positive_chk CHECK (((trial_duration_hours IS NULL) OR (trial_duration_hours > 0))),
+    CONSTRAINT prices_key_nonempty CHECK (btrim(key) <> '')
 );
 COMMENT ON TABLE billing.prices IS 'Pricing tiers for products with rail-specific identifiers';
 COMMENT ON COLUMN billing.prices.amount IS 'Price amount in row currency micros (1 major unit = 1,000,000).';
@@ -1205,6 +1175,7 @@ ALTER TABLE ONLY billing.prices
 
 CREATE INDEX idx_prices_archived ON billing.prices USING btree (archived);
 CREATE INDEX idx_prices_merchant_key ON billing.prices USING btree (merchant_id, key);
+CREATE INDEX prices_merchant_created ON billing.prices (merchant_id, created_at DESC, id DESC);
 CREATE UNIQUE INDEX uq_prices_merchant_key_current ON billing.prices USING btree (merchant_id, key) WHERE (NOT archived);
 
 ALTER TABLE ONLY billing.prices
@@ -1212,7 +1183,6 @@ ALTER TABLE ONLY billing.prices
 ALTER TABLE ONLY billing.prices
     ADD CONSTRAINT prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT;
 
-CREATE TRIGGER trg_prices_default_key BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.prices_default_key();
 CREATE TRIGGER catalog_authored_price BEFORE INSERT OR UPDATE OR DELETE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write();
 CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived,key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired();
 
@@ -1318,6 +1288,7 @@ ALTER TABLE ONLY billing.catalog_rate_cards
 
 CREATE UNIQUE INDEX uq_catalog_rate_cards_meter ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NULL));
 CREATE UNIQUE INDEX uq_catalog_rate_cards_payer_meter ON billing.catalog_rate_cards USING btree (merchant_id, customer_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NOT NULL));
+CREATE INDEX catalog_rate_cards_meter_customer ON billing.catalog_rate_cards (merchant_id, meter_key, customer_id) WHERE customer_id IS NOT NULL;
 CREATE UNIQUE INDEX uq_catalog_rate_cards_product_ordinal ON billing.catalog_rate_cards USING btree (merchant_id, product_id, ordinal);
 
 ALTER TABLE ONLY billing.catalog_rate_cards

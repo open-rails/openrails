@@ -12,40 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countPricesFiltered = `-- name: CountPricesFiltered :one
-SELECT count(*) FROM billing.prices price
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=$1::uuid)) AND price.merchant_id = $2::uuid AND ($3::boolean IS NULL OR price.archived = $3::boolean)
-  AND ($4::text IS NULL OR LOWER(price.currency) = LOWER($4::text))
-  AND ($5::uuid IS NULL OR price.product_id = $5::uuid)
-  AND (NOT $6::boolean OR price.auto_renew)
-  AND (NOT $7::boolean OR NOT price.auto_renew)
-`
-
-type CountPricesFilteredParams struct {
-	CatalogID     *uuid.UUID
-	MerchantID    uuid.UUID
-	Archived      *bool
-	Currency      *string
-	ProductID     *uuid.UUID
-	OnlyRecurring bool
-	OnlyOneTime   bool
-}
-
-func (q *Queries) CountPricesFiltered(ctx context.Context, arg CountPricesFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPricesFiltered,
-		arg.CatalogID,
-		arg.MerchantID,
-		arg.Archived,
-		arg.Currency,
-		arg.ProductID,
-		arg.OnlyRecurring,
-		arg.OnlyOneTime,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createPrice = `-- name: CreatePrice :execrows
 
 INSERT INTO billing.prices (
@@ -531,6 +497,55 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context, arg ListAllPrice
 	return items, nil
 }
 
+const listCurrentPricesByProducts = `-- name: ListCurrentPricesByProducts :many
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key FROM billing.prices price
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE price.merchant_id = $1::uuid AND price.product_id = ANY($2::uuid[])
+  AND ($3::uuid IS NULL OR prod.catalog_id = $3::uuid)
+  AND NOT price.archived
+ORDER BY price.amount, price.id
+`
+
+type ListCurrentPricesByProductsParams struct {
+	MerchantID uuid.UUID
+	ProductIds []uuid.UUID
+	CatalogID  *uuid.UUID
+}
+
+func (q *Queries) ListCurrentPricesByProducts(ctx context.Context, arg ListCurrentPricesByProductsParams) ([]BillingPrice, error) {
+	rows, err := q.db.Query(ctx, listCurrentPricesByProducts, arg.MerchantID, arg.ProductIds, arg.CatalogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPrice
+	for rows.Next() {
+		var i BillingPrice
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.Amount,
+			&i.Currency,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+			&i.AccessDurationHours,
+			&i.AutoRenew,
+			&i.TrialUnitAmount,
+			&i.TrialDurationHours,
+			&i.Key,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPriceChainByKey = `-- name: ListPriceChainByKey :many
 SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices
 WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=prices.merchant_id AND catalog_product.id=prices.product_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND key = $3::text
@@ -673,26 +688,28 @@ func (q *Queries) ListPricesByProduct(ctx context.Context, arg ListPricesByProdu
 const listPricesFiltered = `-- name: ListPricesFiltered :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.catalog_id
 FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=$1::uuid)) AND price.merchant_id = $2::uuid AND prod.merchant_id = $2::uuid AND ($3::boolean IS NULL OR price.archived = $3::boolean)
-  AND ($4::text IS NULL OR LOWER(price.currency) = LOWER($4::text))
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE price.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR prod.catalog_id = $2::uuid)
+  AND ($3::boolean IS NULL OR price.archived = $3::boolean)
+  AND ($4::text IS NULL OR price.currency = $4::text)
   AND ($5::uuid IS NULL OR price.product_id = $5::uuid)
-  AND (NOT $6::boolean OR price.auto_renew)
-  AND (NOT $7::boolean OR NOT price.auto_renew)
+  AND ($6::boolean IS NULL OR price.auto_renew = $6::boolean)
+  AND ($7::timestamptz IS NULL OR (price.created_at, price.id) < ($7::timestamptz, $8::uuid))
 ORDER BY price.created_at DESC, price.id DESC
-LIMIT NULLIF($9::int, 0) OFFSET $8::int
+LIMIT $9::int
 `
 
 type ListPricesFilteredParams struct {
-	CatalogID     *uuid.UUID
-	MerchantID    uuid.UUID
-	Archived      *bool
-	Currency      *string
-	ProductID     *uuid.UUID
-	OnlyRecurring bool
-	OnlyOneTime   bool
-	PageOffset    int32
-	PageLimit     int32
+	MerchantID uuid.UUID
+	CatalogID  *uuid.UUID
+	Archived   *bool
+	Currency   *string
+	ProductID  *uuid.UUID
+	AutoRenew  *bool
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	FetchLimit int32
 }
 
 type ListPricesFilteredRow struct {
@@ -700,17 +717,18 @@ type ListPricesFilteredRow struct {
 	BillingProduct BillingProduct
 }
 
+// One keyset page, newest first: rows after (after_at, after_id).
 func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFilteredParams) ([]ListPricesFilteredRow, error) {
 	rows, err := q.db.Query(ctx, listPricesFiltered,
-		arg.CatalogID,
 		arg.MerchantID,
+		arg.CatalogID,
 		arg.Archived,
 		arg.Currency,
 		arg.ProductID,
-		arg.OnlyRecurring,
-		arg.OnlyOneTime,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AutoRenew,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.FetchLimit,
 	)
 	if err != nil {
 		return nil, err

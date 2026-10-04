@@ -6,23 +6,19 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Catalog action handlers (issue #205/#510). Mounted under
-// /merchant/catalog/* with the live merchant:catalog:update permission gate.
-//
-// Each handler is a thin shim: bind input -> call internal/service facade -> emit
-// JSON. The internal/service facade is the canonical surface; embedded callers and
-// HTTP callers go through the same code path.
+// Catalog handlers serve both the merchant's catalog routes
+// (/v1/merchant/catalog) and a creator's own (/v1/catalog); the owner scope on
+// the request selects which catalog they act on.
 
 func newAdminBillingService(r *httprequest.Request) (*billingservice.Service, bool) {
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "billing service unavailable")
 		return nil, false
 	}
 	return svc, true
@@ -32,86 +28,99 @@ func writeCatalogError(r *httprequest.Request, err error) {
 	writeRefusal(r, err, "catalog operation failed")
 }
 
+// ProductListQuery filters ListProducts.
+type ProductListQuery struct {
+	CatalogID billing.CatalogID `form:"catalog_id"`
+	Archived  *bool             `form:"archived"`
+	TierGroup string            `form:"tier_group"`
+}
+
+// PriceListQuery filters ListPrices.
+type PriceListQuery struct {
+	CatalogID billing.CatalogID `form:"catalog_id"`
+	ProductID billing.ProductID `form:"product_id"`
+	Currency  string            `form:"currency"`
+	AutoRenew *bool             `form:"auto_renew"`
+	Archived  *bool             `form:"archived"`
+}
+
+// PriceQuery is GetPrice's query.
+type PriceQuery struct {
+	Verify bool `form:"verify"`
+}
+
 // -- Products ----------------------------------------------------------------
 
-func AdminCreateProduct(r *httprequest.Request) {
-	var req billingservice.CreateProductRequest
-	if !bindCatalogJSON(r, &req) {
+func CreateProduct(r *httprequest.Request) {
+	var params billing.CreateProductParams
+	if !r.BindJSON(&params) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.CreateProduct(r.Request.Context(), req)
+	out, err := svc.CreateProduct(r.Request.Context(), params)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusCreated, out)
+	writeProduct(r, svc, http.StatusCreated, out)
 }
 
-// AdminEnsureProduct preserves a product's first declaration under its key.
-func AdminEnsureProduct(r *httprequest.Request) {
-	var req billingservice.CreateProductRequest
-	if !bindCatalogJSON(r, &req) {
+// EnsureProduct creates the product under the path's key unless it exists;
+// an existing product is returned unchanged.
+func EnsureProduct(r *httprequest.Request) {
+	var params billing.CreateProductParams
+	if !r.BindJSON(&params) {
 		return
 	}
 	key := r.Param("key")
-	if req.Key != "" && req.Key != key {
-		r.ErrorJSON(http.StatusBadRequest, "product key in path and body must match")
+	if params.Key != "" && params.Key != key {
+		r.ErrorCode(billing.CodeInvalidParam, "product key in path and body must match")
 		return
 	}
-	req.Key = key
+	params.Key = key
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.EnsureProduct(r.Request.Context(), req)
+	out, err := svc.EnsureProduct(r.Request.Context(), params)
 	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	writeProduct(r, svc, http.StatusOK, out)
+}
+
+func ListProducts(r *httprequest.Request) {
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	var query ProductListQuery
+	if !r.BindQuery(&query) {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, CatalogID: query.CatalogID, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup)})
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	if err := svc.HydratePrices(r.Request.Context(), out.Items); err != nil {
 		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
 }
 
-func AdminListProducts(r *httprequest.Request) {
-	svc, ok := newAdminBillingService(r)
+func GetProduct(r *httprequest.Request) {
+	id, ok := productIDParam(r)
 	if !ok {
-		return
-	}
-	opts := billingservice.ListProductsOptions{
-		TierGroup: strings.TrimSpace(r.Query("tier_group")),
-		Limit:     parseIntDefault(r.Query("limit"), 100),
-		Offset:    parseIntDefault(r.Query("offset"), 0),
-	}
-	if raw := r.Query("catalog_id"); raw != "" {
-		id, err := billing.ParseCatalogID(raw)
-		if err != nil || id.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid catalog_id")
-			return
-		}
-		catalogID := id.UUID()
-		opts.CatalogID = &catalogID
-	}
-	// archived=false lists live products, archived=true archived ones; absent
-	// lists both.
-	if v := strings.TrimSpace(r.Query("archived")); v != "" {
-		archived := parseBool(v)
-		opts.Archived = &archived
-	}
-	page, err := svc.ListProducts(r.Request.Context(), opts)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, page)
-}
-
-func AdminGetProduct(r *httprequest.Request) {
-	id, err := billing.ParseProductID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -123,97 +132,74 @@ func AdminGetProduct(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, out)
+	writeProduct(r, svc, http.StatusOK, out)
 }
 
-func AdminGetProductByKey(r *httprequest.Request) {
-	key := strings.TrimSpace(r.Param("key"))
-	if key == "" {
-		r.ErrorJSON(http.StatusBadRequest, "key required")
+func GetProductByKey(r *httprequest.Request) {
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.GetProductByKey(r.Request.Context(), r.Param("key"))
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	writeProduct(r, svc, http.StatusOK, out)
+}
+
+func UpdateProduct(r *httprequest.Request) {
+	id, ok := productIDParam(r)
+	if !ok {
+		return
+	}
+	var params billing.UpdateProductParams
+	if !r.BindJSON(&params) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.GetProductByKey(r.Request.Context(), key)
+	out, err := svc.UpdateProduct(r.Request.Context(), id, params)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, out)
+	writeProduct(r, svc, http.StatusOK, out)
 }
 
-func AdminUpdateProduct(r *httprequest.Request) {
+func productIDParam(r *httprequest.Request) (billing.ProductID, bool) {
 	id, err := billing.ParseProductID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
-		return
+		r.APIError(invalidParam("id", "invalid product id"))
+		return billing.ProductID{}, false
 	}
-	var req billingservice.UpdateProductRequest
-	if !bindCatalogJSON(r, &req) {
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.UpdateProduct(r.Request.Context(), id, req)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
+	return id, true
 }
 
-func AdminActivateProduct(r *httprequest.Request) {
-	id, err := billing.ParseProductID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.ActivateProduct(r.Request.Context(), id)
-	if err != nil {
+// writeProduct answers a product with its current prices.
+func writeProduct(r *httprequest.Request, svc *billingservice.Service, status int, product *billing.Product) {
+	products := []billing.Product{*product}
+	if err := svc.HydratePrices(r.Request.Context(), products); err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, out)
-}
-
-func AdminDeactivateProduct(r *httprequest.Request) {
-	id, err := billing.ParseProductID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.DeactivateProduct(r.Request.Context(), id)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
+	r.JSON(status, products[0])
 }
 
 // -- Prices ------------------------------------------------------------------
 
-func AdminCreatePrice(r *httprequest.Request) {
-	var req billingservice.CreatePriceRequest
-	if !bindCatalogJSON(r, &req) {
+func CreatePrice(r *httprequest.Request) {
+	var params billing.CreatePriceParams
+	if !r.BindJSON(&params) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.CreatePrice(r.Request.Context(), req)
+	out, err := svc.CreatePrice(r.Request.Context(), params)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -221,53 +207,37 @@ func AdminCreatePrice(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
-func AdminListPrices(r *httprequest.Request) {
+func ListPrices(r *httprequest.Request) {
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	var query PriceListQuery
+	if !r.BindQuery(&query) {
+		return
+	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	filter := catalog.PriceFilter{
-		Currency: moneyutil.NormalizeCurrency(r.Query("currency")),
-		Type:     strings.TrimSpace(r.Query("type")),
-	}
-	if raw := r.Query("catalog_id"); raw != "" {
-		id, err := billing.ParseCatalogID(raw)
-		if err != nil || id.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid catalog_id")
-			return
-		}
-		catalogID := id.UUID()
-		filter.CatalogID = &catalogID
-	}
-	if raw := strings.TrimSpace(r.Query("product_id")); raw != "" {
-		id, err := billing.ParseProductID(raw)
-		if err != nil || id.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
-			return
-		}
-		productID := id.UUID()
-		filter.ProductID = &productID
-	}
-	// archived=false lists live prices, archived=true archived ones; absent
-	// lists both.
-	if v := strings.TrimSpace(r.Query("archived")); v != "" {
-		archived := parseBool(v)
-		filter.Archived = &archived
-	}
-	limit := parseIntDefault(r.Query("limit"), 100)
-	offset := parseIntDefault(r.Query("offset"), 0)
-	page, err := svc.ListPrices(r.Request.Context(), filter, limit, offset)
+	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, CatalogID: query.CatalogID, ProductID: query.ProductID,
+		Currency: query.Currency, AutoRenew: query.AutoRenew, Archived: query.Archived})
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, page)
+	r.JSON(http.StatusOK, out)
 }
 
-func AdminGetPrice(r *httprequest.Request) {
-	id, err := billing.ParsePriceID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
+// GetPrice reads a price; ?verify=true also reads each linked PSP's copy and
+// reports its drift.
+func GetPrice(r *httprequest.Request) {
+	id, ok := priceIDParam(r)
+	if !ok {
+		return
+	}
+	var query PriceQuery
+	if !r.BindQuery(&query) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -279,150 +249,86 @@ func AdminGetPrice(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	if parseBool(r.Query("verify")) {
+	if query.Verify {
 		if states, vErr := svc.VerifyPriceSync(r.Request.Context(), id.UUID()); vErr == nil && len(states) > 0 {
-			out.Providers = states
+			out.PSPs = states
 		}
 	}
 	r.JSON(http.StatusOK, out)
 }
 
-func AdminUpdatePrice(r *httprequest.Request) {
+// GetPriceByKey reads the price a key currently names.
+func GetPriceByKey(r *httprequest.Request) {
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.GetPriceByKey(r.Request.Context(), r.Param("key"))
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
+// ListPriceKeyHistory lists when a key moved to which price, most recent
+// first.
+func ListPriceKeyHistory(r *httprequest.Request) {
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.ListPriceKeyHistory(r.Request.Context(), r.Param("key"), page)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
+func UpdatePrice(r *httprequest.Request) {
+	id, ok := priceIDParam(r)
+	if !ok {
+		return
+	}
+	var params billing.UpdatePriceParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.UpdatePrice(r.Request.Context(), id, params)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
+func priceIDParam(r *httprequest.Request) (billing.PriceID, bool) {
 	id, err := billing.ParsePriceID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
-		return
+		r.APIError(invalidParam("id", "invalid price id"))
+		return billing.PriceID{}, false
 	}
-	var req billingservice.UpdatePriceRequest
-	if !bindCatalogJSON(r, &req) {
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.UpdatePrice(r.Request.Context(), id, req)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-func AdminActivatePrice(r *httprequest.Request) {
-	id, err := billing.ParsePriceID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.ActivatePrice(r.Request.Context(), id)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-func AdminDeactivatePrice(r *httprequest.Request) {
-	id, err := billing.ParsePriceID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.DeactivatePrice(r.Request.Context(), id)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-// AdminGetPriceByKey resolves a price by its #774 key — the CURRENT
-// (non-archived) row for that key.
-func AdminGetPriceByKey(r *httprequest.Request) {
-	key := strings.TrimSpace(r.Param("key"))
-	if key == "" {
-		r.ErrorJSON(http.StatusBadRequest, "key required")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.GetPriceByKey(r.Request.Context(), key)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-// AdminGetPriceKeyHistory returns a price key's full version chain resolved
-// from the #774 pointer-movement log (most-recent-first) — the #777 console
-// price page's "version chain with dates" surface. Not part of #774's
-// original HTTP surface (which only exposed by-key resolution + relabel).
-func AdminGetPriceKeyHistory(r *httprequest.Request) {
-	key := strings.TrimSpace(r.Param("key"))
-	if key == "" {
-		r.ErrorJSON(http.StatusBadRequest, "key required")
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	items, err := svc.GetPriceKeyHistory(r.Request.Context(), key)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, PaginatedResponse[billingservice.PriceKeyHistoryEntry]{
-		Items:  items,
-		Total:  int64(len(items)),
-		Limit:  len(items),
-		Offset: 0,
-	})
-}
-
-type SetPriceKeyRequest struct {
-	Key string `json:"key"`
-}
-
-// AdminSetPriceKey relabels a price's #774 key in place (a plain rename; see
-// Service.SetPriceKey for the repoint semantics if the target key is already
-// held by another live row).
-func AdminSetPriceKey(r *httprequest.Request) {
-	id, err := billing.ParsePriceID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
-		return
-	}
-	var req SetPriceKeyRequest
-	if !bindCatalogJSON(r, &req) {
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.SetPriceKey(r.Request.Context(), id, req.Key)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
+	return id, true
 }
 
 // -- Helpers -----------------------------------------------------------------
 
+// invalidParam refuses one malformed request parameter.
+func invalidParam(param, message string) *api.APIError {
+	return api.Coded(billing.CodeInvalidParam, message).WithParam(param)
+}
+
+// PaginatedResponse is the offset page some routes outside the catalog still
+// answer.
 type PaginatedResponse[T any] struct {
 	Items  []T   `json:"items"`
 	Total  int64 `json:"total"`

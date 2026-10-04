@@ -10,9 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -29,16 +31,6 @@ type ProductService struct {
 
 func NewProductService(db *db.DB) *ProductService {
 	return &ProductService{db: db}
-}
-
-func productPageInt32(v int) int32 {
-	if v < 0 {
-		return 0
-	}
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	return int32(v)
 }
 
 func productTierRankInt32(v int) (int32, error) {
@@ -195,38 +187,34 @@ type ProductFilter struct {
 	TierGroup string
 }
 
-func (s *ProductService) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	live := false
-	return s.GetPaginated(ctx, ProductFilter{Archived: &live}, limit, offset)
-}
-
-func (s *ProductService) GetAllPaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	return s.GetPaginated(ctx, ProductFilter{}, limit, offset)
-}
-
-// GetPaginated applies identical filters to the count and page before slicing.
-func (s *ProductService) GetPaginated(ctx context.Context, filter ProductFilter, limit, offset int) ([]*models.Product, int64, error) {
+// List returns one keyset page of products, newest first.
+func (s *ProductService) List(ctx context.Context, filter ProductFilter, page billing.PageRequest) (billing.ListPage[*models.Product], error) {
 	queryMerchant, _, queryScopeErr := queryCatalogScope(ctx)
 	if queryScopeErr != nil {
-		return nil, 0, queryScopeErr
+		return billing.ListPage[*models.Product]{}, queryScopeErr
 	}
 	catalogID, err := selectCatalogFilter(ctx, s.db, filter.CatalogID)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.Product]{}, err
 	}
-
-	q := s.db.Gen(ctx)
-	tierGroup := strings.TrimSpace(filter.TierGroup)
-	total, err := q.CountProductsFiltered(ctx, gen.CountProductsFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, Archived: filter.Archived, TierGroup: tierGroup})
+	limit, err := pagination.Limit(page)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.Product]{}, err
 	}
-	rows, err := q.ListProductsFiltered(ctx, gen.ListProductsFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, Archived: filter.Archived, TierGroup: tierGroup, PageLimit: productPageInt32(limit), PageOffset: productPageInt32(offset)})
+	afterAt, afterID, err := pagination.After(page.Cursor)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.Product]{}, err
+	}
+	rows, err := s.db.Gen(ctx).ListProductsFiltered(ctx, gen.ListProductsFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, Archived: filter.Archived,
+		TierGroup: strings.TrimSpace(filter.TierGroup), AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
+	if err != nil {
+		return billing.ListPage[*models.Product]{}, err
 	}
 	products, err := productsFromGen(rows)
-	return products, total, err
+	if err != nil {
+		return billing.ListPage[*models.Product]{}, err
+	}
+	return pagination.Cut(products, limit, func(p *models.Product) any { return pagination.TimeID{At: p.CreatedAt, ID: p.ID} }), nil
 }
 
 // Update is not supported for arbitrary changes - products should be treated as mostly immutable.

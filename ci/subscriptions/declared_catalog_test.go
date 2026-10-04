@@ -18,14 +18,15 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 )
 
 // declaredFile is a host's catalog.yaml: a monthly membership granting key,
 // and a usage meter priced per event.
-func declaredFile(t *testing.T, key, title string, amount int64) *billing.CatalogApplyParams {
+func declaredFile(t *testing.T, key, title string, amount int64) *catalog.Application {
 	t.Helper()
-	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 meters:
 - key: %[1]s-events
   event_type: %[1]s.event
@@ -62,7 +63,7 @@ func (w *world) catalogRevision() int64 {
 
 // bootDeclared constructs one more process for w's merchant, outside the
 // harness, so New's own outcome stays observable.
-func (w *world) bootDeclared(ctx context.Context, catalog *billing.CatalogApplyParams) (*openrails.Client, error) {
+func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Client, error) {
 	return openrails.New(ctx, openrails.Config{
 		Schema: w.schema, River: openrails.RiverHostOwned, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps},
@@ -86,36 +87,37 @@ func TestDeclaredCatalog(t *testing.T) {
 	title, amount := "Gold", int64(9_990_000)
 	w.cfg = func(cfg *config.Config) { cfg.Catalog = declaredFile(t, key, title, amount) }
 	w.booted = func(c *openrails.Client) {
-		price, err := c.Prices.RetrieveByKey(t.Context(), key+"-monthly")
+		price, err := c.GetPriceByKey(t.Context(), key+"-monthly")
 		require.NoError(t, err, "applied before New returned")
 		require.EqualValues(t, amount, price.UnitAmount)
 	}
 	w.start()
 
 	// The first customer buys it at once.
-	price, err := w.client[embedded].Prices.RetrieveByKey(t.Context(), key+"-monthly")
+	price, err := w.client[embedded].GetPriceByKey(t.Context(), key+"-monthly")
 	require.NoError(t, err)
 	buyer := w.newCustomer()
-	buyer.subscribe(embedded, "nmi", price.ID, key, buyer.saveCard("nmi", visa))
+	buyer.subscribe(embedded, "nmi", price.ID.String(), key, buyer.saveCard("nmi", visa))
 	require.True(t, buyer.entitled(key))
 
 	// Nothing else writes the declared catalog, in process or over HTTP, and
 	// a refused price never reaches a provider.
-	product, err := w.client[embedded].Products.RetrieveByKey(t.Context(), key)
+	product, err := w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
 	revision := w.catalogRevision()
 	stripeWrites := len(w.stripe.mutations("/v1/"))
 	console, hours := "Console title", monthHours
 	for _, tp := range []topology{embedded, remote} {
 		c := w.client[tp]
-		_, err = c.Products.Update(t.Context(), product.ID, &billing.ProductUpdateParams{DisplayName: &console})
+		_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value(console)})
 		requireCatalogDeclared(t, err)
-		_, err = c.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: key + "-yearly", UnitAmount: 99_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-yearly", UnitAmount: 99_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 		requireCatalogDeclared(t, err)
-		_, err = c.Catalog.Apply(t.Context(), declaredFile(t, key, "Edited at runtime", amount))
+		_, err = c.ApplyCatalog(t.Context(), declaredFile(t, key, "Edited at runtime", amount))
 		requireCatalogDeclared(t, err)
-		requireCatalogDeclared(t, c.EnsureUsageMeter(t.Context(), billing.UsageMeterSpec{Key: key + "-other", EventType: key + ".other", Aggregation: "count"}))
-		state, err := c.Catalog.Revision(t.Context())
+		_, err = c.SetMeter(t.Context(), key+"-other", billing.SetMeterParams{EventType: key + ".other", Aggregation: catalog.AggregationCount})
+		requireCatalogDeclared(t, err)
+		state, err := c.GetCatalogRevision(t.Context())
 		require.NoError(t, err)
 		require.False(t, state.WritesAllowed, tp)
 	}
@@ -142,10 +144,10 @@ func TestDeclaredCatalog(t *testing.T) {
 	title, amount = "Platinum", 12_000_000
 	w.restart()
 	require.Equal(t, revision+1, w.catalogRevision())
-	product, err = w.client[embedded].Products.RetrieveByKey(t.Context(), key)
+	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, "Platinum", product.DisplayName)
-	repriced, err := w.client[embedded].Prices.RetrieveByKey(t.Context(), key+"-monthly")
+	repriced, err := w.client[embedded].GetPriceByKey(t.Context(), key+"-monthly")
 	require.NoError(t, err)
 	require.NotEqual(t, price.ID, repriced.ID)
 	require.True(t, buyer.entitled(key))
@@ -153,7 +155,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	// A catalog the engine refuses fails New with the reason and changes nothing.
 	w.stop()
 	refused := declaredFile(t, key, "Platinum", 12_000_000)
-	refused.Products[0].Prices[0].PSPs = billing.CatalogValue([]string{"nowhere"})
+	refused.Products[0].Prices[0].PSPs = catalog.Value([]string{"nowhere"})
 	_, err = w.bootDeclared(t.Context(), refused)
 	require.ErrorContains(t, err, "Config.Catalog")
 	require.ErrorContains(t, err, `"nowhere"`)
@@ -179,7 +181,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	}
 	require.Equal(t, revision+2, w.catalogRevision(), "one application, one replay")
 	for _, c := range clients {
-		product, err = c.Products.RetrieveByKey(t.Context(), key)
+		product, err = c.GetProductByKey(t.Context(), key)
 		require.NoError(t, err)
 		require.Equal(t, "Concurrent", product.DisplayName)
 	}
@@ -192,7 +194,7 @@ func TestDeclaredCatalogAwaitsItsProvider(t *testing.T) {
 	w.start()
 	w.stop()
 	key := "legacy-" + uuid.NewString()[:8]
-	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
 - key: %[1]s
   display_name: Legacy
@@ -217,14 +219,14 @@ products:
 	_, err = riverkit.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 1}}}, client.RiverJobs())
 	require.NoError(t, err)
 	require.ErrorContains(t, client.Ready(t.Context()), "declared catalog not applied yet")
-	_, err = client.Prices.RetrieveByKey(t.Context(), key+"-monthly")
+	_, err = client.GetPriceByKey(t.Context(), key+"-monthly")
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	require.Equal(t, revision, w.catalogRevision())
 
 	w.stripe.priceReadsUnavailable(false)
 	require.Eventually(t, func() bool { return client.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond)
-	price, err := client.Prices.RetrieveByKey(t.Context(), key+"-monthly")
+	price, err := client.GetPriceByKey(t.Context(), key+"-monthly")
 	require.NoError(t, err)
-	require.Equal(t, "price_legacy_"+key, price.Providers["stripe"].IDs["price_id"])
+	require.Equal(t, "price_legacy_"+key, price.PSPs["stripe"].IDs["price_id"])
 	require.Equal(t, revision+1, w.catalogRevision())
 }

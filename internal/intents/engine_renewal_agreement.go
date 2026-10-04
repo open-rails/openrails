@@ -31,17 +31,6 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 		return agreement, fmt.Errorf("%w: engine paid agreement is missing or ambiguous", ErrRebillNotRetryable)
 	}
 	op := rows[0]
-	if op.IntentType == TypeNMIEngineTakeover {
-		taken, err := TakeoverAgreement(ctx, d, sub, op)
-		if err != nil {
-			return agreement, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
-		}
-		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now, &taken)
-		if errors.Is(err, subscriptions.ErrEngineAgreementMismatch) {
-			return terms, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
-		}
-		return terms, err
-	}
 	var accepted subscriptions.InitialMembershipTerms
 	var payment gen.BillingPayment
 	switch op.IntentType {

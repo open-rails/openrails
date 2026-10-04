@@ -43,12 +43,12 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			alice, mallory := w.newCustomer(), w.newCustomer()
 			aliceCard := alice.saveCard(rail, visa)
-			aliceSub := alice.subscribe(embedded, rail, price.ID, "content:members", aliceCard)
+			aliceSub := alice.subscribe(embedded, rail, price.ID.String(), "content:members", aliceCard)
 			malloryCard := mallory.saveCard(rail, mastercard)
-			mallorySub := mallory.subscribe(embedded, rail, price.ID, "content:members", malloryCard)
+			mallorySub := mallory.subscribe(embedded, rail, price.ID.String(), "content:members", malloryCard)
 			other := w.membership("content:other", 4_990_000)
 			pending, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: alice.id}, Entitlement: "content:other", PriceID: other.ID,
+				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: alice.id}, Entitlement: "content:other", PriceID: other.ID.String(),
 				IdempotencyKey: "alice-pending-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: aliceCard},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
@@ -248,11 +248,11 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	_, err = r.client.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "rival-refund"})
 	require.Error(t, err)
 	require.Error(t, r.client.CancelSubscription(ctx, e.sub, billing.CancelSubscriptionRequest{}))
-	price, err := w.client[embedded].Prices.Retrieve(ctx, e.price)
+	price, err := w.client[embedded].GetPrice(ctx, typedPriceID(t, e.price), billing.GetPriceParams{})
 	require.NoError(t, err)
-	_, err = r.client.Prices.Retrieve(ctx, price.ID)
+	_, err = r.client.GetPrice(ctx, price.ID, billing.GetPriceParams{})
 	require.ErrorIs(t, err, billing.ErrNotFound)
-	_, err = r.client.Products.Retrieve(ctx, price.ProductID)
+	_, err = r.client.GetProduct(ctx, price.ProductID)
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	list, err := r.client.ListPayments(ctx, billing.ListPaymentsParams{CustomerID: e.c.cid()})
 	require.NoError(t, err)
@@ -266,12 +266,12 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	})
 	require.Error(t, err)
 	own := r.client
-	product, err := own.Products.Create(ctx, &billing.ProductCreateParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", EntitlementsSpec: map[string]*int{"content:rival": nil}})
+	product, err := own.CreateProduct(ctx, billing.CreateProductParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", EntitlementsSpec: map[string]*int{"content:rival": nil}})
 	require.NoError(t, err)
-	rivalPrice, err := own.Prices.Create(ctx, &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	rivalPrice, err := own.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	_, err = own.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
-		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
+		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: "content:rival", PriceID: rivalPrice.ID.String(),
 		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})

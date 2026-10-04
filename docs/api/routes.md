@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (287), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (269), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -41,8 +41,8 @@ What a checkout page needs: the catalog a buyer may see, checkout, hosted checko
 | POST | `/v1/checkout/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/captcha/status` | public | — | — | 200 untyped |  |
 | GET | `/v1/captcha/client.js` | public | — | — | 200 `application/javascript` |  |
-| GET | `/v1/products` | optional | — | — | 200 `PageOfProductObject` |  |
-| GET | `/v1/prices` | optional | — | — | 200 `PageOfPublicPrice` |  |
+| GET | `/v1/products` | optional | — | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/prices` | optional | — | — | 200 `ListPage<Price>` |  |
 
 ## Customer (`/v1/me`)
 
@@ -113,45 +113,39 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | merchant | `merchant:checkout:create` | `ConfirmCheckoutSessionRequest` | 200 `CheckoutSession` |  |
 | GET | `/v1/merchant/checkout-options` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutRailOption[]` |  |
 | GET | `/v1/merchant/checkout-config` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutConfig` |  |
-| GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | merchant | `merchant:customer-settings:read` | — | 200 `PayerRateCardDTO[]` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | `AdminRateOverrideRequest` | 200 `PayerRateCardDTO` | catalog write; limit `grant` |
-| DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | — | 200 `Message` | catalog write; limit `destructive` |
-| POST | `/v1/merchant/catalog/offers/lookup` | merchant | `merchant:catalog:read` | `OfferLookupRequest` | 200 untyped |  |
-| POST | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:update` | `CreateProductRequest` | 201 `CatalogProduct` | catalog write |
-| GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `CatalogPageOfCatalogProduct` |  |
-| GET | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:read` | — | 200 `CatalogProduct` |  |
-| GET | `/v1/merchant/catalog/products/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `CatalogProduct` |  |
-| PUT | `/v1/merchant/catalog/products/by-key/{key}` | merchant | `merchant:catalog:update` | `CreateProductRequest` | 200 `CatalogProduct` | catalog write |
-| PATCH | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:update` | `UpdateProductRequest` | 200 `CatalogProduct` | catalog write |
-| POST | `/v1/merchant/catalog/products/{id}/activate` | merchant | `merchant:catalog:update` | — | 200 `CatalogProduct` | catalog write |
-| POST | `/v1/merchant/catalog/products/{id}/deactivate` | merchant | `merchant:catalog:update` | — | 200 `CatalogProduct` | catalog write |
-| POST | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:update` | `CreatePriceRequest` | 201 `CatalogPrice` | catalog write |
-| GET | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:read` | — | 200 `CatalogPageOfCatalogPrice` |  |
-| GET | `/v1/merchant/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `CatalogPrice` |  |
-| GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read` | — | 200 `PaginatedResponseOfPriceKeyHistoryEntry` |  |
-| GET | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:read` | — | 200 `CatalogPrice` |  |
-| PATCH | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:update` | `UpdatePriceRequest` | 200 `CatalogPrice` | catalog write |
-| POST | `/v1/merchant/catalog/prices/{id}/activate` | merchant | `merchant:catalog:update` | — | 200 `CatalogPrice` | catalog write |
-| POST | `/v1/merchant/catalog/prices/{id}/deactivate` | merchant | `merchant:catalog:update` | — | 200 `CatalogPrice` | catalog write |
-| POST | `/v1/merchant/catalog/prices/{id}/key` | merchant | `merchant:catalog:update` | `SetPriceKeyRequest` | 200 `CatalogPrice` | catalog write |
-| GET | `/v1/merchant/catalog/meters` | merchant | `merchant:catalog:read` | — | 200 `AdminUsageMeterPageResponse` |  |
-| GET | `/v1/merchant/catalog/meters/{key}` | merchant | `merchant:catalog:read` | — | 200 `AdminUsageMeterResponse` |  |
-| GET | `/v1/merchant/catalog/meters/{key}/overrides` | merchant | `merchant:catalog:read` | — | 200 `PaginatedResponseOfUsageMeterOverrideDTO` |  |
-| PUT | `/v1/merchant/catalog/meters/{key}` | merchant | `merchant:catalog:update` | `UsageMeterRequest` | 200 `AdminUsageMeterResponse` | catalog write |
-| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `merchant:catalog:update` | `DefaultUsageRateCardRequest` | 200 `AdminUsageMeterResponse` | catalog write |
-| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `merchant:catalog:update` | — | 204 — | catalog write |
-| GET | `/v1/merchant/catalog/drift` | merchant | `merchant:catalog:read` | — | 200 `PaginatedResponseOfCatalogDriftEventView` |  |
-| POST | `/v1/merchant/catalog/drift/refresh` | merchant | `merchant:catalog:update` | — | 200 `CatalogDriftReport` | catalog write |
 | GET | `/v1/merchant/catalog/revision` | merchant | `merchant:catalog:read` | — | 200 `CatalogRevision` |  |
 | POST | `/v1/merchant/catalog/applications` | merchant | `merchant:catalog:update` | `Application` | 200 `CatalogApplicationReceipt` | catalog write |
+| GET | `/v1/merchant/catalog/drift` | merchant | `merchant:catalog:read` | — | 200 `ListPage<CatalogDrift>` |  |
+| POST | `/v1/merchant/catalog/drift/refresh` | merchant | `merchant:catalog:update` | — | 200 `CatalogDriftCheck` | catalog write |
+| GET | `/v1/merchant/catalog/meters` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/merchant/catalog/meters/{key}` | merchant | `merchant:catalog:read` | — | 200 `Meter` |  |
+| PUT | `/v1/merchant/catalog/meters/{key}` | merchant | `merchant:catalog:update` | `SetMeterParams` | 200 `Meter` | catalog write |
+| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `merchant:catalog:update` | `SetMeterRateCardParams` | 200 `Meter` | catalog write |
+| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `merchant:catalog:update` | — | 204 — | catalog write |
+| GET | `/v1/merchant/catalog/meters/{key}/rate-overrides` | merchant | `merchant:catalog:read` | — | 200 `ListPage<RateOverride>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<RateOverride>` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | `SetRateOverrideParams` | 200 `RateOverride` | catalog write; limit `grant` |
+| DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | — | 204 — | catalog write; limit `destructive` |
 | POST | `/v1/merchant/catalog/product-archives` | merchant | `merchant:catalog:update` + `merchant:payments:refund` | `ProductArchiveRequest` | 200 `ProductArchive` | catalog write; `Idempotency-Key` |
 | GET | `/v1/merchant/catalog/product-archives/{id}` | merchant | `merchant:catalog:read` + `merchant:payments:read` | — | 200 `ProductArchive` |  |
-| GET | `/v1/merchant/catalogs` | merchant | `merchant:catalog:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/catalogs` | merchant | `merchant:catalog:update` | untyped | 200 `Catalog` | catalog write |
-| GET | `/v1/merchant/catalogs/by-owner` | merchant | `merchant:catalog:read` | — | 200 `Catalog` |  |
+| GET | `/v1/merchant/catalogs` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Catalog>` |  |
+| POST | `/v1/merchant/catalogs` | merchant | `merchant:catalog:update` | `EnsureCatalogParams` | 200 `Catalog` | catalog write |
 | GET | `/v1/merchant/catalogs/{id}` | merchant | `merchant:catalog:read` | — | 200 `Catalog` |  |
 | POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | untyped | 200 `CopilotAskResult` | when `catalog_copilot` |
 | POST | `/v1/merchant/catalog/copilot/confirm` | merchant | `merchant:catalog:update` | untyped | 200 `Message` | when `catalog_copilot` |
+| POST | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:update` | `CreateProductParams` | 201 `Product` | catalog write |
+| GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
+| PATCH | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:update` | `UpdateProductParams` | 200 `Product` | catalog write |
+| GET | `/v1/merchant/catalog/products/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
+| PUT | `/v1/merchant/catalog/products/by-key/{key}` | merchant | `merchant:catalog:update` | `CreateProductParams` | 200 `Product` | catalog write |
+| POST | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:update` | `CreatePriceParams` | 201 `Price` | catalog write |
+| GET | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
+| PATCH | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:update` | `UpdatePriceParams` | 200 `Price` | catalog write |
+| GET | `/v1/merchant/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
+| GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| POST | `/v1/merchant/catalog/offers/lookup` | merchant | `merchant:catalog:read` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | merchant | `merchant:customer-settings:read` | — | 200 `EffectiveTier` |  |
 | GET | `/v1/merchant/subscriptions` | merchant | `merchant:subscriptions:read` | — | 200 `PageOfSubscription` |  |
 | GET | `/v1/merchant/subscriptions/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Subscription` |  |
@@ -163,11 +157,6 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:update` | `ProviderCutoverRequest` | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:read` | — | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | merchant | `merchant:subscriptions:read` | `ProviderCutoverRequest` | 200 `ProviderCutover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/preview` | merchant | `merchant:subscriptions:read` | — | 200 `EngineTakeover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover` | merchant | `merchant:subscriptions:update` | — | 200 `EngineTakeover`<br>202 `EngineTakeover` |  |
-| GET | `/v1/merchant/subscriptions/{id}/engine-takeover` | merchant | `merchant:subscriptions:read` | — | 200 `EngineTakeover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/abandon` | merchant | `merchant:subscriptions:update` | — | 200 `EngineTakeover`<br>202 `EngineTakeover` |  |
-| POST | `/v1/merchant/engine-takeovers` | merchant | `merchant:subscriptions:update` | `EngineTakeoverBatchRequest` | 200 `EngineTakeoverBatchResult` |  |
 | POST | `/v1/merchant/provider-refresh` | merchant | `merchant:subscriptions:update` | — | 202 `ProviderRefresh` |  |
 | POST | `/v1/merchant/subscriptions/{id}/reprice` | merchant | `merchant:subscriptions:update` | `CreateSubscriptionRepriceRequest` | 201 `SubscriptionRepriceView` |  |
 | POST | `/v1/merchant/catalog/reprice-all-prior-versions` | merchant | `merchant:subscriptions:update` | `RepriceAllPriorVersionsRequest` | 201 `RepriceBatchResult` |  |
@@ -290,26 +279,19 @@ A creator managing its own catalog.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/catalog` | merchant | `merchant:catalog:read-own` | — | 200 `Catalog` |  |
-| PUT | `/v1/catalog` | merchant | `merchant:catalog:update-own` | — | 200 `Catalog` | catalog write |
-| GET | `/v1/catalog/products` | merchant | `merchant:catalog:read-own` | — | 200 `CatalogPageOfCatalogProduct` |  |
-| POST | `/v1/catalog/offers/lookup` | merchant | `merchant:catalog:read-own` | `OfferLookupRequest` | 200 untyped |  |
-| POST | `/v1/catalog/products` | merchant | `merchant:catalog:update-own` | `CreateProductRequest` | 201 `CatalogProduct` | catalog write |
-| GET | `/v1/catalog/products/by-key/{key}` | merchant | `merchant:catalog:read-own` | — | 200 `CatalogProduct` |  |
-| PUT | `/v1/catalog/products/by-key/{key}` | merchant | `merchant:catalog:update-own` | `CreateProductRequest` | 200 `CatalogProduct` | catalog write |
-| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read-own` | — | 200 `CatalogProduct` |  |
-| PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:update-own` | `UpdateProductRequest` | 200 `CatalogProduct` | catalog write |
-| POST | `/v1/catalog/products/{id}/activate` | merchant | `merchant:catalog:update-own` | — | 200 `CatalogProduct` | catalog write |
-| POST | `/v1/catalog/products/{id}/deactivate` | merchant | `merchant:catalog:update-own` | — | 200 `CatalogProduct` | catalog write |
-| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read-own` | — | 200 `CatalogPageOfCatalogPrice` |  |
-| POST | `/v1/catalog/prices` | merchant | `merchant:catalog:update-own` | `CreatePriceRequest` | 201 `CatalogPrice` | catalog write |
-| GET | `/v1/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read-own` | — | 200 `CatalogPrice` |  |
-| GET | `/v1/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read-own` | — | 200 `PaginatedResponseOfPriceKeyHistoryEntry` |  |
-| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read-own` | — | 200 `CatalogPrice` |  |
-| PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:update-own` | `UpdatePriceRequest` | 200 `CatalogPrice` | catalog write |
-| POST | `/v1/catalog/prices/{id}/activate` | merchant | `merchant:catalog:update-own` | — | 200 `CatalogPrice` | catalog write |
-| POST | `/v1/catalog/prices/{id}/deactivate` | merchant | `merchant:catalog:update-own` | — | 200 `CatalogPrice` | catalog write |
-| POST | `/v1/catalog/prices/{id}/key` | merchant | `merchant:catalog:update-own` | `SetPriceKeyRequest` | 200 `CatalogPrice` | catalog write |
+| POST | `/v1/catalog/products` | merchant | `merchant:catalog:update-own` | `CreateProductParams` | 201 `Product` | catalog write |
+| GET | `/v1/catalog/products` | merchant | `merchant:catalog:read-own` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read-own` | — | 200 `Product` |  |
+| PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:update-own` | `UpdateProductParams` | 200 `Product` | catalog write |
+| GET | `/v1/catalog/products/by-key/{key}` | merchant | `merchant:catalog:read-own` | — | 200 `Product` |  |
+| PUT | `/v1/catalog/products/by-key/{key}` | merchant | `merchant:catalog:update-own` | `CreateProductParams` | 200 `Product` | catalog write |
+| POST | `/v1/catalog/prices` | merchant | `merchant:catalog:update-own` | `CreatePriceParams` | 201 `Price` | catalog write |
+| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read-own` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read-own` | — | 200 `Price` |  |
+| PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:update-own` | `UpdatePriceParams` | 200 `Price` | catalog write |
+| GET | `/v1/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read-own` | — | 200 `Price` |  |
+| GET | `/v1/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read-own` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| POST | `/v1/catalog/offers/lookup` | merchant | `merchant:catalog:read-own` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
 
 ## Control plane (standalone)
 

@@ -37,22 +37,21 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	t.Helper()
 	l := &legacy{w: w, rail: rail, tp: tp, ent: "content:legacy", c: w.newCustomer()}
 	client := w.client[tp]
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	links := map[string]map[string]string{"stripe": {"price_id": "price_legacy_" + uuid.NewString()[:8]}}
 	if rail == "nmi" {
 		links = map[string]map[string]string{"nmi": {"plan_id": "legacy_plan_" + uuid.NewString()[:8]}}
 	}
-	l.price, err = client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: links})
+	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: links})
 	require.NoError(t, err)
 
 	start := w.clock.Now().Add(-10 * day)
 	end := start.Add(monthHours * time.Hour)
 	customerID, err := billing.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
-	priceID, err := billing.ParsePriceID(l.price.ID)
-	require.NoError(t, err)
+	priceID := l.price.ID
 	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: rail}, Customers: []billing.DeclaredCustomer{{Customer: customerID}}}
 	switch rail {
 	case "stripe":

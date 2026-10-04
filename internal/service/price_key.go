@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -23,7 +22,7 @@ import (
 // whether the default was used. Batch applications require explicit price
 // keys; this default belongs to individual price creation. Changing the
 // financial terms at a key creates or reuses a financial version.
-func resolvePriceKey(product *models.Product, req CreatePriceRequest) (string, bool) {
+func resolvePriceKey(product *models.Product, req billing.CreatePriceParams) (string, bool) {
 	key := strings.TrimSpace(req.Key)
 	if key != "" {
 		return key, false
@@ -33,7 +32,7 @@ func resolvePriceKey(product *models.Product, req CreatePriceRequest) (string, b
 
 // defaultKeyCadenceConflict refuses a defaulted key whose current holder bills
 // on another cadence: a default key never repoints across cadences.
-func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req CreatePriceRequest, key string) error {
+func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req billing.CreatePriceParams, key string) error {
 	if !defaulted || holder == nil || cadence.Same(holder.AccessDurationHours, holder.AutoRenew, req.AccessDurationHours, req.AutoRenew) {
 		return nil
 	}
@@ -43,7 +42,7 @@ func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req CreateP
 // GetPriceByKey resolves a price by its #774 key — the CURRENT (non-archived)
 // row for that key. Used wherever checkout/API accept a price_key alongside a
 // price UUID.
-func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, error) {
+func (s *Service) GetPriceByKey(ctx context.Context, key string) (*billing.Price, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -82,13 +81,13 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 // live row already holds the target key, THAT row is archived first (the same
 // repoint invariant CreatePrice/ActivatePrice enforce), so a rename can also
 // double as a manual repoint.
-func (s *Service) SetPriceKey(ctx context.Context, id billing.PriceID, key string) (*CatalogPrice, error) {
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+func (s *Service) SetPriceKey(ctx context.Context, id billing.PriceID, key string) (*billing.Price, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
 		return scoped.setPriceKey(ctx, id, key)
 	})
 }
 
-func (s *Service) setPriceKey(ctx context.Context, id billing.PriceID, key string) (*CatalogPrice, error) {
+func (s *Service) setPriceKey(ctx context.Context, id billing.PriceID, key string) (*billing.Price, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -144,59 +143,44 @@ func (s *Service) setPriceKey(ctx context.Context, id billing.PriceID, key strin
 	return priceToCatalogPrice(current), nil
 }
 
-// PriceKeyHistoryEntry is one entry of a price key's version chain, resolved
-// from the #774 pointer-movement log — the #777 console price page's
-// "version chain with dates" surface. Most-recent-first (mirrors
-// ListKeyMovements).
-type PriceKeyHistoryEntry struct {
-	Archived    bool         `json:"archived"`
-	Price       CatalogPrice `json:"price"`
-	EffectiveAt time.Time    `json:"effective_at"`
-}
-
-// GetPriceKeyHistory resolves a key's full pointer-movement history log into
-// the priced rows it named at each effective date — NOT built by #774 (which
-// exposed only the key-resolution + per-price read surface), added here
-// because the #777 console needs it to render "key's history with dates"
-// rather than approximating from each price row's own created_at (which is
-// wrong for a REACTIVATED row: its created_at is its ORIGINAL creation, not
-// the date it most recently became current again).
-func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKeyHistoryEntry, error) {
+// ListPriceKeyHistory returns one page of a price key's history, most recent
+// first: when the key moved to which price, or was retired.
+func (s *Service) ListPriceKeyHistory(ctx context.Context, key string, page billing.PageRequest) (billing.ListPage[billing.PriceKeyMovement], error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
-		return nil, err
+		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return nil, pinErr
+		return billing.ListPage[billing.PriceKeyMovement]{}, pinErr
 	}
 	defer release()
 
 	prices, err := s.requirePriceService()
 	if err != nil {
-		return nil, err
+		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, apperr.Invalidf("key required")
+		return billing.ListPage[billing.PriceKeyMovement]{}, apperr.Invalidf("key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
-	movements, err := prices.ListKeyMovements(ctx, tid.UUID(), key)
+	movements, err := prices.ListKeyMovements(ctx, tid.UUID(), key, page)
 	if err != nil {
-		return nil, err
+		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
-	if len(movements) == 0 {
-		return nil, ErrPriceKeyNotFound
+	if len(movements.Items) == 0 && page.Cursor == "" {
+		return billing.ListPage[billing.PriceKeyMovement]{}, ErrPriceKeyNotFound
 	}
-	out := make([]PriceKeyHistoryEntry, 0, len(movements))
-	for _, m := range movements {
+	out := billing.ListPage[billing.PriceKeyMovement]{Items: make([]billing.PriceKeyMovement, 0, len(movements.Items)), Next: movements.Next}
+	for _, m := range movements.Items {
 		p, err := prices.GetByID(ctx, m.PriceID)
 		if err != nil {
-			return nil, fmt.Errorf("resolve price %s for key %q movement: %w", m.PriceID, key, err)
+			return billing.ListPage[billing.PriceKeyMovement]{}, fmt.Errorf("resolve price %s for key %q movement: %w", m.PriceID, key, err)
 		}
-		out = append(out, PriceKeyHistoryEntry{Archived: m.Archived, Price: *priceToCatalogPrice(p), EffectiveAt: m.EffectiveAt})
+		out.Items = append(out.Items, billing.PriceKeyMovement{EffectiveAt: m.EffectiveAt, Archived: m.Archived, Price: *priceToCatalogPrice(p)})
 	}
 	return out, nil
 }

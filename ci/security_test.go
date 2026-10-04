@@ -41,17 +41,17 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "refund-" + uuid.NewString()[:8], DisplayName: "Refunded post", EntitlementsSpec: map[string]*int{"content:refunded": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	userID := uuid.NewString()
 	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CustomerParams{})
 	require.NoError(t, err)
 	_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "refund@example.test"}, PriceID: price.ID,
+		Customer: billing.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "refund@example.test"}, PriceID: price.ID.String(),
 		Entitlement: "content:refunded", OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "security-" + uuid.NewString(), SuccessURL: "https://example.test/success", CancelURL: "https://example.test/cancel",
 	})
@@ -95,7 +95,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutSessionID, metadataUserID, metadataPriceID, now.Add(time.Duration(i+2)*time.Second).Unix()))
 		require.False(t, entitled(), "%s after the refund must not grant again", kind)
 	}
-	access, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: userID, ProductID: product.ID})
+	access, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: userID, ProductID: product.ID.String()})
 	require.NoError(t, err)
 	require.False(t, access.HasAccess, "the refunded product is not owned")
 	payments, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})

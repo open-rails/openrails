@@ -63,7 +63,7 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", visa), "a good card is refused while blocked")
 			for _, tp := range []topology{embedded, remote} {
 				_, err := r.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
 					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: r.psp["nmi"], Rail: "nmi"},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 				})
@@ -139,12 +139,12 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000).ID
 		for range 6 {
-			require.ErrorIs(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", declined), billing.ErrPaymentRefused)
+			require.ErrorIs(t, pay(w, embedded, price.String(), w.newCustomer(), "192.0.2.20", declined), billing.ErrPaymentRefused)
 		}
 		sales := len(w.nmi.Sales())
-		refused(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", visa), http.StatusTooManyRequests)
+		refused(t, pay(w, embedded, price.String(), w.newCustomer(), "192.0.2.20", visa), http.StatusTooManyRequests)
 		require.Len(t, w.nmi.Sales(), sales, "a blocked attempt never reaches the gateway")
-		require.NoError(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.21", visa), "another address pays")
+		require.NoError(t, pay(w, embedded, price.String(), w.newCustomer(), "192.0.2.21", visa), "another address pays")
 	})
 	t.Run("wave", func(t *testing.T) {
 		t.Parallel()
@@ -153,19 +153,19 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		var tester *customer
 		for i := range 100 {
 			tester = w.newCustomer()
-			require.ErrorIs(t, pay(w, embedded, price, tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined), billing.ErrPaymentRefused)
+			require.ErrorIs(t, pay(w, embedded, price.String(), tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined), billing.ErrPaymentRefused)
 		}
 		sales := len(w.nmi.Sales())
-		refused(t, pay(w, embedded, price, tester, "2001:db8:77:64::1", visa), http.StatusTooManyRequests)
+		refused(t, pay(w, embedded, price.String(), tester, "2001:db8:77:64::1", visa), http.StatusTooManyRequests)
 		require.Len(t, w.nmi.Sales(), sales, "in attack mode one recent decline blocks, before the gateway")
-		require.NoError(t, pay(w, embedded, price, w.newCustomer(), "2001:db8:77:1000::1", visa), "a clean buyer still pays")
+		require.NoError(t, pay(w, embedded, price.String(), w.newCustomer(), "2001:db8:77:1000::1", visa), "a clean buyer still pays")
 	})
 	t.Run("invalid", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000).ID
 		for _, tp := range []topology{embedded, remote} {
-			refused(t, pay(w, tp, price, w.newCustomer(), "not-an-ip", visa), http.StatusBadRequest)
+			refused(t, pay(w, tp, price.String(), w.newCustomer(), "not-an-ip", visa), http.StatusBadRequest)
 		}
 		require.Empty(t, w.nmi.Sales())
 	})

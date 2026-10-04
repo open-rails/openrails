@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -24,7 +25,7 @@ import (
 
 // ApplyCatalog applies one durable local operation. It never invokes provider
 // network writes; unsupported provider-link changes fail before local mutation.
-func (s *Service) ApplyCatalog(ctx context.Context, params billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
+func (s *Service) ApplyCatalog(ctx context.Context, params catalogwire.Application) (*billing.CatalogApplicationReceipt, error) {
 	return s.applyCatalog(ctx, params, s.verifyCatalogProviderReference)
 }
 
@@ -37,8 +38,8 @@ var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference uncon
 // declared catalog accepts. Provider reference reads end at deadline (zero:
 // none); one that fails without a provider refusal is
 // ErrCatalogProviderUnconfirmed.
-func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params billing.CatalogApplyParams, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
-	verify := func(ctx context.Context, provider, rail, account, product string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params catalogwire.Application, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
+	verify := func(ctx context.Context, provider, rail, account, product string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 		if !deadline.IsZero() {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithDeadline(ctx, deadline)
@@ -54,7 +55,7 @@ func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params billing.Catal
 	return s.applyCatalog(catalogpolicy.OperatorContext(ctx), params, verify)
 }
 
-func (s *Service) applyCatalog(ctx context.Context, params billing.CatalogApplyParams, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {
+func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -107,7 +108,7 @@ func declarativeApplicationID(digest [32]byte, revision int64) string {
 	return fmt.Sprintf("%s%x@%d", catalogwire.DeclarativeIDPrefix, digest, revision)
 }
 
-func (s *Service) commitCatalogApplication(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte, prepared *catalogApplicationPreparation) (*billing.CatalogApplicationReceipt, error) {
+func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, prepared *catalogApplicationPreparation) (*billing.CatalogApplicationReceipt, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.CatalogApplicationReceipt, error) {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
@@ -146,7 +147,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params billing.C
 		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
-		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, CatalogID: billing.CatalogID(target.ID).String(), BaseRevision: revision}
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, CatalogID: billing.CatalogID(target.ID), BaseRevision: revision}
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -186,12 +187,12 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params billing.C
 	})
 }
 
-func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, params billing.CatalogApplyParams, receipt *billing.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, params catalogwire.Application, receipt *billing.CatalogApplicationReceipt) error {
 	// Enumerate all pages without public active/tier filtering. The merchant lock
 	// makes the stable pagination snapshot safe while the eventual apply mutates it.
-	existing := map[string]*CatalogProduct{}
-	for offset := 0; ; {
-		page, err := s.ListProducts(ctx, ListProductsOptions{CatalogID: &target, Limit: maxCatalogPageSize, Offset: offset})
+	existing := map[string]*billing.Product{}
+	for cursor := ""; ; {
+		page, err := s.ListProducts(ctx, billing.ProductListParams{CatalogID: billing.CatalogID(target), PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit, Cursor: cursor}})
 		if err != nil {
 			return err
 		}
@@ -199,13 +200,10 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			p := page.Items[i]
 			existing[p.Key] = &p
 		}
-		offset += len(page.Items)
-		if int64(offset) >= page.Total {
+		if page.Next == "" {
 			break
 		}
-		if len(page.Items) == 0 {
-			return fmt.Errorf("catalog pagination made no progress")
-		}
+		cursor = page.Next
 	}
 	keep := map[string]bool{}
 	for _, decl := range params.Products {
@@ -226,7 +224,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
 				return apperr.Invalidf("new product %q requires display_name", decl.Key)
 			}
-			req := CreateProductRequest{CatalogID: billing.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
+			req := billing.CreateProductParams{CatalogID: billing.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
 			if decl.TierGroup.Set && !decl.TierGroup.Null {
 				req.TierGroup = &decl.TierGroup.Value
 			}
@@ -262,7 +260,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			}
 			if productApplicationChanges(p, req) {
 				var err error
-				p, err = s.UpdateProduct(ctx, p.ID, req)
+				p, err = s.patchProduct(ctx, p.ID, req)
 				if err != nil {
 					return err
 				}
@@ -291,17 +289,17 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 	return nil
 }
 
-func productApplicationChanges(p *CatalogProduct, r UpdateProductRequest) bool {
+func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool {
 	return r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.EntitlementsSpec, p.EntitlementsSpec)
 }
 
-func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduct, declarations []billing.CatalogApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations []catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
 	prices, err := s.ListPricesByProduct(ctx, product.ID, false)
 	if err != nil {
 		return err
 	}
-	byKey := map[string][]CatalogPrice{}
-	byID := map[string]CatalogPrice{}
+	byKey := map[string][]billing.Price{}
+	byID := map[string]billing.Price{}
 	for _, p := range prices {
 		byKey[p.Key] = append(byKey[p.Key], p)
 		byID[p.ID.String()] = p
@@ -375,7 +373,7 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduc
 	return nil
 }
 
-func (s *Service) applyCatalogBilling(ctx context.Context, params billing.CatalogApplyParams) error {
+func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Application) error {
 	hasCards := false
 	for _, p := range params.Products {
 		hasCards = hasCards || p.RateCards.Set
@@ -437,6 +435,9 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params billing.Catalo
 				desired.RateCards = kept
 				ordinals := map[int]bool{}
 				for i, rc := range p.RateCards.Value {
+					if err := catalogrules.ValidateRateCard(fmt.Sprintf("product %q rate card #%d", p.Key, i+1), &rc); err != nil {
+						return apperr.Invalidf("%s", err.Error())
+					}
 					ordinal := rc.Ordinal
 					if ordinal == 0 {
 						ordinal = i + 1
@@ -456,14 +457,14 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params billing.Catalo
 							return err
 						}
 					}
-					desired.RateCards = append(desired.RateCards, CatalogRateCardSpec{ProductKey: p.Key, Ordinal: ordinal, MeterKey: rc.Meter, PaymentTerm: rc.PaymentTerm, Filter: rc.Filter, Allowance: allowance, Price: price})
+					desired.RateCards = append(desired.RateCards, CatalogRateCardSpec{ProductKey: p.Key, Ordinal: ordinal, MeterKey: rc.Meter, PaymentTerm: string(rc.PaymentTerm), Filter: rc.Filter, Allowance: allowance, Price: price})
 				}
 			}
 		}
 		return s.SyncCatalogSidecars(ctx, desired, CatalogMutationOptions{Insert: true, Overwrite: true, Prune: true})
 	})
 }
-func catalogApplicationPriceRequest(product *CatalogProduct, decl billing.CatalogApplyPrice, byKey map[string][]CatalogPrice, byID map[string]CatalogPrice) (current *CatalogPrice, req CreatePriceRequest, err error) {
+func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.ApplyPrice, byKey map[string][]billing.Price, byID map[string]billing.Price) (current *billing.Price, req billing.CreatePriceParams, err error) {
 	if decl.ID != "" {
 		p, ok := byID[decl.ID]
 		if !ok || p.Key != decl.Key {
@@ -488,7 +489,7 @@ func catalogApplicationPriceRequest(product *CatalogProduct, decl billing.Catalo
 			}
 		}
 	}
-	req = CreatePriceRequest{ProductID: product.ID, Key: decl.Key}
+	req = billing.CreatePriceParams{ProductID: product.ID, Key: decl.Key}
 	if current != nil {
 		req.UnitAmount = current.UnitAmount
 		req.Currency = current.Currency

@@ -1,204 +1,138 @@
 package billing
 
-import "time"
+import (
+	"time"
 
-// Catalog is a subdivision of one merchant's products. A nil OwnerSubject is
-// the ordinary merchant-owned default; creators have an opaque host subject.
+	"github.com/open-rails/openrails/catalog"
+)
+
+// Catalog is one collection of a merchant's products: the merchant's own
+// (OwnerSubject null) or a creator's, named by the host's opaque subject.
 type Catalog struct {
-	ID           CatalogID  `json:"id"`
-	MerchantID   MerchantID `json:"merchant_id"`
-	OwnerSubject *string    `json:"owner_subject"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID           CatalogID `json:"id"`
+	OwnerSubject *string   `json:"owner_subject"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-type CatalogProduct struct {
-	ID               ProductID       `json:"id"`
-	CatalogID        CatalogID       `json:"catalog_id"`
-	Key              string          `json:"key"`
-	DisplayName      string          `json:"display_name"`
-	Description      string          `json:"description"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
+// CatalogListParams lists the merchant's catalogs; OwnerSubject selects one
+// creator's.
+type CatalogListParams struct {
+	PageRequest
+	OwnerSubject string
+}
+
+// Product is something a customer buys: what owning it grants
+// (EntitlementsSpec) and, in Prices, its current prices. A product in a tier
+// group is one tier of a plan family, ranked by TierRank. Archived products
+// keep their purchases and subscribers but are not sold.
+type Product struct {
+	ID        ProductID `json:"id"`
+	CatalogID CatalogID `json:"catalog_id"`
+	// Key is the product's merchant-unique name.
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
+	// EntitlementsSpec maps each entitlement the product grants to its access
+	// in hours; null hours last as long as the purchase.
+	EntitlementsSpec map[string]*int `json:"entitlements_spec"`
+	TierGroup        *string         `json:"tier_group"`
 	TierRank         int             `json:"tier_rank"`
 	Archived         bool            `json:"archived"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	// Prices are the product's current prices; archived ones are listed with
+	// ListPrices.
+	Prices    []Price   `json:"prices"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type CreateProductRequest struct {
-	// CatalogID selects a catalog for authorized merchant administrators. An
-	// owner client derives its catalog from its verified subject.
+// CreateProductParams creates a product. CatalogID selects a creator's
+// catalog; zero is the merchant's own. Archived creates it retired, for a
+// historical plan that still has subscribers.
+type CreateProductParams struct {
 	CatalogID        CatalogID       `json:"catalog_id,omitzero"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
-	Description      string          `json:"description"`
+	Description      string          `json:"description,omitempty"`
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	TierRank         int             `json:"tier_rank,omitempty"`
-	// Archived creates the product retired. Supports migrating historical
-	// plans that already have subscribers (no purchasable gap).
-	Archived bool `json:"archived,omitempty"`
+	Archived         bool            `json:"archived,omitempty"`
 }
 
-type UpdateProductRequest struct {
-	DisplayName      *string         `json:"display_name,omitempty"`
-	Description      *string         `json:"description,omitempty"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	SetEntitlements  bool            `json:"set_entitlements,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
-	SetTierGroup     bool            `json:"set_tier_group,omitempty"`
-	TierRank         *int            `json:"tier_rank,omitempty"`
-	// Archived sets the lifecycle flag. archived propagates to Stripe as
-	// active=false; unarchived as active=true.
-	Archived *bool `json:"archived,omitempty"`
-	// SkipRailSync, when true, suppresses any propagation of this update to
-	// configured external rails (Stripe etc.). The DB row is updated as usual.
-	// Use sparingly — drift introduced this way will appear as sync_status="drifted"
-	// on subsequent ?verify=true reads or reconcile actions.
-	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
+// UpdateProductParams changes a product's fields: an omitted field is left
+// as it is, null clears description, entitlements_spec and tier_group.
+// Archiving takes the product off sale; its purchases and subscribers keep
+// their access.
+type UpdateProductParams struct {
+	DisplayName      catalog.Field[string]          `json:"display_name,omitzero"`
+	Description      catalog.Field[string]          `json:"description,omitzero"`
+	EntitlementsSpec catalog.Field[map[string]*int] `json:"entitlements_spec,omitzero"`
+	TierGroup        catalog.Field[string]          `json:"tier_group,omitzero"`
+	TierRank         catalog.Field[int]             `json:"tier_rank,omitzero"`
+	Archived         catalog.Field[bool]            `json:"archived,omitzero"`
 }
 
-type ProviderState struct {
-	Status     ProviderStatus    `json:"status"`
-	IDs        map[string]string `json:"ids,omitempty"`
-	LookupKey  string            `json:"lookup_key,omitempty"`
-	SyncStatus SyncStatus        `json:"sync_status,omitempty"`
-	Drift      []DriftField      `json:"drift,omitempty"`
-	Message    string            `json:"message,omitempty"`
+// ProductListParams filters ListProducts. A nil Archived lists both live and
+// archived products.
+type ProductListParams struct {
+	PageRequest
+	CatalogID CatalogID
+	Archived  *bool
+	TierGroup string
 }
 
-type DriftField struct {
-	Field          string `json:"field"`
-	OpenRailsValue string `json:"openrails_value"`
-	RemoteValue    string `json:"remote_value"`
+// Price is one way to buy a product: UnitAmount (micros of Currency) for
+// AccessDurationHours of access (null: for good), renewing when AutoRenew,
+// optionally after a first trial period at TrialUnitAmount. A price's terms
+// never change; Key names its current version, and selling on other terms
+// means a new price under the same key. PSPs is the price's state on each PSP
+// it is linked to.
+type Price struct {
+	ID                  PriceID                 `json:"id"`
+	Key                 string                  `json:"key"`
+	ProductID           ProductID               `json:"product_id"`
+	Archived            bool                    `json:"archived"`
+	UnitAmount          int64                   `json:"unit_amount,string"`
+	Currency            string                  `json:"currency"`
+	AccessDurationHours *int                    `json:"access_duration_hours"`
+	AutoRenew           bool                    `json:"auto_renew"`
+	TrialUnitAmount     *int64                  `json:"trial_unit_amount,string"`
+	TrialDurationHours  *int                    `json:"trial_duration_hours"`
+	PSPs                map[string]PSPLinkState `json:"psps"`
+	// PendingManualActions are the steps an operator still has to take
+	// before each PSP whose link is pending_manual_link can sell the price.
+	PendingManualActions []PendingAction `json:"pending_manual_actions"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
-type CatalogPrice struct {
-	ID PriceID `json:"id"`
-	// Key (#774) is the durable, per-merchant-unique movable-pointer handle for
-	// this price's substance-version chain — the stable name to check out
-	// against, reprice by, or reference in support conversations. ID stays the
-	// #662 immutable substance UUID.
-	Key                 string    `json:"key"`
-	ProductID           ProductID `json:"product_id"`
-	Archived            bool      `json:"archived"`
-	UnitAmount          int64     `json:"unit_amount,string"`
-	Currency            string    `json:"currency"`
-	AccessDurationHours *int      `json:"access_duration_hours,omitempty"`
-	AutoRenew           bool      `json:"auto_renew"`
-	TrialUnitAmount     *int64    `json:"trial_unit_amount,omitempty,string"`
-	TrialDurationHours  *int      `json:"trial_duration_hours,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
-
-	// Providers carries the typed per-provider attachment state for every
-	// rail this price is linked to. Always populated when at least one
-	// provider is attached; SyncStatus defaults to "unknown" until a
-	// verify/reconcile path is invoked.
-	Providers map[string]ProviderState `json:"providers,omitempty"`
-
-	// PendingManualActions lists per-provider manual steps the operator must
-	// complete to bring a pending_manual_link provider to linked status. Set
-	// on the CreatePrice response and populated on GetPrice when at least one
-	// provider is still pending.
-	PendingManualActions []PendingAction `json:"pending_manual_actions,omitempty"`
+// PSPLinkState is a price's state on one PSP: the PSP's own identifiers for
+// it and, after a verifying read, whether the PSP still matches. Public
+// catalog routes answer the status only.
+type PSPLinkState struct {
+	Status     PSPLinkStatus     `json:"status"`
+	IDs        map[string]string `json:"ids"`
+	LookupKey  string            `json:"lookup_key"`
+	SyncStatus SyncStatus        `json:"sync_status"`
+	Drift      []DriftField      `json:"drift"`
+	Message    string            `json:"message"`
 }
 
-// ErrPriceKeyCadenceConflict refuses a price created without a key whose
-// default key is already held by a price on another cadence.
-var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict", ErrConflict)
-
-type CreatePriceRequest struct {
-	// Select exactly one existing ProductID/ProductKey or new ProductData.
-	ProductID   ProductID                     `json:"product_id"`
-	ProductKey  string                        `json:"product_key,omitempty"`
-	ProductData *PriceCreateProductDataParams `json:"product_data,omitempty"`
-
-	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
-	// this price's substance-version chain — distinct from ID, which stays the
-	// #662 immutable substance UUID. Optional: auto-defaults to
-	// "<product-key>-<interval>" when omitted: <n>h, <n>d on whole days, or
-	// weekly/monthly/quarterly/yearly for exactly 168/720/2160/8760 hours. A
-	// default key held by a price on another cadence is refused with
-	// ErrPriceKeyCadenceConflict.
-	// Declaring the SAME key with a DIFFERENT financial substance is a version
-	// bump: the new/reactivated substance row becomes the key's current
-	// target and the previously-current row is archived (grandfathered).
-	Key string `json:"key,omitempty"`
-
-	// A price's ROW IDENTITY IS its financial substance — the product key plus
-	// these immutable money terms. There is no price slug: the content-based
-	// provider keys are derived from (product_key, currency, unit_amount,
-	// access duration, renewal flag, and trial terms), so they are stable across
-	// DB rebuilds and a different amount is, by construction, a different price.
-	UnitAmount int64  `json:"unit_amount,string"`
-	Currency   string `json:"currency"`
-
-	// AccessDurationHours (#622): the access window a purchase grants, in HOURS
-	// (supports sub-day windows). nil = indefinite/durable; a positive value = a
-	// finite window (rental, one-off, or the billing period when AutoRenew). Part
-	// of price identity.
-	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
-	// AutoRenew (#622): whether the price recharges and extends the window after
-	// AccessDurationHours. Requires a finite AccessDurationHours. Part of identity.
-	AutoRenew bool `json:"auto_renew"`
-
-	// TrialUnitAmount / TrialDurationHours (#622): optional trial FIRST phase that
-	// differs from the recurring terms. TrialUnitAmount 0 = free trial; both nil =
-	// a flat price. Must be set together and require AutoRenew (there is a "then
-	// recurring" part).
-	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty,string"`
-	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
-
-	// Providers is the list of provider names to attach (e.g. ["stripe",
-	// "ccbill", "nmi"]). Empty means "DB-only price with no external
-	// links" — useful for testing or for prices that are not sold externally.
-	PSPs []string `json:"psps,omitempty"`
-
-	// PSPLinks maps PSP key -> provider-specific link/config key/value pairs.
-	// Schema is per-provider:
-	//   stripe : {"price_id": "price_xxx", "product_id": "prod_xxx" (optional)}
-	//   ccbill : {"form_name": "...", "flex_id": "..."}
-	//   nmi : {"plan_id": "..."}
-	//   solana : {"token": "USD1"} or {"plan_pda": "..."}; omitted token defaults to USDC
-	// Any provider with a non-empty link here is implicitly added to the
-	// attach set even if absent from Providers.
-	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
-
-	// Archived creates the price retired — migrates a historical plan in one
-	// step (grandfathered subscriptions bill it; new buyers cannot).
-	Archived bool `json:"archived,omitempty"`
-}
-
-type UpdatePriceRequest struct {
-	// PSPLinks merges per-PSP link maps into the existing psp_links map.
-	// Supply only the PSPs you want to add or rotate. Each map's values are
-	// validated through the matching rail adapter's Attach.
-	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
-
-	// ReplacePSPLinks, when true, replaces the entire psp_links map rather
-	// than merging — useful for clearing a PSP. When false (the default)
-	// supplied entries are merged into the existing map and PSPs not
-	// mentioned are left alone.
-	ReplacePSPLinks bool `json:"replace_psp_links,omitempty"`
-
-	// Archived sets the lifecycle flag. archived propagates to providers as
-	// active=false; unarchived as active=true.
-	Archived *bool `json:"archived,omitempty"`
-
-	// See UpdateProductRequest.SkipRailSync.
-	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
-}
+// PSPLinkStatus is whether a price is linked to a PSP.
+type PSPLinkStatus string
 
 const (
-	ProviderStatusLinked            ProviderStatus = "linked"
-	ProviderStatusPendingManualLink ProviderStatus = "pending_manual_link"
-	ProviderStatusSyncDisabled      ProviderStatus = "sync_disabled"
-	ProviderStatusError             ProviderStatus = "error"
+	PSPLinkLinked            PSPLinkStatus = "linked"
+	PSPLinkPendingManualLink PSPLinkStatus = "pending_manual_link"
+	PSPLinkSyncDisabled      PSPLinkStatus = "sync_disabled"
+	PSPLinkError             PSPLinkStatus = "error"
 )
 
-type ProviderStatus string
+// SyncStatus is whether a PSP's copy of a price matches OpenRails. Only a
+// verifying read (GetPriceParams.Verify) or reconciliation knows; otherwise
+// it is unknown.
+type SyncStatus string
 
 const (
 	SyncStatusUnknown      SyncStatus = "unknown"
@@ -209,11 +143,107 @@ const (
 	SyncStatusSyncDisabled SyncStatus = "sync_disabled"
 )
 
-type SyncStatus string
+// DriftField is one field on which a PSP's copy differs from OpenRails.
+type DriftField struct {
+	Field          string `json:"field"`
+	OpenRailsValue string `json:"openrails_value"`
+	RemoteValue    string `json:"remote_value"`
+}
 
+// PendingAction is a manual step an operator takes on a PSP so it can sell a
+// price; PatchRequired is the psp_links patch to send once it is done.
 type PendingAction struct {
-	Provider      string                                  `json:"provider"`
+	PSP           string                                  `json:"psp"`
 	Action        string                                  `json:"action"`
 	Hint          string                                  `json:"hint"`
-	PatchRequired map[string]map[string]map[string]string `json:"patch_required,omitempty"`
+	PatchRequired map[string]map[string]map[string]string `json:"patch_required"`
+}
+
+// ErrPriceKeyCadenceConflict refuses a price created without a key whose
+// default key is already held by a price on another cadence.
+var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict", ErrConflict)
+
+// CreatePriceParams creates a price on the product named by exactly one of
+// ProductID, ProductKey and ProductData.
+//
+// Key defaults to "<product key>-<cadence>": <n>h, <n>d on whole days, or
+// weekly, monthly, quarterly or yearly for exactly 168, 720, 2160 or 8760
+// hours; "onetime" when the price does not renew. A default key held by a
+// price on another cadence is refused with ErrPriceKeyCadenceConflict.
+// Creating a price under the key of a live price with other terms makes it
+// the key's current version and archives the previous one.
+//
+// PSPs lists the PSP keys the price is sold on; PSPLinks supplies a PSP's own
+// identifiers for it, per rail: stripe {price_id, product_id} or
+// {lookup_key}; nmi {plan_id}; ccbill {form_name, flex_id}; solana {token} or
+// {plan_pda}. A PSP named in PSPLinks is sold on too.
+type CreatePriceParams struct {
+	ProductID   ProductID           `json:"product_id,omitzero"`
+	ProductKey  string              `json:"product_key,omitempty"`
+	ProductData *CreatePriceProduct `json:"product_data,omitempty"`
+	Key         string              `json:"key,omitempty"`
+	UnitAmount  int64               `json:"unit_amount,string"`
+	Currency    string              `json:"currency"`
+	// AccessDurationHours is the access a purchase grants; nil is for good.
+	// AutoRenew charges again after each period, and needs a duration.
+	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
+	AutoRenew           bool `json:"auto_renew,omitempty"`
+	// TrialUnitAmount and TrialDurationHours are a first period on other
+	// terms (0 is a free trial); set both or neither, with AutoRenew.
+	TrialUnitAmount    *int64                       `json:"trial_unit_amount,omitempty,string"`
+	TrialDurationHours *int                         `json:"trial_duration_hours,omitempty"`
+	PSPs               []string                     `json:"psps,omitempty"`
+	PSPLinks           map[string]map[string]string `json:"psp_links,omitempty"`
+	// Archived creates the price retired: subscribers keep paying it, nobody
+	// new can buy it.
+	Archived bool `json:"archived,omitempty"`
+}
+
+// CreatePriceProduct creates the price's product when no product holds Key;
+// an existing product under Key is reused unchanged. CatalogID selects a
+// creator's catalog.
+type CreatePriceProduct struct {
+	CatalogID   CatalogID `json:"catalog_id,omitzero"`
+	Key         string    `json:"key"`
+	DisplayName string    `json:"display_name"`
+	Description string    `json:"description,omitempty"`
+}
+
+// UpdatePriceParams changes what about a price can change; omitted fields are
+// left as they are. Key moves the price onto another key, archiving the live
+// price that held it. PSPLinks merges into the price's links: a PSP set to
+// null is unlinked.
+type UpdatePriceParams struct {
+	Key      catalog.Field[string]                       `json:"key,omitzero"`
+	Archived catalog.Field[bool]                         `json:"archived,omitzero"`
+	PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`
+}
+
+// GetPriceParams reads a price. Verify asks each linked PSP for its copy and
+// reports any drift; it is a read, never a write.
+type GetPriceParams struct {
+	Verify bool
+}
+
+// PriceListParams filters ListPrices. Nil Archived and AutoRenew list both.
+type PriceListParams struct {
+	PageRequest
+	CatalogID CatalogID
+	ProductID ProductID
+	Currency  string
+	AutoRenew *bool
+	Archived  *bool
+}
+
+// PriceKeyMovement is one point in a price key's history: from EffectiveAt
+// the key named Price, or, when Archived, nothing.
+type PriceKeyMovement struct {
+	EffectiveAt time.Time `json:"effective_at"`
+	Archived    bool      `json:"archived"`
+	Price       Price     `json:"price"`
+}
+
+// EnsureCatalogParams names the creator whose catalog EnsureCatalog returns.
+type EnsureCatalogParams struct {
+	OwnerSubject string `json:"owner_subject"`
 }

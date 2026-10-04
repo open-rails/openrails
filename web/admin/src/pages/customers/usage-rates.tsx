@@ -27,7 +27,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/client"
-import type { CustomerUsageRateOverride, UsageMeter } from "@/lib/api/types"
+import type {
+  Meter,
+  RateOverride,
+} from "@/lib/api/generated/wire"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -46,8 +49,8 @@ export function CustomerUsageRatesSection({
   const ratesQuery = useQuery(adminQueries.customerUsageRates(customerId))
   const metersQuery = useQuery(adminQueries.allUsageMeters())
   const rows = customerUsageRateRows(
-    metersQuery.data?.items ?? [],
-    ratesQuery.data ?? []
+    metersQuery.data?.data ?? [],
+    ratesQuery.data?.data ?? []
   )
   const pending = ratesQuery.isPending || metersQuery.isPending
   const error = ratesQuery.error ?? metersQuery.error
@@ -129,7 +132,7 @@ export function CustomerUsageRatesSection({
                     key={`${meter.key}:${override?.updated_at ?? "default"}`}
                     customerId={customerId}
                     meter={meter}
-                    meters={metersQuery.data?.items ?? []}
+                    meters={metersQuery.data?.data ?? []}
                     override={override}
                   />
                 ))}
@@ -149,11 +152,11 @@ function UsageRateRow({
   override,
 }: {
   customerId: string
-  meter: UsageMeter
-  meters: UsageMeter[]
-  override?: CustomerUsageRateOverride
+  meter: Meter
+  meters: Meter[]
+  override?: RateOverride
 }) {
-  const defaultCard = meter.default_rate_card!
+  const defaultCard = meter.rate_card!
   return (
     <TableRow>
       <TableCell>
@@ -170,7 +173,7 @@ function UsageRateRow({
       <TableCell>
         <p className="font-medium">{defaultCard.product_key}</p>
         <p className="max-w-64 text-xs text-muted-foreground">
-          {formatFilter(defaultCard.filter)}
+          {formatFilter(defaultCard.filter ?? {})}
         </p>
       </TableCell>
       <TableCell className="tabular-nums">
@@ -259,10 +262,10 @@ function RemoveOverrideButton({
   )
 }
 
-function summarizeOverride(override: CustomerUsageRateOverride): string {
+function summarizeOverride(override: RateOverride): string {
   const price = summarizeRateCard({
     price: override.price,
-  } as NonNullable<UsageMeter["default_rate_card"]>)
+  } as NonNullable<Meter["rate_card"]>)
   if (override.allowance?.included !== undefined) {
     return `${price} · ${override.allowance.included.toLocaleString()} included`
   }
@@ -273,7 +276,7 @@ function summarizeOverride(override: CustomerUsageRateOverride): string {
 }
 
 function summarizeDefault(
-  card: NonNullable<UsageMeter["default_rate_card"]>
+  card: NonNullable<Meter["rate_card"]>
 ): string {
   const price = summarizeRateCard(card)
   if (card.allowance?.included !== undefined) {

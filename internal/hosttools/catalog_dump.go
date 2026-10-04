@@ -166,7 +166,7 @@ func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		m := catalog.ApplyMeter{Key: row.Key}
 		m.EventType = catalog.Value(row.EventType)
 		m.ValueProperty = catalog.Value(row.ValueProperty)
-		m.Aggregation = catalog.Value(row.Aggregation)
+		m.Aggregation = catalog.Value(catalog.Aggregation(row.Aggregation))
 		m.Unit = catalog.Value(row.Unit)
 		m.GroupBy.Set = true
 		if err := json.Unmarshal(row.GroupBy, &m.GroupBy.Value); err != nil {
@@ -223,7 +223,7 @@ func dumpCatalogRateCards(ctx context.Context, database *db.DB, scope gen.ListLi
 		return fmt.Errorf("list catalog rate cards: %w", err)
 	}
 	for _, row := range rows {
-		rc := catalog.RateCard{Ordinal: int(row.Ordinal), PaymentTerm: row.PaymentTerm}
+		rc := catalog.RateCard{Ordinal: int(row.Ordinal), PaymentTerm: catalog.PaymentTerm(row.PaymentTerm)}
 		if row.MeterKey != nil {
 			rc.Meter = *row.MeterKey
 		}

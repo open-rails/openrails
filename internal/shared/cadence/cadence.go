@@ -1,6 +1,6 @@
 // Package cadence holds the cadence definitions shared by price keys, notices
-// and receipts. SQL twins live in migration 0004 (price_interval_label,
-// billing_cycle_label, monthly_normalized_amount).
+// and receipts. The analytics buckets have SQL twins in the schema
+// (billing_cycle_label, monthly_normalized_amount).
 package cadence
 
 import (

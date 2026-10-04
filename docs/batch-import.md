@@ -206,14 +206,14 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
 ### Runbook: migrating a legacy NMI book
 
 For a book whose recurring billing NMI owns (NMI plans and subscriptions on
-Customer Vault cards). OpenRails mirrors these memberships and never charges
-them; NMI keeps billing until you hand a membership over.
+Customer Vault cards). OpenRails mirrors and monitors these memberships and
+never takes them over: NMI keeps billing them. New purchases are billed by
+OpenRails.
 
 1. **Import.** Declare the book (customers, vault cards, subscriptions with
    `collection_policy` empty = NMI-owned, and the charge history including
    declines) at a fixed `as_of`. Declare `recurring_transaction_id` on a card
-   only when legacy evidence proves the recurring stored-card agreement; the
-   later engine takeover requires it. A paused NMI schedule is declared as
+   only when legacy evidence proves the recurring stored-card agreement. A paused NMI schedule is declared as
    `cancel: {kind: user_cancelled, at: <pause time>}`: access runs to the paid
    date and OpenRails never deletes the paused schedule. A card reference the
    book does not declare blocks its row. Declared refunds and chargebacks are
@@ -263,13 +263,3 @@ them; NMI keeps billing until you hand a membership over.
    admitted by v0.178.0 on a named-plan schedule) re-reads the schedule on
    every retry: link the target price to an NMI plan of its amount and cycle
    and the operation switches the plan and completes without charging again.
-5. **(Optional) staged takeover to OpenRails billing.** `TakeOverBilling`
-   (one membership) or `TakeOverBillingBatch` (a capped batch) deletes the NMI
-   schedule at least 24 hours before the paid period ends, verifies NMI's
-   tombstone, then replaces the membership with an engine-owned successor on
-   the same vault card whose first OpenRails charge is at that period end:
-   no gap in access and no period billed twice. A takeover held by the switch
-   or the destructive-volume breaker past that cutoff ends `not_executed` and
-   NMI bills the period as before; run it again next cycle. `AbandonEngineTakeover`
-   works until the NMI delete is sent. Start with a handful, watch one renewal
-   cycle, then raise the batch.

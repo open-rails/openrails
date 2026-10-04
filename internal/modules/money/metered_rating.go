@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -274,7 +275,7 @@ func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uui
 				effective = capSeconds
 			}
 			if capSeconds > 0 {
-				allowanceUnits, err := catalog.ChargeModel{Kind: catalog.ModelPerUnit, UnitAmount: cell.Included, DivideBy: capSeconds, Round: catalog.RoundDown}.Rate(effective)
+				allowanceUnits, err := catalogrules.ChargeModel{Kind: catalog.ModelPerUnit, UnitAmount: cell.Included, DivideBy: capSeconds, Round: catalog.RoundDown}.Rate(effective)
 				if err != nil {
 					return err
 				}
@@ -323,9 +324,9 @@ func allowanceCapSeconds(spec string) (int64, error) {
 }
 
 func rateCatalogRateCardUsage(price catalog.RatePrice, allowance *catalog.Allowance, dimValue string, quantity, includedOverride int64) (int64, error) {
-	cm := price.ToChargeModel()
+	cm := catalogrules.Of(price)
 	if price.PerUnit != nil && price.PerUnit.Matrix != nil {
-		cellCM, ok := price.ChargeModelForCell(dimValue)
+		cellCM, ok := catalogrules.ForCell(price, dimValue)
 		if !ok {
 			return 0, fmt.Errorf("rate card has no matrix cell for %q=%q", price.PerUnit.Matrix.Dimension, dimValue)
 		}
@@ -345,7 +346,7 @@ func rateCatalogRateCardUsage(price catalog.RatePrice, allowance *catalog.Allowa
 	if included <= 0 || cm.Kind != catalog.ModelPerUnit {
 		return cm.Rate(quantity)
 	}
-	unitCounter := catalog.ChargeModel{
+	unitCounter := catalogrules.ChargeModel{
 		Kind:       catalog.ModelPerUnit,
 		UnitAmount: 1,
 		DivideBy:   cm.DivideBy,

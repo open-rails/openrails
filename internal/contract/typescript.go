@@ -38,7 +38,11 @@ func (m *model) tsType(t reflect.Type) string {
 	case kindArray:
 		return tsElem(m.tsType(t.Elem())) + "[]"
 	case kindMap:
-		return "Record<string, " + m.tsType(t.Elem()) + ">"
+		value := m.tsType(t.Elem())
+		if t.Elem().Kind() == reflect.Pointer {
+			value += " | null"
+		}
+		return "Record<string, " + value + ">"
 	case kindPage:
 		return "ListPage<" + m.tsType(pageItem(t)) + ">"
 	}

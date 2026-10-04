@@ -18,11 +18,14 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND (sqlc.narg(catalog_id)::uuid IS NULL OR id=sqlc.narg(catalog_id)::uuid);
 
 -- name: ListCatalogs :many
+-- One keyset page, oldest first: rows after (after_at, after_id).
 SELECT * FROM billing.catalogs
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(catalog_id)::uuid IS NULL OR id=sqlc.narg(catalog_id)::uuid)
-ORDER BY created_at,id
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+  AND (sqlc.narg(owner_subject)::text IS NULL OR owner_subject=sqlc.narg(owner_subject)::text)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at, id
+LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetCatalogByOwner :one
 SELECT * FROM billing.catalogs

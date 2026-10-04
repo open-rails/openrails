@@ -21,7 +21,8 @@ func (s *Service) CheckEntitlements(ctx context.Context, customer string, keys [
 	return rt.EntitlementService.CheckMany(ctx, customer, keys, at)
 }
 
-func (s *Service) ListOffersForEntitlements(ctx context.Context, keys []string, params billing.OfferListParams) (map[string]billing.OfferList, error) {
+// ListOffers returns a page of live offers per requested entitlement.
+func (s *Service) ListOffers(ctx context.Context, params billing.OfferListParams) (billing.OfferPages, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -31,5 +32,5 @@ func (s *Service) ListOffersForEntitlements(ctx context.Context, keys []string, 
 	if err != nil {
 		return nil, err
 	}
-	return catalog.ListOffersForEntitlements(ctx, rt.DB, keys, params)
+	return catalog.ListOffers(ctx, rt.DB, params)
 }

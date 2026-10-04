@@ -20,7 +20,9 @@ WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (
  WHERE owned_price.merchant_id=price_key_movements.merchant_id AND owned_price.id=price_key_movements.price_id
  AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid))
  AND merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text
-ORDER BY effective_at DESC, id DESC;
+ AND (sqlc.narg(after_at)::timestamptz IS NULL OR (effective_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY effective_at DESC, id DESC
+LIMIT sqlc.arg(fetch_limit)::int;
 
 -- The price row that was current for `key` as of `as_of` — "what did key K
 -- sell on date D".

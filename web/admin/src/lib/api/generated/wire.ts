@@ -6,39 +6,6 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
-export type AdminRateOverrideRequest = {
-  price?: RatePrice
-  allowance?: Allowance | null
-}
-
-export type AdminUsageMeterPageResponse = {
-  items: AdminUsageMeterResponse[] | null
-  total: number
-  limit: number
-  offset: number
-  configuration_source: string
-  writes_allowed: boolean
-}
-
-export type AdminUsageMeterResponse = {
-  key: string
-  event_type?: string
-  effective_event_type: string
-  value_property?: string
-  aggregation: string
-  unit?: string
-  group_by: Record<string, string> | null
-  billing_supported: boolean
-  default_rate_card?: DefaultUsageRateCardDTO
-  override_count: number
-  has_activity: boolean
-  last_event_at?: string
-  created_at: string
-  updated_at: string
-  configuration_source: string
-  writes_allowed: boolean
-}
-
 export type Admission = {
   request_id: string
   customer_id: string
@@ -104,7 +71,7 @@ export type ApplyMeter = {
   key?: string
   event_type?: string | null
   value_property?: string | null
-  aggregation?: string | null
+  aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count" | null
   unit?: string | null
   group_by?: Record<string, string> | null
 }
@@ -130,7 +97,7 @@ export type ApplyProduct = {
   tier_group?: string | null
   tier_rank?: number | null
   archived?: boolean | null
-  entitlements_spec?: Record<string, number> | null
+  entitlements_spec?: Record<string, number | null> | null
   prices?: ApplyPrice[]
   rate_cards?: RateCard[] | null
 }
@@ -272,7 +239,6 @@ export type CardEntry = {
 
 export type Catalog = {
   id: string
-  merchant_id: string
   owner_subject: string | null
   created_at: string
   updated_at: string
@@ -296,74 +262,29 @@ export type CatalogDiffDraft = {
   create_price: CreatePriceDraft
 }
 
-export type CatalogDriftEventView = {
+export type CatalogDrift = {
   id: string
   psp_id: string
-  provider: string
+  rail: string
   kind: string
-  openrails_resource_type: string
-  openrails_resource_id?: string
-  external_resource_id?: string
-  field?: string
-  openrails_value?: string
-  external_value?: string
+  resource_type: string
+  resource_id: string
+  external_resource_id: string
+  field: string
+  openrails_value: string
+  external_value: string
   detected_at: string
-  resolved_at?: string
+  resolved_at: string | null
 }
 
-export type CatalogDriftReport = {
+export type CatalogDriftCheck = {
   scanned_products: number
   scanned_prices: number
   scanned_nmi_plans: number
   scanned_solana_plans: number
-  open_events: CatalogDriftEventView[] | null
-  new_events: number
-  resolved_events: number
-}
-
-export type CatalogPageOfCatalogPrice = {
-  items: CatalogPrice[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
-export type CatalogPageOfCatalogProduct = {
-  items: CatalogProduct[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
-export type CatalogPrice = {
-  id: string
-  key: string
-  product_id: string
-  archived: boolean
-  unit_amount: string
-  currency: string
-  access_duration_hours?: number
-  auto_renew: boolean
-  trial_unit_amount?: string
-  trial_duration_hours?: number
-  created_at: string
-  updated_at: string
-  providers?: Record<string, ProviderState>
-  pending_manual_actions?: PendingAction[]
-}
-
-export type CatalogProduct = {
-  id: string
-  catalog_id: string
-  key: string
-  display_name: string
-  description: string
-  entitlements_spec?: Record<string, number>
-  tier_group?: string
-  tier_rank: number
-  archived: boolean
-  created_at: string
-  updated_at: string
+  opened_findings: number
+  resolved_findings: number
+  open_findings: number
 }
 
 export type CatalogRevision = {
@@ -520,7 +441,7 @@ export type CheckoutSessionCreateRequest = {
 export type CheckoutSessionMembershipQuote = {
   product_name: string
   cycle_hours: number
-  entitlements: Record<string, number> | null
+  entitlements: Record<string, number | null> | null
 }
 
 export type CheckoutSessionNextAction = {
@@ -681,10 +602,10 @@ export type CreatePriceDraft = {
   providers?: string[]
 }
 
-export type CreatePriceRequest = {
+export type CreatePriceParams = {
   product_id?: string
   product_key?: string
-  product_data?: PriceCreateProductDataParams
+  product_data?: CreatePriceProduct
   key?: string
   unit_amount?: string
   currency?: string
@@ -697,12 +618,19 @@ export type CreatePriceRequest = {
   archived?: boolean
 }
 
-export type CreateProductRequest = {
+export type CreatePriceProduct = {
   catalog_id?: string
   key?: string
   display_name?: string
   description?: string
-  entitlements_spec?: Record<string, number>
+}
+
+export type CreateProductParams = {
+  catalog_id?: string
+  key?: string
+  display_name?: string
+  description?: string
+  entitlements_spec?: Record<string, number | null>
   tier_group?: string
   tier_rank?: number
   archived?: boolean
@@ -925,24 +853,6 @@ export type DeclaredTransaction = {
   occurred_at?: string
 }
 
-export type DefaultUsageRateCardDTO = {
-  id: string
-  product_id: string
-  product_key: string
-  filter: Record<string, string[]> | null
-  price: RatePrice
-  allowance?: Allowance
-  created_at: string
-  updated_at: string
-}
-
-export type DefaultUsageRateCardRequest = {
-  product_id?: string
-  filter?: Record<string, string[]> | null
-  price?: RatePrice
-  allowance?: Allowance
-}
-
 export type Delinquency = {
   customer_id: string
   currency: string
@@ -1030,34 +940,8 @@ export type EffectiveTierResponse = {
   tier: EffectiveTierBody | null
 }
 
-export type EngineTakeover = {
-  id?: string
-  subscription_id: string
-  successor_subscription_id?: string
-  rail_subscription_id: string
-  anchor: string
-  cutoff: string
-  amount: string
-  currency: string
-  status: string
-  stage: string
-  reason?: string
-}
-
-export type EngineTakeoverBatchRequest = {
-  max_subscriptions?: number
-  price_id?: string
-}
-
-export type EngineTakeoverBatchResult = {
-  admitted: EngineTakeover[] | null
-  refused: EngineTakeoverRefusal[] | null
-}
-
-export type EngineTakeoverRefusal = {
-  subscription_id: string
-  code: string
-  reason: string
+export type EnsureCatalogParams = {
+  owner_subject?: string
 }
 
 export type EntitlementRecord = {
@@ -1438,6 +1322,32 @@ export type Message = {
   message: string
 }
 
+export type Meter = {
+  key: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  unit: string
+  group_by: Record<string, string> | null
+  billing_supported: boolean
+  rate_card: MeterRateCard | null
+  override_count: number
+  has_activity: boolean
+  last_event_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type MeterRateCard = {
+  product_id: string
+  product_key: string
+  filter: Record<string, string[]> | null
+  price: RatePrice
+  allowance: Allowance | null
+  created_at: string
+  updated_at: string
+}
+
 export type Notification = {
   id: string
   customer_id: string
@@ -1495,11 +1405,25 @@ export type NotificationData = {
   metadata?: Record<string, unknown>
 }
 
-export type OfferLookupRequest = {
+export type Offer = {
+  kind: "finite" | "permanent" | "recurring"
+  product_id: string
+  product_key: string
+  product_display_name: string
+  entitlements_spec: Record<string, number | null> | null
+  price_id: string
+  price_key: string
+  unit_amount: string
+  currency: string
+  access_duration_hours: number | null
+  auto_renew: boolean
+}
+
+export type OfferListParams = {
   entitlements?: string[] | null
   kind?: "finite" | "permanent" | "recurring"
   preferred_currency?: string
-  page_size?: number
+  limit?: number
   cursors?: Record<string, string>
 }
 
@@ -1542,6 +1466,15 @@ export type OrderTerm = {
   dir?: string
 }
 
+export type PSPLinkState = {
+  status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
+  ids: Record<string, string> | null
+  lookup_key: string
+  sync_status: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
+  drift: DriftField[] | null
+  message: string
+}
+
 export type PSPRef = {
   id?: string
   key?: string
@@ -1553,24 +1486,6 @@ export type PackagePrice = {
   free_units?: number
 }
 
-export type PageOfProductObject = {
-  object: string
-  data: ProductObject[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
-export type PageOfPublicPrice = {
-  object: string
-  data: PublicPrice[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
 export type PageOfSubscription = {
   object: string
   data: Subscription[] | null
@@ -1578,20 +1493,6 @@ export type PageOfSubscription = {
   limit: number
   offset: number
   has_more: boolean
-}
-
-export type PaginatedResponseOfCatalogDriftEventView = {
-  items: CatalogDriftEventView[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
-export type PaginatedResponseOfPriceKeyHistoryEntry = {
-  items: PriceKeyHistoryEntry[] | null
-  total: number
-  limit: number
-  offset: number
 }
 
 export type PaginatedResponseOfRepriceBatchView = {
@@ -1603,13 +1504,6 @@ export type PaginatedResponseOfRepriceBatchView = {
 
 export type PaginatedResponseOfSubscriptionRepriceView = {
   items: SubscriptionRepriceView[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
-export type PaginatedResponseOfUsageMeterOverrideDTO = {
-  items: UsageMeterOverrideDTO[] | null
   total: number
   limit: number
   offset: number
@@ -1647,14 +1541,6 @@ export type PathPageOfSubscription = {
 
 export type PayInvoiceParams = {
   payment_method_id?: string
-}
-
-export type PayerRateCardDTO = {
-  meter_key: string
-  price: RatePrice
-  allowance?: Allowance
-  created_at: string
-  updated_at: string
 }
 
 export type Payment = {
@@ -1785,16 +1671,16 @@ export type PaymentSettlementStatus = {
 }
 
 export type PendingAction = {
-  provider: string
+  psp: string
   action: string
   hint: string
-  patch_required?: Record<string, Record<string, Record<string, string>>>
+  patch_required: Record<string, Record<string, Record<string, string>>> | null
 }
 
 export type PerUnitPrice = {
   unit_amount?: string
   divide_by?: number
-  round?: string
+  round?: "down" | "half_up" | "up"
   maximum_amount?: string
   matrix?: Matrix
 }
@@ -1840,7 +1726,7 @@ export type PlanMigrationResult = {
   scheduled: number
   skipped: number
   blocked: number
-  by_rail: Record<string, PlanMigrationRailCounts> | null
+  by_rail: Record<string, PlanMigrationRailCounts | null> | null
   outcomes: PlanMigrationOutcome[] | null
   source_archived: boolean
 }
@@ -1861,6 +1747,23 @@ export type PortalResponse = {
   url: string
 }
 
+export type Price = {
+  id: string
+  key: string
+  product_id: string
+  archived: boolean
+  unit_amount: string
+  currency: string
+  access_duration_hours: number | null
+  auto_renew: boolean
+  trial_unit_amount: string | null
+  trial_duration_hours: number | null
+  psps: Record<string, PSPLinkState> | null
+  pending_manual_actions: PendingAction[] | null
+  created_at: string
+  updated_at: string
+}
+
 export type PriceChangeDraft = {
   draft_id: string
   drafted_by: string
@@ -1876,21 +1779,25 @@ export type PriceChangeDraft = {
   reprice?: RepriceDraft
 }
 
-export type PriceCreateProductDataParams = {
-  catalog_id?: string
-  key?: string
-  display_name?: string
-  description?: string
-}
-
-export type PriceKeyHistoryEntry = {
-  archived: boolean
-  price: CatalogPrice
+export type PriceKeyMovement = {
   effective_at: string
+  archived: boolean
+  price: Price
 }
 
-export type PriceRecurrence = {
-  interval: string
+export type Product = {
+  id: string
+  catalog_id: string
+  key: string
+  display_name: string
+  description: string
+  entitlements_spec: Record<string, number | null> | null
+  tier_group: string | null
+  tier_rank: number
+  archived: boolean
+  prices: Price[] | null
+  created_at: string
+  updated_at: string
 }
 
 export type ProductAccessCheck = {
@@ -1948,22 +1855,6 @@ export type ProductArchiveRequest = {
   product_key?: string
   purchases?: ProductArchivePurchases
   reason?: string
-}
-
-export type ProductObject = {
-  id: string
-  object: string
-  key: string
-  name: string
-  description: string
-  entitlements_spec?: Record<string, number>
-  tier_group?: string
-  tier_rank: number
-  active: boolean
-  metadata?: Record<string, string>
-  created_at: string
-  updated_at: string
-  prices?: PublicPrice[]
 }
 
 export type ProductSummary = {
@@ -2054,30 +1945,6 @@ export type ProviderRefresh = {
   job_id: string
 }
 
-export type ProviderState = {
-  status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
-  ids?: Record<string, string>
-  lookup_key?: string
-  sync_status?: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
-  drift?: DriftField[]
-  message?: string
-}
-
-export type PublicPrice = {
-  id: string
-  key?: string
-  object: string
-  unit_amount: string
-  currency: string
-  type?: string
-  recurring?: PriceRecurrence
-  product: string
-  active: boolean
-  providers?: string[]
-  metadata?: Record<string, string>
-  created_at: string
-}
-
 export type PurchaseReview = {
   id: string
   status: string
@@ -2133,12 +2000,22 @@ export type RateCard = {
   meter?: string
   filter?: Record<string, string[]>
   allowance?: Allowance
-  payment_term?: string
+  payment_term?: "in_advance" | "in_arrears"
   price?: RatePrice
 }
 
+export type RateOverride = {
+  customer_id: string
+  customer_email: string | null
+  meter_key: string
+  price: RatePrice
+  allowance: Allowance | null
+  created_at: string
+  updated_at: string
+}
+
 export type RatePrice = {
-  model: string
+  model: "flat" | "package" | "per_unit" | "tiered"
   currency?: string
   flat?: FlatPrice
   per_unit?: PerUnitPrice
@@ -2326,8 +2203,24 @@ export type ServiceExternalSubjectEntitlementsRequest = {
   at?: string
 }
 
-export type SetPriceKeyRequest = {
-  key?: string
+export type SetMeterParams = {
+  event_type?: string
+  value_property?: string
+  aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  unit?: string
+  group_by?: Record<string, string>
+}
+
+export type SetMeterRateCardParams = {
+  product_id?: string
+  filter?: Record<string, string[]>
+  price?: RatePrice
+  allowance?: Allowance
+}
+
+export type SetRateOverrideParams = {
+  price?: RatePrice
+  allowance?: Allowance
 }
 
 export type SolanaCheckoutConfig = {
@@ -2558,7 +2451,7 @@ export type TierChangeResponse = {
 }
 
 export type TieredPrice = {
-  mode?: string
+  mode?: "graduated" | "volume"
   tiers?: RateTier[]
 }
 
@@ -2601,23 +2494,19 @@ export type TrustLevelParams = {
   trust_level?: string
 }
 
-export type UpdatePriceRequest = {
+export type UpdatePriceParams = {
+  key?: string | null
+  archived?: boolean | null
   psp_links?: Record<string, Record<string, string>>
-  replace_psp_links?: boolean
-  archived?: boolean
-  skip_rail_sync?: boolean
 }
 
-export type UpdateProductRequest = {
-  display_name?: string
-  description?: string
-  entitlements_spec?: Record<string, number>
-  set_entitlements?: boolean
-  tier_group?: string
-  set_tier_group?: boolean
-  tier_rank?: number
-  archived?: boolean
-  skip_rail_sync?: boolean
+export type UpdateProductParams = {
+  display_name?: string | null
+  description?: string | null
+  entitlements_spec?: Record<string, number | null> | null
+  tier_group?: string | null
+  tier_rank?: number | null
+  archived?: boolean | null
 }
 
 export type UpdateSubscriptionPaymentMethodRequest = {
@@ -2674,24 +2563,6 @@ export type UsageEventParams = {
   source?: string
   source_id?: string
   occurred_at?: string
-}
-
-export type UsageMeterOverrideDTO = {
-  customer_id: string
-  subject?: string
-  email?: string
-  price: RatePrice
-  allowance?: Allowance
-  created_at: string
-  updated_at: string
-}
-
-export type UsageMeterRequest = {
-  event_type?: string
-  value_property?: string
-  aggregation?: string
-  unit?: string
-  group_by?: Record<string, string>
 }
 
 export type UsageRow = {

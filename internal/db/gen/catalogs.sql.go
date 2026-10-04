@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -112,23 +113,30 @@ const listCatalogs = `-- name: ListCatalogs :many
 SELECT id, merchant_id, owner_subject, created_at, updated_at FROM billing.catalogs
 WHERE merchant_id=$1::uuid
   AND ($2::uuid IS NULL OR id=$2::uuid)
-ORDER BY created_at,id
-LIMIT $4::int OFFSET $3::int
+  AND ($3::text IS NULL OR owner_subject=$3::text)
+  AND ($4::timestamptz IS NULL OR (created_at, id) > ($4::timestamptz, $5::uuid))
+ORDER BY created_at, id
+LIMIT $6::int
 `
 
 type ListCatalogsParams struct {
-	MerchantID uuid.UUID
-	CatalogID  *uuid.UUID
-	PageOffset int32
-	PageLimit  int32
+	MerchantID   uuid.UUID
+	CatalogID    *uuid.UUID
+	OwnerSubject *string
+	AfterAt      *time.Time
+	AfterID      *uuid.UUID
+	FetchLimit   int32
 }
 
+// One keyset page, oldest first: rows after (after_at, after_id).
 func (q *Queries) ListCatalogs(ctx context.Context, arg ListCatalogsParams) ([]BillingCatalog, error) {
 	rows, err := q.db.Query(ctx, listCatalogs,
 		arg.MerchantID,
 		arg.CatalogID,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.OwnerSubject,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.FetchLimit,
 	)
 	if err != nil {
 		return nil, err

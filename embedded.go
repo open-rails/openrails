@@ -50,7 +50,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 // Ready fails until they do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
 // opts are the options that make sense in process (WithTimeout, a default
-// merchant, WithOwnCatalog). The credential and transport options belong to
+// merchant). The credential and transport options belong to
 // NewRemote and are refused: New authenticates as the host itself. For a
 // customer's own credential over the same engine, use Client.With.
 func New(ctx context.Context, cfg Config, deps Deps, opts ...ClientOption) (*Client, error) {

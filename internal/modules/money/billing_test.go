@@ -2,7 +2,6 @@ package money
 
 import (
 	"context"
-	"math"
 	"testing"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
 )
 
 func TestInvoicePeriods(t *testing.T) {
@@ -69,7 +69,7 @@ func TestPayerRateCardOverrideKeepsDefaultMeterContract(t *testing.T) {
 	}
 	def := catalogRateCardRow{
 		ID: uuid.New(), MeterKey: "requests", EventType: "request.completed", ValueKey: "$.units",
-		Aggregation: catalog.AggregationSum, GroupBy: map[string]string{"region": "$.region"},
+		Aggregation: string(catalog.AggregationSum), GroupBy: map[string]string{"region": "$.region"},
 		Filter: map[string][]string{"region": {"eu"}}, Allowance: &catalog.Allowance{Included: 5}, Price: perUnit(10_000),
 	}
 	other := catalogRateCardRow{ID: uuid.New(), MeterKey: "storage", Price: perUnit(1)}
@@ -106,23 +106,8 @@ func TestRateCardFilterRules(t *testing.T) {
 	require.ErrorContains(t, err, `filter dimension "region" has no meter property`)
 }
 
-func TestMeteringPageBounds(t *testing.T) {
-	for _, tt := range []struct{ limit, offset, wantLimit, wantOffset int }{
-		{0, -1, defaultMeteringPageSize, 0},
-		{maxMeteringPageSize + 1, 1, maxMeteringPageSize, 1},
-		{1, math.MaxInt, 1, math.MaxInt32},
-	} {
-		limit, offset := normalizeMeteringPage(tt.limit, tt.offset)
-		require.Equal(t, tt.wantLimit, limit)
-		require.Equal(t, tt.wantOffset, offset)
-		require.Equal(t, int32(tt.wantOffset), meteringPageInt32(offset))
-	}
-	require.Equal(t, int32(0), meteringPageInt32(-5))
-	require.Equal(t, int32(math.MaxInt32), meteringPageInt32(math.MaxInt))
-}
-
 func TestAllowanceSourcePrice(t *testing.T) {
-	meter := catalog.Meter{
+	meter := catalogrules.Meter{
 		Key: "runtime", Aggregation: catalog.AggregationSum,
 		GroupBy: map[string]string{"size": "metadata.size", "resource_id": "metadata.resource_id"},
 	}
@@ -134,24 +119,24 @@ func TestAllowanceSourcePrice(t *testing.T) {
 	valid := matrix(map[string]catalog.MatrixCell{"small": {UnitAmount: 10_000, Included: 100}, "large": {UnitAmount: 1}})
 	require.NoError(t, validateAllowanceSourcePrice(meter, valid, "USD"))
 
-	withMeter := func(edit func(*catalog.Meter)) catalog.Meter {
+	withMeter := func(edit func(*catalogrules.Meter)) catalogrules.Meter {
 		m := meter
 		m.GroupBy = map[string]string{"size": "metadata.size", "resource_id": "metadata.resource_id"}
 		edit(&m)
 		return m
 	}
 	for name, tt := range map[string]struct {
-		meter    catalog.Meter
+		meter    catalogrules.Meter
 		price    catalog.RatePrice
 		currency string
 	}{
-		"unsupported aggregation": {withMeter(func(m *catalog.Meter) { m.Aggregation = catalog.AggregationMax }), valid, "USD"},
+		"unsupported aggregation": {withMeter(func(m *catalogrules.Meter) { m.Aggregation = catalog.AggregationMax }), valid, "USD"},
 		"currency mismatch":       {meter, valid, "EUR"},
 		"non-matrix price": {meter, catalog.RatePrice{
 			Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 10_000},
 		}, "USD"},
-		"missing resource dimension": {withMeter(func(m *catalog.Meter) { delete(m.GroupBy, "resource_id") }), valid, "USD"},
-		"missing matrix dimension":   {withMeter(func(m *catalog.Meter) { delete(m.GroupBy, "size") }), valid, "USD"},
+		"missing resource dimension": {withMeter(func(m *catalogrules.Meter) { delete(m.GroupBy, "resource_id") }), valid, "USD"},
+		"missing matrix dimension":   {withMeter(func(m *catalogrules.Meter) { delete(m.GroupBy, "size") }), valid, "USD"},
 		"no included cells":          {meter, matrix(map[string]catalog.MatrixCell{"small": {UnitAmount: 10_000}}), "USD"},
 	} {
 		require.ErrorIs(t, validateAllowanceSourcePrice(tt.meter, tt.price, tt.currency), ErrAllowanceSourceInvalid, name)

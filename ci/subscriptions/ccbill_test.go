@@ -43,10 +43,10 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	t.Helper()
 	l := &legacy{w: w, rail: "ccbill", tp: embedded, ent: "content:ccbill", c: w.newCustomer()}
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
-	l.price, err = client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 
@@ -54,8 +54,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	end := start.Add(monthHours * time.Hour)
 	customerID, err := billing.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
-	priceID, err := billing.ParsePriceID(l.price.ID)
-	require.NoError(t, err)
+	priceID := l.price.ID
 	l.railSub = ccbillNumericID()
 	m := &ccbillMember{legacy: l, paidThrough: end, saleTxn: ccbillNumericID()}
 	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{

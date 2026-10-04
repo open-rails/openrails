@@ -128,28 +128,32 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingReco
 const listOpenCatalogDriftFiltered = `-- name: ListOpenCatalogDriftFiltered :many
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
 WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
-  AND ($3::text IS NULL OR rail = $3::text)
-  AND ($4::text IS NULL OR finding_type = 'catalog.' || $4::text)
-  AND ($5::text IS NULL OR openrails_resource_type = $5::text)
-ORDER BY created_at DESC
-LIMIT $1::int OFFSET $2::int
+  AND ($1::text IS NULL OR rail = $1::text)
+  AND ($2::text IS NULL OR finding_type = 'catalog.' || $2::text)
+  AND ($3::text IS NULL OR openrails_resource_type = $3::text)
+  AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $6::int
 `
 
 type ListOpenCatalogDriftFilteredParams struct {
-	Column1      int32
-	Column2      int32
 	Rail         *string
 	Kind         *string
 	ResourceType *string
+	AfterAt      *time.Time
+	AfterID      *uuid.UUID
+	FetchLimit   int32
 }
 
+// One keyset page, newest first: rows after (after_at, after_id).
 func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]BillingReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftFiltered,
-		arg.Column1,
-		arg.Column2,
 		arg.Rail,
 		arg.Kind,
 		arg.ResourceType,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.FetchLimit,
 	)
 	if err != nil {
 		return nil, err

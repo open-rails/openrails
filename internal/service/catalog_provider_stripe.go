@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -28,15 +29,15 @@ type stripeAdapter struct {
 
 func (a *stripeAdapter) Name() string { return "stripe" }
 
-func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) PendingAction {
+func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction {
 	// Stripe always supports AutoCreate; this should never fire under normal
 	// configuration. The dispatcher only invokes PendingActionTemplate when
 	// AutoCreate returns errPendingManualLink — for stripe that's an edge case
 	// (no config). We still surface a helpful hint.
-	return PendingAction{
-		Provider: "stripe",
-		Action:   "configure_stripe",
-		Hint:     "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /merchant/catalog/prices/{id} with provider_links.stripe.price_id",
+	return billing.PendingAction{
+		PSP:    "stripe",
+		Action: "configure_stripe",
+		Hint:   "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /merchant/catalog/prices/{id} with psp_links.stripe.price_id",
 	}
 }
 
@@ -70,7 +71,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 			}
 			return ids, err
 		}
-		return nil, fmt.Errorf("stripe link requires provider_links.stripe.price_id (an existing Stripe Price) or lookup_key (find-or-create at a chosen key)")
+		return nil, fmt.Errorf("stripe link requires psp_links.stripe.price_id (an existing Stripe Price) or lookup_key (find-or-create at a chosen key)")
 	}
 	out := map[string]string{
 		models.RailKeyStripePriceID: priceID,
@@ -87,7 +88,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 	remote, err := stripeSvc.RetrievePrice(ctx, priceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
-			return nil, fmt.Errorf("stripe price %q not found; create it or fix provider_links.stripe.price_id", priceID)
+			return nil, fmt.Errorf("stripe price %q not found; create it or fix psp_links.stripe.price_id", priceID)
 		}
 		return nil, fmt.Errorf("verify stripe price %q: %w", priceID, err)
 	}
@@ -297,7 +298,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 
 // Verify performs a live retrieve of the Stripe Price (and its Product) and
 // computes per-field drift vs. the OpenRails snapshot.
-func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
+func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]billing.DriftField, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil || !a.stripeConfigured(ctx) {
 		return nil, false, fmt.Errorf("stripe is not configured: %w", errProviderNotArmed)
 	}
@@ -313,10 +314,10 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 		}
 		return nil, false, err
 	}
-	drift := []DriftField{}
+	drift := []billing.DriftField{}
 	if local != nil {
 		if local.IsActive != remote.Active {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "is_active",
 				OpenRailsValue: strconv.FormatBool(local.IsActive),
 				RemoteValue:    strconv.FormatBool(remote.Active),
@@ -324,14 +325,14 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 		}
 		remoteUnitAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(remote.UnitAmount)))
 		if local.UnitAmount != remoteUnitAmountMicros {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "unit_amount",
 				OpenRailsValue: strconv.FormatInt(local.UnitAmount, 10),
 				RemoteValue:    strconv.FormatInt(remoteUnitAmountMicros, 10),
 			})
 		}
 		if !strings.EqualFold(local.Currency, remote.Currency) {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "currency",
 				OpenRailsValue: local.Currency,
 				RemoteValue:    remote.Currency,
@@ -346,7 +347,7 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 // have no user-facing provider linkage). It exists so that internal lookups
 // (UpdateProduct's best-effort Stripe propagation) can decide whether to push
 // changes. Returns drift, missing, configured, error.
-func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID string, local *models.Product) ([]DriftField, bool, bool, error) {
+func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID string, local *models.Product) ([]billing.DriftField, bool, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil, false, false, nil
 	}
@@ -365,24 +366,24 @@ func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID
 		}
 		return nil, false, true, err
 	}
-	drift := []DriftField{}
+	drift := []billing.DriftField{}
 	if local != nil {
 		if strings.TrimSpace(local.DisplayName) != strings.TrimSpace(remote.Name) {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "display_name",
 				OpenRailsValue: local.DisplayName,
 				RemoteValue:    remote.Name,
 			})
 		}
 		if strings.TrimSpace(local.Description) != strings.TrimSpace(remote.Description) {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "description",
 				OpenRailsValue: local.Description,
 				RemoteValue:    remote.Description,
 			})
 		}
 		if localActive := local.IsPurchasable(); localActive != remote.Active {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "is_active",
 				OpenRailsValue: strconv.FormatBool(localActive),
 				RemoteValue:    strconv.FormatBool(remote.Active),

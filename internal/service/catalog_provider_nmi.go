@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -48,13 +49,13 @@ type nmiAdapter struct {
 
 func (a *nmiAdapter) Name() string { return string(models.RailNMI) }
 
-func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
-	return PendingAction{
-		Provider: string(models.RailNMI),
-		Action:   "create_recurring_plan",
-		Hint:     "Create plan in NMI control center, then PATCH /merchant/catalog/prices/" + priceID.String() + " with provider_links.nmi.plan_id",
+func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) billing.PendingAction {
+	return billing.PendingAction{
+		PSP:    string(models.RailNMI),
+		Action: "create_recurring_plan",
+		Hint:   "Create plan in NMI control center, then PATCH /merchant/catalog/prices/" + priceID.String() + " with psp_links.nmi.plan_id",
 		PatchRequired: map[string]map[string]map[string]string{
-			"provider_links": {
+			"psp_links": {
 				string(models.RailNMI): {
 					"plan_id": "<plan id>",
 				},
@@ -67,7 +68,7 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 	link = normalizeLinkMap(link)
 	planID := strings.TrimSpace(link[models.RailKeyPlanID])
 	if planID == "" {
-		return nil, fmt.Errorf("nmi link requires provider_links.nmi.plan_id")
+		return nil, fmt.Errorf("nmi link requires psp_links.nmi.plan_id")
 	}
 	// provider is the merchant's PSP key the plan lives under (recorded
 	// metadata; client resolution is by rail). Link override wins; otherwise
@@ -236,7 +237,7 @@ func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[
 }
 
 // Verify performs a live retrieve of the NMI plan and computes plan_name drift.
-func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
+func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]billing.DriftField, bool, error) {
 	client, _, ok := a.nmiClient(ctx)
 	if !ok || client == nil {
 		// No readable account is not agreement: signal sync_disabled.
@@ -256,14 +257,14 @@ func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *p
 	if !found {
 		return nil, true, nil
 	}
-	drift := []DriftField{}
+	drift := []billing.DriftField{}
 	if local != nil {
 		remoteAmountMicros, err := moneyutil.RailMinorToNative(local.Currency, moneyutil.Cents(remoteAmountCents))
 		if err != nil {
 			return nil, false, err
 		}
 		if local.UnitAmount != remoteAmountMicros {
-			drift = append(drift, DriftField{
+			drift = append(drift, billing.DriftField{
 				Field:          "unit_amount",
 				OpenRailsValue: strconv.FormatInt(local.UnitAmount, 10),
 				RemoteValue:    strconv.FormatInt(remoteAmountMicros, 10),

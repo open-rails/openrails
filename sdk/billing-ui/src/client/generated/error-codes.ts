@@ -76,15 +76,6 @@ export type OpenRailsErrorCode =
   | "delegated_token_revoked"
   | "delegated_verification_unavailable"
   | "email_unverified"
-  | "engine_takeover_boundary_too_close"
-  | "engine_takeover_committed"
-  | "engine_takeover_conflict"
-  | "engine_takeover_in_flight"
-  | "engine_takeover_ineligible"
-  | "engine_takeover_no_recurring_agreement"
-  | "engine_takeover_not_found"
-  | "engine_takeover_rate_limited"
-  | "engine_takeover_unavailable"
   | "hold_not_found"
   | "host_event_not_found"
   | "host_merchant_mismatch"
@@ -230,6 +221,7 @@ export type OpenRailsErrorCode =
   | "unknown_field"
   | "unknown_role"
   | "unsupported_media_type"
+  | "usage_meter_invalid"
   | "usage_meter_not_found"
   | "usage_rate_card_invalid"
   | "webhook_account_mismatch"
@@ -318,15 +310,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   delegated_token_revoked: { status: 401, type: "authentication_error", meaning: "The delegated access token was revoked." },
   delegated_verification_unavailable: { status: 503, type: "api_error", meaning: "Delegated tokens cannot be verified right now; retry." },
   email_unverified: { status: 403, type: "authorization_error", meaning: "Creating a merchant needs a verified email." },
-  engine_takeover_boundary_too_close: { status: 409, type: "invalid_request_error", meaning: "The provider bills the next period too soon to take over before it." },
-  engine_takeover_committed: { status: 409, type: "invalid_request_error", meaning: "The provider schedule delete was already submitted; the takeover can only complete." },
-  engine_takeover_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key was used for another operation." },
-  engine_takeover_in_flight: { status: 409, type: "invalid_request_error", meaning: "The subscription has an unresolved provider operation." },
-  engine_takeover_ineligible: { status: 409, type: "invalid_request_error", meaning: "The subscription cannot be taken over." },
-  engine_takeover_no_recurring_agreement: { status: 409, type: "invalid_request_error", meaning: "The subscription has no verified recurring agreement on its vaulted card." },
-  engine_takeover_not_found: { status: 404, type: "invalid_request_error", meaning: "The subscription has no engine takeover." },
-  engine_takeover_rate_limited: { status: 429, type: "rate_limit_error", meaning: "The takeover batch reached its rate limit." },
-  engine_takeover_unavailable: { status: 503, type: "api_error", meaning: "Engine takeover is not available in this deployment." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_merchant_mismatch: { status: 403, type: "authorization_error", meaning: "The credential's merchant is not the one this host serves." },
@@ -472,6 +455,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   unknown_field: { status: 400, type: "invalid_request_error", meaning: "The JSON body names a field the route does not accept; param is the field." },
   unknown_role: { status: 400, type: "invalid_request_error", meaning: "The role is not one this merchant defines." },
   unsupported_media_type: { status: 415, type: "invalid_request_error", meaning: "The request body is not application/json." },
+  usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },
   usage_rate_card_invalid: { status: 400, type: "invalid_request_error", meaning: "The usage rate card is invalid." },
   webhook_account_mismatch: { status: 400, type: "invalid_request_error", meaning: "The webhook's account does not match its payload." },

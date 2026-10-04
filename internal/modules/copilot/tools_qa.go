@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -251,7 +252,8 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 	if err != nil {
 		return "", err
 	}
-	movements, err := s.prices.ListKeyMovements(ctx, tid.UUID(), key)
+	page, err := s.prices.ListKeyMovements(ctx, tid.UUID(), key, billing.PageRequest{Limit: billing.MaxPageLimit})
+	movements := page.Items
 	if err != nil || len(movements) == 0 {
 		return "", fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
 	}

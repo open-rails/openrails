@@ -4,101 +4,79 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-type catalogPaginationParams struct {
-	Limit  int `form:"limit"`
-	Offset int `form:"offset"`
+// PublicPriceListQuery filters the public price list.
+type PublicPriceListQuery struct {
+	ProductID billing.ProductID `form:"product_id"`
+	Currency  string            `form:"currency"`
+	AutoRenew *bool             `form:"auto_renew"`
 }
 
-type GetProductsQuery struct {
-	catalogPaginationParams
-}
-
-type GetPricesQuery struct {
-	catalogPaginationParams
-	Currency string `form:"currency"`
-	Product  string `form:"product"`
-	Type     string `form:"type"`
-}
-
-func (q *catalogPaginationParams) setDefaults(defaultLimit int) {
-	q.Limit = defaultLimit
-	q.Offset = 0
-}
-
-func GetProducts(r *httprequest.Request) {
-	req := &GetProductsQuery{}
-	req.setDefaults(20)
-	if !r.BindQuery(req) {
+// ListPublicProducts lists the products on sale, each with its current
+// prices, as a buyer sees them.
+func ListPublicProducts(r *httprequest.Request) {
+	page, ok := r.Page()
+	if !ok {
 		return
 	}
-
-	result, err := r.State.PublicSubscriptionService.GetProductsPaginated(
-		r.Request.Context(),
-		false,
-		req.Limit,
-		req.Offset,
-	)
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	onSale := false
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: &onSale})
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve products")
+		writeCatalogError(r, err)
 		return
 	}
-
-	productObjects := make([]api.ProductObject, len(result.Products))
-	for i, p := range result.Products {
-		productObjects[i] = ProductToAPI(p.Product, p.Prices)
-	}
-
-	r.SuccessJSON(api.NewList(productObjects, result.TotalItems, req.Limit, req.Offset))
-}
-
-func GetPrices(r *httprequest.Request) {
-	req := &GetPricesQuery{}
-	req.setDefaults(20)
-	if !r.BindQuery(req) {
+	if err := svc.HydratePrices(r.Request.Context(), out.Items); err != nil {
+		writeCatalogError(r, err)
 		return
 	}
-
-	filter := catalog.PriceFilter{
-		Currency: moneyutil.NormalizeCurrency(req.Currency),
-		Type:     req.Type,
-	}
-
-	// The public surface never exposes archived prices, whatever the caller
-	// asked for.
-	archived := false
-	filter.Archived = &archived
-
-	if req.Product != "" {
-		id, err := billing.ParseProductID(req.Product)
-		if err != nil || id.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "Invalid product ID format")
-			return
+	for i := range out.Items {
+		for j := range out.Items[i].Prices {
+			out.Items[i].Prices[j] = PublicPrice(out.Items[i].Prices[j])
 		}
-		productID := id.UUID()
-		filter.ProductID = &productID
 	}
+	r.JSON(http.StatusOK, out)
+}
 
-	prices, totalItems, err := r.State.PriceService.ListPaginated(
-		r.Request.Context(),
-		filter,
-		req.Limit,
-		req.Offset,
-	)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve prices")
+// ListPublicPrices lists the prices on sale, as a buyer sees them.
+func ListPublicPrices(r *httprequest.Request) {
+	page, ok := r.Page()
+	if !ok {
 		return
 	}
-
-	priceObjects := make([]api.PriceObject, len(prices))
-	for i, p := range prices {
-		priceObjects[i] = PriceToAPI(p)
+	var query PublicPriceListQuery
+	if !r.BindQuery(&query) {
+		return
 	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	onSale := false
+	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, ProductID: query.ProductID, Currency: query.Currency, AutoRenew: query.AutoRenew, Archived: &onSale})
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	for i := range out.Items {
+		out.Items[i] = PublicPrice(out.Items[i])
+	}
+	r.JSON(http.StatusOK, out)
+}
 
-	r.SuccessJSON(api.NewList(priceObjects, totalItems, req.Limit, req.Offset))
+// PublicPrice is a price as a buyer sees it: which PSPs sell it, without the
+// PSPs' own identifiers or the operator's pending work.
+func PublicPrice(p billing.Price) billing.Price {
+	psps := make(map[string]billing.PSPLinkState, len(p.PSPs))
+	for key, state := range p.PSPs {
+		psps[key] = billing.PSPLinkState{Status: state.Status, SyncStatus: billing.SyncStatusUnknown}
+	}
+	p.PSPs = psps
+	p.PendingManualActions = []billing.PendingAction{}
+	return p
 }

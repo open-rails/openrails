@@ -18,7 +18,7 @@ import (
 // writeCatalogPrice atomically moves the key, writes the immutable financial
 // row, and records its movement. Provider resolution completed before entry.
 // Nested calls reuse the existing transaction through a savepoint.
-func (s *Service) writeCatalogPrice(ctx context.Context, req CreatePriceRequest, product *models.Product, priceID uuid.UUID, rails map[string]map[string]string) (*models.Price, error) {
+func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePriceParams, product *models.Product, priceID uuid.UUID, rails map[string]map[string]string) (*models.Price, error) {
 	var price *models.Price
 	err := s.catalogDatabase().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		prices := catalog.NewPriceService(s.catalogDatabase().NewWithPgxTx(tx))

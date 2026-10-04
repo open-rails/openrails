@@ -733,9 +733,9 @@ func (w *world) membership(entitlement string, unitAmount int64) *billing.Price 
 func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
 	require.NoError(w.t, err)
-	price, err := client.Prices.Create(w.t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
@@ -836,4 +836,20 @@ func hooks(identity *billingauth.Integration) openrails.Deps {
 		deps.RecentSignIn = func(r *http.Request) error { return identity.RecentSignIn.CheckRecentSignIn(r.Context(), r) }
 	}
 	return deps
+}
+
+// typedPriceID reads a price id the harness keeps as text.
+func typedPriceID(t testing.TB, id string) billing.PriceID {
+	t.Helper()
+	parsed, err := billing.ParsePriceID(id)
+	require.NoError(t, err)
+	return parsed
+}
+
+// typedProductID reads a product id the harness keeps as text.
+func typedProductID(t testing.TB, id string) billing.ProductID {
+	t.Helper()
+	parsed, err := billing.ParseProductID(id)
+	require.NoError(t, err)
+	return parsed
 }

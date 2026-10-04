@@ -33,17 +33,16 @@ SELECT * FROM billing.products
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid
 ;
 
--- name: CountProductsFiltered :one
-SELECT count(*) FROM billing.products
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
-  AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)));
-
 -- name: ListProductsFiltered :many
+-- One keyset page, newest first: rows after (after_at, after_id).
 SELECT * FROM billing.products
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid)
+  AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
+LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: PatchProduct :one
 -- Every field is chosen at the write point, never copied from a stale read.

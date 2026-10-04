@@ -142,13 +142,13 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 		Key:              "webhook-product-" + uuid.NewString()[:8],
 		DisplayName:      "Webhook product",
 		EntitlementsSpec: map[string]*int{"content:webhook": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{
 		ProductID:  product.ID,
 		Key:        "webhook-price-" + uuid.NewString()[:8],
 		UnitAmount: 1_000_000,
@@ -160,7 +160,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.NoError(t, err)
 	session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
 		Customer:       billing.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "webhook@example.test"},
-		PriceID:        price.ID,
+		PriceID:        price.ID.String(),
 		Entitlement:    "content:webhook",
 		OfferKind:      billing.OfferPermanent,
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
@@ -172,7 +172,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.NotNil(t, session)
 	providerSessionID, checkoutSessionID, metadataUserID, metadataPriceID := fake.metadata(t)
 	require.Equal(t, userID, metadataUserID)
-	require.Equal(t, strings.TrimPrefix(price.ID, "price_"), metadataPriceID)
+	require.Equal(t, strings.TrimPrefix(price.ID.String(), "price_"), metadataPriceID)
 	require.Equal(t, strings.TrimPrefix(session.ID, "cs_"), strings.TrimPrefix(checkoutSessionID, "cs_"))
 
 	mux := http.NewServeMux()

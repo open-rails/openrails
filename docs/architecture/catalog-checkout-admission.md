@@ -11,7 +11,7 @@ merchant service rejected non-ID `PriceID` inputs. This change supplies explicit
 `PriceID` or `PriceKey` selectors end to end instead of overloading an ID. `Price.Key`
 names the active member of an immutable price history; `Product.Key` can name
 the host's opaque resource without a billing foreign key to host tables.
-`Client.Catalog.Apply` supplies atomic catalog writes with revision checks and
+`Client.ApplyCatalog` supplies atomic catalog writes with revision checks and
 application replay. `TestCatalogApplicationRollbackAndPriceHistory` covers a
 price-key move, archive and deliberate reactivation of historical terms.
 
@@ -133,7 +133,7 @@ These proofs use local provider transports and owned test databases only.
 
 A resource key such as `post:<stable-id>` identifies access independently of the
 product key. Several products can grant that resource through `EntitlementsSpec`;
-one product can grant several resources. `ListOffersForEntitlements` performs an
+one product can grant several resources. `ListOffers` performs an
 exact reverse lookup of active products and prices for up to 100 keys in one
 request and one query. Kind is required (`permanent`, `finite`, or `recurring`),
 each key's page caps at 100 with its own cursor, and preferred currency only

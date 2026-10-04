@@ -1,10 +1,7 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 
-import {
-  collectCursorPages,
-  selectedMerchant,
-  type ItemsEnvelope,
-} from "@/lib/api/client"
+import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
+import type { ListPage } from "@/lib/api/generated/wire"
 import {
   getCatalogRevision,
   getCustomerProfile,
@@ -42,6 +39,7 @@ import {
   listTeamInvites,
   listWebhooks,
   listWorkerHealth,
+  PAGE_MAX,
   type AttemptFilters,
   type CycleFilters,
   type PaymentFilters,
@@ -56,34 +54,12 @@ import {
 
 // Complete collections are explicit: selectors need every eligible record,
 // while catalog screens fetch only their visible page.
-export async function collectCatalogPages<Page extends ItemsEnvelope<unknown>>(
-  loadPage: (
-    limit: number,
-    offset: number,
-    signal?: AbortSignal
-  ) => Promise<Page>,
+export async function collectPages<T>(
+  loadPage: (cursor: string | undefined, signal?: AbortSignal) => Promise<ListPage<T>>,
   signal?: AbortSignal
-): Promise<Page> {
-  signal?.throwIfAborted()
-  const first = await loadPage(200, 0, signal)
-  if (first.limit <= 0 || (first.total > 0 && first.items.length === 0)) {
-    throw new Error("Catalog pagination stopped before all records were loaded")
-  }
-  const items = [...first.items]
-  let offset = first.offset + first.limit
-  while (offset < first.total) {
-    signal?.throwIfAborted()
-    const page = await loadPage(200, offset, signal)
-    const next = page.offset + page.limit
-    if (page.items.length === 0 || next <= offset) {
-      throw new Error(
-        "Catalog pagination stopped before all records were loaded"
-      )
-    }
-    items.push(...page.items)
-    offset = next
-  }
-  return { ...first, items, limit: items.length, offset: 0 }
+): Promise<ListPage<T>> {
+  const data = await collectCursorPages((cursor) => loadPage(cursor, signal), signal)
+  return { data, next_cursor: null }
 }
 
 type MerchantRoot = readonly ["merchant", string]
@@ -152,7 +128,11 @@ export const adminQueries = {
   customerUsageRates: (id: string) =>
     queryOptions({
       queryKey: queryKeys.customerUsageRates(id),
-      queryFn: ({ signal }) => listCustomerUsageRateOverrides(id, signal),
+      queryFn: ({ signal }) =>
+        collectPages(
+          (cursor, signal) => listCustomerUsageRateOverrides(id, cursor, signal),
+          signal
+        ),
       enabled: Boolean(id),
       meta: { errorAction: "Load negotiated usage rates" },
     }),
@@ -251,12 +231,12 @@ export const adminQueries = {
       meta: { errorAction: "Load rebill cycle" },
     }),
   products: (
-    options: { limit?: number; offset?: number; errorAction?: string } = {}
+    options: { limit?: number; cursor?: string; errorAction?: string } = {}
   ) => {
-    const { limit = 100, offset = 0, errorAction } = options
+    const { limit = 100, cursor, errorAction } = options
     return queryOptions({
-      queryKey: [...queryKeys.catalog(), "products", { limit, offset }],
-      queryFn: ({ signal }) => listProducts(limit, offset, undefined, signal),
+      queryKey: [...queryKeys.catalog(), "products", { limit, cursor }],
+      queryFn: ({ signal }) => listProducts(limit, cursor, undefined, signal),
       placeholderData: keepPreviousData,
       meta: queryErrorMeta(errorAction),
     })
@@ -265,9 +245,8 @@ export const adminQueries = {
     queryOptions({
       queryKey: [...queryKeys.catalog(), "products", "all"],
       queryFn: ({ signal }) =>
-        collectCatalogPages(
-          (limit, offset, signal) =>
-            listProducts(limit, offset, undefined, signal),
+        collectPages(
+          (cursor, signal) => listProducts(PAGE_MAX, cursor, undefined, signal),
           signal
         ),
       meta: queryErrorMeta(options.errorAction),
@@ -276,18 +255,18 @@ export const adminQueries = {
     options: {
       productId?: string
       limit?: number
-      offset?: number
+      cursor?: string
       errorAction?: string
     } = {}
   ) => {
-    const { productId, limit = 100, offset = 0, errorAction } = options
+    const { productId, limit = 100, cursor, errorAction } = options
     return queryOptions({
       queryKey: [
         ...queryKeys.catalog(),
         "prices",
-        { productId, limit, offset },
+        { productId, limit, cursor },
       ],
-      queryFn: ({ signal }) => listPrices(limit, offset, productId, signal),
+      queryFn: ({ signal }) => listPrices(limit, cursor, productId, signal),
       placeholderData: keepPreviousData,
       meta: queryErrorMeta(errorAction),
     })
@@ -301,9 +280,9 @@ export const adminQueries = {
         { productId: options.productId },
       ],
       queryFn: ({ signal }) =>
-        collectCatalogPages(
-          (limit, offset, signal) =>
-            listPrices(limit, offset, options.productId, signal),
+        collectPages(
+          (cursor, signal) =>
+            listPrices(PAGE_MAX, cursor, options.productId, signal),
           signal
         ),
       meta: queryErrorMeta(options.errorAction),
@@ -360,10 +339,10 @@ export const adminQueries = {
       queryKey: [...queryKeys.catalog(), "revision"],
       queryFn: () => getCatalogRevision(),
     }),
-  catalogDrift: (limit = 200, offset = 0) =>
+  catalogDrift: (limit = 200, cursor?: string) =>
     queryOptions({
-      queryKey: [...queryKeys.catalogDrift(), { limit, offset }],
-      queryFn: ({ signal }) => listCatalogDrift(limit, offset, signal),
+      queryKey: [...queryKeys.catalogDrift(), { limit, cursor }],
+      queryFn: ({ signal }) => listCatalogDrift(limit, cursor, signal),
       meta: { errorAction: "Load drift" },
     }),
   checkoutRouting: (priceId: string) =>
@@ -374,17 +353,21 @@ export const adminQueries = {
       enabled: Boolean(priceId),
       meta: { errorAction: "Check checkout readiness" },
     }),
-  usageMeters: (limit = 200, offset = 0) =>
+  usageMeters: (limit = 200, cursor?: string) =>
     queryOptions({
-      queryKey: [...queryKeys.usageMeters(), { limit, offset }],
-      queryFn: ({ signal }) => listUsageMeters(limit, offset, signal),
+      queryKey: [...queryKeys.usageMeters(), { limit, cursor }],
+      queryFn: ({ signal }) => listUsageMeters(limit, cursor, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load usage meters" },
     }),
   allUsageMeters: () =>
     queryOptions({
       queryKey: [...queryKeys.usageMeters(), "all"],
-      queryFn: ({ signal }) => collectCatalogPages(listUsageMeters, signal),
+      queryFn: ({ signal }) =>
+        collectPages(
+          (cursor, signal) => listUsageMeters(PAGE_MAX, cursor, signal),
+          signal
+        ),
       meta: { errorAction: "Load usage meters" },
     }),
   usageMeter: (key: string) =>
@@ -394,11 +377,11 @@ export const adminQueries = {
       enabled: Boolean(key),
       meta: { errorAction: "Load usage meter" },
     }),
-  usageMeterOverrides: (key: string, limit = 200, offset = 0) =>
+  usageMeterOverrides: (key: string, limit = 200, cursor?: string) =>
     queryOptions({
-      queryKey: [...queryKeys.usageMeter(key), "overrides", { limit, offset }],
+      queryKey: [...queryKeys.usageMeter(key), "overrides", { limit, cursor }],
       queryFn: ({ signal }) =>
-        listUsageMeterOverrides(key, limit, offset, signal),
+        listUsageMeterOverrides(key, limit, cursor, signal),
       enabled: Boolean(key),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load negotiated usage rates" },

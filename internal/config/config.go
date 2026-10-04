@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
@@ -69,13 +69,13 @@ type Config struct {
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
 	Merchant MerchantDeclaration
-	// Catalog declares Merchant's catalog (billing.ParseCatalogApplicationYAML
+	// Catalog declares Merchant's catalog (catalog.ParseApplicationYAML
 	// of the host's catalog.yaml). New applies it before returning: unchanged
 	// it replays, edited it converges. While it is set, writes to the
 	// merchant's catalog are refused (billing.ErrCatalogDeclared); creator
 	// catalogs and negotiated payer rates stay writable. Nil leaves the
 	// catalog to the API.
-	Catalog *billing.CatalogApplyParams
+	Catalog *catalog.Application
 	// HTTP selects the route groups Client.Routes publishes; nil publishes none.
 	HTTP *HTTPConfig
 	// ControlPlane attaches the OpenRails-owned AuthKit control plane (the

@@ -1,8 +1,12 @@
-package catalog
+// Package catalogrules is the catalog engine's rules: charge-model rating and
+// the validation of meters, rate cards and their prices.
+package catalogrules
 
 import (
 	"fmt"
 	"math/big"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // This file is the shared pricing engine behind both #638 (metered resource
@@ -19,42 +23,20 @@ import (
 // it does NOT round usage up to whole units. For block / round-up-to-next-unit
 // pricing use the package model.
 
-// Charge-model kinds.
-const (
-	ModelFlat    = "flat"
-	ModelPerUnit = "per_unit"
-	ModelTiered  = "tiered"
-	ModelPackage = "package"
-)
-
-// Tiered modes (OpenMeter TieredPriceMode / Lago graduated|volume / Stripe tiers_mode).
-const (
-	TierModeVolume    = "volume"
-	TierModeGraduated = "graduated"
-)
-
-// Money rounding for the per-unit divisor. half_up is the money default; up/down
-// force ceil/floor of the final micros.
-const (
-	RoundHalfUp = "half_up"
-	RoundUp     = "up"
-	RoundDown   = "down"
-)
-
 // ChargeModel is a normalized, YAML-independent pricing rule.
 type ChargeModel struct {
-	Kind string
+	Kind catalog.Model
 
 	// per_unit: cost = round(quantity * UnitAmount / DivideBy). DivideBy<=0 == 1.
 	UnitAmount int64
 	DivideBy   int64
-	Round      string
+	Round      catalog.Round
 
 	// flat: a fixed fee independent of quantity.
 	FlatAmount int64
 
 	// tiered: Mode volume|graduated over Tiers (bounds in the meter's unit).
-	Mode  string
+	Mode  catalog.TierMode
 	Tiers []ChargeTier
 
 	// package: ceil(max(0, quantity-FreeUnits)/PackageSize) * PackageAmount.
@@ -85,13 +67,13 @@ func (cm ChargeModel) Rate(quantity int64) (int64, error) {
 	var cost int64
 	var err error
 	switch cm.Kind {
-	case ModelFlat:
+	case catalog.ModelFlat:
 		cost = cm.FlatAmount
-	case ModelPerUnit:
+	case catalog.ModelPerUnit:
 		cost, err = ratePerUnit(quantity, cm.UnitAmount, cm.DivideBy, cm.Round)
-	case ModelTiered:
+	case catalog.ModelTiered:
 		cost, err = rateTiered(quantity, cm.Mode, cm.Tiers)
-	case ModelPackage:
+	case catalog.ModelPackage:
 		cost, err = ratePackage(quantity, cm.PackageSize, cm.PackageAmount, cm.FreeUnits)
 	default:
 		return 0, fmt.Errorf("unknown charge model %q", cm.Kind)
@@ -105,7 +87,7 @@ func (cm ChargeModel) Rate(quantity int64) (int64, error) {
 	return cost, nil
 }
 
-func ratePerUnit(quantity, unitAmount, divideBy int64, round string) (int64, error) {
+func ratePerUnit(quantity, unitAmount, divideBy int64, round catalog.Round) (int64, error) {
 	if unitAmount < 0 {
 		return 0, fmt.Errorf("unit_amount must be >= 0")
 	}
@@ -115,17 +97,17 @@ func ratePerUnit(quantity, unitAmount, divideBy int64, round string) (int64, err
 	return mulDivRound(quantity, unitAmount, divideBy, round)
 }
 
-func rateTiered(quantity int64, mode string, tiers []ChargeTier) (int64, error) {
+func rateTiered(quantity int64, mode catalog.TierMode, tiers []ChargeTier) (int64, error) {
 	if len(tiers) == 0 {
 		return 0, fmt.Errorf("tiered price requires tiers")
 	}
 	switch mode {
-	case TierModeVolume:
+	case catalog.TierModeVolume:
 		return rateVolume(quantity, tiers)
-	case TierModeGraduated:
+	case catalog.TierModeGraduated:
 		return rateGraduated(quantity, tiers)
 	default:
-		return 0, fmt.Errorf("tiered mode must be %q or %q, got %q", TierModeVolume, TierModeGraduated, mode)
+		return 0, fmt.Errorf("tiered mode must be %q or %q, got %q", catalog.TierModeVolume, catalog.TierModeGraduated, mode)
 	}
 }
 
@@ -199,7 +181,7 @@ func ratePackage(quantity, size, amount, free int64) (int64, error) {
 
 // mulDivRound computes round(a*b/denom) in big.Int (overflow-safe), with a,b>=0
 // and denom>0 so truncation == floor.
-func mulDivRound(a, b, denom int64, mode string) (int64, error) {
+func mulDivRound(a, b, denom int64, mode catalog.Round) (int64, error) {
 	if denom <= 0 {
 		return 0, fmt.Errorf("denominator must be positive")
 	}
@@ -208,11 +190,11 @@ func mulDivRound(a, b, denom int64, mode string) (int64, error) {
 	q, r := new(big.Int).QuoRem(n, d, new(big.Int))
 	if r.Sign() != 0 {
 		switch mode {
-		case RoundUp:
+		case catalog.RoundUp:
 			q.Add(q, big.NewInt(1))
-		case RoundDown:
+		case catalog.RoundDown:
 			// QuoRem already truncated toward zero; with non-negative inputs that is floor.
-		case RoundHalfUp, "":
+		case catalog.RoundHalfUp, "":
 			if new(big.Int).Mul(r, big.NewInt(2)).CmpAbs(d) >= 0 {
 				q.Add(q, big.NewInt(1))
 			}
@@ -224,4 +206,62 @@ func mulDivRound(a, b, denom int64, mode string) (int64, error) {
 		return 0, fmt.Errorf("rated amount overflows int64")
 	}
 	return q.Int64(), nil
+}
+
+// Of normalizes a RatePrice into its ChargeModel. For a matrix price use
+// ForCell.
+func Of(rp catalog.RatePrice) ChargeModel {
+	cm := ChargeModel{Kind: rp.Model}
+	if rp.Flat != nil {
+		cm.FlatAmount = rp.Flat.Amount
+	}
+	if rp.PerUnit != nil {
+		cm.UnitAmount = rp.PerUnit.UnitAmount
+		cm.DivideBy = rp.PerUnit.DivideBy
+		cm.Round = rp.PerUnit.Round
+		cm.MaximumAmount = rp.PerUnit.MaximumAmount
+	}
+	if rp.Tiered != nil {
+		cm.Mode = rp.Tiered.Mode
+		for _, t := range rp.Tiered.Tiers {
+			cm.Tiers = append(cm.Tiers, ChargeTier{UpTo: t.UpTo, UnitAmount: t.UnitAmount, FlatAmount: t.FlatAmount})
+		}
+	}
+	if rp.Package != nil {
+		cm.PackageSize = rp.Package.PackageSize
+		cm.PackageAmount = rp.Package.Amount
+		cm.FreeUnits = rp.Package.FreeUnits
+	}
+	return cm
+}
+
+// ForCell is the per-unit ChargeModel of one matrix cell: the cell's
+// unit_amount with the price's divisor and rounding, and the cell's cap or else
+// the price's. It is false when the price is not a matrix or has no such cell.
+func ForCell(rp catalog.RatePrice, dimValue string) (ChargeModel, bool) {
+	if rp.PerUnit == nil || rp.PerUnit.Matrix == nil {
+		return ChargeModel{}, false
+	}
+	cell, ok := rp.PerUnit.Matrix.Cells[dimValue]
+	if !ok {
+		return ChargeModel{}, false
+	}
+	maxAmt := cell.MaximumAmount
+	if maxAmt == 0 {
+		maxAmt = rp.PerUnit.MaximumAmount
+	}
+	return ChargeModel{Kind: catalog.ModelPerUnit, UnitAmount: cell.UnitAmount, DivideBy: rp.PerUnit.DivideBy, Round: rp.PerUnit.Round, MaximumAmount: maxAmt}, true
+}
+
+// RateUsage rates quantity units against a card, through the matrix cell of
+// dimValue when the price is a matrix. Allowances are netted by the caller.
+func RateUsage(rc catalog.RateCard, dimValue string, quantity int64) (int64, error) {
+	if rc.Price.PerUnit != nil && rc.Price.PerUnit.Matrix != nil {
+		cm, ok := ForCell(rc.Price, dimValue)
+		if !ok {
+			return 0, fmt.Errorf("meter %q rate card has no matrix cell for %q=%q", rc.Meter, rc.Price.PerUnit.Matrix.Dimension, dimValue)
+		}
+		return cm.Rate(quantity)
+	}
+	return Of(rc.Price).Rate(quantity)
 }

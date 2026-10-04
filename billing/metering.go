@@ -1,69 +1,77 @@
 package billing
 
 import (
-	"github.com/google/uuid"
-	"github.com/open-rails/openrails/catalog"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
-type UsageMeterDTO struct {
-	Key                string                   `json:"key"`
-	EventType          string                   `json:"event_type,omitempty"`
-	EffectiveEventType string                   `json:"effective_event_type"`
-	ValueProperty      string                   `json:"value_property,omitempty"`
-	Aggregation        string                   `json:"aggregation"`
-	Unit               string                   `json:"unit,omitempty"`
-	GroupBy            map[string]string        `json:"group_by"`
-	BillingSupported   bool                     `json:"billing_supported"`
-	DefaultRateCard    *DefaultUsageRateCardDTO `json:"default_rate_card,omitempty"`
-	OverrideCount      int64                    `json:"override_count"`
-	HasActivity        bool                     `json:"has_activity"`
-	LastEventAt        *time.Time               `json:"last_event_at,omitempty"`
-	CreatedAt          time.Time                `json:"created_at"`
-	UpdatedAt          time.Time                `json:"updated_at"`
+// Meter is a stream of usage events, aggregated per period into the
+// quantity its rate card prices: events of EventType, measured by the
+// ValueProperty of each event, grouped by GroupBy's dimensions. RateCard
+// prices every customer without a RateOverride.
+type Meter struct {
+	Key           string              `json:"key"`
+	EventType     string              `json:"event_type"`
+	ValueProperty string              `json:"value_property"`
+	Aggregation   catalog.Aggregation `json:"aggregation"`
+	Unit          string              `json:"unit"`
+	GroupBy       map[string]string   `json:"group_by"`
+	// BillingSupported is whether usage of this aggregation can be billed
+	// (sum and count).
+	BillingSupported bool           `json:"billing_supported"`
+	RateCard         *MeterRateCard `json:"rate_card"`
+	OverrideCount    int64          `json:"override_count"`
+	HasActivity      bool           `json:"has_activity"`
+	LastEventAt      *time.Time     `json:"last_event_at"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
-type DefaultUsageRateCardDTO struct {
-	ID         uuid.UUID           `json:"id"`
-	ProductID  string              `json:"product_id"`
+// SetMeterParams declares a meter. EventType defaults to the meter's key; a
+// meter with recorded usage keeps its definition.
+type SetMeterParams struct {
+	EventType     string              `json:"event_type,omitempty"`
+	ValueProperty string              `json:"value_property,omitempty"`
+	Aggregation   catalog.Aggregation `json:"aggregation"`
+	Unit          string              `json:"unit,omitempty"`
+	GroupBy       map[string]string   `json:"group_by,omitempty"`
+}
+
+// MeterRateCard is the rate card that prices a meter's usage, under the
+// product whose invoices carry it.
+type MeterRateCard struct {
+	ProductID  ProductID           `json:"product_id"`
 	ProductKey string              `json:"product_key"`
 	Filter     map[string][]string `json:"filter"`
 	Price      catalog.RatePrice   `json:"price"`
-	Allowance  *catalog.Allowance  `json:"allowance,omitempty"`
+	Allowance  *catalog.Allowance  `json:"allowance"`
 	CreatedAt  time.Time           `json:"created_at"`
 	UpdatedAt  time.Time           `json:"updated_at"`
 }
 
-type UsageMeterOverrideDTO struct {
-	CustomerID string             `json:"customer_id"`
-	Subject    string             `json:"subject,omitempty"`
-	Email      string             `json:"email,omitempty"`
-	Price      catalog.RatePrice  `json:"price"`
-	Allowance  *catalog.Allowance `json:"allowance,omitempty"`
-	CreatedAt  time.Time          `json:"created_at"`
-	UpdatedAt  time.Time          `json:"updated_at"`
-}
-
-type UsageMeterSpec struct {
-	Key           string            `json:"key"`
-	EventType     string            `json:"event_type"`
-	ValueProperty string            `json:"value_property"`
-	Aggregation   string            `json:"aggregation"` // sum | count
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
-}
-
-type UsageMeterRequest struct {
-	EventType     string            `json:"event_type"`
-	ValueProperty string            `json:"value_property"`
-	Aggregation   string            `json:"aggregation"`
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
-}
-
-type DefaultUsageRateCardRequest struct {
-	ProductID string              `json:"product_id"`
-	Filter    map[string][]string `json:"filter"`
+// SetMeterRateCardParams sets the rate card of a meter.
+type SetMeterRateCardParams struct {
+	ProductID ProductID           `json:"product_id"`
+	Filter    map[string][]string `json:"filter,omitempty"`
 	Price     catalog.RatePrice   `json:"price"`
 	Allowance *catalog.Allowance  `json:"allowance,omitempty"`
+}
+
+// RateOverride is a customer's negotiated price for one meter's usage; it
+// replaces the meter's rate card for that customer.
+type RateOverride struct {
+	CustomerID    CustomerID         `json:"customer_id"`
+	CustomerEmail *string            `json:"customer_email"`
+	MeterKey      string             `json:"meter_key"`
+	Price         catalog.RatePrice  `json:"price"`
+	Allowance     *catalog.Allowance `json:"allowance"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+// SetRateOverrideParams sets a customer's price for one meter.
+type SetRateOverrideParams struct {
+	Price     catalog.RatePrice  `json:"price"`
+	Allowance *catalog.Allowance `json:"allowance,omitempty"`
 }

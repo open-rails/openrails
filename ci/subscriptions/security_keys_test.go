@@ -26,7 +26,7 @@ func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 		const key = "upgrade-1"
 		for _, tp := range []topology{embedded, remote} {
 			_, sub := w.engineMember(rail, tp, from)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, key, billing.ChangeTierRequest{PriceID: to.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), sub, key, billing.ChangeTierRequest{PriceID: to.ID.String()})
 			require.NoError(t, err, "%s: a key another customer used is still this customer's", tp)
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.NotEqual(t, sub, *done.SubscriptionID)
@@ -42,7 +42,7 @@ func TestSecurityForeignIDsLookMissing(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	owner := w.newCustomer()
 	method := owner.saveCard("nmi", visa)
-	sub := owner.subscribe(embedded, "nmi", price.ID, "content:members", method)
+	sub := owner.subscribe(embedded, "nmi", price.ID.String(), "content:members", method)
 	prober := w.newCustomer()
 	mine := prober.saveCard("nmi", visa)
 	missingMethod := billing.PaymentMethodID(uuid.New()).String()

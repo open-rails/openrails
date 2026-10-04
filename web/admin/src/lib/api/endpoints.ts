@@ -8,26 +8,32 @@ import {
   type PageRequest,
 } from "./client"
 import type {
+  Allowance,
+  CatalogDrift,
+  CatalogDriftCheck,
   CreateOffChannelPaymentParams,
   CreditLimit,
   Customer,
   ListPage,
+  Meter,
   Payment,
   PaymentAttempt,
   PaymentMethod,
+  Price,
+  PriceKeyMovement,
+  Product,
+  RateOverride,
+  RatePrice,
   RebillCycle,
   RefundPaymentParams,
   TrustLevel,
+  UpdatePriceParams,
+  UpdateProductParams,
 } from "./generated/wire"
 import type {
   AdminSubscription,
-  CatalogDriftEvent,
-  CatalogDriftReport,
-  CatalogPrice,
-  CatalogProduct,
   CheckoutRoutingDecision,
   CustomerBillingProfile,
-  CustomerUsageRateOverride,
   Finding,
   FindingsListResponse,
   MerchantAPIKey,
@@ -37,7 +43,6 @@ import type {
   MintedAPIKey,
   PaymentProviderConfig,
   PaymentProviderDefinition,
-  PriceKeyHistoryEntry,
   RawEntitlement,
   RepairAlert,
   RepriceBatch,
@@ -50,11 +55,6 @@ import type {
   TeamInvite,
   TeamInviteResult,
   TeamMember,
-  UsageAllowance,
-  UsageMeter,
-  UsageMeterOverride,
-  UsageMeterPage,
-  UsageRatePrice,
   WebhookFormat,
   WorkerHealth,
 } from "./types"
@@ -89,17 +89,18 @@ export const listCustomerPaymentMethods = (
   )
 
 export interface CustomerUsageRateOverrideRequest {
-  price: UsageRatePrice
-  allowance?: UsageAllowance
+  price: RatePrice
+  allowance?: Allowance
 }
 
 export const listCustomerUsageRateOverrides = (
   customerId: string,
+  cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<CustomerUsageRateOverride[]>(
+  api<ListPage<RateOverride>>(
     `/merchant/customers/${customerId}/rate-overrides`,
-    { signal }
+    { query: { limit: PAGE_MAX, cursor }, signal }
   )
 
 export const putCustomerUsageRateOverride = (
@@ -107,7 +108,7 @@ export const putCustomerUsageRateOverride = (
   meterKey: string,
   body: CustomerUsageRateOverrideRequest
 ) =>
-  api<CustomerUsageRateOverride>(
+  api<RateOverride>(
     `/merchant/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
     { method: "PUT", body }
   )
@@ -116,7 +117,7 @@ export const deleteCustomerUsageRateOverride = (
   customerId: string,
   meterKey: string
 ) =>
-  api<{ message: string }>(
+  api<void>(
     `/merchant/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
     { method: "DELETE" }
   )
@@ -376,20 +377,24 @@ export const REFUNDABLE_RAILS = ["nmi", "stripe"]
 
 // --- Catalog ---
 
+// PAGE_MAX is the largest page a list route serves.
+export const PAGE_MAX = 500
+
 // archived: false lists live products, true archived ones, undefined both.
+// Each product carries its current prices.
 export const listProducts = (
   limit: number,
-  offset: number,
+  cursor?: string,
   archived?: boolean,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<CatalogProduct>>("/merchant/catalog/products", {
-    query: { limit, offset, archived },
+  api<ListPage<Product>>("/merchant/catalog/products", {
+    query: { limit, cursor, archived },
     signal,
   })
 
 export const getProduct = (id: string, signal?: AbortSignal) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}`, { signal })
+  api<Product>(`/merchant/catalog/products/${id}`, { signal })
 
 export interface ProductRequest {
   key: string
@@ -401,25 +406,14 @@ export interface ProductRequest {
 }
 
 export const createProduct = (body: ProductRequest) =>
-  api<CatalogProduct>("/merchant/catalog/products", { method: "POST", body })
+  api<Product>("/merchant/catalog/products", { method: "POST", body })
 
-export const updateProduct = (
-  id: string,
-  body: Partial<ProductRequest> & { set_entitlements?: boolean }
-) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}`, {
+// updateProduct is a merge patch: omitted fields stay, null clears
+// description, entitlements_spec and tier_group.
+export const updateProduct = (id: string, body: UpdateProductParams) =>
+  api<Product>(`/merchant/catalog/products/${id}`, {
     method: "PATCH",
     body,
-  })
-
-export const activateProduct = (id: string) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}/activate`, {
-    method: "POST",
-  })
-
-export const deactivateProduct = (id: string) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}/deactivate`, {
-    method: "POST",
   })
 
 export interface UsageMeterRequest {
@@ -433,38 +427,38 @@ export interface UsageMeterRequest {
 export interface DefaultUsageRateCardRequest {
   product_id: string
   filter: Record<string, string[]>
-  price: UsageRatePrice
-  allowance?: UsageAllowance
+  price: RatePrice
+  allowance?: Allowance
 }
 
 export const listUsageMeters = (
-  limit = 200,
-  offset = 0,
+  limit = PAGE_MAX,
+  cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<UsageMeterPage>("/merchant/catalog/meters", {
-    query: { limit, offset },
+  api<ListPage<Meter>>("/merchant/catalog/meters", {
+    query: { limit, cursor },
     signal,
   })
 
 export const getUsageMeter = (key: string, signal?: AbortSignal) =>
-  api<UsageMeter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
+  api<Meter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
     signal,
   })
 
 export const listUsageMeterOverrides = (
   key: string,
-  limit = 200,
-  offset = 0,
+  limit = PAGE_MAX,
+  cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<UsageMeterOverride>>(
-    `/merchant/catalog/meters/${encodeURIComponent(key)}/overrides`,
-    { query: { limit, offset }, signal }
+  api<ListPage<RateOverride>>(
+    `/merchant/catalog/meters/${encodeURIComponent(key)}/rate-overrides`,
+    { query: { limit, cursor }, signal }
   )
 
 export const putUsageMeter = (key: string, body: UsageMeterRequest) =>
-  api<UsageMeter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
+  api<Meter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
     method: "PUT",
     body,
   })
@@ -473,10 +467,10 @@ export const putDefaultUsageRateCard = (
   key: string,
   body: DefaultUsageRateCardRequest
 ) =>
-  api<UsageMeter>(
-    `/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`,
-    { method: "PUT", body }
-  )
+  api<Meter>(`/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
+    method: "PUT",
+    body,
+  })
 
 export const deleteDefaultUsageRateCard = (key: string) =>
   api<void>(`/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
@@ -485,12 +479,12 @@ export const deleteDefaultUsageRateCard = (key: string) =>
 
 export const listPrices = (
   limit: number,
-  offset: number,
+  cursor?: string,
   productId?: string,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<CatalogPrice>>("/merchant/catalog/prices", {
-    query: { limit, offset, product_id: productId },
+  api<ListPage<Price>>("/merchant/catalog/prices", {
+    query: { limit, cursor, product_id: productId },
     signal,
   })
 
@@ -502,51 +496,40 @@ export interface PriceRequest {
   auto_renew?: boolean
   trial_unit_amount?: string
   trial_duration_hours?: number
-  // Key (#774): declaring the SAME key as an existing live price with a
-  // DIFFERENT amount is a version bump (the #777 wizard's whole mechanism) —
-  // omit to auto-default.
+  // Declaring the key of a live price with other terms makes this its new
+  // version and archives the old one; omit for the default key.
   key?: string
-  // Providers to (re)attach — e.g. carried over from the price being
-  // replaced so the new version doesn't silently lose its Stripe/CCBill/NMI
-  // links. Empty/omitted = DB-only price.
-  providers?: string[]
+  // The PSPs that sell the price, e.g. carried over from the version it
+  // replaces. Empty: sold through no PSP.
+  psps?: string[]
 }
 
 export const createPrice = (body: PriceRequest) =>
-  api<CatalogPrice>("/merchant/catalog/prices", { method: "POST", body })
+  api<Price>("/merchant/catalog/prices", { method: "POST", body })
 
-// getPrice returns the price with its psp_links projection (`providers`).
-// verify=true additionally performs a LIVE retrieve against every attached
-// provider and fills in sync_status/drift — a read, never a write, and slow
-// enough that it stays opt-in (or#812).
+// getPrice returns the price with its state on each linked PSP. verify=true
+// also reads every PSP's copy and reports its drift: a read, never a write,
+// and slow enough that it stays opt-in.
 export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
-  api<CatalogPrice>(`/merchant/catalog/prices/${id}`, {
+  api<Price>(`/merchant/catalog/prices/${id}`, {
     query: verify ? { verify: true } : undefined,
     signal,
   })
 
 export const getPriceByKey = (key: string) =>
-  api<CatalogPrice>(
-    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`
-  )
+  api<Price>(`/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`)
 
-export const activatePrice = (id: string) =>
-  api<CatalogPrice>(`/merchant/catalog/prices/${id}/activate`, {
-    method: "POST",
-  })
+// updatePrice moves a price to another key, archives or restores it, or
+// changes its PSP links (a PSP set to null is unlinked).
+export const updatePrice = (id: string, body: UpdatePriceParams) =>
+  api<Price>(`/merchant/catalog/prices/${id}`, { method: "PATCH", body })
 
-export const deactivatePrice = (id: string) =>
-  api<CatalogPrice>(`/merchant/catalog/prices/${id}/deactivate`, {
-    method: "POST",
-  })
-
-// getPriceKeyHistory returns a price key's version chain (most-recent-first),
-// resolved server-side from the #774 pointer-movement log — the price
-// detail page's "version chain with dates" (#777).
+// getPriceKeyHistory returns a price key's history, most recent first: when
+// the key moved to which price.
 export const getPriceKeyHistory = (key: string, signal?: AbortSignal) =>
-  api<ItemsEnvelope<PriceKeyHistoryEntry>>(
+  api<ListPage<PriceKeyMovement>>(
     `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`,
-    { signal }
+    { query: { limit: PAGE_MAX }, signal }
   )
 
 // --- Repricing / migration (#773 primitive, #777 console wizard) ---
@@ -634,16 +617,16 @@ export const applyCatalog = (document: string) =>
 
 export const listCatalogDrift = (
   limit: number,
-  offset: number,
+  cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<CatalogDriftEvent>>("/merchant/catalog/drift", {
-    query: { limit, offset },
+  api<ListPage<CatalogDrift>>("/merchant/catalog/drift", {
+    query: { limit, cursor },
     signal,
   })
 
 export const refreshCatalogDrift = () =>
-  api<CatalogDriftReport>("/merchant/catalog/drift/refresh", { method: "POST" })
+  api<CatalogDriftCheck>("/merchant/catalog/drift/refresh", { method: "POST" })
 
 // --- Ops ---
 

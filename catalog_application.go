@@ -2,45 +2,62 @@ package openrails
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
-// CatalogClient applies whole-catalog documents and reads the catalog
-// revision (Client.Catalog).
-type CatalogClient struct{ client *Client }
-
-// Apply commits one authorized batch. A declarative document (no application
-// ID or expected revision) converges the catalog to its contents and replays
-// while nothing has changed since. A guarded one replays by ID and applies only
-// at its expected revision; a new ID deliberately applies it again. While
-// Config.Catalog declares the catalog it is refused (billing.ErrCatalogDeclared).
-func (c *CatalogClient) Apply(ctx context.Context, params *billing.CatalogApplyParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
-	if c.client.ownCatalog {
-		return nil, fmt.Errorf("catalog batch applications require merchant catalog authority")
+// ApplyCatalog applies a catalog document. A declarative document (no
+// application ID or expected revision) converges the catalog to its contents
+// and replays while nothing has changed since. A guarded one replays by ID and
+// applies only at its expected revision. While Config.Catalog declares the
+// catalog it is refused (billing.ErrCatalogDeclared).
+func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
+	if document == nil {
+		return nil, invalidErr("catalog document is required")
 	}
-	if params == nil {
-		return nil, fmt.Errorf("catalog application is required")
-	}
-	if err := params.Validate(); err != nil {
-		return nil, err
+	if err := document.Validate(); err != nil {
+		return nil, invalidErr(err.Error())
 	}
 	var out billing.CatalogApplicationReceipt
-	if err := c.client.do(ctx, http.MethodPost, "/v1/merchant/catalog/applications", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/applications", document, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// Revision is a read-only merchant precondition, available with updates disabled.
-func (c *CatalogClient) Revision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error) {
-	if c.client.ownCatalog {
-		return nil, fmt.Errorf("catalog revision requires merchant catalog authority")
-	}
+// GetCatalogRevision reads the catalog revision, which every catalog write
+// advances, and whether catalog writes are accepted.
+func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error) {
 	var out billing.CatalogRevision
-	if err := c.client.do(ctx, http.MethodGet, "/v1/merchant/catalog/revision", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/revision", nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListCatalogDrift returns one page of open findings that a PSP's copy of the
+// catalog differs from OpenRails, newest first.
+func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDriftListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CatalogDrift], error) {
+	q := pageValues(nil, params.PageRequest)
+	for name, value := range map[string]string{"rail": params.Rail, "kind": params.Kind, "resource_type": params.ResourceType} {
+		if value != "" {
+			q.Set(name, value)
+		}
+	}
+	var out billing.ListPage[billing.CatalogDrift]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/drift?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CheckCatalogDrift reads every linked PSP's catalog now and records the
+// drift it finds; it changes neither the PSPs nor the catalog.
+func (c *Client) CheckCatalogDrift(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogDriftCheck, error) {
+	var out billing.CatalogDriftCheck
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/drift/refresh", struct{}{}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

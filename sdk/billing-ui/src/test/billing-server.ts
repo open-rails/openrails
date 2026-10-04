@@ -77,32 +77,57 @@ export function payment(overrides: Partial<Row> = {}): Row {
   } as Row
 }
 
+/** A wire price: hours of access, renewing when autoRenew. */
+export function price(
+  hours: number | null,
+  autoRenew: boolean,
+  overrides: Partial<Row> = {}
+): Row {
+  return {
+    id: "price_plus",
+    key: "plus-monthly",
+    product_id: "prod_plus",
+    archived: false,
+    unit_amount: "19990000",
+    currency: "USD",
+    access_duration_hours: hours,
+    auto_renew: autoRenew,
+    trial_unit_amount: null,
+    trial_duration_hours: null,
+    psps: {},
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+    ...overrides,
+  }
+}
+
 export function product(overrides: Partial<Row> = {}): Row {
   return {
     id: "prod_plus",
-    object: "product",
     key: "plus",
-    name: "Plus",
+    display_name: "Plus",
     description: "",
+    entitlements_spec: { plus: null },
     tier_group: "membership",
     tier_rank: 2,
-    active: true,
-    metadata: {},
+    archived: false,
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
     prices: [
       {
         id: "price_plus",
         key: "plus-monthly",
-        object: "price",
+        product_id: "prod_plus",
+        archived: false,
         unit_amount: "19990000",
         currency: "USD",
-        type: "recurring",
-        recurring: { interval: "720h" },
-        product: "prod_plus",
-        active: true,
-        metadata: {},
+        access_duration_hours: 720,
+        auto_renew: true,
+        trial_unit_amount: null,
+        trial_duration_hours: null,
+        psps: { mobius: { status: "linked", ids: null, sync_status: "unknown" } },
         created_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-01T00:00:00Z",
       },
     ],
     ...overrides,
@@ -315,10 +340,7 @@ export function fakeBilling(
         })
       }
       if (key === "GET /products")
-        return json(
-          200,
-          page(state.products, limit, offset, state.products.length)
-        )
+        return json(200, { data: state.products, next_cursor: null })
       if (key === "GET /me/payments")
         return json(200, cursorPage(state.payments, limit, cursor))
       return apiError(404, "resource_not_found", `no route ${key}`)

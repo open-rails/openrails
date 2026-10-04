@@ -126,7 +126,7 @@ export function PriceDetailPage() {
           <CardTitle className="text-sm">Price history</CardTitle>
         </CardHeader>
         <CardContent>
-          {!history?.items?.length ? (
+          {!history?.data?.length ? (
             <p className="text-sm text-muted-foreground">No history yet.</p>
           ) : (
             <Table>
@@ -141,7 +141,7 @@ export function PriceDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {history.items.map((entry) => (
+                {history.data.map((entry) => (
                   <TableRow key={`${entry.price.id}-${entry.effective_at}`}>
                     <TableCell>
                       {formatNativeAmount(

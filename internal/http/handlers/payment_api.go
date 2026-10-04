@@ -1,36 +1,10 @@
 package handlers
 
 import (
-	"sort"
-
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
-
-func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
-	priceObjects := make([]api.PriceObject, len(prices))
-	for i, price := range prices {
-		priceObjects[i] = PriceToAPI(price)
-	}
-	return api.ProductObject{
-		ID:               billing.ProductID(p.ID),
-		Object:           "product",
-		Key:              p.Key,
-		Name:             p.DisplayName,
-		Description:      p.Description,
-		EntitlementsSpec: p.EntitlementsSpec,
-		TierGroup:        p.TierGroup,
-		TierRank:         p.TierRank,
-		Active:           p.IsPurchasable(),
-		Metadata:         map[string]string{},
-		CreatedAt:        p.CreatedAt,
-		UpdatedAt:        p.UpdatedAt,
-		Prices:           priceObjects,
-	}
-}
 
 // PaymentToAPI is a payment on the wire; refunds, when not nil, are the
 // reversals of a charge and set its refunded amount.
@@ -151,24 +125,4 @@ func paymentStatus(status string) billing.PaymentStatus {
 		return billing.PaymentFailed
 	}
 	return billing.PaymentPending
-}
-
-func PriceToAPI(p *models.Price) api.PriceObject {
-	var recurring *api.RecurringInfo
-	if ch := p.RecurringCycleHours(); ch != nil && *ch > 0 {
-		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleHoursToInterval(*ch)}
-	}
-	priceType := "one_time"
-	if recurring != nil {
-		priceType = "recurring"
-	}
-	var providers []string
-	if len(p.PSPLinks) > 0 {
-		providers = make([]string, 0, len(p.PSPLinks))
-		for name := range p.PSPLinks {
-			providers = append(providers, name)
-		}
-		sort.Strings(providers)
-	}
-	return api.PriceObject{ID: (billing.PriceID(p.ID)).String(), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: (billing.ProductID(p.ProductID)).String(), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, CreatedAt: p.CreatedAt}
 }

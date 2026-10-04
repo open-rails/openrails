@@ -7,7 +7,8 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { FormFieldErrors } from "@/components/form-field-errors"
-import { PaginationFooter } from "@/components/pagination-footer"
+import { CursorPaginationFooter } from "@/components/cursor-pagination"
+import { useCursorPages } from "@/hooks/use-cursor-pages"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -42,7 +43,7 @@ import {
 } from "@/components/ui/table"
 import { getBootstrap } from "@/lib/api/client"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
+import type { Price, Product } from "@/lib/api/generated/wire"
 import {
   currencyScale,
   formatDate,
@@ -137,7 +138,7 @@ const CATALOG_PAGE_SIZE = 100
 
 function ProductsTab() {
   const writesAllowed = React.useContext(CatalogWritesContext)
-  const [offset, setOffset] = React.useState(0)
+  const pages = useCursorPages()
   const {
     data,
     isPending: loading,
@@ -145,7 +146,7 @@ function ProductsTab() {
   } = useQuery(
     adminQueries.products({
       limit: CATALOG_PAGE_SIZE,
-      offset,
+      cursor: pages.cursor,
       errorAction: "Load products",
     })
   )
@@ -182,10 +183,10 @@ function ProductsTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(data?.items ?? []).map((p) => (
+              {(data?.data ?? []).map((p) => (
                 <ProductRow key={p.id} product={p} />
               ))}
-              {!data?.items?.length && (
+              {!data?.data?.length && (
                 <TableRow>
                   <TableCell
                     colSpan={6}
@@ -199,18 +200,16 @@ function ProductsTab() {
           </Table>
         </div>
       )}
-      <PaginationFooter
-        total={data?.total ?? 0}
-        limit={data?.limit ?? CATALOG_PAGE_SIZE}
-        offset={data?.offset ?? offset}
+      <CursorPaginationFooter
+        pages={pages}
+        nextCursor={data?.next_cursor}
         loading={isFetching}
-        onChange={setOffset}
       />
     </div>
   )
 }
 
-function ProductRow({ product }: { product: CatalogProduct }) {
+function ProductRow({ product }: { product: Product }) {
   const writesAllowed = React.useContext(CatalogWritesContext)
   const queryClient = useQueryClient()
   const setProductActive = useMutation(
@@ -275,7 +274,7 @@ function ProductRow({ product }: { product: CatalogProduct }) {
   )
 }
 
-function productFormValues(product?: CatalogProduct) {
+function productFormValues(product?: Product) {
   return {
     key: product?.key ?? "",
     name: product?.display_name ?? "",
@@ -286,7 +285,7 @@ function productFormValues(product?: CatalogProduct) {
   }
 }
 
-function ProductDialog({ product }: { product?: CatalogProduct }) {
+function ProductDialog({ product }: { product?: Product }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const createProduct = useMutation(adminMutations.createProduct(queryClient))
@@ -309,10 +308,9 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
             product: {
               display_name: value.name,
               description: value.description,
-              tier_group: value.tierGroup || undefined,
+              tier_group: value.tierGroup || null,
               tier_rank: Number(value.tierRank) || 0,
               entitlements_spec: spec,
-              set_entitlements: true,
             },
           })
           toast.success("Product updated")
@@ -534,7 +532,7 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
 
 function PricesTab() {
   const writesAllowed = React.useContext(CatalogWritesContext)
-  const [offset, setOffset] = React.useState(0)
+  const pages = useCursorPages()
   const { data: products } = useQuery(
     adminQueries.allProducts({ errorAction: "Load products" })
   )
@@ -545,17 +543,17 @@ function PricesTab() {
   } = useQuery(
     adminQueries.prices({
       limit: CATALOG_PAGE_SIZE,
-      offset,
+      cursor: pages.cursor,
       errorAction: "Load prices",
     })
   )
   const productName = (id: string) =>
-    products?.items.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
+    products?.data.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        {writesAllowed && <PriceDialog products={products?.items ?? []} />}
+        {writesAllowed && <PriceDialog products={products?.data ?? []} />}
       </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
@@ -580,14 +578,14 @@ function PricesTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(data?.items ?? []).map((price) => (
+              {(data?.data ?? []).map((price) => (
                 <PriceRow
                   key={price.id}
                   price={price}
                   productName={productName(price.product_id)}
                 />
               ))}
-              {!data?.items?.length && (
+              {!data?.data?.length && (
                 <TableRow>
                   <TableCell
                     colSpan={7}
@@ -601,12 +599,10 @@ function PricesTab() {
           </Table>
         </div>
       )}
-      <PaginationFooter
-        total={data?.total ?? 0}
-        limit={data?.limit ?? CATALOG_PAGE_SIZE}
-        offset={data?.offset ?? offset}
+      <CursorPaginationFooter
+        pages={pages}
+        nextCursor={data?.next_cursor}
         loading={isFetching}
-        onChange={setOffset}
       />
     </div>
   )
@@ -616,7 +612,7 @@ function PriceRow({
   price,
   productName,
 }: {
-  price: CatalogPrice
+  price: Price
   productName: string
 }) {
   const writesAllowed = React.useContext(CatalogWritesContext)
@@ -655,14 +651,14 @@ function PriceRow({
         <span className="flex flex-wrap gap-1">
           {/* psp_links is keyed by PSP key ("mobius"), not by rail — the rail
               is recorded inside the entry (or#812). */}
-          {Object.entries(price.providers ?? {}).map(([psp, state]) => (
+          {Object.entries(price.psps ?? {}).map(([psp, state]) => (
             <Badge
               key={psp}
               variant="secondary"
               className={
                 state.status === "linked" ? "" : "bg-held-surface text-held"
               }
-              title={state.message}
+              title={state.message || undefined}
             >
               {psp}: {state.status}
             </Badge>
@@ -697,7 +693,7 @@ function PriceRow({
   )
 }
 
-function PriceDialog({ products }: { products: CatalogProduct[] }) {
+function PriceDialog({ products }: { products: Product[] }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const createPrice = useMutation(adminMutations.createPrice(queryClient))
@@ -969,7 +965,7 @@ function DriftTab() {
             try {
               const report = await refreshDrift.mutateAsync()
               toast.success(
-                `Drift scan done: ${report.new_events} new, ${report.resolved_events} resolved`
+                `Drift scan done: ${report.opened_findings} new, ${report.resolved_findings} resolved`
               )
             } catch (err) {
               toastApiError(err, "Refresh drift")
@@ -991,7 +987,7 @@ function DriftTab() {
             <Skeleton key={i} className="h-6 w-full" />
           ))}
         </div>
-      ) : !data?.items?.length ? (
+      ) : !data?.data?.length ? (
         <p className="text-sm text-muted-foreground">
           No open drift events. Catalog is in sync.
         </p>
@@ -1018,23 +1014,20 @@ function DriftTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.items.map((e) => (
+              {data.data.map((e) => (
                 <TableRow key={e.id}>
-                  <TableCell>{e.provider}</TableCell>
+                  <TableCell>{e.rail}</TableCell>
                   <TableCell>{e.kind}</TableCell>
                   <TableCell className="text-xs">
-                    {e.openrails_resource_type}{" "}
-                    {shortId(
-                      e.openrails_resource_id ?? e.external_resource_id ?? "",
-                      13
-                    )}
+                    {e.resource_type}{" "}
+                    {shortId(e.resource_id || e.external_resource_id, 13)}
                   </TableCell>
-                  <TableCell>{e.field ?? "—"}</TableCell>
+                  <TableCell>{e.field || "—"}</TableCell>
                   <TableCell className="max-w-40 truncate">
-                    {e.openrails_value ?? "—"}
+                    {e.openrails_value || "—"}
                   </TableCell>
                   <TableCell className="max-w-40 truncate">
-                    {e.external_value ?? "—"}
+                    {e.external_value || "—"}
                   </TableCell>
                   <TableCell>{formatDate(e.detected_at)}</TableCell>
                 </TableRow>

@@ -36,15 +36,15 @@ func (c *Client) CheckEntitlements(ctx context.Context, customerID string, entit
 	return result, err
 }
 
-// ListOffersForEntitlements returns one bounded page of active offers per
-// opaque resource key (at most 100 keys) in one request. Every requested key
-// is present in the result. PreferredCurrency ranks matching offers first;
-// alternatives retain their actual native currency and amount.
-func (c *Client) ListOffersForEntitlements(ctx context.Context, entitlements []string, params billing.OfferListParams, requestOptions ...RequestOption) (map[string]billing.OfferList, error) {
-	if len(entitlements) > billing.MaxEntitlementChecks {
+// ListOffers returns one page of live offers for each requested entitlement
+// (at most 100) in one request; every requested entitlement is in the result.
+// PreferredCurrency ranks matching offers first; alternatives keep their own
+// currency and amount.
+func (c *Client) ListOffers(ctx context.Context, params billing.OfferListParams, requestOptions ...RequestOption) (billing.OfferPages, error) {
+	if len(params.Entitlements) > billing.MaxEntitlementChecks {
 		return nil, invalidErr("at most 100 entitlements are allowed")
 	}
-	for _, key := range entitlements {
+	for _, key := range params.Entitlements {
 		if strings.TrimSpace(key) == "" || len(key) > 256 {
 			return nil, invalidErr("entitlement must be a nonempty key of at most 256 bytes")
 		}
@@ -55,10 +55,9 @@ func (c *Client) ListOffersForEntitlements(ctx context.Context, entitlements []s
 	if params.Limit < 0 || params.Limit > 100 {
 		return nil, invalidErr("limit must be between 1 and 100")
 	}
-	if len(entitlements) == 0 {
-		return map[string]billing.OfferList{}, nil
+	var out billing.OfferPages
+	if err := c.do(ctx, http.MethodPost, c.catalogPath()+"/offers/lookup", params, &out, requestOptions...); err != nil {
+		return nil, err
 	}
-	var result map[string]billing.OfferList
-	err := c.do(ctx, http.MethodPost, c.catalogPath()+"/offers/lookup", billing.OfferLookupRequest{Entitlements: entitlements, Kind: params.Kind, PreferredCurrency: params.PreferredCurrency, PageSize: params.Limit, Cursors: params.Cursors}, &result, requestOptions...)
-	return result, err
+	return out, nil
 }

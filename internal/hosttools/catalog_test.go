@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -45,7 +46,7 @@ func TestExampleCatalogApplicationsParse(t *testing.T) {
 	}
 	require.True(t, allowance, "pooled egress allowance survives")
 	require.NotNil(t, matrix)
-	model, ok := matrix.ChargeModelForCell("s-1vcpu-1gb")
+	model, ok := catalogrules.ForCell(*matrix, "s-1vcpu-1gb")
 	require.True(t, ok)
 	cost, err := model.Rate(720 * 3600)
 	require.NoError(t, err)

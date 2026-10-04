@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -22,12 +23,12 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-type catalogReferenceVerifier func(context.Context, string, string, string, string, CreatePriceRequest, map[string]string) (map[string]string, error)
+type catalogReferenceVerifier func(context.Context, string, string, string, string, billing.CreatePriceParams, map[string]string) (map[string]string, error)
 
 type catalogReferenceCheck struct {
 	key, provider, productKey string
 	account                   gen.BillingPsp
-	request                   CreatePriceRequest
+	request                   billing.CreatePriceParams
 	link                      map[string]string
 }
 type catalogApplicationPreparation struct {
@@ -42,7 +43,7 @@ type catalogApplicationPreparation struct {
 // replays by its ID and otherwise requires its expected revision. A declarative
 // one replays only while the catalog is still at the revision it produced;
 // after any other authored write it applies again, so the document wins.
-func (s *Service) catalogApplicationGate(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
+func (s *Service) catalogApplicationGate(ctx context.Context, params catalogwire.Application, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, nil, err
@@ -80,7 +81,7 @@ func (s *Service) catalogApplicationGate(ctx context.Context, params billing.Cat
 // Prepare only observes remote references. Snapshot collection and the final
 // local commit each fence the merchant, but no transaction spans provider I/O.
 // A committed retry returns before resolving targets or contacting a provider.
-func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
+func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		revision, replay, err := scoped.catalogApplicationGate(ctx, params, digest)
 		if err != nil {
@@ -129,7 +130,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.
 				if !declared.DisplayName.Set {
 					return nil, apperr.Invalidf("new product %q requires display_name; cannot archive unknown product", declared.Key)
 				}
-				product = &CatalogProduct{ID: billing.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), declared.Key)), Key: declared.Key, DisplayName: declared.DisplayName.Value}
+				product = &billing.Product{ID: billing.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), declared.Key)), Key: declared.Key, DisplayName: declared.DisplayName.Value}
 			}
 			reactivatingProduct := product.Archived && declared.Archived.Set && !declared.Archived.Value
 			if declared.Archived.Set {
@@ -139,8 +140,8 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.
 			if err != nil {
 				return nil, err
 			}
-			byKey := map[string][]CatalogPrice{}
-			byID := map[string]CatalogPrice{}
+			byKey := map[string][]billing.Price{}
+			byID := map[string]billing.Price{}
 			for _, p := range prices {
 				byKey[p.Key] = append(byKey[p.Key], p)
 				byID[p.ID.String()] = p
@@ -154,10 +155,10 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.
 				for _, price := range declared.Prices {
 					named[price.Key] = true
 				}
-				references = append([]billing.CatalogApplyPrice(nil), declared.Prices...)
+				references = append([]catalogwire.ApplyPrice(nil), declared.Prices...)
 				for _, price := range prices {
-					if !price.Archived && !named[price.Key] && len(price.Providers) > 0 {
-						references = append(references, billing.CatalogApplyPrice{Key: price.Key, ID: price.ID.String()})
+					if !price.Archived && !named[price.Key] && len(price.PSPs) > 0 {
+						references = append(references, catalogwire.ApplyPrice{Key: price.Key, ID: price.ID.String()})
 					}
 				}
 			}
@@ -287,10 +288,10 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.
 	return prepared, nil
 }
 
-func catalogPriceLinks(price *CatalogPrice) map[string]map[string]string {
+func catalogPriceLinks(price *billing.Price) map[string]map[string]string {
 	out := map[string]map[string]string{}
 	if price != nil {
-		for key, state := range price.Providers {
+		for key, state := range price.PSPs {
 			out[key] = cloneStringMap(state.IDs)
 		}
 	}
@@ -376,7 +377,7 @@ func sameCatalogLinks(a, b map[string]map[string]string) bool {
 // requireSellablePrice refuses an active price that declares PSPs yet no rail
 // can sell new: none of its declared rails supports its kind, and no armed
 // rail sells it on local terms (#1078). Checkout would otherwise be empty.
-func requireSellablePrice(key string, request CreatePriceRequest, declared []string, accounts []gen.BillingPsp, environment string) error {
+func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []gen.BillingPsp, environment string) error {
 	recurring := request.AutoRenew
 	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil
 	for _, rail := range declared {

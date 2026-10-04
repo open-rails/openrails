@@ -29,7 +29,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
-	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // newAuth is a development AuthKit: open registration, ephemeral signing keys,
@@ -64,7 +64,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 	if err != nil {
 		return nil, err
 	}
-	catalog, err := billing.ParseCatalogApplicationYAML(raw)
+	declared, err := catalog.ParseApplicationYAML(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			Slug: "myvideos", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
-		Catalog: catalog,
+		Catalog: declared,
 		HTTP: &openrails.HTTPConfig{
 			Checkout: &openrails.CheckoutConfig{}, // products, prices, hosted checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{

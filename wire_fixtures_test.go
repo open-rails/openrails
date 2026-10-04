@@ -36,6 +36,8 @@ func canonicalWireFixtures() map[string]any {
 	param, sourceID := "amount", "deposit-1"
 	periodHours, expMonth, expYear := 720, 12, 2030
 	card := &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("4242"), ExpMonth: &expMonth, ExpYear: &expYear}
+	priceFixtureValue := billing.Price{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AccessDurationHours: &periodHours, AutoRenew: true,
+		PSPs: map[string]billing.PSPLinkState{"mobius": {Status: billing.PSPLinkLinked, SyncStatus: billing.SyncStatusUnknown}}, PendingManualActions: []billing.PendingAction{}, CreatedAt: when, UpdatedAt: when}
 	return map[string]any{
 		"error_envelope.json": errorEnvelope{Error: billing.ErrorDetails{
 			Type: "invalid_request_error", Code: "idempotency_key_reused", Message: "retry changed the committed amount",
@@ -79,7 +81,9 @@ func canonicalWireFixtures() map[string]any {
 			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: (customerFixture).String(), EventType: "subscription_reprice_scheduled", CreatedAt: when,
 			Data: billing.NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: (priceFixture).String(), ToPriceID: (scheduledPriceFixture).String(), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
 		},
-		"catalog_price.json": billing.CatalogPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, CreatedAt: when, UpdatedAt: when},
+		"price.json": priceFixtureValue,
+		"product.json": billing.Product{ID: productFixture, CatalogID: billing.CatalogID(productFixture), Key: "pro", DisplayName: "Pro", EntitlementsSpec: map[string]*int{"pro": nil},
+			Prices: []billing.Price{priceFixtureValue}, CreatedAt: when, UpdatedAt: when},
 		"checkout_session.json": billing.CheckoutSession{
 			ID: sessionFixture.String(), Status: "succeeded", Mode: "subscription", PriceID: new(priceFixture.String()), Amount: new(maxMoney), Currency: new("USD"), PaymentStatus: "paid",
 			SubscriptionID: new(subscriptionFixture.String()), PaymentID: new(paymentFixture.String()), ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"}, RailData: map[string]any{"rail": "nmi"},

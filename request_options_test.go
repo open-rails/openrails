@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -50,9 +51,9 @@ func targetCredential(_ context.Context, target CredentialTarget) (string, error
 	return "id:" + target.MerchantID.String(), nil
 }
 
-func catalogApplication() *billing.CatalogApplyParams {
-	return &billing.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
-		Products: []billing.CatalogApplyProduct{{Key: "post", DisplayName: billing.CatalogValue("Post")}}}
+func catalogApplication() *catalog.Application {
+	return &catalog.Application{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
+		Products: []catalog.ApplyProduct{{Key: "post", DisplayName: catalog.Value("Post")}}}
 }
 
 // Exactly one selector, a slug or an id, reaches both the OpenRails-Merchant
@@ -77,11 +78,11 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 	calls := map[string]func(opts []RequestOption) (string, error){
 		"GET /merchant/settings": func(o []RequestOption) (string, error) { return http.MethodGet, client.Verify(t.Context(), o...) },
 		"POST /merchant/catalog/applications": func(o []RequestOption) (string, error) {
-			_, err := client.Catalog.Apply(t.Context(), catalogApplication(), o...)
+			_, err := client.ApplyCatalog(t.Context(), catalogApplication(), o...)
 			return http.MethodPost, err
 		},
 		"GET /merchant/catalog/revision": func(o []RequestOption) (string, error) {
-			_, err := client.Catalog.Revision(t.Context(), o...)
+			_, err := client.GetCatalogRevision(t.Context(), o...)
 			return http.MethodGet, err
 		},
 		"GET /merchant/payments/" + billing.PaymentID(id).String(): func(o []RequestOption) (string, error) {
@@ -210,17 +211,16 @@ func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
 	})
 	owner, err := client.ForCatalogOwner("channel/é")
 	require.NoError(t, err)
-	require.NotSame(t, client.Catalog, owner.Catalog, "copied views rebind resources to their own parent")
-	_, err = owner.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post", DisplayName: "Post"})
+	_, err = owner.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post", DisplayName: "Post"})
 	require.NoError(t, err)
 
 	var denied *billing.StatusError
 	require.ErrorAs(t, owner.Verify(t.Context()), &denied)
 	require.Equal(t, http.StatusForbidden, denied.Status)
-	_, err = owner.Catalog.Apply(t.Context(), catalogApplication())
-	require.Error(t, err)
-	_, err = owner.Catalog.Revision(t.Context())
-	require.Error(t, err)
+	_, err = owner.ApplyCatalog(t.Context(), catalogApplication())
+	require.ErrorIs(t, err, billing.ErrDenied)
+	_, err = owner.GetCatalogRevision(t.Context())
+	require.ErrorIs(t, err, billing.ErrDenied)
 	_, err = owner.ForCatalogOwner("someone-else")
 	require.ErrorIs(t, err, billing.ErrDenied)
 	for _, subject := range []string{"", "a\x00b", "\xff"} {
@@ -249,7 +249,7 @@ func TestConcurrentSelectionDoesNotContaminate(t *testing.T) {
 			if i%2 == 1 {
 				slug, options = "bravo", []RequestOption{WithMerchant("bravo")}
 			}
-			product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: fmt.Sprintf("post-%d", i), DisplayName: "post"}, options...)
+			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: fmt.Sprintf("post-%d", i), DisplayName: "post"}, options...)
 			if err != nil || product.DisplayName != slug {
 				t.Errorf("operation for %s returned %+v, %v", slug, product, err)
 			}

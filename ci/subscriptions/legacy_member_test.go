@@ -144,11 +144,11 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	t.Helper()
 	w, client := l.w, l.w.client[l.tp]
 	ent := "content:legacy-other"
-	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "legacy-other-" + uuid.NewString()[:8], DisplayName: "Legacy extra", EntitlementsSpec: map[string]*int{ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-other-" + uuid.NewString()[:8], DisplayName: "Legacy extra", EntitlementsSpec: map[string]*int{ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	plan := "legacy_plan_" + uuid.NewString()[:8]
-	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(t, err)
 	start := w.clock.Now().Add(-5 * day)
@@ -156,8 +156,7 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: l.railCust, Plan: plan, Amount: "9.99", NextBilling: end})
 	customerID, err := billing.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
-	priceID, err := billing.ParsePriceID(price.ID)
-	require.NoError(t, err)
+	priceID := price.ID
 	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
 	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
 		Customers: []billing.DeclaredCustomer{{Customer: customerID}},

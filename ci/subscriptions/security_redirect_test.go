@@ -22,7 +22,7 @@ func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	method := c.saveCard("stripe", visa)
 	create := func(tp topology, success, cancel string) error {
 		_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
 			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
 			SuccessURL: success, CancelURL: cancel,
 		})

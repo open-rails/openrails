@@ -189,9 +189,6 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if deps.Runtime.UserSubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime user subscription service is required")
 	}
-	if deps.Runtime.PublicSubscriptionService == nil {
-		return nil, fmt.Errorf("server runtime public subscription service is required")
-	}
 	if deps.Runtime.AdminSubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime admin subscription service is required")
 	}

@@ -122,7 +122,7 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 
 // An import commits its members together with their access, so a converge
 // that runs the moment the import commits finds nothing to repair (the
-// derive.subscription.missing race behind the takeover-convergence flake).
+// derive.subscription.missing race).
 func TestLegacyImportConvergesAtCommit(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -136,7 +136,7 @@ func TestLegacyImportConvergesAtCommit(t *testing.T) {
 		return err
 	})
 	defer remove()
-	l := importTakeoverLegacy(t, w, embedded)
+	l := importLegacy(t, w, "nmi", embedded)
 	remove()
 	require.NotEmpty(t, res, "convergence ran at the import's commit")
 	for _, r := range res {

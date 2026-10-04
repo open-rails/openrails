@@ -4,8 +4,8 @@ One Client can make concurrent calls for multiple merchants. An operation is a
 normal synchronous Go call, with an optional merchant selector at the end:
 
 ```go
-product, err := client.Products.Create(ctx, params, openrails.WithMerchant("alpha"))
-price, err := client.Prices.Retrieve(ctx, priceID, openrails.WithMerchant("bravo"))
+product, err := client.CreateProduct(ctx, params, openrails.WithMerchant("alpha"))
+price, err := client.GetPrice(ctx, priceID, billing.GetPriceParams{}, openrails.WithMerchant("bravo"))
 ```
 
 Use `ForMerchantID(id)` when the caller already stores the stable merchant UUID.

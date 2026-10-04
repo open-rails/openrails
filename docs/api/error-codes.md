@@ -81,15 +81,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `delegated_token_revoked` | 401 | `authentication_error` | The delegated access token was revoked. |
 | `delegated_verification_unavailable` | 503 | `api_error` | Delegated tokens cannot be verified right now; retry. |
 | `email_unverified` | 403 | `authorization_error` | Creating a merchant needs a verified email. |
-| `engine_takeover_boundary_too_close` | 409 | `invalid_request_error` | The provider bills the next period too soon to take over before it. |
-| `engine_takeover_committed` | 409 | `invalid_request_error` | The provider schedule delete was already submitted; the takeover can only complete. |
-| `engine_takeover_conflict` | 409 | `invalid_request_error` | The idempotency key was used for another operation. |
-| `engine_takeover_in_flight` | 409 | `invalid_request_error` | The subscription has an unresolved provider operation. |
-| `engine_takeover_ineligible` | 409 | `invalid_request_error` | The subscription cannot be taken over. |
-| `engine_takeover_no_recurring_agreement` | 409 | `invalid_request_error` | The subscription has no verified recurring agreement on its vaulted card. |
-| `engine_takeover_not_found` | 404 | `invalid_request_error` | The subscription has no engine takeover. |
-| `engine_takeover_rate_limited` | 429 | `rate_limit_error` | The takeover batch reached its rate limit. |
-| `engine_takeover_unavailable` | 503 | `api_error` | Engine takeover is not available in this deployment. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_merchant_mismatch` | 403 | `authorization_error` | The credential's merchant is not the one this host serves. |
@@ -235,6 +226,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
 | `unknown_role` | 400 | `invalid_request_error` | The role is not one this merchant defines. |
 | `unsupported_media_type` | 415 | `invalid_request_error` | The request body is not application/json. |
+| `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
 | `usage_rate_card_invalid` | 400 | `invalid_request_error` | The usage rate card is invalid. |
 | `webhook_account_mismatch` | 400 | `invalid_request_error` | The webhook's account does not match its payload. |

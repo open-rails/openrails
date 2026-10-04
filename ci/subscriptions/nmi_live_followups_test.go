@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
@@ -47,46 +46,6 @@ func (w *world) subscriptionWindows(sub billing.SubscriptionID) []accessWindow {
 		out = append(out, a)
 	}
 	return out
-}
-
-// #1080 item 2: a takeover ends the legacy membership's access at the
-// boundary in its own transaction; convergence finds nothing to repair, and
-// the successor's first paid period grants from the boundary.
-func TestNMIEngineTakeoverBoundsLegacyAccess(t *testing.T) {
-	t.Parallel()
-	for _, tp := range []topology{embedded, remote} {
-		t.Run(string(tp), func(t *testing.T) {
-			t.Parallel()
-			w := newWorld(t)
-			w.armDestructive()
-			l := importTakeoverLegacy(t, w, tp)
-			end := l.periodEnd()
-			done := l.takeover("takeover-" + uuid.NewString())
-			require.Equal(t, "completed", done.Stage, "%+v", done)
-
-			windows := w.subscriptionWindows(l.sub)
-			require.NotEmpty(t, windows)
-			for _, win := range windows {
-				require.NotNil(t, win.end, "the legacy window is bounded by the takeover itself")
-				require.False(t, win.end.After(end), "legacy access ends at the boundary")
-			}
-			w.converge()
-			require.Empty(t, w.findingsAbout(l.sub), "nothing for convergence to repair on the legacy membership")
-			require.Empty(t, w.findingsAbout(*done.SuccessorSubscriptionID))
-			require.True(t, l.c.entitled(l.ent))
-
-			w.advance(end.Sub(w.clock.Now()) + time.Hour)
-			w.runRenewals()
-			w.until(func() bool { return w.subscription(tp, *done.SuccessorSubscriptionID).CurrentPeriodEndsAt.After(end) }, "the first engine renewal")
-			require.True(t, l.c.entitled(l.ent), "access continues from the boundary")
-			successor := w.subscriptionWindows(*done.SuccessorSubscriptionID)
-			require.NotEmpty(t, successor)
-			require.True(t, successor[0].start.Equal(end), "the successor grants from the boundary (%s vs %s)", successor[0].start, end)
-			w.converge()
-			require.Empty(t, w.findingsAbout(l.sub))
-			require.Empty(t, w.findingsAbout(*done.SuccessorSubscriptionID))
-		})
-	}
 }
 
 // #1080 item 4: importing a legacy book writes its access as the import's own

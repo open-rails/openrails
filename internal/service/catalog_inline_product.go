@@ -24,7 +24,7 @@ func (s *Service) catalogDatabase() *db.DB {
 // createPriceWithProduct owns the local product/price transaction. A natural
 // product key reuses an existing same-catalog product without changing labels;
 // each explicitly keyed immutable price can be retried concurrently.
-func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) createPriceWithProduct(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	if !req.ProductID.IsZero() || req.ProductKey != "" {
 		return nil, apperr.Invalidf("product_id, product_key and product_data are mutually exclusive")
 	}
@@ -34,14 +34,7 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 	if data.Key == "" || data.DisplayName == "" {
 		return nil, apperr.Invalidf("product_data requires key and display_name")
 	}
-	requested := billing.CatalogID{}
-	if data.CatalogID != "" {
-		var err error
-		requested, err = billing.ParseCatalogID(data.CatalogID)
-		if err != nil || requested.IsZero() {
-			return nil, apperr.Invalidf("invalid product_data.catalog_id")
-		}
-	}
+	requested := data.CatalogID
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -51,12 +44,12 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 	if err != nil {
 		return nil, err
 	}
-	var out *CatalogPrice
+	var out *billing.Price
 	err = s.catalogDatabase().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		scoped := *s
 		scoped.catalogTx = s.catalogDatabase().NewWithPgxTx(tx)
 		scoped.localCatalogOnly = true
-		product, err := scoped.EnsureProduct(ctx, CreateProductRequest{CatalogID: requested, Key: data.Key, DisplayName: data.DisplayName, Description: data.Description})
+		product, err := scoped.EnsureProduct(ctx, billing.CreateProductParams{CatalogID: requested, Key: data.Key, DisplayName: data.DisplayName, Description: data.Description})
 		if err != nil {
 			return err
 		}

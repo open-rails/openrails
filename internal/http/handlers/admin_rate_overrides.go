@@ -3,110 +3,95 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/billing"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// or#909 merchant-admin negotiated price overrides: per-customer rate cards
-// that replace the merchant-default card for a catalog meter, with an
-// optional included allowance netted before overage at rating time.
-// Admin surface — negotiated pricing is never self-serve.
+// Rate overrides are a customer's negotiated price for one meter, replacing
+// the meter's rate card when that customer's usage is rated. Merchant staff
+// set them; customers never do.
 
-// adminRateOverrideRequest is the PUT body. Price is the canonical
-// catalog.RatePrice charge-model JSON (same shape the catalog speaks);
-// allowance.included is the pre-overage quantity in the meter's raw unit.
-type AdminRateOverrideRequest struct {
-	Price     catalog.RatePrice  `json:"price" binding:"required"`
-	Allowance *catalog.Allowance `json:"allowance"`
-}
-
-// PutAdminRateOverride is PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}:
-// install (or replace) the payer's negotiated card for one meter. Idempotent.
-func PutAdminRateOverride(r *httprequest.Request) {
-	payer, err := parseServiceCustomerID(r.Param("customer_id"))
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+// SetRateOverride sets the customer's price for the path's meter.
+func SetRateOverride(r *httprequest.Request) {
+	customer, ok := rateOverrideCustomer(r)
+	if !ok {
 		return
 	}
-	meterKey := catalog.NormalizeKey(r.Param("meter_key"))
-	if meterKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
+	key, ok := meterKeyParam(r, "meter_key")
+	if !ok {
 		return
 	}
-	var req AdminRateOverrideRequest
-	if !r.BindJSON(&req) {
+	var params billing.SetRateOverrideParams
+	if !r.BindJSON(&params) {
 		return
 	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+	svc, ok := newAdminBillingService(r)
+	if !ok {
 		return
 	}
-	if err := svc.SetUsageRateCard(r.Request.Context(), billingservice.UsageRateCardInput{
-		Payer:     payer,
-		MeterKey:  meterKey,
-		Price:     req.Price,
-		Allowance: req.Allowance,
-	}); err != nil {
+	if err := svc.SetUsageRateCard(r.Request.Context(), billingservice.UsageRateCardInput{Payer: &customer, MeterKey: key, Price: params.Price, Allowance: params.Allowance}); err != nil {
 		writeMeteringError(r, err)
 		return
 	}
-	cards, err := svc.ListPayerRateCards(r.Request.Context(), *payer)
+	out, err := svc.GetPayerRateCard(r.Request.Context(), customer, key)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "override stored but read-back failed")
+		writeMeteringError(r, err)
 		return
 	}
-	for _, c := range cards {
-		if c.MeterKey == meterKey {
-			r.SuccessJSON(c)
-			return
-		}
-	}
-	r.ErrorJSON(http.StatusInternalServerError, "override stored but read-back failed")
+	r.JSON(http.StatusOK, out)
 }
 
-// ListAdminRateOverrides is GET /v1/merchant/customers/{customer_id}/rate-overrides.
-func ListAdminRateOverrides(r *httprequest.Request) {
-	payer, err := parseServiceCustomerID(r.Param("customer_id"))
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+// ListRateOverrides lists a customer's negotiated prices, by meter.
+func ListRateOverrides(r *httprequest.Request) {
+	customer, ok := rateOverrideCustomer(r)
+	if !ok {
 		return
 	}
-	svc, err := billingservice.New(r.State)
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.ListPayerRateCards(r.Request.Context(), customer, page)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		writeMeteringError(r, err)
 		return
 	}
-	cards, err := svc.ListPayerRateCards(r.Request.Context(), *payer)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list rate overrides")
-		return
-	}
-	r.SuccessJSON(cards)
+	r.JSON(http.StatusOK, out)
 }
 
-// DeleteAdminRateOverride is DELETE /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}:
-// drop the negotiated card, restoring the merchant default for future rating.
-func DeleteAdminRateOverride(r *httprequest.Request) {
-	payer, err := parseServiceCustomerID(r.Param("customer_id"))
-	if err != nil || payer == nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+// DeleteRateOverride removes a customer's negotiated price; the meter's rate
+// card prices their usage again.
+func DeleteRateOverride(r *httprequest.Request) {
+	customer, ok := rateOverrideCustomer(r)
+	if !ok {
 		return
 	}
-	meterKey := catalog.NormalizeKey(r.Param("meter_key"))
-	if meterKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
+	key, ok := meterKeyParam(r, "meter_key")
+	if !ok {
 		return
 	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+	svc, ok := newAdminBillingService(r)
+	if !ok {
 		return
 	}
-	if err := svc.DeletePayerRateCard(r.Request.Context(), *payer, meterKey); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to delete rate override")
+	if err := svc.DeletePayerRateCard(r.Request.Context(), customer, key); err != nil {
+		writeMeteringError(r, err)
 		return
 	}
-	r.SuccessJSONMessage("rate override removed (merchant default restored)")
+	r.Status(http.StatusNoContent)
+}
+
+func rateOverrideCustomer(r *httprequest.Request) (identity.CustomerID, bool) {
+	customer, err := parseServiceCustomerID(r.Param("customer_id"))
+	if err != nil || customer == nil {
+		r.APIError(invalidParam("customer_id", "invalid customer_id"))
+		return identity.CustomerID{}, false
+	}
+	return *customer, true
 }

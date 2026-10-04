@@ -37,8 +37,7 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	sale := w.nmi.AddScheduleSale(railSub, start)
 	customerID, err := billing.ParseCustomerID(c.id)
 	require.NoError(t, err)
-	priceID, err := billing.ParsePriceID(price.ID)
-	require.NoError(t, err)
+	priceID := price.ID
 	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
 	result, err := w.client[tp].ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
 		Customers:      []billing.DeclaredCustomer{{Customer: customerID}},
@@ -86,7 +85,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			end := l.periodEnd()
 			sales := len(l.tierSales())
 
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
 			require.Equal(t, "now", preview.Effective)
 			require.Positive(t, preview.AmountDueNow)
@@ -97,7 +96,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Contains(t, preview.Message, fmt.Sprintf("$%d.%02d now", charged/100, charged%100), "money in the currency's minor units")
 			require.Contains(t, preview.Message, end.UTC().Format("January 2, 2006"))
 			key := "up-" + uuid.NewString()
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -116,13 +115,13 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Zero(t, w.nmi.scheduleWrites(), "no second schedule, no delete")
 
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, next.ID, sub.PriceID)
+			require.Equal(t, next.ID.String(), sub.PriceID)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end))
 			require.True(t, l.c.entitled(next.ent), "the new tier is granted now")
 			require.False(t, l.c.entitled(old.ent), "the old tier ends now")
 
 			// Replay: the same key answers the same result and sends nothing.
-			again, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
+			again, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
 			require.Equal(t, done.AmountDueNow, again.AmountDueNow)
 			require.Len(t, l.tierSales(), sales+1)
@@ -140,7 +139,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Equal(t, int64(1999), ledger[len(ledger)-1].Amount)
 			require.Equal(t, w.nmiCharges(l.railCust), w.localCharges(tp, l.c.id), "one local payment per NMI sale")
 			sub = w.subscription(tp, l.sub)
-			require.Equal(t, next.ID, sub.PriceID)
+			require.Equal(t, next.ID.String(), sub.PriceID)
 			require.True(t, sub.CurrentPeriodEndsAt.After(end))
 			require.True(t, l.c.entitled(next.ent))
 			require.Zero(t, w.nmi.scheduleWrites())
@@ -158,11 +157,11 @@ func TestLegacyNMITierChange(t *testing.T) {
 			end := l.periodEnd()
 			sales := len(l.tierSales())
 
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: lower.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: lower.ID.String()})
 			require.NoError(t, err)
 			require.Equal(t, "period_end", preview.Effective)
 			require.Zero(t, preview.AmountDueNow)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "down-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: lower.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "down-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: lower.ID.String()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -173,9 +172,9 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Equal(t, lower.plan, updates[0].Form.Get("plan_id"))
 			require.Equal(t, "4.99", w.nmi.Schedule(l.railSub).Amount, "NMI bills the lower amount from its next renewal")
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, old.ID, sub.PriceID, "the paid period keeps its tier")
+			require.Equal(t, old.ID.String(), sub.PriceID, "the paid period keeps its tier")
 			require.NotNil(t, sub.ScheduledPriceID)
-			require.Equal(t, lower.ID, *sub.ScheduledPriceID)
+			require.Equal(t, lower.ID.String(), *sub.ScheduledPriceID)
 			require.True(t, l.c.entitled(old.ent))
 
 			w.pull()
@@ -186,7 +185,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			ledger := l.tierSales()
 			require.Equal(t, int64(499), ledger[len(ledger)-1].Amount)
 			sub = w.subscription(tp, l.sub)
-			require.Equal(t, lower.ID, sub.PriceID, "the renewal opens the lower tier")
+			require.Equal(t, lower.ID.String(), sub.PriceID, "the renewal opens the lower tier")
 			require.Nil(t, sub.ScheduledPriceID)
 			require.True(t, sub.CurrentPeriodEndsAt.After(end))
 			require.True(t, l.c.entitled(lower.ent))
@@ -210,7 +209,7 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			l := w.legacyOnTier(tp, old, 999, monthHours, 10*day)
 			sales := len(l.tierSales())
 			w.nmi.SetDecline(visa.Last4, "202")
-			_, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
+			_, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID.String()})
 			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "%v", err)
 			require.Equal(t, http.StatusPaymentRequired, status.Status, "%v", err)
@@ -219,13 +218,13 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
 			require.Equal(t, "9.99", w.nmi.Schedule(l.railSub).Amount)
 			sub := w.subscription(tp, l.sub)
-			require.Equal(t, old.ID, sub.PriceID)
+			require.Equal(t, old.ID.String(), sub.PriceID)
 			require.Nil(t, sub.ScheduledPriceID)
 			require.True(t, l.c.entitled(old.ent))
 			require.False(t, l.c.entitled(next.ent))
 			rows := w.attempts(l.c.id)
 			require.Len(t, rows, 1, "the refused proration is one attempt")
-			require.Equal(t, []string{"upgrade", "nmi_schedule", "saved", "insufficient_funds", strings.TrimPrefix(next.ID, "price_")}, []string{rows[0].Kind, rows[0].Owner, rows[0].CardEntry, str(rows[0].Reason), str(rows[0].Target)})
+			require.Equal(t, []string{"upgrade", "nmi_schedule", "saved", "insufficient_funds", strings.TrimPrefix(next.ID.String(), "price_")}, []string{rows[0].Kind, rows[0].Owner, rows[0].CardEntry, str(rows[0].Reason), str(rows[0].Target)})
 			require.NotEmpty(t, str(rows[0].TransactionID))
 		})
 	}
@@ -249,7 +248,7 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 			sales := len(l.tierSales())
 			w.nmi.FailScheduleUpdates(row.fails)
 			key := "up-" + uuid.NewString()
-			_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
+			_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
 			w.settle()
 			if row.name == "stuck" {
@@ -257,10 +256,10 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 				require.Contains(t, w.openFindings(tierUpdateStuck), l.sub.UUID().String())
 				require.Len(t, l.tierSales(), sales+1, "one charge while the update is stuck")
 				require.Equal(t, "9.99", w.nmi.Schedule(l.railSub).Amount)
-				require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID, "the local change waits for NMI")
+				require.Equal(t, old.ID.String(), w.subscription(embedded, l.sub).PriceID, "the local change waits for NMI")
 				w.nmi.FailScheduleUpdates(0)
 			}
-			w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the schedule update converges")
+			w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID.String() }, "the schedule update converges")
 			require.Len(t, l.tierSales(), sales+1, "exactly one charge")
 			require.Equal(t, "19.99", w.nmi.Schedule(l.railSub).Amount)
 			require.GreaterOrEqual(t, len(w.nmi.ScheduleUpdates(l.railSub)), 2, "the failed update was retried")
@@ -293,7 +292,7 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = client.ChangeTier(context.WithoutCancel(t.Context()), l.sub, fmt.Sprintf("race-%d-%s", i, uuid.NewString()), billing.ChangeTierRequest{PriceID: next.ID})
+			_, errs[i] = client.ChangeTier(context.WithoutCancel(t.Context()), l.sub, fmt.Sprintf("race-%d-%s", i, uuid.NewString()), billing.ChangeTierRequest{PriceID: next.ID.String()})
 		}()
 	}
 	wg.Wait()
@@ -308,7 +307,7 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 		}
 	}
 	require.LessOrEqual(t, refused, 1)
-	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "one tier change applies")
+	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID.String() }, "one tier change applies")
 	require.Len(t, l.tierSales(), sales+1, "one proration charge across replicas")
 	require.Len(t, w.nmi.ScheduleUpdates(l.railSub), 1, "one schedule update")
 	require.Zero(t, w.nmi.scheduleWrites())
@@ -325,15 +324,15 @@ func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	sales := len(l.tierSales())
 	for _, tp := range []topology{embedded, remote} {
-		_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: weekly.ID})
+		_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: weekly.ID.String()})
 		requireCode(t, err, http.StatusConflict, billing.CodeTierChangeCadenceUnsupported)
-		_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: weekly.ID})
+		_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: weekly.ID.String()})
 		requireCode(t, err, http.StatusConflict, billing.CodeTierChangeCadenceUnsupported)
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales)
 	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
-	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
+	require.Equal(t, old.ID.String(), w.subscription(embedded, l.sub).PriceID)
 }
 
 // accessEndedNotices counts premium_ended notifications queued for a customer.
@@ -358,16 +357,16 @@ func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 	sales := len(l.tierSales())
 	for _, target := range []tier{unlinked, lower} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: target.ID})
+			_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: target.ID.String()})
 			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRequiresLinkedPlan)
-			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID})
+			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID.String()})
 			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRequiresLinkedPlan)
 		}
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales, "nothing charged")
 	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub), "nothing sent to NMI")
-	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
+	require.Equal(t, old.ID.String(), w.subscription(embedded, l.sub).PriceID)
 	require.True(t, l.c.entitled(old.ent))
 }
 
@@ -386,9 +385,9 @@ func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
 			w.nmi.customSchedule(l.railSub)
 			end := l.periodEnd()
 			sales := len(l.tierSales())
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID.String()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -401,7 +400,7 @@ func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
 			state := w.nmi.Schedule(l.railSub)
 			require.Equal(t, "19.99", state.Amount)
 			require.True(t, state.NextBilling.Equal(end))
-			require.Equal(t, next.ID, w.subscription(tp, l.sub).PriceID)
+			require.Equal(t, next.ID.String(), w.subscription(tp, l.sub).PriceID)
 			require.True(t, l.c.entitled(next.ent))
 			require.Zero(t, w.nmi.scheduleWrites())
 		})
@@ -422,7 +421,7 @@ func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
 	w.nmi.customSchedule(l.railSub)
 	sales := len(l.tierSales())
 	w.nmi.FailScheduleUpdates(1000)
-	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
+	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID.String()})
 	require.NoError(t, err)
 	w.settle()
 	w.until(func() bool { return len(w.openFindings(tierUpdateStuck)) > 0 }, "the stuck update raises a finding")
@@ -430,7 +429,7 @@ func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
 	// The schedule turns out to be on a named plan: NMI ignores plan_amount.
 	w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.Custom, s.Plan = false, old.plan })
 	w.nmi.FailScheduleUpdates(0)
-	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the operation converges on the linked plan")
+	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID.String() }, "the operation converges on the linked plan")
 	state := w.nmi.Schedule(l.railSub)
 	require.Equal(t, next.plan, state.Plan)
 	require.Equal(t, "19.99", state.Amount)

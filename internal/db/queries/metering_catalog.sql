@@ -125,11 +125,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text
   AND customer_id IS NULL;
 
--- name: CountUsageMeters :one
-SELECT count(*)
-FROM billing.catalog_meters
-WHERE merchant_id = sqlc.arg(merchant_id);
-
 -- name: ListUsageMetersWithCatalog :many
 WITH activity AS (
     SELECT event_type, count(*) AS event_count, max(occurred_at) AS last_event_at
@@ -175,8 +170,9 @@ LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
 WHERE meter.merchant_id = sqlc.arg(merchant_id)
+  AND (sqlc.narg(after_key)::text IS NULL OR meter.key > sqlc.narg(after_key)::text)
 ORDER BY meter.key
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetUsageMeterWithCatalog :one
 WITH activity AS (
@@ -241,18 +237,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id IS NOT NULL;
 
 -- name: ListUsageMeterOverrides :many
+-- One keyset page of a meter's customer overrides, by customer.
 SELECT card.customer_id,
-       card.customer_id::text AS subject,
-       COALESCE((
-           SELECT BTRIM(subscription.user_email)
-           FROM billing.subscriptions subscription
-           WHERE subscription.merchant_id = card.merchant_id
-             AND subscription.customer_id = card.customer_id
-             AND subscription.deleted_at IS NULL
-             AND NULLIF(BTRIM(subscription.user_email), '') IS NOT NULL
-           ORDER BY subscription.created_at DESC, subscription.id DESC
-           LIMIT 1
-       ), '') AS email,
+       card.meter_key,
        card.price,
        card.allowance,
        card.created_at,
@@ -261,8 +248,9 @@ FROM billing.catalog_rate_cards card
 WHERE card.merchant_id = sqlc.arg(merchant_id)
   AND card.meter_key = sqlc.arg(meter_key)::text
   AND card.customer_id IS NOT NULL
-ORDER BY card.updated_at DESC, card.customer_id
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+  AND (sqlc.narg(after_customer)::uuid IS NULL OR card.customer_id > sqlc.narg(after_customer)::uuid)
+ORDER BY card.customer_id
+LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: LockUsageEventsForMeterCorrection :exec
 LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE;

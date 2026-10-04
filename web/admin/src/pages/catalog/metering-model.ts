@@ -1,10 +1,10 @@
 import type {
-  CustomerUsageRateOverride,
-  DefaultUsageRateCard,
-  UsageAllowance,
-  UsageMeter,
-  UsageRatePrice,
-} from "@/lib/api/types"
+  Allowance,
+  Meter,
+  MeterRateCard,
+  RateOverride,
+  RatePrice,
+} from "@/lib/api/generated/wire"
 import type {
   CustomerUsageRateOverrideRequest,
   DefaultUsageRateCardRequest,
@@ -84,15 +84,15 @@ export type MeterCollectionState =
   "loading" | "permission" | "error" | "empty" | "ready"
 
 export function customerUsageRateRows(
-  meters: UsageMeter[],
-  overrides: CustomerUsageRateOverride[]
-): Array<{ meter: UsageMeter; override?: CustomerUsageRateOverride }> {
+  meters: Meter[],
+  overrides: RateOverride[]
+): Array<{ meter: Meter; override?: RateOverride }> {
   const overridesByMeter = new Map(
     overrides.map((override) => [override.meter_key, override])
   )
   return meters
     .filter(
-      (meter) => meter.billing_supported && Boolean(meter.default_rate_card)
+      (meter) => meter.billing_supported && Boolean(meter.rate_card)
     )
     .map((meter) => ({ meter, override: overridesByMeter.get(meter.key) }))
     .sort((left, right) => left.meter.key.localeCompare(right.meter.key))
@@ -118,7 +118,7 @@ export function normalizeMeterKey(value: string): string {
     .replace(/^[-_]+|[-_]+$/g, "")
 }
 
-export function meterFormValues(meter?: UsageMeter): MeterFormValues {
+export function meterFormValues(meter?: Meter): MeterFormValues {
   return {
     key: meter?.key ?? "",
     eventType: meter?.event_type ?? "",
@@ -157,7 +157,7 @@ export function buildMeterRequest(values: MeterFormValues): {
 }
 
 export function rateCardFormValues(
-  card?: DefaultUsageRateCard
+  card?: Pick<MeterRateCard, "product_id" | "filter" | "price" | "allowance"> | null
 ): RateCardFormValues {
   const price = card?.price
   const matrix = price?.per_unit?.matrix
@@ -170,7 +170,7 @@ export function rateCardFormValues(
   const currency = price?.currency ?? "USD"
   return {
     productId: card?.product_id ?? "",
-    model: price?.model ?? "per_unit",
+    model: price?.model && price.model !== "flat" ? price.model : "per_unit",
     currency,
     unitAmount: moneyToInput(currency, price?.per_unit?.unit_amount),
     divideBy: integerToInput(price?.per_unit?.divide_by, "1"),
@@ -209,8 +209,8 @@ export function rateCardFormValues(
 }
 
 export function negotiatedRateFormValues(
-  defaultCard: DefaultUsageRateCard,
-  override?: CustomerUsageRateOverride
+  defaultCard: MeterRateCard,
+  override?: RateOverride
 ): RateCardFormValues {
   return rateCardFormValues({
     ...defaultCard,
@@ -253,7 +253,7 @@ export function negotiatedRateRequest(
 function buildPrice(
   values: RateCardFormValues,
   currency: string
-): UsageRatePrice {
+): RatePrice {
   if (values.model === "per_unit") {
     const divideBy = positiveInteger(
       values.divideBy,
@@ -275,7 +275,7 @@ function buildPrice(
         rateCardError("matrix-add-cell", "Add at least one matrix cell.")
       }
       const cells: NonNullable<
-        NonNullable<UsageRatePrice["per_unit"]>["matrix"]
+        NonNullable<RatePrice["per_unit"]>["matrix"]
       >["cells"] = {}
       for (const [index, row] of values.matrixCells.entries()) {
         const key = row.key.trim()
@@ -435,7 +435,7 @@ function buildPrice(
 
 function buildAllowance(
   values: RateCardFormValues
-): UsageAllowance | undefined {
+): Allowance | undefined {
   if (values.allowanceMode === "none") return undefined
   if (values.allowanceMode === "included") {
     return {
@@ -566,26 +566,29 @@ function integerToInput(value?: number, fallback = ""): string {
   return value ? String(value) : fallback
 }
 
-export function summarizeRateCard(card?: DefaultUsageRateCard): string {
+export function summarizeRateCard(card?: MeterRateCard | null): string {
   if (!card) return "Not priced"
   const { price } = card
+  const currency = price.currency ?? ""
   if (price.model === "per_unit" && price.per_unit) {
     if (price.per_unit.matrix) {
-      return `${Object.keys(price.per_unit.matrix.cells).length} matrix rates · ${price.currency}`
+      return `${Object.keys(price.per_unit.matrix.cells ?? {}).length} matrix rates · ${currency}`
     }
-    return `${formatNativeAmount(price.per_unit.unit_amount ?? "0", price.currency)} per ${price.per_unit.divide_by || 1} units`
+    return `${formatNativeAmount(price.per_unit.unit_amount ?? "0", currency)} per ${price.per_unit.divide_by || 1} units`
   }
   if (price.model === "tiered" && price.tiered) {
-    return `${price.tiered.tiers.length} ${price.tiered.mode} tiers · ${price.currency}`
+    return `${price.tiered.tiers?.length ?? 0} ${price.tiered.mode} tiers · ${currency}`
   }
   if (price.model === "package" && price.package) {
-    return `${formatNativeAmount(price.package.amount, price.currency)} per ${price.package.package_size.toLocaleString()} units`
+    return `${formatNativeAmount(price.package.amount ?? "0", currency)} per ${(price.package.package_size ?? 1).toLocaleString()} units`
   }
-  return `Unsupported price · ${price.currency}`
+  return `Unsupported price · ${currency}`
 }
 
-export function meterDefinitionLocked(meter: UsageMeter): string | null {
-  if (!meter.writes_allowed) return "Catalog updates are disabled."
+// meterDefinitionLocked says why a meter's definition cannot change, given
+// whether this deployment accepts catalog writes.
+export function meterDefinitionLocked(meter: Meter, writesAllowed: boolean): string | null {
+  if (!writesAllowed) return "Catalog updates are disabled."
   if (meter.has_activity) return "Meter definitions lock after the first event."
   return null
 }

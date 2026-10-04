@@ -51,10 +51,10 @@ func (w *world) callAt(server, token, method, path, key string, body any) (int, 
 func (w *world) finitePass(entitlement string) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: "pass-" + uuid.NewString()[:8], DisplayName: "Pass", EntitlementsSpec: map[string]*int{entitlement: nil}})
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "pass-" + uuid.NewString()[:8], DisplayName: "Pass", EntitlementsSpec: map[string]*int{entitlement: nil}})
 	require.NoError(w.t, err)
 	hours := monthHours
-	price, err := client.Prices.Create(w.t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD", AccessDurationHours: &hours})
+	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD", AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
@@ -62,7 +62,7 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 func (c *customer) buyWith(rail, method string, price *billing.Price, kind billing.OfferKind, entitlement string) {
 	c.w.t.Helper()
 	_, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), billing.CreateCheckoutSessionRequest{
-		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID,
+		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID.String(),
 		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
@@ -151,7 +151,7 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		var wg sync.WaitGroup
 		change := func(client *openrails.Client, target tier) {
 			defer wg.Done()
-			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID})
+			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID.String()})
 			t.Logf("upgrade to %s: %v", target.ent, err)
 		}
 		wg.Add(1)
@@ -177,7 +177,7 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		for _, s := range subs.Data {
 			if s.Status == "active" {
 				live++
-				require.Equal(t, plus.ID, s.PriceID)
+				require.Equal(t, plus.ID.String(), s.PriceID)
 			}
 		}
 		require.Equal(t, 1, live, "one live membership")
@@ -196,12 +196,12 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 	loose := w.membership("content:loose", 30_000_000)
 	c, sub := w.engineMember("nmi", embedded, basic)
 	other := w.newCustomer()
-	looseSub := other.subscribe(embedded, "nmi", loose.ID, "content:loose", other.saveCard("nmi", visa))
+	looseSub := other.subscribe(embedded, "nmi", loose.ID.String(), "content:loose", other.saveCard("nmi", visa))
 	charges := len(w.railLedger("nmi"))
 	for _, tc := range []struct {
 		sub    billing.SubscriptionID
 		target string
-	}{{sub, loose.ID}, {looseSub, basic.ID}} {
+	}{{sub, loose.ID.String()}, {looseSub, basic.ID.String()}} {
 		for _, tp := range []topology{embedded, remote} {
 			_, err := w.client[tp].ChangeTier(t.Context(), tc.sub, "cross-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target})
 			require.Error(t, err)
@@ -318,12 +318,12 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		client := rt
-		product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", EntitlementsSpec: map[string]*int{"content:live": nil}})
+		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", EntitlementsSpec: map[string]*int{"content:live": nil}})
 		require.NoError(t, err)
-		price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
 		_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
+			Customer: billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "live@example.test"}, PriceID: price.ID.String(), Entitlement: "content:live",
 			OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 		})

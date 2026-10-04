@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -25,18 +26,15 @@ const (
 	CollectionSendInvoice         = money.CollectionSendInvoice
 )
 
-// UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
-type UsageMeterSpec = billing.UsageMeterSpec
-
-// EnsureUsageMeter idempotently declares a host-owned catalog meter.
-func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
+// EnsureUsageMeter idempotently declares a catalog meter.
+func (s *Service) EnsureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		return struct{}{}, scoped.ensureUsageMeter(ctx, spec)
 	})
 	return err
 }
 
-func (s *Service) ensureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
+func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -46,14 +44,7 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec UsageMeterSpec) err
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, money.UsageMeterSpec{
-		Key:           spec.Key,
-		EventType:     spec.EventType,
-		ValueProperty: spec.ValueProperty,
-		Aggregation:   spec.Aggregation,
-		Unit:          spec.Unit,
-		GroupBy:       spec.GroupBy,
-	})
+	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec)
 }
 
 // UsageRateCardInput declares an in_arrears usage rate card. Payer nil = the
@@ -126,43 +117,30 @@ func (s *Service) deleteDefaultUsageRateCard(ctx context.Context, meterKey strin
 	return money.NewMoneyService(s.catalogDatabase()).DeleteDefaultUsageRateCard(ctx, meterKey)
 }
 
-// PayerRateCardDTO is one negotiated per-payer override (or#909): the price
-// (and optional included allowance, netted before overage) applied over the
-// merchant-default card for MeterKey when rating this payer.
-type PayerRateCardDTO struct {
-	MeterKey  string             `json:"meter_key"`
-	Price     catalog.RatePrice  `json:"price"`
-	Allowance *catalog.Allowance `json:"allowance,omitempty"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
+// ListPayerRateCards returns one page of a customer's rate overrides.
+func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.CustomerID, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return billing.ListPage[billing.RateOverride]{}, pinErr
+	}
+	defer release()
+	if s == nil || s.rt == nil {
+		return billing.ListPage[billing.RateOverride]{}, fmt.Errorf("service not initialized")
+	}
+	return s.moneyService().ListPayerRateCards(ctx, payer, page)
 }
 
-// ListPayerRateCards returns a payer's negotiated overrides.
-func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.CustomerID) ([]PayerRateCardDTO, error) {
+// GetPayerRateCard reads a customer's rate override for one meter.
+func (s *Service) GetPayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) (*billing.RateOverride, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
 	}
 	defer release()
-
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	rows, err := s.moneyService().ListPayerRateCards(ctx, payer)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]PayerRateCardDTO, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, PayerRateCardDTO{
-			MeterKey:  r.MeterKey,
-			Price:     r.Price,
-			Allowance: r.Allowance,
-			CreatedAt: r.CreatedAt,
-			UpdatedAt: r.UpdatedAt,
-		})
-	}
-	return out, nil
+	return s.moneyService().GetPayerRateCard(ctx, payer, meterKey)
 }
 
 // DeletePayerRateCard removes a payer's negotiated override for a meter.

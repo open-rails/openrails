@@ -25,7 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { UsageMeter } from "@/lib/api/types"
+import type {
+  Meter,
+} from "@/lib/api/generated/wire"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
@@ -35,12 +37,18 @@ import {
   meterFormValues,
 } from "./metering-model"
 
-export function MeterFormDialog({ meter }: { meter?: UsageMeter }) {
+export function MeterFormDialog({
+  meter,
+  writesAllowed,
+}: {
+  meter?: Meter
+  writesAllowed: boolean
+}) {
   const [open, setOpen] = React.useState(false)
   const [submitError, setSubmitError] = React.useState("")
   const queryClient = useQueryClient()
   const save = useMutation(adminMutations.putUsageMeter(queryClient))
-  const locked = meter ? meterDefinitionLocked(meter) : null
+  const locked = meter ? meterDefinitionLocked(meter, writesAllowed) : null
   const form = useForm({
     defaultValues: meterFormValues(meter),
     onSubmit: async ({ value }) => {

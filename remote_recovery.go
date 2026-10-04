@@ -107,7 +107,7 @@ func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionI
 	if err != nil {
 		return nil, err
 	}
-	if _, err := resourcePriceID(request.PriceID); err != nil {
+	if _, err := requirePriceID(request.PriceID); err != nil {
 		return nil, err
 	}
 	var out billing.TierChangePreviewResponse
@@ -124,7 +124,7 @@ func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, key 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := resourcePriceID(request.PriceID); err != nil {
+	if _, err := requirePriceID(request.PriceID); err != nil {
 		return nil, err
 	}
 	var out billing.TierChangeResponse

@@ -13,7 +13,6 @@ import { zh } from "../locales/zh"
 import {
   accessLabel,
   everyLabel,
-  intervalHours,
   perLabel,
   periodOf,
 } from "./period"
@@ -37,13 +36,6 @@ describe("periodOf", () => {
 
   it.each([0, -24, 1.5, null, undefined, Number.NaN])("rejects %s", (h) => {
     expect(periodOf(h)).toBeNull()
-  })
-
-  it("parses OpenRails intervals", () => {
-    expect(intervalHours("720h")).toBe(720)
-    expect(intervalHours("720h0m0s")).toBe(720)
-    expect(intervalHours("30d")).toBeNull()
-    expect(intervalHours(null)).toBeNull()
   })
 })
 

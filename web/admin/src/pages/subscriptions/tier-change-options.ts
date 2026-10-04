@@ -1,16 +1,18 @@
 import type {
-  CatalogPrice,
-  CatalogProduct,
   Rail,
   SubscriptionStatus,
 } from "@/lib/api/types"
+import type {
+  Price,
+  Product,
+} from "@/lib/api/generated/wire"
 import { formatNativeAmount } from "@/lib/format"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 
 export interface TierChangeOption {
   direction: "upgrade" | "downgrade"
-  price: CatalogPrice
-  product: CatalogProduct
+  price: Price
+  product: Product
 }
 
 export function tierChangeOptionLabel(option: TierChangeOption): string {
@@ -53,10 +55,10 @@ export function tierChangeOptions({
   products,
   prices,
 }: {
-  currentProduct?: CatalogProduct
+  currentProduct?: Product
   currentCurrency?: string
-  products: CatalogProduct[]
-  prices: CatalogPrice[]
+  products: Product[]
+  prices: Price[]
 }): TierChangeOption[] {
   const tierGroup = currentProduct?.tier_group?.trim()
   const currency = currentCurrency?.trim().toLowerCase()

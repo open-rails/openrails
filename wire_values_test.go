@@ -40,8 +40,8 @@ func TestCurrencyRegistry(t *testing.T) {
 
 func TestHostedCheckoutPlanStampsRegistryScale(t *testing.T) {
 	hours := 720
-	product := &billing.Product{ID: billing.ProductID(uuid.New()).String(), DisplayName: "Premium"}
-	price := &billing.Price{ID: billing.PriceID(uuid.New()).String(), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
+	product := &billing.Product{ID: billing.ProductID(uuid.New()), DisplayName: "Premium"}
+	price := &billing.Price{ID: billing.PriceID(uuid.New()), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
 	plan, err := billing.NewHostedCheckoutPlan(product, price)
 	require.NoError(t, err)
 	require.Equal(t, billing.HostedCheckoutPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, PeriodHours: &hours, AutomaticallyRenews: true}, plan)

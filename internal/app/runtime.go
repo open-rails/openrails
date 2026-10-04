@@ -153,11 +153,9 @@ type Runtime struct {
 	// composition root alongside the other write-through producers.
 	PaymentSourceUpdateIntents *intents.PaymentSourceUpdateThrough
 	ProviderCutovers           *intents.NMIProviderCutover
-	EngineTakeovers            *intents.NMIEngineTakeover
 
-	UserSubscriptionService   *subscriptions.UserSubscriptionService
-	PublicSubscriptionService *catalog.PublicSubscriptionService
-	AdminSubscriptionService  *subscriptions.AdminSubscriptionService
+	UserSubscriptionService  *subscriptions.UserSubscriptionService
+	AdminSubscriptionService *subscriptions.AdminSubscriptionService
 
 	EmailService *subscriptions.EmailService
 

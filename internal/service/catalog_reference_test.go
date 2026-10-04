@@ -16,7 +16,7 @@ import (
 )
 
 func TestNMICatalogReferencePreflightRejectsMismatch(t *testing.T) {
-	req := CreatePriceRequest{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
+	req := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
 	for _, remote := range []string{nmiPlanJSON("known", "23.00", "0"), nmiPlanJSON("known", "23.00", "31"), nmiPlanJSON("known", "19.00", "30")} {
 		srv, creates := fakeNMIPlans(t, map[string]string{"known": remote})
 		_, err := verifyNMICatalogReference(nmiCatalogCtx(), newMobiusAdapterWithServer(srv.URL), "mobius", req, map[string]string{"plan_id": "known"})
@@ -41,7 +41,7 @@ func TestStripeCatalogReferencePreflight(t *testing.T) {
 		t.Cleanup(srv.Close)
 		return srv.URL
 	}
-	monthly := CreatePriceRequest{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
+	monthly := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
 	adapter := newStripeAdapterWithServer(serve(t, `{"id":"price_existing","product":"prod_existing","unit_amount":2300,"currency":"usd","active":true,"recurring":{"interval":"month","interval_count":1}}`))
 	out, err := verifyStripeCatalogReference(t.Context(), adapter, "", monthly, map[string]string{"price_id": "price_existing"})
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestStripeCatalogReferencePreflight(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"id":"price_precision","product":"prod_precision","unit_amount":%d,"currency":%q,"active":true}`, tc.remoteMinor, strings.ToLower(tc.currency))
-			_, err := verifyStripeCatalogReference(t.Context(), newStripeAdapterWithServer(serve(t, body)), "", CreatePriceRequest{Currency: tc.currency, UnitAmount: tc.native}, map[string]string{"price_id": "price_precision"})
+			_, err := verifyStripeCatalogReference(t.Context(), newStripeAdapterWithServer(serve(t, body)), "", billing.CreatePriceParams{Currency: tc.currency, UnitAmount: tc.native}, map[string]string{"price_id": "price_precision"})
 			if tc.ok {
 				require.NoError(t, err)
 			} else {
@@ -88,33 +88,39 @@ func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
 	product, price := billing.ProductID(uuid.New()), billing.PriceID(uuid.New())
 	for name, call := range map[string]func() error{
 		"create entitlements": func() error {
-			_, err := svc.CreateProduct(ctx, CreateProductRequest{EntitlementsSpec: map[string]*int{}})
+			_, err := svc.CreateProduct(ctx, billing.CreateProductParams{EntitlementsSpec: map[string]*int{}})
 			return err
 		},
-		"create tier": func() error { _, err := svc.CreateProduct(ctx, CreateProductRequest{TierGroup: &tier}); return err },
+		"create tier": func() error {
+			_, err := svc.CreateProduct(ctx, billing.CreateProductParams{TierGroup: &tier})
+			return err
+		},
 		"patch entitlements": func() error {
-			_, err := svc.UpdateProduct(ctx, product, UpdateProductRequest{SetEntitlements: true})
+			_, err := svc.patchProduct(ctx, product, UpdateProductRequest{SetEntitlements: true})
 			return err
 		},
 		"patch tier rank": func() error {
-			_, err := svc.UpdateProduct(ctx, product, UpdateProductRequest{TierRank: &rank})
+			_, err := svc.patchProduct(ctx, product, UpdateProductRequest{TierRank: &rank})
 			return err
 		},
 		"skip product sync": func() error {
-			_, err := svc.UpdateProduct(ctx, product, UpdateProductRequest{SkipRailSync: true})
+			_, err := svc.patchProduct(ctx, product, UpdateProductRequest{SkipRailSync: true})
 			return err
 		},
-		"choose PSP": func() error { _, err := svc.CreatePrice(ctx, CreatePriceRequest{PSPs: []string{"stripe"}}); return err },
+		"choose PSP": func() error {
+			_, err := svc.CreatePrice(ctx, billing.CreatePriceParams{PSPs: []string{"stripe"}})
+			return err
+		},
 		"attach PSP": func() error {
-			_, err := svc.CreatePrice(ctx, CreatePriceRequest{PSPLinks: map[string]map[string]string{}})
+			_, err := svc.CreatePrice(ctx, billing.CreatePriceParams{PSPLinks: map[string]map[string]string{}})
 			return err
 		},
-		"replace PSP": func() error {
-			_, err := svc.UpdatePrice(ctx, price, UpdatePriceRequest{ReplacePSPLinks: true})
+		"link PSP": func() error {
+			_, err := svc.patchPrice(ctx, price, UpdatePriceRequest{PSPLinks: map[string]map[string]string{"stripe": {}}})
 			return err
 		},
 		"skip price sync": func() error {
-			_, err := svc.UpdatePrice(ctx, price, UpdatePriceRequest{SkipRailSync: true})
+			_, err := svc.patchPrice(ctx, price, UpdatePriceRequest{SkipRailSync: true})
 			return err
 		},
 		"verify provider":   func() error { _, err := svc.VerifyPriceSync(ctx, uuid.New()); return err },
@@ -123,7 +129,7 @@ func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
 	} {
 		require.ErrorIs(t, call(), catalog.ErrOwnerOperation, name)
 	}
-	_, err = svc.CreateProduct(ctx, CreateProductRequest{CatalogID: billing.CatalogID(uuid.New())})
+	_, err = svc.CreateProduct(ctx, billing.CreateProductParams{CatalogID: billing.CatalogID(uuid.New())})
 	require.ErrorIs(t, err, catalog.ErrOwnerScope, "a creator cannot target another catalog")
 	_, err = svc.GetProduct(merchant.WithID(ctx, billing.MerchantID(uuid.New())), billing.ProductID(uuid.New()))
 	require.ErrorIs(t, err, catalog.ErrOwnerScope, "changing the merchant must not widen a captured owner scope")

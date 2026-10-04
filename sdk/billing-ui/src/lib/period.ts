@@ -16,12 +16,6 @@ export function periodOf(hours: number | null | undefined): Period | null {
   return { unit: "hour", count: hours }
 }
 
-/** Hours from an OpenRails interval (`"720h"`, `"720h0m0s"`). */
-export function intervalHours(interval: string | null | undefined) {
-  const match = /^(\d+)h(?:0m(?:0s)?)?$/.exec(interval?.trim() ?? "")
-  return match ? Number(match[1]) : null
-}
-
 /** "every 30 days" */
 export function everyLabel(hours: number | null | undefined, m: Translator) {
   const p = periodOf(hours)

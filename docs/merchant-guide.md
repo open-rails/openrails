@@ -48,11 +48,12 @@ An embedded host whose `catalog.yaml` is the truth declares it instead:
 merchant's catalog refuses other writes (`catalog_declared`) until the file
 changes. See [embedded-integration.md](embedded-integration.md).
 
-Otherwise use `client.Catalog.Apply(ctx, params)` for embedded and remote Clients. Decode
-YAML with `billing.ParseCatalogApplicationYAML`; both encodings share the same
-validation and authorization as individual writes. The HTTP operation is
-`POST /v1/merchant/catalog/applications`; a guarded application reads its base
-revision through `client.Catalog.Revision(ctx)` or `GET /v1/merchant/catalog/revision`.
+Otherwise use `client.ApplyCatalog(ctx, document)` for embedded and remote Clients.
+Decode YAML with `catalog.ParseApplicationYAML` (JSON: `catalog.ParseApplicationJSON`);
+both encodings share the same validation and authorization as individual writes. The
+HTTP operation is `POST /v1/merchant/catalog/applications`; a guarded application reads
+its base revision through `client.GetCatalogRevision(ctx)` or
+`GET /v1/merchant/catalog/revision`.
 
 The server commits local products, prices, related definitions, history and the
 application receipt atomically. Unsupported provider changes fail before mutation;
@@ -249,7 +250,7 @@ reference: `docs/api/endpoints.md`.
 | Ask what a grant key did | `GET /v1/merchant/customers/{id}/credit-grants?source_id=` | — |
 | Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[/{scope}/{scope_key}]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
 | Credit limit / trust level | `PUT /v1/merchant/customers/{id}/credit-limit`, `PUT /v1/merchant/customers/{id}/trust-level` | Settings |
-| Catalog CRUD over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` | Catalog |
+| Catalog over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
 | Repair alerts / drift findings | `GET /v1/merchant/repair-alerts` | Ops |
 
@@ -326,7 +327,7 @@ mount details: `docs/admin-console.md`.
 Pages: **Customers** (search → profile with grant/revoke and off-channel payment),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
-(products/prices CRUD, activate/deactivate, durable catalog batch application, drift
+(products/prices CRUD, archive/restore, durable catalog batch application, drift
 view), **Ops** (findings queue, repair alerts, worker health), **Settings** (profile,
 team, payment providers, API keys, credit limit, trust level), **Dashboard**.
 

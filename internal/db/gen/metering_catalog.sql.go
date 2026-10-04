@@ -32,19 +32,6 @@ func (q *Queries) CountUsageMeterOverrides(ctx context.Context, arg CountUsageMe
 	return count, err
 }
 
-const countUsageMeters = `-- name: CountUsageMeters :one
-SELECT count(*)
-FROM billing.catalog_meters
-WHERE merchant_id = $1
-`
-
-func (q *Queries) CountUsageMeters(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countUsageMeters, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const deleteDefaultUsageRateCard = `-- name: DeleteDefaultUsageRateCard :exec
 DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
@@ -364,17 +351,7 @@ func (q *Queries) InsertUsageMeter(ctx context.Context, arg InsertUsageMeterPara
 
 const listUsageMeterOverrides = `-- name: ListUsageMeterOverrides :many
 SELECT card.customer_id,
-       card.customer_id::text AS subject,
-       COALESCE((
-           SELECT BTRIM(subscription.user_email)
-           FROM billing.subscriptions subscription
-           WHERE subscription.merchant_id = card.merchant_id
-             AND subscription.customer_id = card.customer_id
-             AND subscription.deleted_at IS NULL
-             AND NULLIF(BTRIM(subscription.user_email), '') IS NOT NULL
-           ORDER BY subscription.created_at DESC, subscription.id DESC
-           LIMIT 1
-       ), '') AS email,
+       card.meter_key,
        card.price,
        card.allowance,
        card.created_at,
@@ -383,33 +360,34 @@ FROM billing.catalog_rate_cards card
 WHERE card.merchant_id = $1
   AND card.meter_key = $2::text
   AND card.customer_id IS NOT NULL
-ORDER BY card.updated_at DESC, card.customer_id
-LIMIT $4::int OFFSET $3::int
+  AND ($3::uuid IS NULL OR card.customer_id > $3::uuid)
+ORDER BY card.customer_id
+LIMIT $4::int
 `
 
 type ListUsageMeterOverridesParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-	PageOffset int32
-	PageLimit  int32
+	MerchantID    uuid.UUID
+	MeterKey      string
+	AfterCustomer *uuid.UUID
+	FetchLimit    int32
 }
 
 type ListUsageMeterOverridesRow struct {
 	CustomerID *uuid.UUID
-	Subject    string
-	Email      *string
+	MeterKey   *string
 	Price      []byte
 	Allowance  []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
 
+// One keyset page of a meter's customer overrides, by customer.
 func (q *Queries) ListUsageMeterOverrides(ctx context.Context, arg ListUsageMeterOverridesParams) ([]ListUsageMeterOverridesRow, error) {
 	rows, err := q.db.Query(ctx, listUsageMeterOverrides,
 		arg.MerchantID,
 		arg.MeterKey,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterCustomer,
+		arg.FetchLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -420,8 +398,7 @@ func (q *Queries) ListUsageMeterOverrides(ctx context.Context, arg ListUsageMete
 		var i ListUsageMeterOverridesRow
 		if err := rows.Scan(
 			&i.CustomerID,
-			&i.Subject,
-			&i.Email,
+			&i.MeterKey,
 			&i.Price,
 			&i.Allowance,
 			&i.CreatedAt,
@@ -482,14 +459,15 @@ LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
 WHERE meter.merchant_id = $1
+  AND ($2::text IS NULL OR meter.key > $2::text)
 ORDER BY meter.key
-LIMIT $3::int OFFSET $2::int
+LIMIT $3::int
 `
 
 type ListUsageMetersWithCatalogParams struct {
 	MerchantID uuid.UUID
-	PageOffset int32
-	PageLimit  int32
+	AfterKey   *string
+	FetchLimit int32
 }
 
 type ListUsageMetersWithCatalogRow struct {
@@ -516,7 +494,7 @@ type ListUsageMetersWithCatalogRow struct {
 }
 
 func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageMetersWithCatalogParams) ([]ListUsageMetersWithCatalogRow, error) {
-	rows, err := q.db.Query(ctx, listUsageMetersWithCatalog, arg.MerchantID, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listUsageMetersWithCatalog, arg.MerchantID, arg.AfterKey, arg.FetchLimit)
 	if err != nil {
 		return nil, err
 	}

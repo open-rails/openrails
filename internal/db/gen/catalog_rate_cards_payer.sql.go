@@ -29,35 +29,79 @@ func (q *Queries) DeletePayerRateCard(ctx context.Context, arg DeletePayerRateCa
 	return err
 }
 
+const getPayerRateCard = `-- name: GetPayerRateCard :one
+SELECT customer_id, meter_key, allowance, price, created_at, updated_at
+FROM billing.catalog_rate_cards
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND meter_key = $3::text
+`
+
+type GetPayerRateCardParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	MeterKey   string
+}
+
+type GetPayerRateCardRow struct {
+	CustomerID *uuid.UUID
+	MeterKey   *string
+	Allowance  []byte
+	Price      []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+func (q *Queries) GetPayerRateCard(ctx context.Context, arg GetPayerRateCardParams) (GetPayerRateCardRow, error) {
+	row := q.db.QueryRow(ctx, getPayerRateCard, arg.MerchantID, arg.CustomerID, arg.MeterKey)
+	var i GetPayerRateCardRow
+	err := row.Scan(
+		&i.CustomerID,
+		&i.MeterKey,
+		&i.Allowance,
+		&i.Price,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listPayerRateCards = `-- name: ListPayerRateCards :many
 
-SELECT meter_key, product_id, allowance, price, created_at, updated_at
+SELECT customer_id, meter_key, allowance, price, created_at, updated_at
 FROM billing.catalog_rate_cards
-WHERE merchant_id = $1 AND customer_id = $2 AND meter_key IS NOT NULL
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND meter_key IS NOT NULL
+  AND ($3::text IS NULL OR meter_key > $3::text)
 ORDER BY meter_key
+LIMIT $4::int
 `
 
 type ListPayerRateCardsParams struct {
 	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
+	CustomerID uuid.UUID
+	AfterKey   *string
+	FetchLimit int32
 }
 
 type ListPayerRateCardsRow struct {
-	MeterKey  *string
-	ProductID *uuid.UUID
-	Allowance []byte
-	Price     []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CustomerID *uuid.UUID
+	MeterKey   *string
+	Allowance  []byte
+	Price      []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // or#909: negotiated per-payer rate-card overrides (#798 storage) — the read
 // side. Writes stay in money/enterprise.go's SetUsageRateCard /
 // DeletePayerRateCard chokepoints.
-// A payer's negotiated overrides. Bounded by the payer's own contract (one
-// row per overridden meter), not by customer activity.
+// One keyset page of a customer's overrides, by meter.
 func (q *Queries) ListPayerRateCards(ctx context.Context, arg ListPayerRateCardsParams) ([]ListPayerRateCardsRow, error) {
-	rows, err := q.db.Query(ctx, listPayerRateCards, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, listPayerRateCards,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.AfterKey,
+		arg.FetchLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -66,8 +110,8 @@ func (q *Queries) ListPayerRateCards(ctx context.Context, arg ListPayerRateCards
 	for rows.Next() {
 		var i ListPayerRateCardsRow
 		if err := rows.Scan(
+			&i.CustomerID,
 			&i.MeterKey,
-			&i.ProductID,
 			&i.Allowance,
 			&i.Price,
 			&i.CreatedAt,

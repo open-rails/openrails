@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ApiError } from "@/lib/api/client"
-import { adminQueries, collectCatalogPages, queryKeys } from "@/lib/queries"
+import { adminQueries, collectPages, queryKeys } from "@/lib/queries"
 import { queryClient, shouldRetry } from "@/lib/query-client"
 import { toastApiError } from "@/lib/toast"
 import { tierChangeOptions } from "@/pages/subscriptions/tier-change-options"
@@ -58,10 +58,11 @@ it("reports a failed load only when the usage asked for it", async () => {
 })
 
 describe("complete collections", () => {
-  // A smaller effective server page than the 200 the collection requests.
+  // A smaller effective server page than the collection requests.
   const pageOf = <T,>(items: T[], query: string) => {
-    const offset = Number(new URLSearchParams(query).get("offset"))
-    return { items: items.slice(offset, offset + 100), total: items.length, limit: 100, offset }
+    const offset = Number(new URLSearchParams(query).get("cursor") ?? "0")
+    const next = offset + 100
+    return { data: items.slice(offset, next), next_cursor: next < items.length ? String(next) : null }
   }
 
   it("loads records past the first page into the price-selection workflow", async () => {
@@ -78,44 +79,42 @@ describe("complete collections", () => {
       queries.fetchQuery(adminQueries.allPrices()),
     ])
 
-    expect([allProducts.items.length, allPrices.items.length]).toEqual([1001, 1001])
+    expect([allProducts.data.length, allPrices.data.length]).toEqual([1001, 1001])
     expect(calls(requests)).toHaveLength(22)
     const options = tierChangeOptions({
-      currentProduct: allProducts.items[0],
+      currentProduct: allProducts.data[0],
       currentCurrency: "USD",
-      products: allProducts.items,
-      prices: allPrices.items,
+      products: allProducts.data,
+      prices: allPrices.data,
     })
     expect(options.some((option) => option.price.id === "price_1000")).toBe(true)
     // A visible page is its own request, not a slice of the collection.
-    expect((await queries.fetchQuery(adminQueries.products({ limit: 100, offset: 0 }))).items).toHaveLength(100)
+    expect((await queries.fetchQuery(adminQueries.products({ limit: 100 }))).data).toHaveLength(100)
     expect(calls(requests)).toHaveLength(23)
     queries.clear()
   })
 
   it.each([
-    ["a page fails", [{ items: ["first"], total: 2, limit: 1, offset: 0 }, "network unavailable"], "network unavailable"],
-    ["a later page comes back empty",
-      [{ items: ["first"], total: 2, limit: 1, offset: 0 }, { items: [], total: 2, limit: 1, offset: 1 }],
+    ["a page fails", [{ data: ["first"], next_cursor: "1" }, "network unavailable"], "network unavailable"],
+    ["a page repeats its cursor",
+      [{ data: ["first"], next_cursor: "1" }, { data: ["second"], next_cursor: "1" }],
       "before all records"],
-    ["the first page is empty but records are promised",
-      [{ items: [], total: 1001, limit: 1000, offset: 0 }], "before all records"],
   ])("refuses to truncate the collection when %s", async (_name, pages, message) => {
     const load = vi.fn(async () => {
       const page = pages.shift()
       if (typeof page === "string") throw new Error(page)
       return page!
     })
-    await expect(collectCatalogPages(load)).rejects.toThrow(message)
+    await expect(collectPages(load)).rejects.toThrow(message)
   })
 
   it("stops collecting once the caller cancels", async () => {
     const controller = new AbortController()
     const load = vi.fn(async () => {
       controller.abort()
-      return { items: ["first"], total: 2, limit: 1, offset: 0 }
+      return { data: ["first"], next_cursor: "1" }
     })
-    await expect(collectCatalogPages(load, controller.signal)).rejects.toThrow()
+    await expect(collectPages(load, controller.signal)).rejects.toThrow()
     expect(load).toHaveBeenCalledTimes(1)
   })
 })

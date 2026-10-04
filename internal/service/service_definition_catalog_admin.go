@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -17,45 +16,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// maxCatalogPageSize bounds caller-supplied pagination so a single request can
-// never force an unbounded result set (DoS-resistance).
-const maxCatalogPageSize = 1000
-
-// clampCatalogPage normalises a (limit, offset) pair:
-//   - limit <= 0 → 100 (default page size)
-//   - limit > maxCatalogPageSize → maxCatalogPageSize (cap)
-//   - offset < 0 → 0 (floor)
-func clampCatalogPage(limit, offset int) (int, int) {
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > maxCatalogPageSize {
-		limit = maxCatalogPageSize
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > math.MaxInt32 {
-		offset = math.MaxInt32
-	}
-	return limit, offset
-}
-
-// CatalogPage carries the effective pagination used by the query. HTTP and
-// embedded callers advance by these values, never by the unnormalized request.
-type CatalogPage[T any] struct {
-	Items  []T   `json:"items"`
-	Total  int64 `json:"total"`
-	Limit  int   `json:"limit"`
-	Offset int   `json:"offset"`
-}
-
 // GetProduct returns a product by ID.
-func (s *Service) GetProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
+func (s *Service) GetProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -81,7 +48,7 @@ func (s *Service) GetProduct(ctx context.Context, id billing.ProductID) (*Catalo
 }
 
 // GetProductByKey returns a product by its key.
-func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProduct, error) {
+func (s *Service) GetProductByKey(ctx context.Context, key string) (*billing.Product, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -106,59 +73,72 @@ func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProd
 	return productToCatalogProduct(p), nil
 }
 
-// ListProductsOptions controls ListProducts filtering and pagination.
-//
-// Zero values mean "no filter / use defaults":
-//   - Archived=nil: include live and archived products; false live only; true archived only
-//   - TierGroup="": no tier_group filter
-//   - Limit=0: defaults to 100
-//   - Offset=0: start from the first row
-type ListProductsOptions struct {
-	CatalogID *uuid.UUID
-	Archived  *bool
-	TierGroup string
-	Limit     int
-	Offset    int
-}
-
-// ListProducts returns a paginated list of products with optional filters.
-// Total is the unfiltered-by-pagination count.
-func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (CatalogPage[CatalogProduct], error) {
+// ListProducts returns one page of products, newest first. Prices are not
+// loaded; HydratePrices adds them.
+func (s *Service) ListProducts(ctx context.Context, params billing.ProductListParams) (billing.ListPage[billing.Product], error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
-		return CatalogPage[CatalogProduct]{}, err
+		return billing.ListPage[billing.Product]{}, err
 	}
-	var page CatalogPage[CatalogProduct]
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return page, err
+		return billing.ListPage[billing.Product]{}, err
 	}
 	defer release()
 	products, err := s.requireProductService()
 	if err != nil {
-		return page, err
+		return billing.ListPage[billing.Product]{}, err
 	}
-	page.Limit, page.Offset = clampCatalogPage(opts.Limit, opts.Offset)
-	raws, total, err := products.GetPaginated(ctx, catalog.ProductFilter{CatalogID: opts.CatalogID, Archived: opts.Archived, TierGroup: opts.TierGroup}, page.Limit, page.Offset)
+	filter := catalog.ProductFilter{Archived: params.Archived, TierGroup: params.TierGroup}
+	if !params.CatalogID.IsZero() {
+		id := params.CatalogID.UUID()
+		filter.CatalogID = &id
+	}
+	page, err := products.List(ctx, filter, params.PageRequest)
 	if err != nil {
-		return page, err
+		return billing.ListPage[billing.Product]{}, err
 	}
-	page.Items = make([]CatalogProduct, 0, len(raws))
-	page.Total = total
-	for _, p := range raws {
-		projected := productToCatalogProduct(p)
-		page.Items = append(page.Items, *projected)
+	return pagination.Map(page, func(p *models.Product) billing.Product { return *productToCatalogProduct(p) }), nil
+}
+
+// HydratePrices sets each product's Prices to its current prices.
+func (s *Service) HydratePrices(ctx context.Context, products []billing.Product) error {
+	if len(products) == 0 {
+		return nil
 	}
-	return page, nil
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return err
+	}
+	ids := make([]uuid.UUID, len(products))
+	for i, p := range products {
+		ids[i] = p.ID.UUID()
+	}
+	current, err := prices.CurrentByProducts(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range products {
+		products[i].Prices = make([]billing.Price, 0, len(current[ids[i]]))
+		for _, p := range current[ids[i]] {
+			products[i].Prices = append(products[i].Prices, *priceToCatalogPrice(p))
+		}
+	}
+	return nil
 }
 
 // ActivateProduct sets status=active on a product.
-func (s *Service) ActivateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+func (s *Service) ActivateProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.activateProduct(ctx, id)
 	})
 }
 
-func (s *Service) activateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
+func (s *Service) activateProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -191,13 +171,13 @@ func (s *Service) activateProduct(ctx context.Context, id billing.ProductID) (*C
 
 // DeactivateProduct archives a product. Existing subscriptions on its prices
 // are grandfathered and keep billing.
-func (s *Service) DeactivateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+func (s *Service) DeactivateProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.deactivateProduct(ctx, id)
 	})
 }
 
-func (s *Service) deactivateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
+func (s *Service) deactivateProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -228,7 +208,7 @@ func (s *Service) deactivateProduct(ctx context.Context, id billing.ProductID) (
 }
 
 // GetPrice returns a price by ID.
-func (s *Service) GetPrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
+func (s *Service) GetPrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -254,7 +234,7 @@ func (s *Service) GetPrice(ctx context.Context, id billing.PriceID) (*CatalogPri
 }
 
 // ListPricesByProduct returns all prices belonging to a product. Set activeOnly=true to filter inactive.
-func (s *Service) ListPricesByProduct(ctx context.Context, id billing.ProductID, activeOnly bool) ([]CatalogPrice, error) {
+func (s *Service) ListPricesByProduct(ctx context.Context, id billing.ProductID, activeOnly bool) ([]billing.Price, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -281,39 +261,41 @@ func (s *Service) ListPricesByProduct(ctx context.Context, id billing.ProductID,
 	if err != nil {
 		return nil, err
 	}
-	out := make([]CatalogPrice, 0, len(raws))
+	out := make([]billing.Price, 0, len(raws))
 	for _, p := range raws {
 		out = append(out, *priceToCatalogPrice(p))
 	}
 	return out, nil
 }
 
-// ListPrices returns a paginated list of prices across all products, with filters.
-func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, limit, offset int) (CatalogPage[CatalogPrice], error) {
+// ListPrices returns one page of prices, newest first.
+func (s *Service) ListPrices(ctx context.Context, params billing.PriceListParams) (billing.ListPage[billing.Price], error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
-		return CatalogPage[CatalogPrice]{}, err
+		return billing.ListPage[billing.Price]{}, err
 	}
-	var page CatalogPage[CatalogPrice]
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return page, err
+		return billing.ListPage[billing.Price]{}, err
 	}
 	defer release()
 	prices, err := s.requirePriceService()
 	if err != nil {
-		return page, err
+		return billing.ListPage[billing.Price]{}, err
 	}
-	page.Limit, page.Offset = clampCatalogPage(limit, offset)
-	raws, total, err := prices.ListPaginated(ctx, filter, page.Limit, page.Offset)
+	filter := catalog.PriceFilter{Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency), AutoRenew: params.AutoRenew}
+	if !params.CatalogID.IsZero() {
+		id := params.CatalogID.UUID()
+		filter.CatalogID = &id
+	}
+	if !params.ProductID.IsZero() {
+		id := params.ProductID.UUID()
+		filter.ProductID = &id
+	}
+	page, err := prices.List(ctx, filter, params.PageRequest)
 	if err != nil {
-		return page, err
+		return billing.ListPage[billing.Price]{}, err
 	}
-	page.Items = make([]CatalogPrice, 0, len(raws))
-	page.Total = total
-	for _, p := range raws {
-		page.Items = append(page.Items, *priceToCatalogPrice(p))
-	}
-	return page, nil
+	return pagination.Map(page, func(p *models.Price) billing.Price { return *priceToCatalogPrice(p) }), nil
 }
 
 // propagatePriceActiveToStripe pushes a price's active flag to its linked Stripe
@@ -350,13 +332,13 @@ func (s *Service) propagatePriceActiveToStripeCommitted(ctx context.Context, pri
 // (merchant_id, key) WHERE NOT archived allows only one live holder), then
 // this row is un-archived, then one pointer-movement log entry records the
 // move. Activating an already-active row is a no-op (no movement logged).
-func (s *Service) ActivatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+func (s *Service) ActivatePrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
 		return scoped.activatePrice(ctx, id)
 	})
 }
 
-func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
+func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -416,13 +398,13 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*Catal
 
 // DeactivatePrice archives a price. Existing subscriptions on this price are
 // grandfathered and keep billing; new purchases are rejected.
-func (s *Service) DeactivatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+func (s *Service) DeactivatePrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
 		return scoped.deactivatePrice(ctx, id)
 	})
 }
 
-func (s *Service) deactivatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
+func (s *Service) deactivatePrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -455,8 +437,8 @@ func (s *Service) deactivatePrice(ctx context.Context, id billing.PriceID) (*Cat
 // and returns a populated Providers map. Replaces issue #205's
 // VerifyPriceStripeSync. Each provider's adapter does its own retrieve; the
 // dispatcher merges per-provider drift / missing / configured signals into the
-// uniform ProviderState surface.
-func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[string]ProviderState, error) {
+// uniform billing.PSPLinkState surface.
+func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[string]billing.PSPLinkState, error) {
 	if err := catalog.RefuseOwnerOperation(ctx); err != nil {
 		return nil, err
 	}
@@ -486,22 +468,22 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		Currency:   p.Currency,
 	}
 	adapters := s.providerAdapters()
-	out := make(map[string]ProviderState, len(p.PSPLinks))
+	out := make(map[string]billing.PSPLinkState, len(p.PSPLinks))
 	for name, ids := range p.PSPLinks {
 		// Entries are account-keyed; the rail lives in the entry.
 		adapter, ok := adapters[strings.ToLower(strings.TrimSpace(ids[models.RailKeyRail]))]
 		if !ok {
 			// Unknown providers stay visible but uncomputed.
-			out[name] = ProviderState{
-				Status:     ProviderStatusLinked,
+			out[name] = billing.PSPLinkState{
+				Status:     billing.PSPLinkLinked,
 				IDs:        copyStringMap(ids),
 				LookupKey:  ids[providerLookupKey],
-				SyncStatus: SyncStatusUnknown,
+				SyncStatus: billing.SyncStatusUnknown,
 			}
 			continue
 		}
-		state := ProviderState{
-			Status:    ProviderStatusLinked,
+		state := billing.PSPLinkState{
+			Status:    billing.PSPLinkLinked,
 			IDs:       copyStringMap(ids),
 			LookupKey: ids[providerLookupKey],
 		}
@@ -513,19 +495,19 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		drift, missing, verifyErr := adapter.Verify(verifyCtx, ids, local)
 		if verifyErr != nil {
 			if errors.Is(verifyErr, errProviderNotArmed) {
-				state.SyncStatus = SyncStatusSyncDisabled
+				state.SyncStatus = billing.SyncStatusSyncDisabled
 			} else {
-				state.Status = ProviderStatusError
-				state.SyncStatus = SyncStatusUnknown
+				state.Status = billing.PSPLinkError
+				state.SyncStatus = billing.SyncStatusUnknown
 				state.Message = verifyErr.Error()
 			}
 		} else if missing {
-			state.SyncStatus = SyncStatusMissing
+			state.SyncStatus = billing.SyncStatusMissing
 		} else if len(drift) > 0 {
-			state.SyncStatus = SyncStatusDrifted
+			state.SyncStatus = billing.SyncStatusDrifted
 			state.Drift = drift
 		} else {
-			state.SyncStatus = SyncStatusInSync
+			state.SyncStatus = billing.SyncStatusInSync
 		}
 		out[name] = state
 	}
@@ -551,7 +533,7 @@ type ReconcileOptions struct {
 type ReconcileResult struct {
 	// Providers carries the post-reconcile per-provider state. The dispatcher
 	// fills this from a fresh Verify after any mutations land.
-	Providers map[string]ProviderState `json:"providers,omitempty"`
+	Providers map[string]billing.PSPLinkState `json:"providers,omitempty"`
 	// Actions maps provider name -> what reconcile did (or would do, on DryRun).
 	// Possible action values: "no_op", "updated_remote", "recreated_remote",
 	// "would_update_remote" (dry_run), "would_recreate_remote" (dry_run),
@@ -605,9 +587,9 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 	for name, state := range verified {
 		actions[name] = "no_op"
 		switch state.SyncStatus {
-		case SyncStatusInSync, SyncStatusNeverSynced, SyncStatusSyncDisabled, SyncStatusUnknown:
+		case billing.SyncStatusInSync, billing.SyncStatusNeverSynced, billing.SyncStatusSyncDisabled, billing.SyncStatusUnknown:
 			continue
-		case SyncStatusMissing:
+		case billing.SyncStatusMissing:
 			if name != "stripe" {
 				// Only Stripe supports recreate today.
 				actions[name] = "missing_no_recreate"
@@ -637,7 +619,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 			}
 			actions[name] = "recreated_remote"
 			mutated = true
-		case SyncStatusDrifted:
+		case billing.SyncStatusDrifted:
 			// Prices are immutable on their financial terms (amount/currency/cycle):
 			// those fields are baked into the content key, so any change is a
 			// different price minted upstream (create-new + archive-old), never an
@@ -672,7 +654,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 		}
 	}
 	// Re-verify after mutation so the response carries the post-reconcile state.
-	var finalStates map[string]ProviderState
+	var finalStates map[string]billing.PSPLinkState
 	if mutated {
 		finalStates, _ = s.VerifyPriceSync(ctx, priceID)
 	} else {
@@ -682,7 +664,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 	// sync. Unknown, disabled, missing or drifted accounts keep their findings.
 	if !opts.DryRun {
 		for _, state := range finalStates {
-			if state.SyncStatus != SyncStatusInSync {
+			if state.SyncStatus != billing.SyncStatusInSync {
 				continue
 			}
 			pspID, perr := uuid.Parse(state.IDs[models.RailKeyPSPID])
@@ -701,10 +683,10 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 type ProductReconcileResult struct {
 	// SyncStatus is the product's Stripe sync state after the pass
 	// (in_sync / drifted / missing / sync_disabled / unknown).
-	SyncStatus SyncStatus `json:"sync_status"`
+	SyncStatus billing.SyncStatus `json:"sync_status"`
 	// Drift carries the field-level divergence observed (pre-reconcile on DryRun,
 	// otherwise the residual after the push).
-	Drift []DriftField `json:"drift,omitempty"`
+	Drift []billing.DriftField `json:"drift,omitempty"`
 	// Action is what reconcile did (or would do): "no_op", "updated_remote",
 	// "would_update_remote" (dry_run), "missing" (no Stripe product to update),
 	// "sync_disabled" (stripe not configured).
@@ -750,13 +732,13 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 	if stripeProductID == "" {
 		// No Stripe Product is associated with this OpenRails product (no price
 		// has a Stripe link). Nothing to reconcile.
-		return &ProductReconcileResult{SyncStatus: SyncStatusUnknown, Action: "missing"}, nil
+		return &ProductReconcileResult{SyncStatus: billing.SyncStatusUnknown, Action: "missing"}, nil
 	}
 
 	adapter := &stripeAdapter{svc: s}
 	drift, missing, configured, verifyErr := adapter.verifyStripeProduct(ctx, stripeProductID, local)
 	if !configured {
-		return &ProductReconcileResult{SyncStatus: SyncStatusSyncDisabled, Action: "sync_disabled"}, nil
+		return &ProductReconcileResult{SyncStatus: billing.SyncStatusSyncDisabled, Action: "sync_disabled"}, nil
 	}
 	if verifyErr != nil {
 		return nil, verifyErr
@@ -764,13 +746,13 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 	if missing {
 		// The Stripe Product 404'd. Product recreate is out of scope here (it
 		// would orphan the prices that reference the old product id); surface it.
-		return &ProductReconcileResult{SyncStatus: SyncStatusMissing, Action: "missing"}, nil
+		return &ProductReconcileResult{SyncStatus: billing.SyncStatusMissing, Action: "missing"}, nil
 	}
 	if len(drift) == 0 {
-		return &ProductReconcileResult{SyncStatus: SyncStatusInSync, Action: "no_op"}, nil
+		return &ProductReconcileResult{SyncStatus: billing.SyncStatusInSync, Action: "no_op"}, nil
 	}
 	if opts.DryRun {
-		return &ProductReconcileResult{SyncStatus: SyncStatusDrifted, Drift: drift, Action: "would_update_remote"}, nil
+		return &ProductReconcileResult{SyncStatus: billing.SyncStatusDrifted, Drift: drift, Action: "would_update_remote"}, nil
 	}
 
 	// Push OpenRails values to Stripe: name, description, and the active flag.
@@ -788,12 +770,12 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 
 	// Re-verify so the residual drift (should be empty) is reflected.
 	residual, _, _, _ := adapter.verifyStripeProduct(ctx, stripeProductID, local)
-	syncStatus := SyncStatusInSync
+	syncStatus := billing.SyncStatusInSync
 	if len(residual) > 0 {
-		syncStatus = SyncStatusDrifted
+		syncStatus = billing.SyncStatusDrifted
 	}
 	// Close product drift only for the active Stripe account just verified in sync.
-	if syncStatus == SyncStatusInSync {
+	if syncStatus == billing.SyncStatusInSync {
 		if account, ok, aerr := catalog.ActiveDriftPSP(ctx, s.rt.RailConfigs, models.RailStripe); aerr == nil && ok {
 			if _, derr := s.ResolveDriftForResource(ctx, account.ID, models.CatalogDriftResourceProduct, productID.String()); derr != nil {
 				log.WithContext(ctx).WithError(derr).WithField("product_id", productID.String()).Warn("catalog reconcile: drift resolution deferred to the next pass")

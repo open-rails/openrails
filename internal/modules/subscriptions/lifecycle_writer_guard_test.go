@@ -16,14 +16,13 @@ import (
 // lifecycleDecisionWriters are the only functions that may name a lifecycle
 // decision (#1091 part C). The state machine's Transition is the rule; the rest
 // are explicit decisions outside it: an operator override, a plan change that
-// supersedes a membership, a refund that revokes access, an engine takeover.
+// supersedes a membership, a refund that revokes access.
 // Adding a writer means adding it here, in review.
 var lifecycleDecisionWriters = map[string]bool{
 	"internal/modules/subscriptions/upgrade.go:CompleteUpgradeTx":                  true,
 	"internal/modules/subscriptions/admin_service.go:ExtendSubscriptionByDuration": true,
 	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":       true,
 	"internal/intents/refund.go:revokeMembershipAccess":                            true,
-	"internal/intents/nmi_engine_takeover.go:commit":                               true,
 	"internal/modules/subscriptions/transition.go:Transition":                      true,
 	"internal/modules/subscriptions/lifecycle_service.go:createMembershipCore":     true,
 	"internal/modules/subscriptions/admin_service.go:UpdateSubscription":           true,

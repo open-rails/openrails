@@ -228,7 +228,7 @@ an operation ID and expected account revision. `HTTP.Merchant` publishes
 these routes with the rest of the merchant API, each gated by its permission.
 
 **Declared catalog**: a host whose `catalog.yaml` is the truth sets
-`Config.Catalog` (`billing.ParseCatalogApplicationYAML` of the file). `New`
+`Config.Catalog` (`catalog.ParseApplicationYAML` of the file). `New`
 applies it before returning, so checkout never sells an unapplied catalog:
 unchanged it replays, edited it converges, and replicas booting together
 converge on one application. A catalog the engine refuses fails `New` with the
@@ -237,16 +237,16 @@ provider writes. It reads a provider only to confirm a new or changed
 `psp_links` reference (a Stripe price, an NMI plan, a Solana plan); if that
 read gets no answer within seconds, `New` returns and the application finishes
 in the background, with `Ready` failing until it commits. While declared, writes
-to the merchant's catalog (products, prices, meters, default rate cards,
-`Catalog.Apply`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
+to the merchant's catalog (products, prices, meters, rate cards,
+`ApplyCatalog`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
 from every caller, the host included: the next boot would overwrite them.
 Creator-owned catalogs and negotiated payer rates stay writable.
 
 **Catalog authoring** (no `Config.Catalog`): storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
-(`Catalog.Apply`, or `Products.Create`, `Prices.Create`, `Prices.SetKey`);
+(`ApplyCatalog`, or `CreateProduct`, `CreatePrice`, `UpdatePrice`);
 `AllowCatalogUpdates` only publishes catalog mutations to HTTP callers. YAML is
-decoded into the same typed request as JSON (`billing.ParseCatalogApplicationYAML`).
+decoded into the same `catalog.Application` as JSON (`catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
 record, and `prune: true` archives omitted products and prices. Price keys name
 immutable financial versions; changing a price never silently reprices existing
@@ -258,7 +258,7 @@ subscriptions. For dynamic products with host-owned Stripe credentials use
 
 One merchant may have a default catalog and catalogs owned by opaque host
 subjects. Ordinary Client calls continue to create products in the default
-catalog unless an authorized administrator supplies `ProductCreateParams.CatalogID`.
+catalog unless an authorized administrator supplies `CreateProductParams.CatalogID`.
 Product and price keys remain unique within the merchant.
 
 For a creator, pass an identity obtained from your authenticated user:
@@ -266,14 +266,14 @@ For a creator, pass an identity obtained from your authenticated user:
 ```go
 author, err := client.ForCatalogOwner(verifiedSubject)
 if err != nil { return err }
-product, err := author.Products.Create(ctx, &billing.ProductCreateParams{
+product, err := author.CreateProduct(ctx, billing.CreateProductParams{
     Key: "post-" + postID, DisplayName: title,
 })
 ```
 
 The subject is a nonempty opaque string; it need not be a UUID or email. The
 library owns its catalog mapping and enforces creator scope on product/price
-reads, lists, edits, archive actions and price-key history. Prices inherit their
+reads, lists, edits, archiving and price-key history. Prices inherit their
 catalog from the product, and a purchased product cannot be moved to another
 catalog through an ordinary update. Content ACLs and authentication remain yours.
 
@@ -285,19 +285,21 @@ raw provider bindings, provider selection, meters or bulk publishing. The engine
 selects applicable configured providers for creator prices. It does not create
 separate merchants, provider accounts, payout policies or checkout authority.
 
-HTTP hosts mount these endpoints by configuring `HTTP.Merchant: true`, under
-`/v1/catalog`. Native personal operations use the explicitly mapped canonical
+HTTP hosts mount these endpoints with `HTTP.Merchant: true`, under
+`/v1/catalog`, with the same product, price and offer routes as
+`/v1/merchant/catalog`. A creator's first write creates its catalog. Native personal operations use the explicitly mapped canonical
 `Identity.CustomerID` as the owner key. Explicitly selecting a different owner
 requires the existing live catalog administrator check. Advanced delegated gates
 must return a verified `Principal.Subject`
 and authorize the narrow owner permission. If Subject is absent, the library
 uses only that Gate result's `UserContext.UserID`; both absent is a refusal.
-An owner ID in a body, query, header or ambient host context never supplies
-authority. Remote clients use `openrails.WithOwnCatalog()` with their normal
-verified credential; this option only selects the owner paths.
+An owner ID in a body, query or ambient host context never supplies authority.
+`ForCatalogOwner` sends the subject in the `OpenRails-Catalog-Owner` header; a
+subject other than the credential's own needs administrator permission.
 
-Administrators keep `/v1/merchant/catalog/*` and use `EnsureCatalogForOwner`,
-`GetCatalog`, and `ListCatalogs` under `/v1/merchant/catalogs`. Verify the admin
+Administrators keep `/v1/merchant/catalog/*` and use `EnsureCatalog`,
+`GetCatalog`, and `ListCatalogs` (`OwnerSubject` selects one creator's) under
+`/v1/merchant/catalogs`. Verify the admin
 permission separately; never impersonate another creator by constructing a
 CatalogClient from an owner read out of a product or content row. The optional
 OpenRails control-plane adapter includes a `creator` role with only the two owner
@@ -393,7 +395,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Policy | `GetMerchantSettings`, `SetMerchantSettings`, `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
-| Catalog (API hosts) | `Products.Create`, `Products.Update`, `Products.Retrieve`, `Products.RetrieveByKey`, `Products.List`, `Products.Ensure`, `Prices.Create`, `Prices.Update`, `Prices.Retrieve`, `Prices.RetrieveByKey`, `Prices.List`, `Prices.SetKey`, `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `CheckCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
 | Checkout | `CreateCheckoutSession`, `GetCheckoutSession`, `ConfirmCheckoutSession`, `ListCheckoutRailOptions`, `GetCheckoutConfig`, `ResolveEffectiveTier` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CancelPlanMigration` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPurchaseReviews`, `ResolvePurchaseReview`, `ListPaymentMethods`, `DeletePaymentMethod` |
@@ -443,7 +445,7 @@ Client:
 ```go
 client, err := openrails.New(ctx, cfg, deps, openrails.WithDefaultMerchant("store-a"))
 if err != nil { return err }
-products, err := client.Products.List(ctx, nil, openrails.WithMerchant("store-b"))
+products, err := client.ListProducts(ctx, billing.ProductListParams{}, openrails.WithMerchant("store-b"))
 // For stored UUIDs use openrails.ForMerchantID(id) instead of a slug selector.
 ```
 

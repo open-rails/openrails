@@ -57,11 +57,11 @@ const (
 
 func (a *solanaAdapter) Name() string { return "solana" }
 
-func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
-	return PendingAction{
-		Provider: "solana",
-		Action:   "configure_solana_recurring",
-		Hint:     "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC in live mode, DUSD in test mode; set psp_links.solana.token to select another supported stablecoin)",
+func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) billing.PendingAction {
+	return billing.PendingAction{
+		PSP:    "solana",
+		Action: "configure_solana_recurring",
+		Hint:   "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC in live mode, DUSD in test mode; set psp_links.solana.token to select another supported stablecoin)",
 	}
 }
 
@@ -408,7 +408,7 @@ func isSolanaRecurringToken(symbol string) bool {
 // divergence means tampering or a deleted+recreated plan (created_at fingerprint
 // shift); both are real drift the operator must resolve. RPC unavailable ->
 // sync_disabled (nil,false,nil). Account gone -> missing=true.
-func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *priceVerifyContext) ([]DriftField, bool, error) {
+func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *priceVerifyContext) ([]billing.DriftField, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		return nil, false, fmt.Errorf("solana is not configured: %w", errProviderNotArmed)
 	}
@@ -432,10 +432,10 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 		return nil, false, fmt.Errorf("decode solana plan account: %w", err)
 	}
 
-	drift := []DriftField{}
+	drift := []billing.DriftField{}
 	cmp := func(field, want, got string) {
 		if want != "" && want != got {
-			drift = append(drift, DriftField{Field: field, OpenRailsValue: want, RemoteValue: got})
+			drift = append(drift, billing.DriftField{Field: field, OpenRailsValue: want, RemoteValue: got})
 		}
 	}
 	cmp(solanaKeyAmountBaseUnits, ids[solanaKeyAmountBaseUnits], strconv.FormatUint(acct.Amount, 10))

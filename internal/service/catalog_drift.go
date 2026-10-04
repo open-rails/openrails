@@ -3,16 +3,16 @@ package service
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
 // Catalog reconciliation (issue #209) runs the shared catalog.RunDriftPass:
@@ -20,39 +20,10 @@ import (
 // drift through per-price/product reconcile, which closes only findings of an
 // account it verified in sync.
 
-// CatalogDriftReport is the result of a reconciliation pass.
-type CatalogDriftReport struct {
-	ScannedProducts    int                     `json:"scanned_products"`
-	ScannedPrices      int                     `json:"scanned_prices"`
-	ScannedNMIPlans    int                     `json:"scanned_nmi_plans"`
-	ScannedSolanaPlans int                     `json:"scanned_solana_plans"`
-	OpenEvents         []CatalogDriftEventView `json:"open_events"`
-	// NewEvents counts findings this pass opened; ignored identities do not count.
-	NewEvents int `json:"new_events"`
-	// ResolvedEvents counts open findings a complete provider read proved gone.
-	ResolvedEvents int `json:"resolved_events"`
-}
-
-// CatalogDriftEventView is the API-facing shape of a drift finding.
-type CatalogDriftEventView struct {
-	ID                    uuid.UUID  `json:"id"`
-	PSPID                 uuid.UUID  `json:"psp_id"`
-	Provider              string     `json:"provider"`
-	Kind                  string     `json:"kind"`
-	OpenRailsResourceType string     `json:"openrails_resource_type"`
-	OpenRailsResourceID   string     `json:"openrails_resource_id,omitempty"`
-	ExternalResourceID    string     `json:"external_resource_id,omitempty"`
-	Field                 string     `json:"field,omitempty"`
-	OpenRailsValue        string     `json:"openrails_value,omitempty"`
-	ExternalValue         string     `json:"external_value,omitempty"`
-	DetectedAt            time.Time  `json:"detected_at"`
-	ResolvedAt            *time.Time `json:"resolved_at,omitempty"`
-}
-
 // RunCatalogReconciliation reads the active Stripe and NMI accounts completely
 // and verifies stored Solana plans, then persists standing findings. Idempotent
 // and alert-only.
-func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftReport, error) {
+func (s *Service) RunCatalogReconciliation(ctx context.Context) (*billing.CatalogDriftCheck, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -108,21 +79,22 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 	if err != nil {
 		return nil, err
 	}
-	open, _, err := s.ListCatalogDrift(ctx, CatalogDriftFilter{})
+	open, err := dbi.Gen(ctx).CountOpenCatalogDriftFiltered(ctx, gen.CountOpenCatalogDriftFilteredParams{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("count drift findings: %w", err)
 	}
-	return &CatalogDriftReport{
+	return &billing.CatalogDriftCheck{
 		ScannedProducts: pass.ScannedProducts, ScannedPrices: pass.ScannedPrices,
 		ScannedNMIPlans: pass.ScannedNMIPlans, ScannedSolanaPlans: pass.ScannedSolanaPlans,
-		OpenEvents: open, NewEvents: pass.NewEvents, ResolvedEvents: pass.ResolvedEvents,
+		OpenedFindings: pass.NewEvents, ResolvedFindings: pass.ResolvedEvents, OpenFindings: int(open),
 	}, nil
 }
 
-func driftEventFromGen(r gen.BillingReconciliationFinding) CatalogDriftEventView {
-	view := CatalogDriftEventView{
-		ID: r.ID, Provider: r.Rail, Kind: string(models.CatalogDriftKindOf(r.FindingType)), OpenRailsResourceType: r.OpenrailsResourceType,
-		OpenRailsResourceID: derefText(r.OpenrailsResourceID), ExternalResourceID: derefText(r.ExternalResourceID),
+// catalogDrift reads one catalog.* reconciliation finding.
+func catalogDrift(r gen.BillingReconciliationFinding) billing.CatalogDrift {
+	view := billing.CatalogDrift{
+		ID: r.ID, Rail: r.Rail, Kind: strings.TrimPrefix(r.FindingType, "catalog."), ResourceType: r.OpenrailsResourceType,
+		ResourceID: derefText(r.OpenrailsResourceID), ExternalResourceID: derefText(r.ExternalResourceID),
 		Field: derefText(r.Field), OpenRailsValue: derefText(r.OpenrailsValue), ExternalValue: derefText(r.ExternalValue),
 		DetectedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,
 	}
@@ -130,16 +102,6 @@ func driftEventFromGen(r gen.BillingReconciliationFinding) CatalogDriftEventView
 		view.PSPID = *r.PspID
 	}
 	return view
-}
-
-func driftPageInt32(v int) int32 {
-	if v < 0 {
-		return 0
-	}
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	return int32(v)
 }
 
 func nilIfEmptyText(s string) *string {
@@ -156,51 +118,35 @@ func derefText(s *string) string {
 	return *s
 }
 
-// CatalogDriftFilter narrows the open-drift listing.
-type CatalogDriftFilter struct {
-	Rail         string
-	Kind         string
-	ResourceType string
-	Limit        int
-	Offset       int
-}
-
-// ListCatalogDrift returns open drift findings with pagination and optional
-// provider / kind / resource_type filters. Total is the unpaginated count.
-func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilter) (items []CatalogDriftEventView, total int64, err error) {
+// ListCatalogDrift returns one page of open drift findings, newest first.
+func (s *Service) ListCatalogDrift(ctx context.Context, params billing.CatalogDriftListParams) (billing.ListPage[billing.CatalogDrift], error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return nil, 0, pinErr
+		return billing.ListPage[billing.CatalogDrift]{}, pinErr
 	}
 	defer release()
 	dbi, err := s.requireDB()
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[billing.CatalogDrift]{}, err
 	}
-	q := dbi.Gen(ctx)
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	offset := max(filter.Offset, 0)
-	provider := nilIfEmptyText(strings.TrimSpace(filter.Rail))
-	kind := nilIfEmptyText(strings.TrimSpace(filter.Kind))
-	resourceType := nilIfEmptyText(strings.TrimSpace(filter.ResourceType))
-	total, err = q.CountOpenCatalogDriftFiltered(ctx, gen.CountOpenCatalogDriftFilteredParams{Rail: provider, Kind: kind, ResourceType: resourceType})
+	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {
-		return nil, 0, fmt.Errorf("count drift events: %w", err)
+		return billing.ListPage[billing.CatalogDrift]{}, err
 	}
-	rows, err := q.ListOpenCatalogDriftFiltered(ctx, gen.ListOpenCatalogDriftFilteredParams{
-		Rail: provider, Kind: kind, ResourceType: resourceType, Column1: driftPageInt32(limit), Column2: driftPageInt32(offset),
+	afterAt, afterID, err := pagination.After(params.Cursor)
+	if err != nil {
+		return billing.ListPage[billing.CatalogDrift]{}, err
+	}
+	rows, err := dbi.Gen(ctx).ListOpenCatalogDriftFiltered(ctx, gen.ListOpenCatalogDriftFilteredParams{
+		Rail: nilIfEmptyText(strings.TrimSpace(params.Rail)), Kind: nilIfEmptyText(strings.TrimSpace(params.Kind)),
+		ResourceType: nilIfEmptyText(strings.TrimSpace(params.ResourceType)),
+		AfterAt:      afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("list drift events: %w", err)
+		return billing.ListPage[billing.CatalogDrift]{}, fmt.Errorf("list drift findings: %w", err)
 	}
-	out := make([]CatalogDriftEventView, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, driftEventFromGen(row))
-	}
-	return out, total, nil
+	page := pagination.Cut(rows, limit, func(r gen.BillingReconciliationFinding) any { return pagination.TimeID{At: r.CreatedAt, ID: r.ID} })
+	return pagination.Map(page, catalogDrift), nil
 }
 
 // ResolveDriftForResource closes open findings of one PSP account for a local

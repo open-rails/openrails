@@ -3,229 +3,207 @@ package openrails
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// ProductClient is the product resource on an embedded or remote Client.
-type ProductClient struct{ client *Client }
-
-// PriceClient is the immutable price resource on an embedded or remote Client.
-type PriceClient struct{ client *Client }
-
 func (c *Client) initResources() {
 	c.MerchantConfiguration = &MerchantConfigurationClient{client: c}
 	c.PaymentProviders = &PaymentProviderClient{client: c}
-	c.Catalog = &CatalogClient{client: c}
 	c.ProductAccess = &ProductAccessClient{client: c}
-	c.Products = &ProductClient{client: c}
-	c.Prices = &PriceClient{client: c}
 }
 
-// Create adds a product.
-func (p *ProductClient) Create(ctx context.Context, params *billing.ProductCreateParams, requestOptions ...RequestOption) (*billing.Product, error) {
+// catalogPath is the catalog the product, price and offer methods act on: the
+// creator's own (ForCatalogOwner) or the merchant's.
+func (c *Client) catalogPath() string {
+	if c.catalogOwner != "" {
+		return "/v1/catalog"
+	}
+	return "/v1/merchant/catalog"
+}
+
+func setBool(q url.Values, name string, value *bool) {
+	if value != nil {
+		q.Set(name, strconv.FormatBool(*value))
+	}
+}
+
+func setID(q url.Values, name string, id wireID) {
+	if !id.IsZero() {
+		q.Set(name, id.String())
+	}
+}
+
+// CreateProduct creates a product.
+func (c *Client) CreateProduct(ctx context.Context, params billing.CreateProductParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	var out billing.Product
-	if err := p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/products", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, c.catalogPath()+"/products", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// Retrieve reads one product by ID.
-func (p *ProductClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.Product, error) {
-	id, err := resourceProductID(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Product
-	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/products/"+id, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// RetrieveByKey reads one product by its merchant-unique key.
-func (p *ProductClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Product, error) {
-	key, err := pathID("key", key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Product
-	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/products/by-key/"+key, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Update changes a product's mutable fields; omitted ones keep their values.
-func (p *ProductClient) Update(ctx context.Context, id string, params *billing.ProductUpdateParams, requestOptions ...RequestOption) (*billing.Product, error) {
-	id, err := resourceProductID(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Product
-	if err = p.client.do(ctx, http.MethodPatch, p.client.catalogPath()+"/products/"+id, params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// List returns one page of products matching params.
-func (p *ProductClient) List(ctx context.Context, params *billing.ProductListParams, requestOptions ...RequestOption) (*billing.CatalogPage[billing.Product], error) {
-	if params == nil {
-		params = &billing.ProductListParams{}
-	}
-	q := pageQuery(params.PageOptions)
-	q.Set("catalog_id", params.CatalogID)
-	q.Set("tier_group", params.TierGroup)
-	if params.Archived != nil {
-		q.Set("archived", strconv.FormatBool(*params.Archived))
-	}
-	var out billing.CatalogPage[billing.Product]
-	if err := p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Create adds a price to a product named by exactly one of ProductID,
-// ProductKey and ProductData. A price's amount and terms never change;
-// selling at another price means another price.
-func (p *PriceClient) Create(ctx context.Context, params *billing.PriceCreateParams, requestOptions ...RequestOption) (*billing.Price, error) {
-	if params == nil {
-		return nil, invalidErr("params are required")
-	}
-	selectors := 0
-	if params.ProductID != "" {
-		selectors++
-		if _, err := resourceProductID(params.ProductID); err != nil {
-			return nil, err
-		}
-	}
-	if params.ProductKey != "" {
-		selectors++
-		if !validProductKey(params.ProductKey) {
-			return nil, invalidErr("product_key is invalid")
-		}
-	}
-	if params.ProductData != nil {
-		selectors++
-	}
-	if selectors != 1 {
-		return nil, invalidErr("exactly one of product_id, product_key and product_data is required")
-	}
-	var out billing.Price
-	if err := p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/prices", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Retrieve reads one price by ID.
-func (p *PriceClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.Price, error) {
-	id, err := resourcePriceID(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Price
-	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/prices/"+id, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// RetrieveByKey reads the price currently holding a merchant-unique key.
-func (p *PriceClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Price, error) {
-	key, err := pathID("key", key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Price
-	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Update changes a price's mutable fields, such as archiving it.
-func (p *PriceClient) Update(ctx context.Context, id string, params *billing.PriceUpdateParams, requestOptions ...RequestOption) (*billing.Price, error) {
-	id, err := resourcePriceID(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Price
-	if err = p.client.do(ctx, http.MethodPatch, p.client.catalogPath()+"/prices/"+id, params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// List returns one page of prices matching params.
-func (p *PriceClient) List(ctx context.Context, params *billing.PriceListParams, requestOptions ...RequestOption) (*billing.CatalogPage[billing.Price], error) {
-	if params == nil {
-		params = &billing.PriceListParams{}
-	}
-	q := pageQuery(params.PageOptions)
-	q.Set("catalog_id", params.CatalogID)
-	q.Set("product_id", params.ProductID)
-	q.Set("currency", normalizeCurrency(params.Currency))
-	q.Set("type", params.Type)
-	if params.Archived != nil {
-		q.Set("archived", strconv.FormatBool(*params.Archived))
-	}
-	var out billing.CatalogPage[billing.Price]
-	if err := p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-func resourceProductID(id string) (string, error) {
-	parsed, err := billing.ParseProductID(id)
-	if err != nil {
-		return "", invalidErr("invalid product_id")
-	}
-	return requireTypedID("product_id", parsed)
-}
-func resourcePriceID(id string) (string, error) {
-	parsed, err := billing.ParsePriceID(id)
-	if err != nil {
-		return "", invalidErr("invalid price_id")
-	}
-	return requireTypedID("price_id", parsed)
-}
-
-// SetKey moves a price onto a merchant-unique lookup key.
-func (p *PriceClient) SetKey(ctx context.Context, id, key string, requestOptions ...RequestOption) (*billing.Price, error) {
-	id, err := resourcePriceID(id)
-	if err != nil {
-		return nil, err
-	}
-	key, err = requireID("key", key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Price
-	if err = p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/prices/"+id+"/key", struct {
-		Key string `json:"key"`
-	}{key}, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Ensure creates params only when its key is absent. Existing definitions
-// are preserved. The server owns concurrency and catalog scope.
-func (p *ProductClient) Ensure(ctx context.Context, params *billing.ProductCreateParams, requestOptions ...RequestOption) (*billing.Product, error) {
-	if params == nil {
-		return nil, invalidErr("product parameters are required")
-	}
+// EnsureProduct creates the product under params.Key unless one exists; an
+// existing product is returned unchanged.
+func (c *Client) EnsureProduct(ctx context.Context, params billing.CreateProductParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	key, err := pathID("key", params.Key)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.Product
-	if err = p.client.do(ctx, http.MethodPut, p.client.catalogPath()+"/products/by-key/"+key, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPut, c.catalogPath()+"/products/by-key/"+key, params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetProduct reads a product with its current prices.
+func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) (*billing.Product, error) {
+	path, err := requireTypedID("product_id", id)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.Product
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/products/"+path, nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetProductByKey reads the product with a merchant-unique key.
+func (c *Client) GetProductByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Product, error) {
+	key, err := pathID("key", key)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.Product
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/products/by-key/"+key, nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListProducts returns one page of products, newest first, each with its
+// current prices.
+func (c *Client) ListProducts(ctx context.Context, params billing.ProductListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Product], error) {
+	q := pageValues(nil, params.PageRequest)
+	setID(q, "catalog_id", params.CatalogID)
+	setBool(q, "archived", params.Archived)
+	if params.TierGroup != "" {
+		q.Set("tier_group", params.TierGroup)
+	}
+	var out billing.ListPage[billing.Product]
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateProduct changes a product's fields; omitted ones keep their values.
+func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params billing.UpdateProductParams, requestOptions ...RequestOption) (*billing.Product, error) {
+	path, err := requireTypedID("product_id", id)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.Product
+	if err := c.do(ctx, http.MethodPatch, c.catalogPath()+"/products/"+path, params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreatePrice creates a price on the product named by exactly one of
+// ProductID, ProductKey and ProductData. A price's terms never change;
+// selling on other terms means another price.
+func (c *Client) CreatePrice(ctx context.Context, params billing.CreatePriceParams, requestOptions ...RequestOption) (*billing.Price, error) {
+	selectors := 0
+	for _, set := range []bool{!params.ProductID.IsZero(), params.ProductKey != "", params.ProductData != nil} {
+		if set {
+			selectors++
+		}
+	}
+	if selectors != 1 {
+		return nil, invalidErr("exactly one of product_id, product_key and product_data is required")
+	}
+	var out billing.Price
+	if err := c.do(ctx, http.MethodPost, c.catalogPath()+"/prices", params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetPrice reads a price; params.Verify also reads each linked PSP's copy and
+// reports its drift.
+func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billing.GetPriceParams, requestOptions ...RequestOption) (*billing.Price, error) {
+	path, err := requireTypedID("price_id", id)
+	if err != nil {
+		return nil, err
+	}
+	if params.Verify {
+		path += "?verify=true"
+	}
+	var out billing.Price
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices/"+path, nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetPriceByKey reads the price a merchant-unique key currently names.
+func (c *Client) GetPriceByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Price, error) {
+	key, err := pathID("key", key)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.Price
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListPrices returns one page of prices, newest first.
+func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Price], error) {
+	q := pageValues(nil, params.PageRequest)
+	setID(q, "catalog_id", params.CatalogID)
+	setID(q, "product_id", params.ProductID)
+	if params.Currency != "" {
+		q.Set("currency", normalizeCurrency(params.Currency))
+	}
+	setBool(q, "auto_renew", params.AutoRenew)
+	setBool(q, "archived", params.Archived)
+	var out billing.ListPage[billing.Price]
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListPriceKeyHistory returns one page of a price key's history, most recent
+// first: when the key moved to which price, or was retired.
+func (c *Client) ListPriceKeyHistory(ctx context.Context, key string, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PriceKeyMovement], error) {
+	key, err := pathID("key", key)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.ListPage[billing.PriceKeyMovement]
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices/by-key/"+key+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdatePrice moves a price to another key, archives or restores it, or
+// changes its PSP links; omitted fields keep their values.
+func (c *Client) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams, requestOptions ...RequestOption) (*billing.Price, error) {
+	path, err := requireTypedID("price_id", id)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.Price
+	if err := c.do(ctx, http.MethodPatch, c.catalogPath()+"/prices/"+path, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

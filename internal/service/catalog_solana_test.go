@@ -211,7 +211,7 @@ func TestSolanaCatalogReapplyEnsuresReceivingATA(t *testing.T) {
 // Reference preflight only reads: an existing plan must match owner, amount,
 // period and status exactly, and a missing plan is never created here.
 func TestSolanaCatalogReferencePreflight(t *testing.T) {
-	req := CreatePriceRequest{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
+	req := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
 	setup := func() (*fakeChain, *recurring.PlanService, solanago.PublicKey) {
 		chain := newFakeChain(map[string]uint8{usdcMint: 6})
 		chain.readOnly = true

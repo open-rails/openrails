@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -32,7 +33,7 @@ type PriceReader interface {
 	GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error)
 	GetCurrentByKey(ctx context.Context, merchantID uuid.UUID, key string) (*models.Price, error)
 	ListChainByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error)
-	ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.PriceKeyMovement, error)
+	ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error)
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error)
 }
 

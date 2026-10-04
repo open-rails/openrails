@@ -44,6 +44,14 @@ WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prod
 SELECT * FROM billing.prices price
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid)) AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1;
 
+-- name: ListCurrentPricesByProducts :many
+SELECT price.* FROM billing.prices price
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = ANY(sqlc.arg(product_ids)::uuid[])
+  AND (sqlc.narg(catalog_id)::uuid IS NULL OR prod.catalog_id = sqlc.narg(catalog_id)::uuid)
+  AND NOT price.archived
+ORDER BY price.amount, price.id;
+
 -- name: ListActivePricesByProductOrdered :many
 SELECT * FROM billing.prices price
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid)) AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1 AND NOT price.archived
@@ -64,25 +72,20 @@ JOIN billing.products prod ON prod.id = price.product_id
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid)) AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY price.amount ASC;
 
--- name: CountPricesFiltered :one
-SELECT count(*) FROM billing.prices price
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid)) AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
-  AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
-  AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
-  AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
-  AND (NOT sqlc.arg(only_one_time)::boolean OR NOT price.auto_renew);
-
 -- name: ListPricesFiltered :many
+-- One keyset page, newest first: rows after (after_at, after_id).
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM billing.prices price
-JOIN billing.products prod ON prod.id = price.product_id
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=price.merchant_id AND catalog_product.id=price.product_id AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid)) AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
-  AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
+JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(catalog_id)::uuid IS NULL OR prod.catalog_id = sqlc.narg(catalog_id)::uuid)
+  AND (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
+  AND (sqlc.narg(currency)::text IS NULL OR price.currency = sqlc.narg(currency)::text)
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
-  AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
-  AND (NOT sqlc.arg(only_one_time)::boolean OR NOT price.auto_renew)
+  AND (sqlc.narg(auto_renew)::boolean IS NULL OR price.auto_renew = sqlc.narg(auto_renew)::boolean)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (price.created_at, price.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY price.created_at DESC, price.id DESC
-LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
+LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetPriceByNMIPlan :one
 SELECT price.* FROM billing.prices price

@@ -325,3 +325,36 @@ func (p *Product) Summary() *billing.ProductSummary {
 	}
 	return &billing.ProductSummary{ID: billing.ProductID(p.ID).String(), Key: p.Key, DisplayName: p.DisplayName, Description: p.Description, TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived}
 }
+
+// View is the product as the API shows it, without its prices.
+func (p *Product) View() billing.Product {
+	return billing.Product{
+		ID: billing.ProductID(p.ID), CatalogID: billing.CatalogID(p.CatalogID), Key: p.Key,
+		DisplayName: p.DisplayName, Description: p.Description, EntitlementsSpec: p.EntitlementsSpec,
+		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+}
+
+// View is the price as the API shows it, linked to every PSP in its links.
+// Sync status is unknown until a verifying read fills it.
+func (p *Price) View() billing.Price {
+	out := billing.Price{
+		ID: billing.PriceID(p.ID), Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
+		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, AutoRenew: p.AutoRenew,
+		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours,
+		PSPs: make(map[string]billing.PSPLinkState, len(p.PSPLinks)), PendingManualActions: []billing.PendingAction{},
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+	for name, ids := range p.PSPLinks {
+		if len(ids) == 0 {
+			continue
+		}
+		state := billing.PSPLinkState{Status: billing.PSPLinkLinked, IDs: make(map[string]string, len(ids)), LookupKey: strings.TrimSpace(ids["lookup_key"]), SyncStatus: billing.SyncStatusUnknown}
+		for k, v := range ids {
+			state.IDs[k] = v
+		}
+		out.PSPs[name] = state
+	}
+	return out
+}

@@ -12,31 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countProductsFiltered = `-- name: CountProductsFiltered :one
-SELECT count(*) FROM billing.products
-WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND ($3::boolean IS NULL OR archived = $3::boolean)
-  AND ($4::text = '' OR lower(btrim(tier_group)) = lower(btrim($4::text)))
-`
-
-type CountProductsFilteredParams struct {
-	CatalogID  *uuid.UUID
-	MerchantID uuid.UUID
-	Archived   *bool
-	TierGroup  string
-}
-
-func (q *Queries) CountProductsFiltered(ctx context.Context, arg CountProductsFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countProductsFiltered,
-		arg.CatalogID,
-		arg.MerchantID,
-		arg.Archived,
-		arg.TierGroup,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createProduct = `-- name: CreateProduct :execrows
 
 INSERT INTO billing.products (
@@ -282,29 +257,35 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
 SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products
-WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND ($3::boolean IS NULL OR archived = $3::boolean)
+WHERE products.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR products.catalog_id=$2::uuid)
+  AND ($3::boolean IS NULL OR archived = $3::boolean)
   AND ($4::text = '' OR lower(btrim(tier_group)) = lower(btrim($4::text)))
+  AND ($5::timestamptz IS NULL OR (created_at, id) < ($5::timestamptz, $6::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT NULLIF($6::int, 0) OFFSET $5::int
+LIMIT $7::int
 `
 
 type ListProductsFilteredParams struct {
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
+	CatalogID  *uuid.UUID
 	Archived   *bool
 	TierGroup  string
-	PageOffset int32
-	PageLimit  int32
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	FetchLimit int32
 }
 
+// One keyset page, newest first: rows after (after_at, after_id).
 func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilteredParams) ([]BillingProduct, error) {
 	rows, err := q.db.Query(ctx, listProductsFiltered,
-		arg.CatalogID,
 		arg.MerchantID,
+		arg.CatalogID,
 		arg.Archived,
 		arg.TierGroup,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.FetchLimit,
 	)
 	if err != nil {
 		return nil, err

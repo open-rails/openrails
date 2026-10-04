@@ -79,7 +79,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
-	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/riverqueue/river"
 )
 
@@ -97,7 +97,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 	if err != nil {
 		return nil, err
 	}
-	catalog, err := billing.ParseCatalogApplicationYAML(raw)
+	declared, err := catalog.ParseApplicationYAML(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			Slug: "myvideos", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
-		Catalog: catalog,
+		Catalog: declared,
 		HTTP: &openrails.HTTPConfig{
 			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
@@ -212,8 +212,8 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `GET /billing/v1/products` | products, each with its active prices |
-| `GET /billing/v1/prices` | prices (`?product=`, `?currency=`, `?type=recurring` or `one_time`) |
+| `GET /billing/v1/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
+| `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?auto_renew=`, `?limit=`, `?cursor=`) |
 | `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
 | `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
 | `POST /billing/v1/me/checkout/sessions` | start a checkout for a price, as the signed-in user |
@@ -340,7 +340,7 @@ Customer side (your users):
 
 ### Checkout catalog references
 
-Use a stable offer key such as `post-123-usd`. `Catalog.Apply` reprices it by
+Use a stable offer key such as `post-123-usd`. `ApplyCatalog` reprices it by
 creating an immutable price version and retiring its predecessor. Checkout owns
 current availability, amount, permanent ownership eligibility and payment
 idempotency; a host wrapper supplies verified identity and its content policy.
@@ -349,13 +349,13 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | --- | --- |
 | `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions |
 | `LookupCheckoutSession` | Read-only replay lookup with the original complete checkout request |
-| `ListOffersForEntitlements` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
+| `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
 | `HasEntitlement` / `CheckEntitlements` | Exact grant-backed access; batch maximum 100 keys |
 | `ProductAccess.Check` / `CheckMany` | Product ID or key; archived purchase access remains readable |
-| `Prices.Create` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
+| `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
 | `ListCheckoutRailOptions` / `ListCheckoutRailOptionsByKey` | Explicit ID / key methods |
 | Checkout-options HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
-| Catalog retrieval | `Retrieve(id)` or `RetrieveByKey(key)` |
+| Catalog retrieval | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
 | Accepted sessions, payments, subscriptions and imports | Immutable IDs |
 | Recurring change-tier/preview and Solana tier-change | Existing ID contract; key selectors tracked separately |
 

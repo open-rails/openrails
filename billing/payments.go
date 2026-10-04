@@ -4,30 +4,6 @@ import (
 	"time"
 )
 
-// PublicPrice is the price object public catalog and payment responses embed.
-// Amounts are native units at the currency's registered scale.
-type PublicPrice struct {
-	ID string `json:"id"`
-	// Key is the durable, merchant-unique handle for this price's version
-	// chain, usable anywhere id is accepted.
-	Key        string            `json:"key,omitempty"`
-	Object     string            `json:"object"`
-	UnitAmount int64             `json:"unit_amount,string"`
-	Currency   string            `json:"currency"`
-	Type       string            `json:"type,omitempty"` // one_time or recurring
-	Recurring  *PriceRecurrence  `json:"recurring,omitempty"`
-	Product    string            `json:"product"`
-	Active     bool              `json:"active"`
-	Providers  []string          `json:"providers,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-}
-
-// PriceRecurrence describes a recurring price's interval ("720h", "8760h").
-type PriceRecurrence struct {
-	Interval string `json:"interval"`
-}
-
 // PaymentKind is what a payment row records: a charge, or a reversal of one.
 type PaymentKind string
 

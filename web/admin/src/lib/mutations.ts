@@ -1,4 +1,5 @@
 import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
+import type { UpdateProductParams } from "@/lib/api/generated/wire"
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
 import {
@@ -7,8 +8,6 @@ import {
   type CreatePriceDraft,
 } from "@/lib/api/copilot"
 import {
-  activatePrice,
-  activateProduct,
   cancelReprice,
   cancelSubscription,
   changeTeamRole,
@@ -20,8 +19,6 @@ import {
   createProduct,
   createWebhook,
   rotateWebhookURL,
-  deactivatePrice,
-  deactivateProduct,
   archivePaymentProviderAccount,
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
@@ -56,6 +53,7 @@ import {
   revokeProductAccess,
   revokeTeamInvite,
   setCreditLimit,
+  updatePrice,
   updateProduct,
   type DefaultUsageRateCardRequest,
   type CustomerUsageRateOverrideRequest,
@@ -602,7 +600,7 @@ export const adminMutations = {
         product,
       }: {
         id: string
-        product: Partial<ProductRequest> & { set_entitlements?: boolean }
+        product: UpdateProductParams
       }) => updateProduct(id, product),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
@@ -612,7 +610,7 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...keys.catalog(), "products", "set-active"],
       mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-        active ? activateProduct(id) : deactivateProduct(id),
+        updateProduct(id, { archived: !active }),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
@@ -629,7 +627,7 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...keys.catalog(), "prices", "set-active"],
       mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-        active ? activatePrice(id) : deactivatePrice(id),
+        updatePrice(id, { archived: !active }),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },

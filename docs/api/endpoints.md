@@ -73,8 +73,8 @@ admin responses are never replayed by global middleware.
 | GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `features` (`stripe_billing_portal`, `solana_one_time_payments`, `solana_subscription_management`, `provider_credential_writes`). Features require both an exposed HTTP action and provider support; webhooks appear only in route groups. ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
-| GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
-| GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` id), `type` (`recurring`/`one_time`), `limit`, `offset` |
+| GET | `/v1/products` | optional | Products on sale, each with its current prices; a price's `psps` carry the status only. Query: `limit`, `cursor` |
+| GET | `/v1/prices` | optional | Prices on sale. Query: `product_id`, `currency`, `auto_renew`, `limit`, `cursor` |
 | GET | `/v1/currencies` | none | The currency scale registry: `{object:"currencies", currencies:[{code, decimals, minor_decimals}]}`. Every monetary string on the wire is in native units (`10^decimals` per major unit); providers settle in `10^minor_decimals`. System-fixed, merchant-independent; `billing.Currencies()` is the same table in Go. Hosts stamp it into the hosted checkout document as `plan.unit_decimals` ([commerce](commerce.md#hosted-checkout-document)) |
 | GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, checkout, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`elements`/`redirect`/`wallet`, `checkout` marks PSPs that take new purchases and cards under the checkout routing, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Stripe `publishable_key`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear. When a Solana PSP is armed, `solana` carries `{network, chain, preferred_token, tokens[]}` (the same acceptance policy as `/v1/solana/config`) |
 | GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
@@ -412,12 +412,7 @@ Full request and state-transition details are in
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | `merchant:subscriptions:read` | Validate per-user account cutover |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:update` | Execute or resume the original durable cutover |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:read` | Read cutover by idempotency_key |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/preview` | `merchant:subscriptions:read` | Check an NMI-billed subscription for takeover to OpenRails billing; no mutation |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover` | `merchant:subscriptions:update` | Durable takeover (Idempotency-Key): delete the NMI schedule at least 24h before the period end, then an engine successor bills the same card from that boundary; `202` while held |
-| GET | `/v1/merchant/subscriptions/{id}/engine-takeover` | `merchant:subscriptions:read` | Latest takeover and its stage |
-| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/abandon` | `merchant:subscriptions:update` | Abandon before the NMI delete is sent; afterwards `409 engine_takeover_committed` |
 | POST | `/v1/merchant/provider-refresh` | `merchant:subscriptions:update` | Run the merchant's provider refresh now; `202 {status: queued\|already_running, job_id}`. `Client.RefreshProviders` |
-| POST | `/v1/merchant/engine-takeovers` | `merchant:subscriptions:update` | Admit takeovers for up to `max_subscriptions` (1-50) eligible NMI-billed subscriptions, earliest boundary first; executions obey the destructive switch and volume breaker |
 | POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B) |
 | POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
 | GET | `/v1/merchant/plan-migrations/{id}` | `merchant:subscriptions:read` | One migration |
@@ -425,96 +420,63 @@ Full request and state-transition details are in
 
 ### Catalog (`/v1/merchant/catalog`)
 
-Merchant administrators retain this surface. Creator operations use the separate
-`/v1/catalog` prefix and `merchant:catalog:read-own` / `merchant:catalog:update-own` permissions, with
-owner identity supplied by the verified Gate principal. They expose product and
-price get/list/create/patch/activate/deactivate, price-key rename and history,
-plus `PUT /v1/catalog` to ensure the caller's catalog. Provider configuration,
-meters, entitlement/tier definitions and bulk publish are not creator operations.
-Product/price keys remain merchant-wide; every owner lookup also constrains the
-owned catalog.
-
-Catalog administration uses `GET/POST /v1/merchant/catalogs` and
-`GET /v1/merchant/catalogs/{id}`. POST idempotently ensures a catalog for
-its explicit `owner_subject` and requires merchant-wide catalog update authority.
-Catalog IDs use `cat_<uuid>`. Product responses include `catalog_id`; creators
-cannot reassign it. Administrators can select a catalog in product creation and
-in product/price list filters. Ordinary merchant product creation continues to
-use the merchant-owned default catalog.
+One shape per noun: a product (with its current `prices`), a price, a meter
+and a rate override are the same object on every route that returns them, in
+the Go client (`billing.Product`, `billing.Price`, `billing.Meter`,
+`billing.RateOverride`) and on the wire. Lists are `{data, next_cursor}`;
+pass `cursor` for the next page. A price's cadence is `access_duration_hours`
+(null: for good) and `auto_renew`. `psps` maps each PSP key to the price's
+state on it.
 
 Reads need `merchant:catalog:read`; writes need `merchant:catalog:update` and
-`allow_catalog_updates: true`. The flag defaults to false and omits
-catalog mutation routes from HTTP; the embedded in-process Client is the
-process owner and is not gated by it.
-Catalog reads remain available. Storage is always the database, independently
-of provider credential custody. Trusted local operator application can run
-when ordinary writes are disabled; there is no remote bypass.
+`allow_catalog_updates: true` (catalog writes are not mounted otherwise; the
+in-process Client is not gated). While `Config.Catalog` declares the catalog,
+writes answer 405 `catalog_declared`.
+
+A creator's own catalog uses the `/v1/catalog` prefix with the same product,
+price and offer routes, under `merchant:catalog:read-own` /
+`merchant:catalog:update-own`; the catalog is created on the creator's first
+write. The owner is the Gate-verified subject, or the
+`OpenRails-Catalog-Owner` header (base64url subject) an administrator selects
+(`Client.ForCatalogOwner`). Creators cannot set entitlements, tier groups or
+PSP links.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/catalog` | Read the verified caller's catalog (`merchant:catalog:read-own`) |
-| PUT | `/v1/catalog` | Ensure the verified caller's catalog (`merchant:catalog:update-own`) |
-| POST | `/v1/catalog/offers/lookup` | Active offers in the caller's catalog per exact entitlement key: `{ entitlements (max 100), kind, preferred_currency?, page_size? (per key), cursors? }` → `{ key: { data, has_more, next_cursor } }` |
-| GET | `/v1/catalog/products` | List products in the caller's catalog |
-| GET | `/v1/catalog/products/{id}` | Read an owned product |
-| GET | `/v1/catalog/products/by-key/{key}` | Read an owned product by key |
-| PUT | `/v1/catalog/products/by-key/{key}` | Ensure a product in the caller's catalog; existing definitions remain unchanged |
-| POST | `/v1/catalog/products` | Create a product in the caller's catalog |
-| PATCH | `/v1/catalog/products/{id}` | Update an owned product |
-| POST | `/v1/catalog/products/{id}/activate` | Activate an owned product |
-| POST | `/v1/catalog/products/{id}/deactivate` | Deactivate an owned product |
-| GET | `/v1/catalog/prices` | List prices in the caller's catalog |
-| GET | `/v1/catalog/prices/{id}` | Read an owned price |
-| GET | `/v1/catalog/prices/by-key/{key}` | Read an owned price by key |
-| GET | `/v1/catalog/prices/by-key/{key}/history` | Read an owned price key's version history |
-| POST | `/v1/catalog/prices` | Create a price for an owned product |
-| PATCH | `/v1/catalog/prices/{id}` | Update an owned price |
-| POST | `/v1/catalog/prices/{id}/activate` | Activate an owned price |
-| POST | `/v1/catalog/prices/{id}/deactivate` | Deactivate an owned price |
-| POST | `/v1/catalog/prices/{id}/key` | Relabel an owned price's key |
-| GET | `/v1/merchant/catalogs` | List the merchant's catalogs (`merchant:catalog:read`) |
-| GET | `/v1/merchant/catalogs/by-owner` | Read an existing catalog by exact `owner_subject` query parameter without creating it (`merchant:catalog:read`); missing catalogs return 404 |
-| GET | `/v1/merchant/catalogs/{id}` | Read one merchant catalog (`merchant:catalog:read`) |
-| POST | `/v1/merchant/catalogs` | Ensure a catalog for an explicit `owner_subject` (`merchant:catalog:update`) |
-| POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
-| POST | `/v1/merchant/catalog/offers/lookup` | Active offers per exact entitlement key: `{ entitlements (max 100), kind (`permanent`, `finite`, `recurring`), preferred_currency?, page_size? (per key, max 100), cursors? ({ key: next_cursor }) }` → `{ key: { data, has_more, next_cursor } }`; every requested key is present |
-| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
+| POST | `/v1/merchant/catalog/products` | Create a product |
+| GET | `/v1/merchant/catalog/products` | List products, newest first. Query: `catalog_id`, `archived`, `tier_group` |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
-| GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
-| PUT | `/v1/merchant/catalog/products/by-key/{key}` | Ensure a product in the selected catalog; existing definitions remain unchanged |
-| PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
-| POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
-| POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
-| POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids or select declarative provider config; recurring Solana defaults to USDC, accepts `token: USD1`, or resolves an attached `plan_pda`) |
-| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `archived` (`false` live only, `true` archived only, absent both) filters |
-| GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
-| GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
-| GET | `/v1/merchant/catalog/prices/{id}` | One price |
-| PATCH | `/v1/merchant/catalog/prices/{id}` | Update links / `archived` flag |
-| POST | `/v1/merchant/catalog/prices/{id}/activate` | Activate |
-| POST | `/v1/merchant/catalog/prices/{id}/deactivate` | Deactivate |
-| POST | `/v1/merchant/catalog/prices/{id}/key` | Relabel a price's key (version-bump repoint on collision) |
-| GET | `/v1/merchant/catalog/drift` | List catalog↔provider drift (the pull reconciliation is alert-only, never mutating) |
-| POST | `/v1/merchant/catalog/drift/refresh` | Refresh drift detection |
-| GET | `/v1/merchant/catalog/revision` | Read the current merchant catalog revision |
-| POST | `/v1/merchant/catalog/applications` | Apply a JSON/YAML batch with durable application ID and expected revision |
-| POST | `/v1/merchant/catalog/product-archives` | Archive a product and refund or review its recent one-time purchases (also needs `merchant:payments:refund`; `Idempotency-Key` required); `Client.ArchiveProduct` |
-| GET | `/v1/merchant/catalog/product-archives/{id}` | Read an archive operation and each purchase's outcome (also needs `merchant:payments:read`); `Client.GetProductArchive` |
-| POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
-| POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only; does not mutate catalog definitions) |
-| GET | `/v1/merchant/catalog/meters` | List usage-meter definitions |
-| GET | `/v1/merchant/catalog/meters/{key}` | Read one usage meter |
-| GET | `/v1/merchant/catalog/meters/{key}/overrides` | List negotiated customer overrides for a meter |
-| PUT | `/v1/merchant/catalog/meters/{key}` | Create or replace a usage-meter definition |
-| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | Set the merchant-default rate card |
-| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | Remove the merchant-default rate card |
-
-Catalog product and price lists return `{items, total, limit, offset}`. `limit`
-and `offset` are the effective query values: nonpositive limits default to 100,
-limits above 1000 clamp to 1000, and negative offsets become zero. Advance by the
-returned `offset + limit`; a product-scoped price list follows the same paging
-contract. Ties in creation time are ordered by ID. Catalog screens page these
-results; selectors and manifest pruning explicitly traverse every page.
+| PATCH | `/v1/merchant/catalog/products/{id}` | Merge patch: omitted fields stay, `null` clears `description`, `entitlements_spec`, `tier_group`; `archived` takes it off sale |
+| GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by key |
+| PUT | `/v1/merchant/catalog/products/by-key/{key}` | Create the product unless it exists; an existing one is returned unchanged |
+| POST | `/v1/merchant/catalog/prices` | Create a price on exactly one of `product_id`, `product_key`, `product_data`; `psps` lists the PSPs that sell it, `psp_links` their identifiers. The same key with other terms makes a new version and archives the old one |
+| GET | `/v1/merchant/catalog/prices` | List prices, newest first. Query: `catalog_id`, `product_id`, `currency`, `auto_renew`, `archived` |
+| GET | `/v1/merchant/catalog/prices/{id}` | One price; `?verify=true` reads each linked PSP's copy and reports drift |
+| PATCH | `/v1/merchant/catalog/prices/{id}` | `key` moves the price onto a key (archiving the live price that held it), `archived` takes it off sale or back, `psp_links` merges links (a PSP set to `null` is unlinked) |
+| GET | `/v1/merchant/catalog/prices/by-key/{key}` | The price a key currently names |
+| GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | When the key moved to which price, most recent first |
+| POST | `/v1/merchant/catalog/offers/lookup` | Live offers per entitlement: `{entitlements (max 100), kind (permanent, finite, recurring), preferred_currency?, limit?, cursors?}` → `{entitlement: {data, next_cursor}}` |
+| GET | `/v1/merchant/catalog/revision` | The catalog revision and whether writes are accepted |
+| POST | `/v1/merchant/catalog/applications` | Apply a JSON or YAML catalog document |
+| GET | `/v1/merchant/catalog/drift` | Open findings that a PSP's copy differs (alert-only). Query: `rail`, `kind`, `resource_type` |
+| POST | `/v1/merchant/catalog/drift/refresh` | Read every linked PSP's catalog now and record its drift |
+| GET | `/v1/merchant/catalog/meters` | List meters by key |
+| GET | `/v1/merchant/catalog/meters/{key}` | One meter with its rate card |
+| PUT | `/v1/merchant/catalog/meters/{key}` | Declare a meter; one with recorded usage keeps its definition (`meter_in_use`) |
+| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | Set the rate card that prices the meter's usage |
+| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | Remove it once no customer has an override (`rate_card_has_overrides`) |
+| GET | `/v1/merchant/catalog/meters/{key}/rate-overrides` | The customers whose negotiated price replaces the rate card |
+| GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | A customer's negotiated prices (`merchant:customer-settings:read`) |
+| PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | Set a customer's price for one meter (`merchant:customer-settings:update`) |
+| DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | Remove it (`merchant:customer-settings:update`); 204 |
+| POST | `/v1/merchant/catalog/product-archives` | Archive a product and refund or review its recent one-time purchases (also `merchant:payments:refund`; `Idempotency-Key`) |
+| GET | `/v1/merchant/catalog/product-archives/{id}` | An archive operation and each purchase's outcome (also `merchant:payments:read`) |
+| GET | `/v1/merchant/catalogs` | The merchant's catalogs, oldest first. Query: `owner_subject` selects one creator's |
+| POST | `/v1/merchant/catalogs` | `{owner_subject}`: return the creator's catalog, creating it the first time |
+| GET | `/v1/merchant/catalogs/{id}` | One catalog |
+| POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (mounted when configured; never mutates) |
+| POST | `/v1/merchant/catalog/copilot/confirm` | Record that a copilot draft was applied |
+| — | `/v1/catalog/products…`, `/v1/catalog/prices…`, `/v1/catalog/offers/lookup` | A creator's own catalog: the product, price and offer routes above |
 
 ### Payment providers (`/v1/merchant/payment-providers`)
 
