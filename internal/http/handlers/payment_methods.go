@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -49,7 +50,7 @@ type paymentMethodURI struct {
 }
 
 type createPaymentMethodRequest struct {
-	PaymentToken   string `json:"payment_token" binding:"required"`
+	PaymentToken   string `json:"payment_token" binding:"required_without=Card"`
 	NameOnCard     string `json:"name_on_card" binding:"omitempty"`
 	FirstName      string `json:"first_name" binding:"omitempty"`
 	LastName       string `json:"last_name" binding:"omitempty"`
@@ -69,6 +70,9 @@ type createPaymentMethodRequest struct {
 	CardType       string `json:"card_type" binding:"omitempty"`
 	ExpiryDate     string `json:"expiry_date" binding:"omitempty"`
 
+	// Card is the card itself, for a PSP whose card_entry is server (#1129).
+	Card *cardguard.Card `json:"card,omitempty"`
+
 	RawCardNumber        *json.RawMessage `json:"card_number,omitempty"`
 	RawNumber            *json.RawMessage `json:"number,omitempty"`
 	RawPAN               *json.RawMessage `json:"pan,omitempty"`
@@ -81,7 +85,7 @@ type createPaymentMethodRequest struct {
 }
 
 type updatePaymentMethodRequest struct {
-	PaymentToken   string  `json:"payment_token" binding:"required"`
+	PaymentToken   string  `json:"payment_token" binding:"required_without=Card"`
 	NameOnCard     *string `json:"name_on_card"`
 	FirstName      *string `json:"first_name"`
 	LastName       *string `json:"last_name"`
@@ -100,6 +104,9 @@ type updatePaymentMethodRequest struct {
 	LastFour       *string `json:"last_four" binding:"omitempty"`
 	CardType       *string `json:"card_type" binding:"omitempty"`
 	ExpiryDate     *string `json:"expiry_date" binding:"omitempty"`
+
+	// Card replaces the method's card, for a PSP whose card_entry is server.
+	Card *cardguard.Card `json:"card,omitempty"`
 
 	RawCardNumber        *json.RawMessage `json:"card_number,omitempty"`
 	RawNumber            *json.RawMessage `json:"number,omitempty"`
@@ -180,12 +187,18 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	if !r.BindJSON(req) {
 		return
 	}
+	defer req.Card.Zero()
 	if err := req.rejectRawCardFields(); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if strings.TrimSpace(req.PaymentToken) == "" {
+	if req.Card != nil {
+		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", req.NameOnCard, req.FirstName, req.LastName, req.Address1, req.Address2,
+			req.City, req.State, req.Zip, req.PostalCode, req.Country, req.BillingCountry, req.Phone, req.Email, req.Company, req.Provider) {
+			return
+		}
+	} else if strings.TrimSpace(req.PaymentToken) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "payment_token is required")
 		return
 	}
@@ -225,6 +238,9 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		}
 		if errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused) {
 			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentDuplicateRefused, err.Error()))
+			return
+		}
+		if writeCardEntryError(r, err) {
 			return
 		}
 		if providerErr := createPaymentMethodProviderError(err); providerErr != nil {
@@ -292,6 +308,7 @@ func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string)
 
 	return &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
+		Card:         req.Card,
 		NameOnCard:   req.NameOnCard,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -321,6 +338,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if !r.BindJSON(body) {
 		return
 	}
+	defer body.Card.Zero()
 	if err := body.rejectRawCardFields(); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -340,7 +358,21 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	methodID := typedMethodID.UUID()
 
 	trimmedToken := strings.TrimSpace(body.PaymentToken)
-	if trimmedToken == "" {
+	attemptKey := ""
+	if body.Card != nil {
+		if !cardFieldAdmitted(r, trimmedToken != "", optionalStrings(body.NameOnCard, body.FirstName, body.LastName, body.Address1, body.Address2,
+			body.City, body.State, body.Zip, body.PostalCode, body.Country, body.BillingCountry, body.Phone, body.Email, body.Company, body.Provider)...) {
+			return
+		}
+		// A retry of this replacement is recognised by its Idempotency-Key,
+		// never by the card.
+		if attemptKey = strings.TrimSpace(r.Header("Idempotency-Key")); attemptKey == "" {
+			attemptKey = uuid.NewString()
+		} else if len(attemptKey) > 255 || cardguard.ContainsPAN(attemptKey) {
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, "Idempotency-Key must be at most 255 bytes and carry no card data"))
+			return
+		}
+	} else if trimmedToken == "" {
 		r.ErrorJSON(http.StatusBadRequest, "payment_token is required")
 		return
 	}
@@ -370,6 +402,8 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 
 	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &trimmedToken,
+		Card:         body.Card,
+		AttemptKey:   attemptKey,
 		Provider:     body.Provider,
 		NameOnCard:   body.NameOnCard,
 		FirstName:    body.FirstName,
@@ -395,6 +429,8 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if err != nil {
 		fields := log.Fields{"payment_method_id": methodID, "user_id": user.ID, "rail": pm.Rail}
 		switch {
+		case writeCardEntryError(r, err):
+			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
 			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict, "Payment method changed before the update could be accepted"))
 			return

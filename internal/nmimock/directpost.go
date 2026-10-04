@@ -39,6 +39,8 @@ func (m *Mock) directPost(form url.Values) string {
 			return rejected(err)
 		}
 		return answer("response", "1", "responsetext", "Subscription added", "subscription_id", id, "orderid", form.Get("orderid"), "response_code", "100")
+	case form.Get("customer_vault") == "add_customer", form.Get("customer_vault") == "add_billing":
+		return m.vaultCard(form)
 	}
 	m.odd = append(m.odd, "POST transact.php type="+form.Get("type")+" recurring="+form.Get("recurring"))
 	return rejected("Invalid Transaction Type")
@@ -303,4 +305,87 @@ func (m *Mock) plan(id string) (Plan, bool) {
 		return m.opts.PlanFallback(id)
 	}
 	return Plan{}, false
+}
+
+// vaultCard is the Customer Vault taking a card number itself (no token):
+// add_customer creates the vault, add_billing adds an entry to one. The
+// caller's customer_vault_id and billing_id are kept when given.
+func (m *Mock) vaultCard(form url.Values) string {
+	number := strings.NewReplacer(" ", "", "-", "").Replace(form.Get("ccnumber"))
+	if !luhn(number) {
+		return rejected("Invalid Credit Card Number REFID:3187654324")
+	}
+	exp := form.Get("ccexp")
+	if _, err := time.Parse("0106", exp); err != nil {
+		return rejected("Invalid Credit Card Expiration REFID:3187654325")
+	}
+	c, ok := m.issued[number]
+	if !ok {
+		c = Card{Brand: brandOf(number)}
+	}
+	c.Last4, c.Exp = number[len(number)-4:], exp
+	if c.Decline == "vault" {
+		m.refusedSaves++
+		return rejected("Card refused REFID:3187654326")
+	}
+	id, billing := form.Get("customer_vault_id"), form.Get("billing_id")
+	if billing == "" {
+		billing = m.next("bill")
+	}
+	text := "Customer Added"
+	if form.Get("customer_vault") == "add_billing" {
+		v := m.vaults[id]
+		if v == nil {
+			return rejected("Invalid Customer Vault Id REFID:3187654327")
+		}
+		if _, taken := v.cardFor(billing); taken {
+			return rejected("Duplicate Billing Id REFID:3187654328")
+		}
+		v.Extra = append(v.Extra, Billing{ID: billing, Card: c})
+		text = "Billing Information Added"
+	} else {
+		if id == "" {
+			id = m.next("vault")
+		}
+		if m.vaults[id] != nil {
+			return rejected("Duplicate Customer Vault Id REFID:3187654329")
+		}
+		m.vaults[id] = &Vault{ID: id, BillingID: billing, Card: c}
+	}
+	return answer("response", "1", "responsetext", text, "authcode", "", "transactionid", "", "avsresponse", "", "cvvresponse", "",
+		"orderid", "", "type", "", "response_code", "100", "customer_vault_id", id)
+}
+
+func luhn(number string) bool {
+	if len(number) < 12 || len(number) > 19 {
+		return false
+	}
+	sum := 0
+	for i := 0; i < len(number); i++ {
+		d := int(number[len(number)-1-i] - '0')
+		if d < 0 || d > 9 {
+			return false
+		}
+		if i%2 == 1 {
+			if d *= 2; d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+	}
+	return sum%10 == 0
+}
+
+func brandOf(number string) string {
+	switch {
+	case strings.HasPrefix(number, "4"):
+		return "visa"
+	case strings.HasPrefix(number, "34"), strings.HasPrefix(number, "37"):
+		return "amex"
+	case strings.HasPrefix(number, "5"), strings.HasPrefix(number, "2"):
+		return "mastercard"
+	case strings.HasPrefix(number, "6"):
+		return "discover"
+	}
+	return ""
 }

@@ -88,6 +88,9 @@ func (f *NMIFactory) Settings(ctx context.Context, secrets merchants.MerchantSec
 	if err != nil {
 		return nil, err
 	}
+	if _, err := config.CardEntry(scope.Rail, scope.Settings, scope.CustodianID != nil); err != nil {
+		return nil, err
+	}
 	return &config.NMIProviderSettings{SecurityKey: securityKey, WebhookSecret: webhookSecret, EndpointDeployment: deployment}, nil
 }
 

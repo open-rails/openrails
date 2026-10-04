@@ -119,6 +119,9 @@ func TestPublicPSPConfigWithholdsUndrivablePSPs(t *testing.T) {
 		"unresolved custodian":         {PSPScope{Rail: "nmi", CustodianID: &bt.ID}, nil, "custodian"},
 		"archived custodian":           {PSPScope{Rail: "nmi", CustodianID: &bt.ID}, &archived, "archived"},
 		"custodian missing public key": {PSPScope{Rail: "nmi", CustodianID: &bt.ID}, &CustodianScope{Key: "bt", Kind: models.CustodianBasisTheory}, ""},
+		"server card entry off nmi":    {PSPScope{Rail: "stripe", Settings: map[string]any{"card_entry": "server"}}, nil, "card_entry"},
+		"server card entry in custody": {PSPScope{Rail: "nmi", CustodianID: &bt.ID, Settings: map[string]any{"card_entry": "server"}}, bt, "custodian"},
+		"unknown card entry":           {PSPScope{Rail: "nmi", Settings: map[string]any{"tokenization_key": "tk", "card_entry": "both"}}, nil, "card_entry"},
 	} {
 		_, reason, ok := PublicPSPConfigFor(tc.scope, tc.custodian)
 		require.False(t, ok, name)
@@ -133,6 +136,9 @@ func TestPublicPSPConfigWithholdsUndrivablePSPs(t *testing.T) {
 		// Script URLs are never merchant-arbitrary: off-allowlist falls back to the declared default.
 		"nmi": {PSPScope{Rail: " NMI ", Key: "Mobius", Settings: map[string]any{"tokenization_key": "tk", "tokenization_url": "https://evil.example/c.js"}}, nil,
 			PublicPSPConfig{Key: "mobius", Rail: "nmi", Flow: FlowTokenize, Config: map[string]string{"tokenization_key": "tk", "tokenization_url": DefaultNMICollectJSURL}}},
+		// #1129: a server PSP's page posts the card to OpenRails and is given no gateway key or script.
+		"nmi server card entry": {PSPScope{Rail: "nmi", Key: "mobius", Settings: map[string]any{"card_entry": "server", "tokenization_key": "tk", "tokenization_url": DefaultNMICollectJSURL}}, nil,
+			PublicPSPConfig{Key: "mobius", Rail: "nmi", Flow: FlowCard}},
 		"keyless stripe redirects": {PSPScope{Rail: "stripe"}, nil, PublicPSPConfig{Key: "stripe", Rail: "stripe", Flow: FlowRedirect}},
 		"stripe publishable key enables elements": {PSPScope{Rail: "stripe", Settings: map[string]any{"publishable_key": "pk_test_abc", "secret_key": "sk_test_x"}}, nil,
 			PublicPSPConfig{Key: "stripe", Rail: "stripe", Flow: FlowElements, Config: map[string]string{"publishable_key": "pk_test_abc"}}},

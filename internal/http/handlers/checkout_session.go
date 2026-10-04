@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -43,6 +44,9 @@ type checkoutSessionPaymentParams struct {
 	LastFour        string `json:"last_four,omitempty" binding:"omitempty"`
 	CardType        string `json:"card_type,omitempty" binding:"omitempty"`
 	ExpiryDate      string `json:"expiry_date,omitempty" binding:"omitempty"`
+
+	// Card is a new card for a PSP whose card_entry is server (#1129).
+	Card *cardguard.Card `json:"card,omitempty"`
 }
 
 type checkoutSessionCreateRequest struct {
@@ -89,6 +93,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	defer req.Payment.Card.Zero()
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
@@ -98,8 +103,12 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	// A saved method or card token is charged at creation.
-	if (strings.TrimSpace(req.Payment.PaymentMethodID) != "" || strings.TrimSpace(req.Payment.PaymentToken) != "") && !customerInitiatedChargeAllowed(r) {
+	// A saved method, card token or card is charged at creation.
+	if (strings.TrimSpace(req.Payment.PaymentMethodID) != "" || strings.TrimSpace(req.Payment.PaymentToken) != "" || req.Payment.Card != nil) && !customerInitiatedChargeAllowed(r) {
+		return
+	}
+	// Every other field of the request is scanned by the session service.
+	if req.Payment.Card != nil && !cardFieldAdmitted(r, strings.TrimSpace(req.Payment.PaymentToken) != "") {
 		return
 	}
 	// The pre-gate checks a NAMED PSP. An omitted selector is the routing
@@ -121,7 +130,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, Card: req.Payment.Card, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if checkout.CardAttemptFailed(resp, err) {
 		recordCardFailure(r)
@@ -263,6 +272,9 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 	var pmErr *paymentmethods.PaymentMethodError
 	if errors.As(err, &pmErr) {
 		writePaymentMethodError(r, pmErr)
+		return
+	}
+	if writeCardEntryError(r, err) {
 		return
 	}
 	if errors.Is(err, checkout.ErrPaymentMethodStale) {

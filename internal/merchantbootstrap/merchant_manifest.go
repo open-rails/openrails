@@ -1161,6 +1161,11 @@ func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 	if err := config.RejectRetiredCustodySettings(account.Settings); err != nil {
 		return out, fmt.Errorf("PSP %q: %w", out.rail, err)
 	}
+	// #1129: server card entry is refused on a rail with no server-side vault
+	// call, and beside a custodian.
+	if _, err := config.CardEntry(out.rail, account.Settings, strings.TrimSpace(account.Custodian) != ""); err != nil {
+		return out, fmt.Errorf("PSP %q: %w", out.rail, err)
+	}
 	secrets, err := NewManifestSecretValues(out.rail, account.Secrets)
 	if err != nil {
 		return out, err

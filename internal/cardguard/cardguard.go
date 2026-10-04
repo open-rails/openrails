@@ -6,6 +6,9 @@
 // One detector, one set of rules. Callers scan fields; they never carve out
 // per-field exemptions, because a rule good enough to exempt a field is a rule
 // that belongs here.
+//
+// Card (#1129) is the one admitted exception: the typed `card` field of a PSP
+// whose card_entry is server.
 package cardguard
 
 const (

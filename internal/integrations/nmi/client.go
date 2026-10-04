@@ -1,6 +1,7 @@
 package nmi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -366,9 +367,12 @@ func responseText(output url.Values, fallback string) string {
 	return fallback
 }
 
-func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (_ string, err error) {
-	requestType := strings.TrimSpace(data.Get("type"))
+func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (string, error) {
+	return c.sendDirectBody(ctx, strings.TrimSpace(data.Get("type")), []byte(data.Encode()))
+}
 
+// sendDirectBody posts an already-encoded form. requestType only labels logs.
+func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body []byte) (_ string, err error) {
 	if c.ReadOnly {
 		log.WithFields(log.Fields{
 			"provider":     c.providerName,
@@ -379,7 +383,7 @@ func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (_ s
 
 	// Every direct-post request is a MUTATION: any failure past this point may
 	// have executed at the gateway, so it is wrapped transport-ambiguous (#674).
-	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.DirectPostURL, strings.NewReader(data.Encode()), true)
+	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.DirectPostURL, bytes.NewReader(body), true)
 	if err != nil {
 		return "", fmt.Errorf("build direct request: %w", err)
 	}
@@ -413,12 +417,12 @@ func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (_ s
 		return "", ambiguous(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	answer, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", ambiguous(fmt.Errorf("failed to read response: %w", err))
 	}
 
-	return string(body), nil
+	return string(answer), nil
 }
 
 // sendQueryRequest is the transaction SEARCH survivor: a POST on the wire, but

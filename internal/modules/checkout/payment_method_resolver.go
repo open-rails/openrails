@@ -61,7 +61,7 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 		return pm.RailCustomerRef, pm.RailMethodRef, pm, false, nil
 	}
 
-	if req.PaymentToken == "" {
+	if req.PaymentToken == "" && req.Card == nil {
 		return "", "", nil, false, errors.New("payment_method_id or payment_token is required")
 	}
 	if !rails.IsNMI(models.Rail(target.Rail)) {
@@ -74,6 +74,7 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 
 	pmNew, err := s.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
+		Card:         req.Card,
 		NameOnCard:   req.NameOnCard,
 		Provider:     target.PSP,
 		FirstName:    ResolveCheckoutFirstName(req, user),

@@ -59,7 +59,7 @@ type HostedCheckoutRail struct {
 	ID           string            `json:"id"`
 	Rail         string            `json:"rail"`
 	Mode         string            `json:"mode"`   // one_off or subscription
-	Driver       string            `json:"driver"` // collect_js, stripe_elements, redirect or solana_pay
+	Driver       string            `json:"driver"` // collect_js, card, stripe_elements, redirect or solana_pay
 	PublicConfig map[string]string `json:"public_config,omitempty"`
 }
 
@@ -93,6 +93,8 @@ type HostedCheckoutPayRequest struct {
 	LastFour   string `json:"last_four,omitempty"`
 	CardType   string `json:"card_type,omitempty"`
 	ExpiryDate string `json:"expiry_date,omitempty"`
+	// Card is a new card entered in the page, for a rail whose driver is card.
+	Card *Card `json:"card,omitempty"`
 }
 
 // HostedCheckoutPayResult is the host's answer to a pay request.

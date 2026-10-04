@@ -14,6 +14,15 @@ func (m *Mock) Tokenize(c Card) string {
 	return t
 }
 
+// Issue sets how the issuer answers for a card stored by its number (the
+// Customer Vault's ccnumber): c's Decline, AVS and CVV. Its Last4 and Exp
+// come from the request.
+func (m *Mock) Issue(number string, c Card) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.issued[number] = c
+}
+
 // AddVault stores c in a new vault, as a legacy system did, and returns its id.
 func (m *Mock) AddVault(c Card) string {
 	m.mu.Lock()

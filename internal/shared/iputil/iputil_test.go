@@ -61,3 +61,31 @@ func TestSourceAllowlists(t *testing.T) {
 	require.False(t, IPInAnyCIDR("192.0.2.7", nil))
 	require.False(t, IPInAnyCIDR("nope", cidrs))
 }
+
+// A card is accepted in live posture only over HTTPS (#1129): the proxy's
+// word counts only when the socket peer is a trusted proxy.
+func TestForwardedHTTPSTrustsOnlyConfiguredProxies(t *testing.T) {
+	proxies := ParseTrustedProxies([]string{"10.0.0.0/8"})
+	for name, tc := range map[string]struct {
+		t      *TrustedProxies
+		remote string
+		protos []string
+		want   bool
+	}{
+		"trusted proxy says https":     {proxies, "10.0.0.5:443", []string{"https"}, true},
+		"trusted proxy says http":      {proxies, "10.0.0.5:443", []string{"http"}, false},
+		"trusted proxy says nothing":   {proxies, "10.0.0.5:443", nil, false},
+		"client line beside the proxy": {proxies, "10.0.0.5:443", []string{"https", "http"}, false},
+		"client value inside one line": {proxies, "10.0.0.5:443", []string{"https, http"}, false},
+		"every hop https":              {proxies, "10.0.0.5:443", []string{"https, HTTPS"}, true},
+		"untrusted peer claims https":  {proxies, "203.0.113.9:443", []string{"https"}, false},
+		"no proxies configured":        {nil, "10.0.0.5:443", []string{"https"}, false},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "http://billing.test/v1/me/payment-methods", nil)
+		r.RemoteAddr = tc.remote
+		for _, proto := range tc.protos {
+			r.Header.Add("X-Forwarded-Proto", proto)
+		}
+		require.Equal(t, tc.want, tc.t.ForwardedHTTPS(r), name)
+	}
+}

@@ -34,6 +34,10 @@ const (
 	// fields, then checkout charges that saved card; any authentication runs
 	// in the page. No card data reaches the host.
 	FlowElements = "elements"
+	// FlowCard: the page posts the card to OpenRails, which vaults it at the
+	// gateway (the PSP's card_entry is server, #1129). The browser loads no
+	// gateway script and needs no public key.
+	FlowCard = "card"
 )
 
 // publicSetting is ONE psps.settings key that is public by nature and may
@@ -141,6 +145,16 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 		Custodian:   models.CustodianPSP,
 		DisplayName: rails.DisplayName(models.Rail(rail)),
 		Flow:        profile.Flow,
+	}
+
+	entry, err := config.CardEntry(rail, scope.Settings, scope.CustodianID != nil)
+	if err != nil {
+		return PublicPSPConfig{}, err.Error(), false
+	}
+	if entry == config.CardEntryServer {
+		// No tokenizer key is served: the page must not load the gateway.
+		out.Flow = FlowCard
+		return out, "", true
 	}
 
 	if scope.CustodianID != nil {
@@ -319,6 +333,7 @@ func (s *Service) checkoutSelectors(ctx context.Context, id merchant.ID) (map[st
 // Browser checkout drivers: how @openrails/billing-ui executes one option.
 const (
 	DriverCollectJS      = "collect_js"
+	DriverCard           = "card"
 	DriverStripeElements = "stripe_elements"
 	DriverRedirect       = "redirect"
 	DriverSolanaPay      = "solana_pay"
@@ -337,6 +352,8 @@ func CheckoutDriver(psp PublicPSPConfig, mode string) string {
 		if key := psp.Config["tokenization_key"]; key != "" && !strings.HasPrefix(key, "preview_") && psp.Config["tokenization_url"] != "" {
 			driver = DriverCollectJS
 		}
+	case FlowCard:
+		driver = DriverCard
 	case FlowElements:
 		if strings.HasPrefix(psp.Config["publishable_key"], "pk_") {
 			driver = DriverStripeElements
@@ -348,7 +365,7 @@ func CheckoutDriver(psp PublicPSPConfig, mode string) string {
 	}
 	if mode == string(models.CheckoutSessionModeSubscription) &&
 		rails.NewSubscriptionFor(models.Rail(psp.Rail)) == rails.NewSubscriptionEngine &&
-		driver != DriverCollectJS && driver != DriverStripeElements {
+		driver != DriverCollectJS && driver != DriverCard && driver != DriverStripeElements {
 		return ""
 	}
 	return driver

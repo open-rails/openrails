@@ -16,7 +16,9 @@ type CheckoutRailOption struct {
 	Rail     string `json:"rail"`
 	// Mode is one_off or subscription.
 	Mode string `json:"mode"`
-	// Driver is collect_js, stripe_elements, redirect or solana_pay.
+	// Driver is collect_js, card, stripe_elements, redirect or solana_pay.
+	// card: the page posts the card itself to OpenRails (the PSP's card_entry
+	// is server) and loads no gateway script.
 	Driver string `json:"driver,omitempty"`
 	// PublicConfig holds browser-safe values: the PSP's public keys, and for
 	// Solana token_symbol, token_name and network.
@@ -67,9 +69,10 @@ type CheckoutPSPConfig struct {
 	// Custodian holds the card: "psp", or the third party whose page tokenizes it.
 	Custodian   string `json:"custodian"`
 	DisplayName string `json:"display_name"`
-	// Flow is how a browser drives this PSP: tokenize, elements, redirect or
-	// wallet. elements: the page saves the card with the PSP's own fields and
-	// checkout charges the saved card, with authentication in the page.
+	// Flow is how a browser drives this PSP: tokenize, card, elements, redirect
+	// or wallet. card: the page posts the card to OpenRails, which vaults it.
+	// elements: the page saves the card with the PSP's own fields and checkout
+	// charges the saved card, with authentication in the page.
 	Flow string `json:"flow"`
 	// Checkout is true when new purchases and newly entered cards use this PSP
 	// under the merchant's checkout routing. Other armed PSPs stay listed so
@@ -188,6 +191,11 @@ type CheckoutPaymentOptions struct {
 	LastFour   string `json:"last_four"`
 	CardType   string `json:"card_type"`
 	ExpiryDate string `json:"expiry_date"`
+
+	// Card is a new card for a PSP whose card_entry is server. It cannot be
+	// re-encoded, so it is set only by the request that first carried it: a
+	// Client refuses to send one.
+	Card *Card `json:"card,omitempty"`
 }
 
 // CheckoutSession is the durable result of a checkout attempt. Amount is native

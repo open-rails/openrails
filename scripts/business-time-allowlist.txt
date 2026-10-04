@@ -9,7 +9,9 @@ internal/http/handlers/webhook_basistheory.go|ReceivedAt:     time.Now(),|infras
 internal/intents/basistheory_account_updater.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_delete.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_payment_method_update.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
-internal/intents/nmi_payment_method_update.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
+internal/intents/nmi_payment_method_update.go|due := time.Now().UTC()|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
+internal/intents/nmi_card_vault.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
+internal/intents/nmi_card_vault.go|NextAttemptAt: time.Now().UTC().Add(cardVaultAttendance),|infrastructure_time|Queue eligibility: a worker looks only after the request carrying the card has had its turn|1
 internal/intents/nmi_payment_source_update.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_payment_source_update.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
 internal/intents/refund.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied refund clock takes precedence|1

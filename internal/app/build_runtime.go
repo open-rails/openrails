@@ -494,6 +494,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner}
 		runtime.RailPaymentMethodService.UpdateIntents = &intents.PaymentMethodUpdateThrough{Runner: intentRunner, DB: database}
+		runtime.RailPaymentMethodService.CardVaults = &intents.CardVaultThrough{Runner: intentRunner}
 	}
 	// #674: user/admin payment-method swaps route through the durable
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a

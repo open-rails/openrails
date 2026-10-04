@@ -20,6 +20,8 @@ func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *Checkou
 	if req == nil || user == nil || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, ErrCheckoutSessionValidation
 	}
+	// A lookup never uses a card; it only names the request being asked about.
+	defer describeCard(req)()
 	if err := validateCheckoutPriceSelector(req.PriceID, req.PriceKey); err != nil {
 		return nil, err
 	}

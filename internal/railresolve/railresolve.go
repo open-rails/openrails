@@ -190,6 +190,11 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		Rail:      models.Rail(scope.Rail),
 		AccountID: scope.AccountID,
 	}
+	// #1129: stored settings are an ingestion plane too; a card_entry no
+	// boot would accept never arms.
+	if _, err := config.CardEntry(scope.Rail, scope.Settings, scope.CustodianID != nil); err != nil {
+		return nil, fmt.Errorf("%s account %s: %w", scope.Rail, scope.AccountID, err)
+	}
 	switch models.Rail(scope.Rail) {
 	case models.RailStripe:
 		secretKey, err := s.requireSecret(ctx, mid, scope, "secret_key")

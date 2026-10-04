@@ -334,6 +334,8 @@ func (s *CheckoutSessionService) requireProviderWrites() error {
 }
 
 func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	// However the request ends, it is done with the card (#1129).
+	defer describeCard(req)()
 	if err := s.guardCardAttempt(ctx, user); err != nil {
 		return nil, err
 	}
@@ -525,6 +527,9 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	// their dedicated builder before the price-first validation below.
 	switch models.CheckoutSessionMode(strings.TrimSpace(req.Mode)) {
 	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
+		if req.Payment.Card != nil {
+			return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionValidation, paymentmethods.ErrCardEntryNotEnabled)
+		}
 		return s.createSolanaLifecycleSession(ctx, req, user)
 	}
 	// The durable buyer-bound agreement wins over a moved price key, archived
@@ -621,6 +626,10 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if err := s.validatePayment(ctx, rail, &req.Payment, user); err != nil {
 		return nil, fmt.Errorf("error validating payment: %w", err)
 	}
+	// #1129: a card is admitted only by the PSP this session routed to.
+	if req.Payment.Card != nil && cardEntryFor(decision.Target) != config.CardEntryServer {
+		return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionValidation, paymentmethods.ErrCardEntryNotEnabled)
+	}
 
 	now := s.now()
 	ttl := defaultCheckoutSessionTTL
@@ -688,7 +697,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	engineEnrollment := mode == models.CheckoutSessionModeSubscription && rails.NewSubscriptionFor(models.Rail(rail)) == rails.NewSubscriptionEngine
 	// A new NMI card is vaulted first: engine memberships charge saved methods.
 	var vaulted *models.PaymentMethod
-	if engineEnrollment && req.Payment.PaymentMethodID == "" && strings.TrimSpace(req.Payment.PaymentToken) != "" && rails.IsNMI(models.Rail(rail)) {
+	if engineEnrollment && req.Payment.PaymentMethodID == "" && (strings.TrimSpace(req.Payment.PaymentToken) != "" || req.Payment.Card != nil) && rails.IsNMI(models.Rail(rail)) {
 		vaulted, err = s.vaultEnrollmentCard(ctx, &req.Payment, session, decision.Target, user)
 		if err != nil {
 			return nil, err
@@ -1261,14 +1270,22 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 	return nil
 }
 
-// validateNMIInput requires exactly one of payment_token or payment_method_id;
-// a saved method must belong to the caller. The NMI executor charges with the
-// token or vaulted method, so both inputs are genuinely consumed downstream.
+// validateNMIInput requires exactly one of payment_token, card or
+// payment_method_id; a saved method must belong to the caller. The NMI
+// executor charges with the token, card or vaulted method, so each input is
+// genuinely consumed downstream.
 func (s *CheckoutSessionService) validateNMIInput(ctx context.Context, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	hasToken := strings.TrimSpace(payment.PaymentToken) != ""
 	hasMethod := strings.TrimSpace(payment.PaymentMethodID) != ""
-	if !hasToken && !hasMethod {
+	hasCard := payment.Card != nil
+	if !hasToken && !hasMethod && !hasCard {
 		return ErrPaymentMethodRequired
+	}
+	if hasCard && hasToken {
+		return fmt.Errorf("%w: %w", ErrCheckoutSessionValidation, paymentmethods.ErrCardWithToken)
+	}
+	if hasCard && hasMethod {
+		return fmt.Errorf("%w: provide either card or payment_method_id, not both", ErrCheckoutSessionValidation)
 	}
 	if hasToken && hasMethod {
 		return fmt.Errorf("%w: provide either payment_token or payment_method_id, not both", ErrCheckoutSessionValidation)
@@ -2077,6 +2094,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		PriceID:           billing.PriceID(*session.PriceID).String(),
 		PaymentMethodID:   payment.PaymentMethodID,
 		PaymentToken:      payment.PaymentToken,
+		Card:              payment.Card,
 		Rail:              railSelector,
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
