@@ -35,7 +35,7 @@ func LoopbackNMIEndpoints(url string) NMIEndpoints {
 }
 
 func (f *NMIFactory) testMode() bool {
-	return f != nil && f.Config != nil && f.Config.IsTestMode()
+	return f != nil && f.Config != nil && config.IsTestMode(f.Config)
 }
 
 func (f *NMIFactory) endpoints() NMIEndpoints {
@@ -44,7 +44,7 @@ func (f *NMIFactory) endpoints() NMIEndpoints {
 	}
 	endpoints := f.Endpoints
 	if f.Config != nil {
-		if gateway := f.Config.SandboxNMIGatewayURL(); gateway != "" {
+		if gateway := config.SandboxNMIGatewayURL(f.Config); gateway != "" {
 			for _, url := range []*string{&endpoints.V5BaseURL, &endpoints.DirectPostURL, &endpoints.QueryURL} {
 				if *url == "" {
 					*url = gateway
@@ -110,7 +110,7 @@ func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope,
 	if err != nil {
 		return nil, fmt.Errorf("build NMI client for PSP %s: %w", scope.ID, err)
 	}
-	client.ReadOnly = f != nil && f.Config != nil && f.Config.IsProviderReadOnly()
+	client.ReadOnly = f != nil && f.Config != nil && config.IsProviderReadOnly(f.Config)
 	if endpoints := f.endpoints(); endpoints != (NMIEndpoints{}) {
 		// Loopback fake gateways only: the client refuses any mutation whose
 		// destination is not a literal loopback IP.

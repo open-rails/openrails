@@ -41,7 +41,7 @@ func (b *MerchantRPCBuilder) merchants() *merchants.Service {
 }
 
 func (b *MerchantRPCBuilder) testMode() bool {
-	return b != nil && b.Config != nil && b.Config.IsTestMode()
+	return b != nil && b.Config != nil && config.IsTestMode(b.Config)
 }
 
 // Resolve arms the merchant's RPC client: a declared solana account's store
@@ -79,7 +79,7 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 		RPCProvider:     settings.RPCProvider,
 		RPCAPIKey:       settings.RPCAPIKey,
 		Network:         network,
-		ReadOnly:        b.Config != nil && b.Config.IsProviderReadOnly(),
+		ReadOnly:        b.Config != nil && config.IsProviderReadOnly(b.Config),
 	}), nil
 }
 

@@ -101,7 +101,7 @@ func (b *MerchantCollectionAdapterBuilder) merchants() *merchants.Service {
 }
 
 func (b *MerchantCollectionAdapterBuilder) testMode() bool {
-	return b.Config != nil && b.Config.IsTestMode()
+	return b.Config != nil && config.IsTestMode(b.Config)
 }
 
 // nmiArmer is the shared store-armed NMI client plane this builder delegates
@@ -290,7 +290,7 @@ func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Con
 	bt, err := basistheory.New(basistheory.Config{
 		APIKey:   apiKey,
 		BaseURL:  b.Endpoints.BTBaseURL,
-		ReadOnly: b.Config != nil && b.Config.IsProviderReadOnly(),
+		ReadOnly: b.Config != nil && config.IsProviderReadOnly(b.Config),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build store-armed BT client: %w", err)

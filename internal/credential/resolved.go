@@ -130,7 +130,7 @@ func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*Res
 	if p == nil {
 		return nil, billingauth.ErrDelegatedPrincipalInvalid
 	}
-	if err := p.Validate(); err != nil {
+	if err := billingauth.ValidateDelegatedPrincipal(p); err != nil {
 		return nil, err
 	}
 	merchantID, err := billing.ParseMerchantID(strings.TrimSpace(p.MerchantID))

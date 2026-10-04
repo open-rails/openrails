@@ -9,6 +9,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -61,7 +62,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
 			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients,
-				Endpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: r.Config.SandboxCCBillDataLinkURL()}},
+				Endpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)}},
 		}
 		r.Verifier.Start()
 	}
@@ -79,7 +80,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		NotificationService: r.NotificationService,
 		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
 		NMIClients:          r.NMIClients,
-		PullEndpoints:       reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: r.Config.SandboxCCBillDataLinkURL()},
+		PullEndpoints:       reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
 		Verifier:            r.Verifier,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
@@ -336,7 +337,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// state at drain time — NMI via the ONE #725 builder, CCBill DataLink and
 	// Stripe via the #788 rail resolution seam.
 	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 (unarmed rail parks)
-	ccbillCancel.DataLinkBaseURL = r.Config.SandboxCCBillDataLinkURL()
+	ccbillCancel.DataLinkBaseURL = config.SandboxCCBillDataLinkURL(r.Config)
 	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, clock) // retain unresolved pre-qualification refunds
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
@@ -353,7 +354,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		rebill,
 		// Invoice collection rides the ledger like every other money mover; the
 		// charger and reconciliation reads are the #725 store-armed plane.
-		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Config, clock),
+		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, config.Mode{Config: r.Config}, clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
@@ -410,8 +411,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 // intentRunner builds a Runner over a registry. Config is attached only when
 // non-nil: since or#865 a nil ModeView fails CLOSED (everything parks), so
 // handing the gate a typed-nil interface would silently park production work.
-// It does NOT panic — (*config.Config).normalizedProviderWriteMode nil-guards
-// its receiver and a typed nil reads as readonly, which parks just the same.
+// It does NOT panic — config.Mode nil-guards its Config and a nil one reads
+// as readonly, which parks just the same.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
 		// #732: gate the request-path enqueue chokepoint (vault delete, admin
@@ -426,7 +427,7 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		Clock:       clock,
 	}
 	if r.Config != nil {
-		runner.Config = r.Config
+		runner.Config = config.Mode{Config: r.Config}
 	}
 	return runner
 }
@@ -716,7 +717,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// diff it against the OpenRails DB, recording drift + orphan events.
 	// Alert-only — never mutates Stripe or the catalog rows. Interval is config
 	// catalog_reconciliation_interval (#712; 0 disables, malformed fails here).
-	interval, reconcileEnabled, err := r.Config.CatalogReconciliationSchedule()
+	interval, reconcileEnabled, err := config.CatalogReconciliationSchedule(r.Config)
 	if err != nil {
 		return nil, err
 	}

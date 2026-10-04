@@ -244,7 +244,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			markedChallenge := false
 			for _, item := range results {
 				if !item.result.allowed && item.result.count >= extremeThreshold {
-					if err := deps.ChallengeStore.MarkChallenged(r.Context(), item.subject.Key, deps.Captcha.EffectiveChallengeTTL()); err != nil {
+					if err := deps.ChallengeStore.MarkChallenged(r.Context(), item.subject.Key, config.CaptchaChallengeTTL); err != nil {
 						log.WithError(err).WithFields(log.Fields{"bucket": bucket, "subject": item.subject.Key}).Warn("failed to mark captcha challenge")
 					}
 					markedChallenge = true
@@ -308,7 +308,7 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 			log.WithError(err).WithFields(log.Fields{"bucket": bucket, "subject": subjectKey}).Warn("failed to clear captcha challenge")
 		}
 	}
-	resetBuckets := deps.Captcha.EffectiveChallengeBuckets()
+	resetBuckets := config.CaptchaChallengeBuckets()
 	if err := resetRedisRateLimitBuckets(r.Context(), deps.RDB, keys, resetBuckets); err != nil {
 		log.WithError(err).WithField("bucket", bucket).Warn("failed to reset redis rate limit after captcha")
 	}
@@ -371,7 +371,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		w.Header().Set("X-Captcha-Required", "true")
 		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_required", "Captcha verification required").
 			WithMetadata(map[string]any{
-				"provider": captchaCfg.EffectiveProvider(),
+				"provider": config.CaptchaProvider(captchaCfg),
 				"site_key": strings.TrimSpace(captchaSiteKey(captchaCfg)),
 				"bucket":   decision.Bucket,
 			})

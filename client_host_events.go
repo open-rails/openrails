@@ -11,6 +11,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// ListHostEvents returns the merchant's host events, oldest first:
+// unacknowledged ones unless options asks for all. Process each idempotently,
+// AcknowledgeHostEvent it, and list again.
 func (c *Client) ListHostEvents(ctx context.Context, options billing.HostEventListOptions, requestOptions ...RequestOption) ([]billing.HostEvent, error) {
 	query := url.Values{}
 	if options.Type != "" {

@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,45 +18,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// FlexiblePort is a custom type that can unmarshal both strings and integers.
-// Plain int, NOT int16 (#349): TCP ports run to 65535 and the kernel's default
-// ephemeral range STARTS at 32768, so an int16 wrapped every ephemeral port
-// negative (44553 → -20983) and the listener died.
-type FlexiblePort int
-
-// UnmarshalText implements the encoding.TextUnmarshaler interface
-func (p *FlexiblePort) UnmarshalText(text []byte) error {
-	s := strings.TrimSpace(string(text))
-	if s == "" {
-		*p = 0
-		return nil
-	}
-
-	val, err := strconv.ParseInt(s, 10, 32)
-	if err != nil {
-		return fmt.Errorf("invalid port value: %w", err)
-	}
-	if val < 1 || val > 65535 {
-		return fmt.Errorf("invalid port value %d: must be 1-65535", val)
-	}
-
-	*p = FlexiblePort(val)
-	return nil
-}
-
 // configContextKey is a distinct type so this key cannot collide with another
-// package storing "config" in the same context (SA1029, or#869).
+// package storing "config" in the same context.
 type configContextKey string
 
 // ConfigContextKey is the context key the CLI stores the loaded *Config under.
 const ConfigContextKey configContextKey = "config"
 
-// CredentialPosture is the sandbox-credential axis (#355/#745): "sandbox" or
-// "live", never a bare true/false. The Go zero value (empty string) means
-// UNSET — it can never be mistaken for "live" the way a bool's false zero
-// value could. UnmarshalText keeps config.yaml/TEST_MODE/--test-mode decoding
-// through koanf (the same encoding.TextUnmarshaler pattern FlexiblePort uses
-// above, #349).
+// CredentialPosture says which provider credentials are accepted: sandbox or
+// live. The zero value is unset, which New refuses.
 type CredentialPosture string
 
 const (
@@ -65,218 +34,170 @@ const (
 	CredentialPostureLive    CredentialPosture = "live"
 )
 
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (p *CredentialPosture) UnmarshalText(text []byte) error {
-	switch s := CredentialPosture(strings.ToLower(strings.TrimSpace(string(text)))); s {
+// ParseCredentialPosture reads a posture from text; empty is unset.
+func ParseCredentialPosture(text string) (CredentialPosture, error) {
+	switch p := CredentialPosture(strings.ToLower(strings.TrimSpace(text))); p {
 	case "", CredentialPostureSandbox, CredentialPostureLive:
-		*p = s
-		return nil
+		return p, nil
 	default:
-		return fmt.Errorf("invalid test_mode %q: must be %q or %q", s, CredentialPostureSandbox, CredentialPostureLive)
+		return "", fmt.Errorf("invalid test_mode %q: must be %q or %q", p, CredentialPostureSandbox, CredentialPostureLive)
 	}
 }
 
+// Config is the engine's configuration: plain data. Everything that reaches
+// outside the process is in Deps. TestMode and ProviderWriteMode are required.
 type Config struct {
-	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
-	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
+	// ProviderWriteMode is how much OpenRails may do against payment
+	// providers: "full" (normal operation), "limited" (no system-initiated
+	// provider writes) or "readonly" (no provider writes: it never charges
+	// anyone). Required. Independent of TestMode.
+	ProviderWriteMode string
 
-	// ProviderWriteMode is the behavior dial (#346, #355): how much OpenRails is
-	// allowed to do against payment providers. It is independent from TestMode.
-	// One of:
-	//   - "full":     normal operation
-	//   - "limited":  no system-initiated provider writes
-	//   - "readonly": no provider writes
-	// Required: openrails.New (and so run-server) refuses it unset (#1063). Readers
-	// of an unset value still fail closed to "readonly" (Paul 2026-07-02).
-	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
+	// TestMode selects sandbox or live provider credentials. Required. It
+	// never relaxes authentication, transport security or credential
+	// encryption.
+	TestMode CredentialPosture
 
-	// TestMode selects sandbox or live provider credentials. It never relaxes
-	// authentication, transport security or credential encryption. Constructors
-	// require an explicit posture independently of provider write permissions.
-	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
-
-	// Schema is the Postgres schema OpenRails' tables live in (default
-	// "billing"; env DB_SCHEMA). Read the effective value through SchemaName.
-	Schema string `koanf:"schema,omitempty"`
+	// Schema is the Postgres schema OpenRails' tables live in. Empty is
+	// "billing".
+	Schema string
 	// River selects who runs the job fleet. Zero is RiverManaged.
-	River RiverOwnership `koanf:"-"`
+	River RiverOwnership
 	// RiverSchema is the managed fleet's schema (default public). A host-owned
 	// fleet keeps River's tables where the host's client puts them.
-	RiverSchema string `koanf:"-"`
+	RiverSchema string
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
-	Merchant MerchantDeclaration `koanf:"-"`
+	Merchant MerchantDeclaration
 	// Catalog declares Merchant's catalog (billing.ParseCatalogApplicationYAML
 	// of the host's catalog.yaml). New applies it before returning: unchanged
 	// it replays, edited it converges. While it is set, writes to the
 	// merchant's catalog are refused (billing.ErrCatalogDeclared); creator
 	// catalogs and negotiated payer rates stay writable. Nil leaves the
 	// catalog to the API.
-	Catalog *billing.CatalogApplyParams `koanf:"-"`
+	Catalog *billing.CatalogApplyParams
 	// HTTP selects the route groups Client.Routes publishes; nil publishes none.
-	HTTP *HTTPConfig `koanf:"-"`
+	HTTP *HTTPConfig
 	// ControlPlane attaches the OpenRails-owned AuthKit control plane (the
 	// standalone server and hosted products); nil for hosts with their own auth.
-	ControlPlane *ControlPlaneConfig `koanf:"-"`
+	ControlPlane *ControlPlaneConfig
 
-	// PublicBillingBaseURL is the external billing mount, excluding /v1.
-	// Used only to generate provider callbacks and customer billing links.
-	PublicBillingBaseURL string `koanf:"public_billing_base_url,omitempty"`
-	// DashboardBaseURL is the independent destination for administrative links.
-	DashboardBaseURL string `koanf:"dashboard_base_url,omitempty"`
+	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
+	// used only to build provider callbacks and customer billing links.
+	PublicBillingBaseURL string
+	// DashboardBaseURL is where administrative links point.
+	DashboardBaseURL string
 
-	DB         *DBConfig         `koanf:"db,omitempty"`
-	Redis      *RedisConfig      `koanf:"redis,omitempty"`
-	Logger     *LoggerConfig     `koanf:"logger,omitempty"`
-	SendGrid   *SendGridConfig   `koanf:"sendgrid,omitempty"`
-	RateLimits *RateLimitsConfig `koanf:"rate_limits,omitempty"`
-	// RateLimitsDisabled explicitly opts OUT of OpenRails' built-in rate
-	// limiting/captcha enforcement (#742) — for a host that fronts billing
-	// with its own gateway/limiter and deliberately wants RateLimitHTTP to
-	// run as a passthrough. Zero value (false) keeps hosts PROTECTED:
-	// embedded.New seeds the same curated RateLimits/Captcha defaults
-	// config.Load applies whenever the host leaves them nil, unless this is
-	// explicitly set. Standalone Load() never needs it — GetDefaultBillingConfig
-	// always seeds RateLimits — but the knob is honored there too. Env:
-	// RATE_LIMITS_DISABLED.
-	RateLimitsDisabled bool              `koanf:"rate_limits_disabled,omitempty"`
-	Captcha            *CaptchaConfig    `koanf:"captcha,omitempty"`
-	Encryption         *EncryptionConfig `koanf:"encryption,omitempty"`
-	Vault              *VaultConfig      `koanf:"vault,omitempty"`
+	// DB opens OpenRails' own pool when Deps.Postgres is nil.
+	DB *DBConfig
+	// Redis opens OpenRails' own client when Deps.Redis is nil.
+	Redis *RedisConfig
+	// Logger sets the log level.
+	Logger *LoggerConfig
+	// SendGrid sends billing email; nil sends none.
+	SendGrid *SendGridConfig
+	// RateLimits are the per-bucket request limits; nil takes the built-in
+	// defaults.
+	RateLimits *RateLimitsConfig
+	// RateLimitsDisabled turns off the built-in rate limits and captcha
+	// escalation, for a host that fronts billing with its own limiter.
+	RateLimitsDisabled bool
+	// Captcha challenges a client that keeps hitting a rate limit.
+	Captcha *CaptchaConfig
+	// Encryption holds the master key for credentials stored in the database.
+	Encryption *EncryptionConfig
+	// Vault connects to HashiCorp Vault when Deps.Vault is nil.
+	Vault *VaultConfig
 
-	// AdminConsole gates the merchant admin console SPA served at
-	// AdminConsole.Path, /admin by default (#740/#1127). Default OFF. Enabling
-	// it requires console assets in the binary (#754: `task admin-build` builds
-	// web/admin) — enabled without assets refuses boot. Env:
-	// ADMIN_CONSOLE_ENABLED, ADMIN_CONSOLE_PATH, ADMIN_CONSOLE_AUTH_BASE_URL,
-	// ADMIN_CONSOLE_API_BASE_URL.
-	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`
+	// AdminConsole serves the merchant admin console. Off by default; enabled
+	// without a console build (Deps.ConsoleAssets) New refuses.
+	AdminConsole *AdminConsoleConfig
 
-	// LLM configures the server-side model behind the #741 dashboard
-	// natural-language widget generator. FAIL-CLOSED: no api_key → the
-	// generate endpoint answers 501 and the admin console hides the NL box;
-	// the dashboard itself never depends on an LLM. Env: LLM_PROVIDER,
-	// LLM_MODEL, LLM_BASE_URL, LLM_API_KEY (secret — mounted secret files
-	// work like any other secret env name).
-	LLM *LLMConfig `koanf:"llm,omitempty"`
+	// LLM is the model behind the console's natural-language widgets and
+	// questions. Without an API key those features are off.
+	LLM *LLMConfig
 
-	// SecretBackend selects credential custody: snapshot (default), vault or db.
-	// Snapshot values are supplied by the host and are never persisted. Managed
-	// DB storage always requires encryption. Vault access never falls back to DB.
-	SecretBackend string `koanf:"secret_backend,omitempty"`
-	// CredentialSnapshotID is a stable host-owned UUID identifying snapshot custody.
-	// It is required when publishing a managed-to-snapshot custody transition.
-	CredentialSnapshotID string `koanf:"credential_snapshot_id,omitempty"`
-	// CredentialReadOnly declines managed credential writes even when the
-	// selected backend would permit them. It never grants backend privileges.
-	CredentialReadOnly bool `koanf:"credential_read_only,omitempty"`
-	// AlertSecretBackend optionally selects vault or encrypted db custody for
-	// outbound webhook credentials independently of read-only provider snapshots.
-	AlertSecretBackend string `koanf:"alert_secret_backend,omitempty"`
-	// MerchantConfigHTTP publishes standalone merchant settings/provider routes.
-	// Embedded hosts select HTTP.MerchantConfig instead. Neither flag disables
-	// authorized in-process Client operations or changes credential custody.
-	MerchantConfigHTTP bool `koanf:"merchant_config_http,omitempty"`
-	// AllowCatalogUpdates enables ordinary product, price, catalog and metering
-	// definition mutations and their HTTP routes. Defaults to false independently
-	// of provider credential custody. Trusted operator bootstrap remains available.
-	// A declared Catalog still refuses the merchant's own catalog.
-	// Env: ALLOW_CATALOG_UPDATES.
-	AllowCatalogUpdates bool `koanf:"allow_catalog_updates,omitempty"`
-	// MerchantManifestOverlays are YAML files in the manifest's own shape
-	// (secrets rendered by Vault Agent / a k8s Secret volume) merged over the
-	// MODE-1 boot manifest in order, later wins. Env: MERCHANT_MANIFEST_OVERLAYS
-	// (comma-separated).
-	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays,omitempty"`
+	// SecretBackend selects credential custody: SecretBackendSnapshot (the
+	// default: supplied by the host, never persisted), SecretBackendVault or
+	// SecretBackendDB (always encrypted). Vault never falls back to the
+	// database.
+	SecretBackend string
+	// CredentialSnapshotID is a stable host-owned UUID identifying snapshot
+	// custody. Required to move custody from managed to snapshot.
+	CredentialSnapshotID string
+	// CredentialReadOnly refuses managed credential writes even when the
+	// backend would permit them.
+	CredentialReadOnly bool
+	// AlertSecretBackend selects vault or db custody for outbound webhook
+	// credentials, independently of SecretBackend.
+	AlertSecretBackend string
+	// MerchantConfigHTTP publishes the standalone merchant settings and PSP
+	// routes. Embedded hosts select HTTP.MerchantConfig instead. Neither flag
+	// affects in-process Client operations or credential custody.
+	MerchantConfigHTTP bool
+	// AllowCatalogUpdates enables the product, price, catalog and metering
+	// mutation routes. An in-process Client applies its own catalog without
+	// it; a declared Catalog still refuses the merchant's own catalog.
+	AllowCatalogUpdates bool
 
 	// CatalogReconciliationInterval schedules the alert-only catalog
-	// reconciliation pull loop (#209/#712): a Go duration ("30m", "2h"). Empty
-	// defaults to 1h; "0" disables the loop; malformed values refuse to boot.
-	// Env: CATALOG_RECONCILIATION_INTERVAL.
-	CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval,omitempty"`
+	// reconciliation: a Go duration ("30m"). Empty is 1h; "0" disables it.
+	CatalogReconciliationInterval string
 
 	// ProviderBillingQuiescenceInterval is the minimum separation between two
-	// equal normalized post-absence billing observations before OpenRails may
-	// call an operation authorization settlement eligible. Empty defaults to a
-	// conservative 24h. It must be a positive Go duration. Env:
-	// PROVIDER_BILLING_QUIESCENCE_INTERVAL.
-	ProviderBillingQuiescenceInterval string `koanf:"provider_billing_quiescence_interval,omitempty"`
+	// equal provider billing observations before an operation authorization
+	// may settle: a positive Go duration in whole seconds. Empty is 24h.
+	ProviderBillingQuiescenceInterval string
 
-	// WebhookSecretOverlap bounds how long a rotated-out webhook signing secret
-	// keeps verifying (SEC-29): a Go duration, empty = 24h, at most 168h.
-	// Env: WEBHOOK_SECRET_OVERLAP.
-	WebhookSecretOverlap string `koanf:"webhook_secret_overlap,omitempty"`
+	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
+	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
+	WebhookSecretOverlap string
 
-	// ReturnOrigins are the exact origins (scheme://host[:port]) checkout
-	// success/cancel and billing-portal return URLs may name (SEC-33). Empty
-	// allows only the origin of PublicBillingBaseURL. Env: RETURN_ORIGINS.
-	ReturnOrigins []string `koanf:"return_origins,omitempty"`
+	// ReturnOrigins are the exact origins (scheme://host[:port]) that checkout
+	// and billing-portal return URLs may name. Empty allows only the origin of
+	// PublicBillingBaseURL.
+	ReturnOrigins []string
 
-	// TrustedProxies lists CIDRs (e.g. "10.0.0.0/8") whose X-Forwarded-For is
-	// trusted (#746: one proxy-aware client-IP resolver for rate limiting,
-	// abuse tracking, webhook IPAddress recording, and the CCBill IP
-	// allowlist). Empty (the default) trusts NOTHING — every client-IP
-	// resolution uses the raw socket peer, so a spoofed X-Forwarded-For has
-	// zero effect. Set this to your load balancer's/reverse proxy's address
-	// range when deploying behind one. Env: TRUSTED_PROXIES (YAML list or a
-	// JSON array string, e.g. TRUSTED_PROXIES='["10.0.0.0/8"]').
-	TrustedProxies []string `koanf:"trusted_proxies,omitempty"`
+	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
+	// resolving a client's address. Empty trusts none: the socket peer is the
+	// client.
+	TrustedProxies []string
 
-	// CloudflareProxies lists Cloudflare's egress CIDRs, ONLY where Cloudflare
-	// fronts this origin (ak#298). These peers are trusted for X-Forwarded-For
-	// like TrustedProxies, and they alone may assert CF-Connecting-IP to
-	// AuthKit — a merely trusted proxy never does. Lock the origin down to
-	// Cloudflare ingress when set. Env: CLOUDFLARE_PROXIES (same list forms as
-	// TRUSTED_PROXIES).
-	CloudflareProxies []string `koanf:"cloudflare_proxies,omitempty"`
+	// CloudflareProxies are Cloudflare's egress CIDRs, set only where
+	// Cloudflare fronts this origin. They are trusted like TrustedProxies, and
+	// they alone may assert CF-Connecting-IP.
+	CloudflareProxies []string
 
-	// CCBillWebhookIPAllowlist lists EXTRA source CIDRs accepted as CCBill
-	// webhook origins on top of CCBill's own documented ranges (SEC-19).
-	// CCBill signs nothing, so the source IP IS the authentication: this list
-	// is a credential, not a convenience. It is honored ONLY under
-	// test_mode=sandbox and ONLY while the PSP catalog PROVES no live CCBill
-	// PSP exists anywhere; anything unproven refuses it. Empty (the default)
-	// accepts CCBill's ranges alone. It replaces the old implicit "test_mode
-	// accepts any IP" bypass — a loopback dev harness must now declare
-	// "127.0.0.1/32". Env: CCBILL_WEBHOOK_IP_ALLOWLIST (YAML list or a JSON
-	// array string).
-	CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist,omitempty"`
+	// CCBillWebhookIPAllowlist are extra source CIDRs accepted as CCBill
+	// webhook origins. CCBill signs nothing, so the source address is the
+	// authentication: the list is honored only with TestMode sandbox and no
+	// live CCBill PSP. Empty accepts CCBill's own ranges alone.
+	CCBillWebhookIPAllowlist []string
 
-	// ProviderSandbox points sandbox-posture provider clients at loopback
-	// gateways so a whole process (standalone or embedded) can be qualified
-	// against fake providers over its real wire paths. It is process
-	// configuration only (file, env, flags): no merchant setting or route
-	// writes it. Honored only under test_mode=sandbox and only for a literal
-	// loopback destination; anything else refuses to load.
-	ProviderSandbox *ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
-	// HyperSwitch is a trusted host-owned deployment, never tenant-controlled.
-	HyperSwitch *HyperSwitchConfig `koanf:"hyperswitch,omitempty"`
+	// ProviderSandbox points sandbox provider clients at loopback gateways, to
+	// qualify a process against fake providers. Refused with TestMode live
+	// and for anything but a literal loopback address.
+	ProviderSandbox *ProviderSandboxConfig
+	// HyperSwitch is the host's trusted HyperSwitch deployment.
+	HyperSwitch *HyperSwitchConfig
 
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
-	EngineAdmissionHold bool `koanf:"engine_admission_hold"`
+	EngineAdmissionHold bool
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
+// Each is an absolute http(s) URL whose host is a loopback IP literal, with no
+// userinfo; hostnames, even "localhost", are refused.
 type ProviderSandboxConfig struct {
-	// NMIGatewayURL replaces the NMI sandbox direct-post, query and v5 base
-	// URLs for every store-armed NMI client (checkout sales, invoice
-	// collection, payment-method updates and their verify reads). Store
-	// credentials are sent there, so it must be an absolute http(s) URL whose
-	// host is a loopback IP literal (127.0.0.0/8 or ::1) with no userinfo;
-	// hostnames, even "localhost", are refused because locality must not
-	// depend on a resolver. Env: PROVIDER_SANDBOX_NMI_GATEWAY_URL.
-	NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
-	// StripeAPIURL replaces the process-wide Stripe API root under the same sandbox-only,
-	// literal-loopback rule. The readonly guard and pinned API version still
-	// apply. Env: PROVIDER_SANDBOX_STRIPE_API_URL.
-	StripeAPIURL string `koanf:"stripe_api_url,omitempty"`
-	// SolanaRPCURL replaces every merchant's Solana RPC endpoint under the same
-	// rule. Env: PROVIDER_SANDBOX_SOLANA_RPC_URL.
-	SolanaRPCURL string `koanf:"solana_rpc_url,omitempty"`
-	// CCBillDataLinkURL replaces the CCBill DataLink endpoint for every
-	// store-armed DataLink client under the same rule. Env:
-	// PROVIDER_SANDBOX_CCBILL_DATALINK_URL.
-	CCBillDataLinkURL string `koanf:"ccbill_datalink_url,omitempty"`
+	// NMIGatewayURL replaces the NMI sandbox endpoints.
+	NMIGatewayURL string
+	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
+	// pinned API version still apply.
+	StripeAPIURL string
+	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
+	SolanaRPCURL string
+	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
+	CCBillDataLinkURL string
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
@@ -286,7 +207,7 @@ var ErrProviderSandboxGateway = errors.New("provider_sandbox gateway refused")
 
 // SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
 // run, or "" for the real sandbox endpoints.
-func (cfg *Config) SandboxNMIGatewayURL() string {
+func SandboxNMIGatewayURL(cfg *Config) string {
 	if cfg == nil || cfg.ProviderSandbox == nil {
 		return ""
 	}
@@ -294,7 +215,7 @@ func (cfg *Config) SandboxNMIGatewayURL() string {
 }
 
 // SandboxStripeAPIURL is the configured loopback API, or empty for Stripe.
-func (cfg *Config) SandboxStripeAPIURL() string {
+func SandboxStripeAPIURL(cfg *Config) string {
 	if cfg == nil || cfg.ProviderSandbox == nil {
 		return ""
 	}
@@ -302,7 +223,7 @@ func (cfg *Config) SandboxStripeAPIURL() string {
 }
 
 // SandboxSolanaRPCURL is the configured loopback Solana RPC, or empty.
-func (cfg *Config) SandboxSolanaRPCURL() string {
+func SandboxSolanaRPCURL(cfg *Config) string {
 	if cfg == nil || cfg.ProviderSandbox == nil {
 		return ""
 	}
@@ -310,7 +231,7 @@ func (cfg *Config) SandboxSolanaRPCURL() string {
 }
 
 // SandboxCCBillDataLinkURL is the configured loopback DataLink, or empty.
-func (cfg *Config) SandboxCCBillDataLinkURL() string {
+func SandboxCCBillDataLinkURL(cfg *Config) string {
 	if cfg == nil || cfg.ProviderSandbox == nil {
 		return ""
 	}
@@ -339,7 +260,7 @@ func ValidateLoopbackGatewayURL(raw string) error {
 }
 
 func validateProviderSandbox(cfg *Config) error {
-	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL(), "solana_rpc_url": cfg.SandboxSolanaRPCURL(), "ccbill_datalink_url": cfg.SandboxCCBillDataLinkURL()} {
+	for key, gateway := range map[string]string{"nmi_gateway_url": SandboxNMIGatewayURL(cfg), "stripe_api_url": SandboxStripeAPIURL(cfg), "solana_rpc_url": SandboxSolanaRPCURL(cfg), "ccbill_datalink_url": SandboxCCBillDataLinkURL(cfg)} {
 		if gateway == "" {
 			continue
 		}
@@ -356,7 +277,7 @@ func validateProviderSandbox(cfg *Config) error {
 // CatalogReconciliationSchedule resolves the catalog reconciliation loop
 // schedule: empty → 1h default, <=0 → disabled. A malformed value is an error
 // — a typo must never silently pick a schedule (#712).
-func (cfg *Config) CatalogReconciliationSchedule() (interval time.Duration, enabled bool, err error) {
+func CatalogReconciliationSchedule(cfg *Config) (interval time.Duration, enabled bool, err error) {
 	raw := ""
 	if cfg != nil {
 		raw = strings.TrimSpace(cfg.CatalogReconciliationInterval)
@@ -377,7 +298,7 @@ func (cfg *Config) CatalogReconciliationSchedule() (interval time.Duration, enab
 // ProviderBillingQuiescence returns the policy used for new qualifications.
 // The chosen duration is persisted per operation, so later config changes do
 // not retroactively weaken an existing reservation's evidence requirement.
-func (cfg *Config) ProviderBillingQuiescence() (time.Duration, error) {
+func ProviderBillingQuiescence(cfg *Config) (time.Duration, error) {
 	raw := ""
 	if cfg != nil {
 		raw = strings.TrimSpace(cfg.ProviderBillingQuiescenceInterval)
@@ -406,89 +327,73 @@ const (
 
 // SecretStoreBackend returns the declared credential custody. Empty chooses an
 // immutable host snapshot; unknown inputs remain invalid rather than selecting DB.
-func (cfg *Config) SecretStoreBackend() string {
+func SecretStoreBackend(cfg *Config) string {
 	if cfg == nil || strings.TrimSpace(cfg.SecretBackend) == "" {
 		return SecretBackendSnapshot
 	}
 	return strings.ToLower(strings.TrimSpace(cfg.SecretBackend))
 }
 
-// EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
-// master key wraps each merchant's Data Encryption Key (envelope encryption); the
-// DEK encrypts sensitive at-rest field values (e.g. per-merchant rail
-// credentials in billing.merchant_secrets).
-//
-// Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
-// ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
-// KMS (the wrapped DEKs in billing.merchant_deks stay in the DB; the master key
-// that unwraps them never does). An empty key disables this encryptor. Managed
-// Managed DB provider credentials always require encryption, while sensitive
-// optional features such as stored webhook URLs and SDK capture tokens refuse
-// persistence. Host-owned provider credentials remain in memory.
+// EncryptionConfig configures encryption at rest. The master key wraps each
+// merchant's data key, which encrypts the credentials OpenRails stores in the
+// database. SecretBackendDB requires it; host-owned snapshot credentials stay
+// in memory and need none.
 type EncryptionConfig struct {
-	// MasterKey is the base64-encoded 32-byte AES-256 master key that wraps
-	// per-merchant DEKs. Empty disables at-rest encryption.
-	MasterKey string `koanf:"master_key,omitempty"`
+	// MasterKey is the base64 of a 32-byte AES-256 key. Empty disables
+	// encryption at rest.
+	MasterKey string
 }
 
-// VaultConfig configures a HashiCorp Vault connection for merchant-secret KV
-// storage and Solana Transit signing (issue #251). Enabling the connection does
-// not select either capability: SecretBackend selects KV storage, and each
-// Solana PSP selects its signer. KV and Transit mounts default to "secret" and
-// "transit" (KVMount/TransitMount below); the secret cache TTL is fixed in code.
+// VaultConfig connects to HashiCorp Vault for merchant secrets and Solana
+// Transit signing. The connection selects neither: SecretBackend selects
+// secret storage, and each Solana PSP selects its signer.
 type VaultConfig struct {
-	Namespace   string `koanf:"namespace,omitempty"`
-	ScopePrefix string `koanf:"scope_prefix,omitempty"`
-	Enabled     bool   `koanf:"enabled,omitempty"`
-	Address     string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
-	AuthMethod  string `koanf:"auth_method,omitempty"` // "token" | "approle" | "kubernetes"
-	// Token is a pre-issued Vault token (VAULT_TOKEN). When set with no explicit
-	// auth_method, token auth is selected (dev / e2e against a -dev Vault).
-	Token    string `koanf:"token,omitempty"`
-	RoleID   string `koanf:"role_id,omitempty"`
-	SecretID string `koanf:"secret_id,omitempty"`
-	K8sRole  string `koanf:"k8s_role,omitempty"`
-	// KVMount is the KV-v2 mount merchant secrets live under (VAULT_KV_MOUNT).
-	// Empty defaults to "secret" (internal/merchantsecrets.DefaultVaultKVMount,
-	// unchanged from the previous unconditional constant) — set this when a
-	// deployment's Vault instance names its mount something else.
-	KVMount string `koanf:"kv_mount,omitempty"`
-	// TransitMount is the Transit mount Solana signing keys live under
-	// (VAULT_TRANSIT_MOUNT). Empty defaults to "transit"
-	// (internal/merchantsecrets.DefaultVaultTransitMount, unchanged from the
-	// previous unconditional constant).
-	TransitMount string `koanf:"transit_mount,omitempty"`
+	Namespace   string
+	ScopePrefix string
+	Enabled     bool
+	// Address is the server URL; empty uses the Vault client's default.
+	Address string
+	// AuthMethod is "token", "approle" or "kubernetes". Empty with a Token is
+	// token.
+	AuthMethod string
+	// Token is a pre-issued Vault token.
+	Token    string
+	RoleID   string
+	SecretID string
+	K8sRole  string
+	// KVMount is the KV-v2 mount merchant secrets live under; empty is
+	// "secret".
+	KVMount string
+	// TransitMount is the Transit mount Solana signing keys live under; empty
+	// is "transit".
+	TransitMount string
 }
 
-// AdminConsoleConfig configures the merchant admin console SPA (#740).
-// Disabled by default; when enabled the server serves the caller-supplied
-// console build (#754) at Path plus a Path/config.json bootstrap document the
-// SPA reads to find its auth issuer and API base. Enabled without assets is a
-// boot error.
+// AdminConsoleConfig serves the merchant admin console at Path, with a
+// Path/config.json document the console reads to find its auth and API bases.
 type AdminConsoleConfig struct {
-	Enabled bool `koanf:"enabled,omitempty"`
-	// Path is where the console is served (#1127): an absolute URL path
-	// without a trailing slash, e.g. "/billing/admin". Empty is "/admin". An
-	// embedded host mounts Client.AdminConsole() at exactly this path.
-	Path string `koanf:"path,omitempty"`
-	// AuthBaseURL is the base under which the AuthKit authhttp surface lives.
-	// Empty defaults to the standalone control plane's, "/auth/v1" beneath an
-	// origin issuer. Embedded hosts set their AuthKit JSON API, "/api/v1" by
-	// default (may be absolute, another origin).
-	AuthBaseURL string `koanf:"auth_base_url,omitempty"`
-	// APIBaseURL is the base of the merchant API. Empty defaults to "/v1"
-	// (standalone). Embedded hosts typically use "/billing/v1".
-	APIBaseURL string `koanf:"api_base_url,omitempty"`
+	Enabled bool
+	// Path is where the console is served: an absolute URL path without a
+	// trailing slash, such as "/billing/admin". Empty is "/admin". An embedded
+	// host mounts Client.AdminConsole at exactly this path.
+	Path string
+	// AuthBaseURL is the base of the AuthKit HTTP API the console signs in
+	// through. Empty is the control plane's, "/auth/v1". Embedded hosts set
+	// their AuthKit API, "/api/v1" by default; it may be absolute.
+	AuthBaseURL string
+	// APIBaseURL is the base of the merchant API. Empty is "/v1"; embedded
+	// hosts typically use "/billing/v1".
+	APIBaseURL string
 }
 
-// IsEnabled reports whether the admin console SPA should be served.
-func (c *AdminConsoleConfig) IsEnabled() bool { return c != nil && c.Enabled }
+// AdminConsoleEnabled reports whether the admin console SPA should be served.
+func AdminConsoleEnabled(c *AdminConsoleConfig) bool { return c != nil && c.Enabled }
 
 // DefaultAdminConsolePath is where the console is served when Path is unset.
 const DefaultAdminConsolePath = "/admin"
 
-// MountPath is Path, defaulted to DefaultAdminConsolePath.
-func (c *AdminConsoleConfig) MountPath() string {
+// AdminConsoleMountPath is Path, defaulted to DefaultAdminConsolePath.
+func AdminConsoleMountPath(c *AdminConsoleConfig) string {
 	if c == nil || c.Path == "" {
 		return DefaultAdminConsolePath
 	}
@@ -530,115 +435,94 @@ const (
 	LLMDefaultModelOpenAI = "gpt-5.4-nano"
 )
 
-// LLMConfig configures the #741 natural-language widget generator and the
-// #756 metrics Q&A endpoint.
+// LLMConfig configures the model behind the console's natural-language
+// widgets and questions.
 type LLMConfig struct {
-	// Provider selects the API dialect: "anthropic" (default) or "openai";
-	// unknown values refuse to boot.
-	Provider string `koanf:"provider,omitempty"`
-	// Model is the provider model id. Empty = the provider's default
-	// (LLMDefaultModelAnthropic / LLMDefaultModelOpenAI).
-	Model string `koanf:"model,omitempty"`
-	// BaseURL overrides the provider's public API endpoint — with
-	// provider=openai this is the door to every OpenAI-compatible endpoint
-	// (Groq, Together, Ollama, vLLM). Convention per dialect: openai INCLUDES
-	// the version segment (e.g. http://localhost:11434/v1), anthropic is the
-	// origin (e.g. https://api.anthropic.com). Must be an absolute URL; https
-	// required. Env: LLM_BASE_URL.
-	BaseURL string `koanf:"base_url,omitempty"`
-	// APIKey is the provider credential (SECRET — env LLM_API_KEY or a
-	// mounted secret file, never committed config). Empty = feature off.
-	APIKey string `koanf:"api_key,omitempty"`
-	// AskEnabled arms POST /v1/merchant/metrics/ask (#756). SEPARATE consent
-	// from the api_key gate because the data flow differs: widget generation
-	// (#741) only ever sends the metrics schema to the provider, while /ask
-	// sends aggregate query RESULTS too. Default false (fail-closed). Env:
-	// LLM_ASK_ENABLED.
-	AskEnabled bool `koanf:"ask_enabled,omitempty"`
-
-	// CatalogCopilotEnabled arms POST /v1/merchant/catalog/ask (#779 Phase 1):
-	// read-only catalog Q&A. Separate consent from AskEnabled/ask_enabled
-	// because the data flow is a distinct surface (aggregate catalog/
-	// subscriber-count data, not metrics). Default false (fail-closed). Env:
-	// LLM_CATALOG_COPILOT_ENABLED.
-	CatalogCopilotEnabled bool `koanf:"catalog_copilot_enabled,omitempty"`
-
-	// CatalogDraftingEnabled additionally arms the #779 Phase 2 draft_* tools
-	// inside the catalog copilot loop (draft_price_change / draft_catalog_diff
-	// — proposals only, never a mutation). #781's server-side notice-window
-	// enforcement is active. Drafting remains explicit per-deployment consent,
-	// separate from catalog Q&A.
-	// Default false (fail-closed). Env: LLM_CATALOG_DRAFTING_ENABLED.
-	CatalogDraftingEnabled bool `koanf:"catalog_drafting_enabled,omitempty"`
+	// Provider selects the API dialect: "anthropic" (the default) or
+	// "openai". Any other value is refused.
+	Provider string
+	// Model is the provider's model ID; empty is the provider's default.
+	Model string
+	// BaseURL replaces the provider's public endpoint: an absolute https URL.
+	// With openai it includes the version segment
+	// (https://host/v1); with anthropic it is the origin.
+	BaseURL string
+	// APIKey is the provider credential. Empty turns the features off.
+	APIKey string
+	// AskEnabled turns on questions about metrics, which send aggregate query
+	// results to the provider (widget generation sends only the schema).
+	AskEnabled bool
+	// CatalogCopilotEnabled turns on read-only questions about the catalog,
+	// which send aggregate catalog and subscriber counts to the provider.
+	CatalogCopilotEnabled bool
+	// CatalogDraftingEnabled lets the catalog copilot draft price and catalog
+	// changes. Drafts are proposals; nothing is applied.
+	CatalogDraftingEnabled bool
 }
 
-// IsConfigured reports whether NL widget generation can run (fail-closed on a
+// LLMConfigured reports whether NL widget generation can run (fail-closed on a
 // missing key).
-func (c *LLMConfig) IsConfigured() bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
+func LLMConfigured(c *LLMConfig) bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
 
-// AskConfigured reports whether metrics Q&A can run: a key AND the explicit
+// LLMAskConfigured reports whether metrics Q&A can run: a key AND the explicit
 // ask_enabled consent (results flow to the provider — never implied by the key).
-func (c *LLMConfig) AskConfigured() bool { return c.IsConfigured() && c.AskEnabled }
+func LLMAskConfigured(c *LLMConfig) bool { return LLMConfigured(c) && c.AskEnabled }
 
-// CatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
+// LLMCatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
 // run: a key AND the explicit catalog_copilot_enabled consent.
-func (c *LLMConfig) CatalogCopilotConfigured() bool {
-	return c.IsConfigured() && c.CatalogCopilotEnabled
+func LLMCatalogCopilotConfigured(c *LLMConfig) bool {
+	return LLMConfigured(c) && c.CatalogCopilotEnabled
 }
 
-// CatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
+// LLMCatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
 // are armed: catalog Q&A configured and explicit catalog_drafting_enabled
 // consent.
-func (c *LLMConfig) CatalogDraftingConfigured() bool {
-	return c.CatalogCopilotConfigured() && c.CatalogDraftingEnabled
+func LLMCatalogDraftingConfigured(c *LLMConfig) bool {
+	return LLMCatalogCopilotConfigured(c) && c.CatalogDraftingEnabled
 }
 
-// ResolvedProvider returns the effective provider name.
-func (c *LLMConfig) ResolvedProvider() string {
+// LLMProvider returns the effective provider name.
+func LLMProvider(c *LLMConfig) string {
 	if c == nil || strings.TrimSpace(c.Provider) == "" {
 		return LLMProviderAnthropic
 	}
 	return strings.ToLower(strings.TrimSpace(c.Provider))
 }
 
-// ResolvedModel returns the effective model id (per-provider default).
-func (c *LLMConfig) ResolvedModel() string {
+// LLMModel returns the effective model id (per-provider default).
+func LLMModel(c *LLMConfig) string {
 	if c != nil && strings.TrimSpace(c.Model) != "" {
 		return strings.TrimSpace(c.Model)
 	}
-	if c.ResolvedProvider() == LLMProviderOpenAI {
+	if LLMProvider(c) == LLMProviderOpenAI {
 		return LLMDefaultModelOpenAI
 	}
 	return LLMDefaultModelAnthropic
 }
 
-// DBConfig holds database configuration.
-// If URL is provided, it takes precedence. Otherwise, a PostgreSQL connection
-// string is built from the individual parameters.
+// DBConfig is a Postgres connection. URL takes precedence; otherwise the
+// connection string is built from the parts.
 type DBConfig struct {
-	// Full connection string (optional)
-	URL string `koanf:"url"`
+	URL string
 
-	// Individual connection parameters.
-	Host     string `koanf:"host"`
-	Port     string `koanf:"port"`
-	Database string `koanf:"database"`
-	Username string `koanf:"username"`
-	Password string `koanf:"password"`
-	SSLMode  string `koanf:"sslmode"`
+	Host     string
+	Port     string
+	Database string
+	Username string
+	Password string
+	// SSLMode defaults to "require".
+	SSLMode string
 
-	// SQLTrace enables debug-level pgx query tracing on pools OpenRails
-	// constructs (#712; was the ad-hoc OPENRAILS_SQL_TRACE env read). Env:
-	// DB_SQL_TRACE.
-	SQLTrace bool `koanf:"sql_trace"`
+	// SQLTrace logs every query at debug level on pools OpenRails opens.
+	SQLTrace bool
 }
 
-// GetConnectionString returns the database connection string.
+// DBConnectionString returns the database connection string.
 // Priority order:
 // 1. If URL is set, use it directly
 // 2. If all atomic parameters are present, build connection string from them
 // 3. Return empty string (caller should use defaults or error based on environment)
-func (c *DBConfig) GetConnectionString() string {
+func DBConnectionString(c *DBConfig) string {
 	// 1. If URL is provided, use it
 	if c.URL != "" {
 		return c.URL
@@ -698,7 +582,7 @@ var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // SchemaName returns the effective OpenRails Postgres schema (#165, #471):
 // Schema trimmed and lower-cased, default billing. Code that needs the schema
 // reads it here, never Schema directly.
-func (c *Config) SchemaName() string {
+func SchemaName(c *Config) string {
 	if c == nil {
 		return DefaultSchema
 	}
@@ -1061,10 +945,11 @@ type CCBillConfig struct {
 	DataLinkPassword string
 }
 
+// RedisConfig is a Redis connection.
 type RedisConfig struct {
-	Addr     string `koanf:"addr"`
-	Password string `koanf:"password"`
-	DB       int    `koanf:"db"`
+	Addr     string
+	Password string
+	DB       int
 }
 
 // TokenConfig defines configuration for a specific Solana token.
@@ -1099,7 +984,8 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
-// RateLimitsConfig is a map of endpoint identifier -> rate limit config
+// RateLimitsConfig maps a bucket name to its limit; "default" covers unlisted
+// buckets.
 type RateLimitsConfig map[string]*RateLimit
 
 // Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
@@ -1120,22 +1006,20 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeReadOnly: true,
 }
 
-// SendGridConfig holds process-wide SendGrid API configuration. Sender/display
-// metadata is merchant-scoped and loaded from merchant_configurations.
+// SendGridConfig is the SendGrid account billing email is sent through. The
+// sender address and display name are each merchant's own.
 type SendGridConfig struct {
-	APIKey string `koanf:"api_key"`
+	APIKey string
 }
 
-// LoggerConfig holds logging configuration
+// LoggerConfig sets the log level: debug, info, warn or error.
 type LoggerConfig struct {
-	Level string `koanf:"level"` // debug | info | error
+	Level string
 }
 
-// RateLimit defines a rate limit policy.
-// All rate limits use a fixed 1-minute window.
+// RateLimit is one bucket's limit over a fixed one-minute window.
 type RateLimit struct {
-	// RequestsPerMinute is the maximum number of requests allowed per minute.
-	RequestsPerMinute int `koanf:"requests_per_minute"`
+	RequestsPerMinute int
 }
 
 const (
@@ -1144,34 +1028,33 @@ const (
 	CaptchaProviderHCaptcha    = "hcaptcha"
 )
 
-// CaptchaConfig controls captcha challenges enabled after extreme rate-limit hits.
-// CaptchaConfig is deliberately minimal (#353): provider choice + the account
-// credentials. Everything else (verify/script URLs, action, score threshold,
-// challenge TTL, escalation multiplier, challenged buckets) is hardcoded —
-// they are protocol/policy constants, not deployment choices.
+// CaptchaConfig is the captcha account. Setting both keys enables the
+// challenge, which is asked only of a client that keeps hitting a rate limit
+// on checkout, payment methods or subscriptions.
 type CaptchaConfig struct {
-	Provider  string `koanf:"provider"`
-	SiteKey   string `koanf:"site_key"`
-	SecretKey string `koanf:"secret_key"`
+	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
+	Provider  string
+	SiteKey   string
+	SecretKey string
 }
 
-// IsEnabled reports whether captcha challenges are active. There is no
+// CaptchaEnabled reports whether captcha challenges are active. There is no
 // enabled knob (#353): configuring the credentials IS the enablement signal —
 // the system already applies captcha selectively (only after extreme
 // rate-limit escalation, only on the challenged buckets).
-func (c *CaptchaConfig) IsEnabled() bool {
+func CaptchaEnabled(c *CaptchaConfig) bool {
 	return c != nil && strings.TrimSpace(c.SiteKey) != "" && strings.TrimSpace(c.SecretKey) != ""
 }
 
-func (c *CaptchaConfig) EffectiveProvider() string {
+func CaptchaProvider(c *CaptchaConfig) string {
 	if c == nil || strings.TrimSpace(c.Provider) == "" {
 		return CaptchaProviderTurnstile
 	}
 	return strings.ToLower(strings.TrimSpace(c.Provider))
 }
 
-func (c *CaptchaConfig) EffectiveVerifyURL() string {
-	switch c.EffectiveProvider() {
+func CaptchaVerifyURL(c *CaptchaConfig) string {
+	switch CaptchaProvider(c) {
 	case CaptchaProviderRecaptchaV3:
 		return "https://www.google.com/recaptcha/api/siteverify"
 	case CaptchaProviderHCaptcha:
@@ -1181,8 +1064,8 @@ func (c *CaptchaConfig) EffectiveVerifyURL() string {
 	}
 }
 
-func (c *CaptchaConfig) EffectiveScriptURL() string {
-	switch c.EffectiveProvider() {
+func CaptchaScriptURL(c *CaptchaConfig) string {
+	switch CaptchaProvider(c) {
 	case CaptchaProviderRecaptchaV3:
 		siteKey := ""
 		if c != nil {
@@ -1196,23 +1079,16 @@ func (c *CaptchaConfig) EffectiveScriptURL() string {
 	}
 }
 
-func (c *CaptchaConfig) EffectiveChallengeTTL() time.Duration {
-	return 15 * time.Minute
-}
+// Captcha policy is fixed: protocol constants, not deployment choices.
+const (
+	CaptchaChallengeTTL      = 15 * time.Minute
+	CaptchaExtremeMultiplier = 3
+	CaptchaMinScore          = 0.5
+	CaptchaAction            = "billing_challenge"
+)
 
-func (c *CaptchaConfig) EffectiveExtremeMultiplier() int {
-	return 3
-}
-
-func (c *CaptchaConfig) EffectiveMinScore() float64 {
-	return 0.5
-}
-
-func (c *CaptchaConfig) EffectiveAction() string {
-	return "billing_challenge"
-}
-
-func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
+// CaptchaChallengeBuckets are the rate-limit buckets a challenge guards.
+func CaptchaChallengeBuckets() []string {
 	return []string{"checkout", "payment-methods", "subscriptions"}
 }
 
@@ -1228,24 +1104,14 @@ func Validate(cfg *Config) error {
 
 	// Malformed catalog_reconciliation_interval refuses to boot (#712): the old
 	// env knob silently fell back to 1h on a typo.
-	if _, _, err := cfg.CatalogReconciliationSchedule(); err != nil {
+	if _, _, err := CatalogReconciliationSchedule(cfg); err != nil {
 		return err
 	}
-	if _, err := cfg.ProviderBillingQuiescence(); err != nil {
+	if _, err := ProviderBillingQuiescence(cfg); err != nil {
 		return err
 	}
 
-	// Port range (#349): UnmarshalText validates string-typed values, but an
-	// integer yaml value decodes straight into the field and must be checked
-	// here. 0 = unset (the default port applies).
-	if cfg.Port != 0 && (cfg.Port < 1 || cfg.Port > 65535) {
-		return fmt.Errorf("invalid port %d: must be 1-65535", cfg.Port)
-	}
-
-	// A garbage TestMode value can only reach here via a direct Config{}
-	// literal (koanf's UnmarshalText already rejects it on the Load path) —
-	// defense in depth so a typo can never silently take an unrecognized
-	// branch (#745).
+	// A typo never silently takes an unrecognized branch.
 	switch cfg.TestMode {
 	case CredentialPostureSandbox, CredentialPostureLive:
 	case "":
@@ -1269,7 +1135,7 @@ func Validate(cfg *Config) error {
 	// #741/#761: an unknown llm.provider must never silently boot with one
 	// vendor's dialect pointed at another vendor's key.
 	if cfg.LLM != nil {
-		switch cfg.LLM.ResolvedProvider() {
+		switch LLMProvider(cfg.LLM) {
 		case LLMProviderAnthropic, LLMProviderOpenAI:
 		default:
 			return fmt.Errorf("invalid llm.provider %q: must be %q or %q", cfg.LLM.Provider, LLMProviderAnthropic, LLMProviderOpenAI)
@@ -1366,7 +1232,7 @@ func validateSecretBackend(cfg *Config) error {
 	default:
 		return fmt.Errorf("alert_secret_backend must be db or vault when configured")
 	}
-	if cfg.SecretStoreBackend() == SecretBackendDB || cfg.AlertSecretBackend == SecretBackendDB {
+	if SecretStoreBackend(cfg) == SecretBackendDB || cfg.AlertSecretBackend == SecretBackendDB {
 		if cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "" {
 			return fmt.Errorf("DB credential storage requires encryption.master_key")
 		}
@@ -1379,7 +1245,7 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 		return nil
 	}
 
-	switch cfg.EffectiveProvider() {
+	switch CaptchaProvider(cfg) {
 	case CaptchaProviderTurnstile, CaptchaProviderRecaptchaV3, CaptchaProviderHCaptcha:
 	default:
 		return fmt.Errorf("unsupported provider %q", cfg.Provider)
@@ -1453,7 +1319,7 @@ func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error {
 	if secretKey != "" && ((!isLiveKey && !isTestKey) || len(secretKey) <= len("sk_test_")) {
 		return fmt.Errorf("invalid Stripe secret key format: expected sk_live_, rk_live_, sk_test_, or rk_test_ with a nonempty value")
 	}
-	if cfg != nil && cfg.IsTestMode() {
+	if cfg != nil && IsTestMode(cfg) {
 		if isLiveKey {
 			return fmt.Errorf("live key (sk_live_/rk_live_) is not allowed when test_mode=sandbox; use a test key or set test_mode=live")
 		}
@@ -1471,7 +1337,7 @@ func ValidateStripePublishableKeyPosture(cfg *Config, key string) error {
 	if (!live && !test) || len(key) <= len("pk_test_") {
 		return fmt.Errorf("invalid Stripe publishable key format: expected pk_live_ or pk_test_ with a nonempty value")
 	}
-	if cfg != nil && cfg.IsTestMode() {
+	if cfg != nil && IsTestMode(cfg) {
 		if live {
 			return fmt.Errorf("live publishable key (pk_live_) is not allowed when test_mode=sandbox")
 		}
@@ -1733,7 +1599,7 @@ func (cfg *Config) normalizedProviderWriteMode() string {
 // that never declared its write policy (or typoed it before Validate runs)
 // must not execute provider writes. Explicit full|limited is the only way to
 // enable them.
-func (cfg *Config) GetProviderWriteMode() string {
+func GetProviderWriteMode(cfg *Config) string {
 	mode := cfg.normalizedProviderWriteMode()
 	if mode == "" || !ValidProviderWriteModes[mode] {
 		return ProviderWriteModeReadOnly
@@ -1751,7 +1617,7 @@ func (cfg *Config) GetProviderWriteMode() string {
 // accessor via a direct Config{} literal in a test. Sandbox is allowed in
 // every environment (#762) — Validate no longer rejects test_mode=sandbox
 // outside development.
-func (cfg *Config) IsTestMode() bool {
+func IsTestMode(cfg *Config) bool {
 	return cfg.TestMode == CredentialPostureSandbox
 }
 
@@ -1759,20 +1625,27 @@ func (cfg *Config) IsTestMode() bool {
 // (dunning charges/cancellations, invoice collection, Solana
 // pulls, catalog provider-object writes) are disabled, leaving only reactive,
 // user-initiated operations. True in limited and readonly modes.
-func (cfg *Config) IsLimitedMode() bool {
-	mode := cfg.GetProviderWriteMode()
+func IsLimitedMode(cfg *Config) bool {
+	mode := GetProviderWriteMode(cfg)
 	return mode == ProviderWriteModeLimited || mode == ProviderWriteModeReadOnly
 }
 
 // IsProviderReadOnly returns true if EVERY provider write — even reactive,
 // user-initiated ones — must be blocked (provider_write_mode=readonly). Reads
 // (query APIs, verification) stay allowed.
-func (cfg *Config) IsProviderReadOnly() bool {
-	return cfg.GetProviderWriteMode() == ProviderWriteModeReadOnly
+func IsProviderReadOnly(cfg *Config) bool {
+	return GetProviderWriteMode(cfg) == ProviderWriteModeReadOnly
 }
 
-// RequiresSecretEncryption is unconditional for managed database credentials.
-func (cfg *Config) RequiresSecretEncryption() bool { return true }
+// Mode is a Config's provider write mode behind the interface the intent
+// executor's gate reads (intents.ModeView). A nil Config is readonly.
+type Mode struct{ Config *Config }
+
+// IsProviderReadOnly reports IsProviderReadOnly of the Config.
+func (m Mode) IsProviderReadOnly() bool { return IsProviderReadOnly(m.Config) }
+
+// IsLimitedMode reports IsLimitedMode of the Config.
+func (m Mode) IsLimitedMode() bool { return IsLimitedMode(m.Config) }
 
 // validatePublicURL permits HTTP only for explicitly authorized loopback hosts.
 func validatePublicURL(raw string, allowLoopback, originOnly bool) error {
@@ -1791,25 +1664,6 @@ func validatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	return nil
 }
 
-// assembleDBURL builds the database URL from atomic parameters if not explicitly set
-func assembleDBURL(cfg *Config) {
-	if cfg.DB == nil {
-		return
-	}
-
-	// If URL is already explicitly set, nothing to do
-	if cfg.DB.URL != "" {
-		return
-	}
-
-	connStr := cfg.DB.GetConnectionString()
-	if connStr == "" {
-		return
-	}
-
-	cfg.DB.URL = connStr
-}
-
 // ValidateDatabase validates the database configuration and schema.
 func ValidateDatabase(cfg *Config) error {
 	if cfg == nil || cfg.DB == nil {
@@ -1822,57 +1676,28 @@ func ValidateDatabase(cfg *Config) error {
 	return validateSchema(cfg.Schema)
 }
 
-// GetDefaultBillingConfig supplies infrastructure defaults without security exceptions.
-func GetDefaultBillingConfig() *Config {
-	return &Config{
-		Host: "0.0.0.0",
-		Port: 3053,
-		DB: &DBConfig{
-			Host:     "localhost",
-			Port:     "5434",
-			Database: "openrails_db",
-			// Application login used by the local Docker setup.
-			Username: "app",
-			Password: "app_password",
-			SSLMode:  "disable",
-		},
-		Schema: DefaultSchema,
-		Redis: &RedisConfig{
-			// Match docker-compose's host-published Garnet port.
-			Addr:     "localhost:6380",
-			Password: "",
-			DB:       0,
-		},
-		Logger: &LoggerConfig{
-			Level: "info", // Default to info level (options: debug, info, warn, error, fatal, panic)
-		},
-		RateLimits: &RateLimitsConfig{
-			"subscribe": &RateLimit{
-				RequestsPerMinute: 20, // Mutation endpoint; per-user limit is the real fraud control
-			},
-			"checkout": &RateLimit{
-				RequestsPerMinute: 10, // Kept tight to deter card-testing/abuse
-			},
-			"webhook": &RateLimit{
-				// Per source IP. All webhooks from a rail share one bucket
-				// (fixed rail IPs), so this must absorb rebill runs / event
-				// bursts without 429-ing legit payment events. Webhooks are already
-				// authenticated (signature + IP allowlist + body caps); this is a
-				// DoS floor, not the primary control.
-				RequestsPerMinute: 1200,
-			},
-			"payment": &RateLimit{
-				RequestsPerMinute: 40,
-			},
-			"default": &RateLimit{
-				RequestsPerMinute: 300, // SPA/NAT friendly (multiple users behind one IP)
-			},
-		},
-		Captcha: &CaptchaConfig{
-			Provider: CaptchaProviderTurnstile,
-		},
+// DefaultRateLimits are the built-in per-bucket limits, applied whenever
+// Config.RateLimits is nil and limits are not disabled.
+func DefaultRateLimits() *RateLimitsConfig {
+	return &RateLimitsConfig{
+		// Mutation endpoint; the per-user limit is the real fraud control.
+		"subscribe": &RateLimit{RequestsPerMinute: 20},
+		// Kept tight to deter card testing.
+		"checkout": &RateLimit{RequestsPerMinute: 10},
+		// Per source IP. All webhooks from a rail share one bucket (fixed rail
+		// IPs), so this must absorb rebill runs without refusing legitimate
+		// payment events. Webhooks are already authenticated; this is a DoS
+		// floor, not the primary control.
+		"webhook": &RateLimit{RequestsPerMinute: 1200},
+		"payment": &RateLimit{RequestsPerMinute: 40},
+		// SPA and NAT friendly: several users behind one address.
+		"default": &RateLimit{RequestsPerMinute: 300},
 	}
 }
+
+// DefaultCaptcha is the captcha configuration applied with DefaultRateLimits:
+// no account, so no challenge.
+func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaProviderTurnstile} }
 
 // LogStartupStatus writes the operator-facing posture banners for long-running
 // OpenRails processes. Keep this out of Load so one-off CLIs do not look like
@@ -1883,7 +1708,7 @@ func LogStartupStatus(cfg *Config) {
 }
 
 func logOperatingModeStatus(cfg *Config) {
-	switch cfg.GetProviderWriteMode() {
+	switch GetProviderWriteMode(cfg) {
 	case ProviderWriteModeReadOnly:
 		log.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
 		log.Info("   Reconciliation/forensics posture: provider reads + local serving only")
@@ -1901,7 +1726,7 @@ func logOperatingModeStatus(cfg *Config) {
 // logTestModeStatus logs the credential environment at startup.
 // This helps operators confirm whether they're on sandbox or live credentials.
 func logTestModeStatus(cfg *Config) {
-	if cfg.IsTestMode() {
+	if IsTestMode(cfg) {
 		log.Warn("⚠️  TEST ENV ENABLED - No real charges will be processed")
 		log.Info("   Payment providers will use sandbox/test environments:")
 		log.Info("   - NMI: secure.networkmerchants.com with test-mode transactions")

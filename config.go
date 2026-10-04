@@ -6,111 +6,225 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// The Config and Deps family. These are the only aliases in this package: one
-// definition in internal/config (and the auth hook types in
-// internal/billingauth), named here for hosts.
+// The Config and Deps family. These are the only aliases in this package: each
+// type is defined once, in internal/config (the auth hook types in
+// internal/billingauth), and named here for hosts. The field docs are on those
+// definitions; gopls and pkg.go.dev show them through the alias.
 
 type (
-	// Config is the engine's plain-data configuration. TestMode and
+	// Config is the engine's configuration: plain data. TestMode and
 	// ProviderWriteMode are required.
 	Config = config.Config
 	// Deps is everything the engine reaches outside its process: connections,
 	// credentials and the host's hooks.
 	Deps = config.Deps
 
-	CredentialPosture      = config.CredentialPosture
-	RiverOwnership         = config.RiverOwnership
-	HTTPConfig             = config.HTTPConfig
-	CheckoutConfig         = config.CheckoutConfig
-	CustomerRoutesConfig   = config.CustomerRoutesConfig
-	CustomerHTTPScope      = config.CustomerHTTPScope
-	ControlPlaneConfig     = config.ControlPlaneConfig
-	AuthConfig             = config.AuthConfig
-	AuthRateLimit          = config.AuthRateLimit
+	// CredentialPosture is Config.TestMode: Sandbox or Live.
+	CredentialPosture = config.CredentialPosture
+	// RiverOwnership is Config.River: who runs the job fleet.
+	RiverOwnership = config.RiverOwnership
+	// HTTPConfig is Config.HTTP: the route groups Client.Routes publishes.
+	HTTPConfig = config.HTTPConfig
+	// CheckoutConfig is HTTPConfig.Checkout: the hosted checkout routes.
+	CheckoutConfig = config.CheckoutConfig
+	// CustomerRoutesConfig is one customer route profile of
+	// HTTPConfig.CustomerRoutes.
+	CustomerRoutesConfig = config.CustomerRoutesConfig
+	// CustomerHTTPScope is CustomerRoutesConfig.Scope: which routes a profile
+	// publishes.
+	CustomerHTTPScope = config.CustomerHTTPScope
+	// ControlPlaneConfig is Config.ControlPlane: the OpenRails-owned AuthKit
+	// control plane.
+	ControlPlaneConfig = config.ControlPlaneConfig
+	// AuthConfig is ControlPlaneConfig.Auth: issuer, signing keys and naming.
+	AuthConfig = config.AuthConfig
+	// AuthRateLimit is one AuthKit rate-limit bucket of
+	// ControlPlaneConfig.AuthRateLimits.
+	AuthRateLimit = config.AuthRateLimit
+	// MerchantCreationConfig is ControlPlaneConfig.MerchantCreation: the
+	// policy for merchant names users claim.
 	MerchantCreationConfig = config.MerchantCreationConfig
+	// NamingConfig is AuthConfig.Naming: the rename policy for merchant names
+	// and usernames.
+	NamingConfig = config.NamingConfig
+	// FormerNamesConfig is NamingConfig.FormerNames: how long a former name
+	// keeps forwarding.
+	FormerNamesConfig = config.FormerNamesConfig
+	// FormerNamesMode is FormerNamesConfig.Mode.
+	FormerNamesMode = config.FormerNamesMode
 
-	MerchantDeclaration        = config.MerchantDeclaration
-	PSPConfig                  = config.PSPConfig
-	ProviderRailAccountConfig  = config.ProviderRailAccountConfig
-	PSPSignerConfig            = config.PSPSignerConfig
-	CustodianConfig            = config.CustodianConfig
-	CustodianAccountConfig     = config.CustodianAccountConfig
-	MerchantProfileConfig      = config.MerchantProfileConfig
-	InvoiceConfig              = config.InvoiceConfig
-	CheckoutRoutingRuleConfig  = config.CheckoutRoutingRuleConfig
+	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
+	// engine serves.
+	MerchantDeclaration = config.MerchantDeclaration
+	// PSPConfig is one PSP of MerchantDeclaration.PSPs: a single entry keyed
+	// by its rail.
+	PSPConfig = config.PSPConfig
+	// ProviderRailAccountConfig is a PSP's account on its rail: the account
+	// ID, credentials and settings.
+	ProviderRailAccountConfig = config.ProviderRailAccountConfig
+	// PSPSignerConfig selects how a Solana PSP signs.
+	PSPSignerConfig = config.PSPSignerConfig
+	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: a
+	// single entry keyed by its kind.
+	CustodianConfig = config.CustodianConfig
+	// CustodianAccountConfig is the merchant's account with a custodian.
+	CustodianAccountConfig = config.CustodianAccountConfig
+	// MerchantProfileConfig is MerchantDeclaration.Profile: the merchant's
+	// public name, logo and links.
+	MerchantProfileConfig = config.MerchantProfileConfig
+	// InvoiceConfig is MerchantDeclaration.Invoice: when and how accrued
+	// balances are invoiced.
+	InvoiceConfig = config.InvoiceConfig
+	// CheckoutRoutingRuleConfig is one rule of
+	// MerchantDeclaration.CheckoutRouting.
+	CheckoutRoutingRuleConfig = config.CheckoutRoutingRuleConfig
+	// CheckoutRoutingMatchConfig is a routing rule's condition.
 	CheckoutRoutingMatchConfig = config.CheckoutRoutingMatchConfig
-	BillingPolicyConfig        = config.BillingPolicyConfig
+	// BillingPolicyConfig is one named policy of
+	// MerchantDeclaration.BillingPolicies.
+	BillingPolicyConfig = config.BillingPolicyConfig
+	// BillingPolicyBindingConfig binds a trust tier, or the merchant default,
+	// to a billing policy.
 	BillingPolicyBindingConfig = config.BillingPolicyBindingConfig
-	BudgetWindowConfig         = config.BudgetWindowConfig
+	// BudgetWindowConfig is one spend window: a duration and its limit.
+	BudgetWindowConfig = config.BudgetWindowConfig
 
-	DBConfig              = config.DBConfig
-	RedisConfig           = config.RedisConfig
-	LoggerConfig          = config.LoggerConfig
-	SendGridConfig        = config.SendGridConfig
-	RateLimitsConfig      = config.RateLimitsConfig
-	RateLimit             = config.RateLimit
-	CaptchaConfig         = config.CaptchaConfig
-	EncryptionConfig      = config.EncryptionConfig
-	VaultConfig           = config.VaultConfig
-	AdminConsoleConfig    = config.AdminConsoleConfig
-	LLMConfig             = config.LLMConfig
+	// DBConfig is Config.DB: the Postgres connection OpenRails opens when
+	// Deps.Postgres is nil.
+	DBConfig = config.DBConfig
+	// RedisConfig is Config.Redis: the Redis connection OpenRails opens when
+	// Deps.Redis is nil.
+	RedisConfig = config.RedisConfig
+	// LoggerConfig is Config.Logger: the log level.
+	LoggerConfig = config.LoggerConfig
+	// SendGridConfig is Config.SendGrid: the account billing email is sent
+	// through.
+	SendGridConfig = config.SendGridConfig
+	// RateLimitsConfig is Config.RateLimits: a limit per bucket name.
+	RateLimitsConfig = config.RateLimitsConfig
+	// RateLimit is one bucket's requests per minute.
+	RateLimit = config.RateLimit
+	// CaptchaConfig is Config.Captcha: the captcha account.
+	CaptchaConfig = config.CaptchaConfig
+	// EncryptionConfig is Config.Encryption: the master key for credentials
+	// stored in the database.
+	EncryptionConfig = config.EncryptionConfig
+	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails
+	// opens when Deps.Vault is nil.
+	VaultConfig = config.VaultConfig
+	// AdminConsoleConfig is Config.AdminConsole: the merchant admin console.
+	AdminConsoleConfig = config.AdminConsoleConfig
+	// LLMConfig is Config.LLM: the model behind the console's natural-language
+	// features.
+	LLMConfig = config.LLMConfig
+	// ProviderSandboxConfig is Config.ProviderSandbox: loopback provider
+	// gateways for sandbox runs.
 	ProviderSandboxConfig = config.ProviderSandboxConfig
-	HyperSwitchConfig     = config.HyperSwitchConfig
+	// HyperSwitchConfig is Config.HyperSwitch: the host's HyperSwitch
+	// deployment.
+	HyperSwitchConfig = config.HyperSwitchConfig
 
+	// ProviderCredentialSnapshot is one entry of Deps.ProviderCredentials:
+	// host-owned credentials for an existing PSP.
 	ProviderCredentialSnapshot = config.ProviderCredentialSnapshot
-	Cache                      = cache.Cache
-	EmailSender                = config.EmailSender
-	SMSSender                  = config.SMSSender
+	// Cache is Deps.Cache: the store behind OpenRails' shared cache.
+	Cache = cache.Cache
+	// EmailSender is Deps.EmailSender: it delivers the control plane's
+	// AuthKit email.
+	EmailSender = config.EmailSender
+	// SMSSender is Deps.SMSSender: it delivers the control plane's AuthKit
+	// text messages.
+	SMSSender = config.SMSSender
 
+	// RequestAuthenticator is what Deps.AuthKit accepts: the host's
+	// *authkit.Client, or an AuthKit verifier for the host's audiences.
+	RequestAuthenticator = billingauth.Verifier
 	// Identity is who Deps.Authenticate says is calling.
-	Identity        = billingauth.Identity
-	PrincipalKind   = billingauth.PrincipalKind
+	Identity = billingauth.Identity
+	// PrincipalKind is Identity.Kind: User, Machine or Delegated.
+	PrincipalKind = billingauth.PrincipalKind
+	// CredentialClass says whether a credential is a customer's own session
+	// or automation acting for them.
 	CredentialClass = billingauth.CredentialClass
 	// Requirement is the permission, scope and target Deps.Authorize checks.
 	Requirement = billingauth.Requirement
 	// Authority is the AuthKit group and permission Deps.AuthorityFor names.
 	Authority = billingauth.Authority
-	Target    = billingauth.Target
-	Scope     = billingauth.Scope
-	// DelegatedPrincipal is a customer route's own authentication result: an
-	// explicit merchant and paying subject.
+	// Target is Requirement.Target: the merchant and customer an operation
+	// acts on.
+	Target = billingauth.Target
+	// Scope is Requirement.Scope: MerchantScope, CustomerScope or
+	// PlatformScope.
+	Scope = billingauth.Scope
+	// DelegatedPrincipal is what Deps.AuthenticateCustomer returns: an
+	// explicit merchant and paying customer.
 	DelegatedPrincipal = billingauth.DelegatedPrincipal
 	// GateError lets an authentication hook answer with a specific HTTP status.
 	GateError = billingauth.GateError
 )
 
 const (
-	// Sandbox and Live select which PSP credentials are accepted.
+	// Sandbox accepts only sandbox PSP credentials.
 	Sandbox = config.CredentialPostureSandbox
-	Live    = config.CredentialPostureLive
+	// Live accepts only live PSP credentials.
+	Live = config.CredentialPostureLive
 
-	// ProviderWritesFull is normal operation; ProviderWritesLimited makes no
-	// system-initiated provider writes; ProviderWritesReadOnly makes none
-	// (it never charges anyone).
-	ProviderWritesFull     = config.ProviderWriteModeFull
-	ProviderWritesLimited  = config.ProviderWriteModeLimited
+	// ProviderWritesFull is normal operation.
+	ProviderWritesFull = config.ProviderWriteModeFull
+	// ProviderWritesLimited makes no system-initiated provider writes:
+	// dunning, invoice collection and the other proactive operations wait,
+	// while checkout and customer or staff actions run.
+	ProviderWritesLimited = config.ProviderWriteModeLimited
+	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
 	ProviderWritesReadOnly = config.ProviderWriteModeReadOnly
 
+	// SecretBackendSnapshot keeps host-supplied credentials in memory.
 	SecretBackendSnapshot = config.SecretBackendSnapshot
-	SecretBackendVault    = config.SecretBackendVault
-	SecretBackendDB       = config.SecretBackendDB
+	// SecretBackendVault stores credentials in HashiCorp Vault.
+	SecretBackendVault = config.SecretBackendVault
+	// SecretBackendDB stores credentials encrypted in the database.
+	SecretBackendDB = config.SecretBackendDB
 
-	RiverManaged   = config.RiverManaged
+	// RiverManaged has OpenRails run its own River fleet; Client.Start starts
+	// it.
+	RiverManaged = config.RiverManaged
+	// RiverHostOwned has the host run Client.RiverJobs in its own fleet.
 	RiverHostOwned = config.RiverHostOwned
 
-	CustomerSelfService            = config.CustomerSelfService
-	CustomerSubscriptionManagement = config.CustomerSubscriptionManagement
-	CustomerBillingManagement      = config.CustomerBillingManagement
+	// FormerNamesFinite forwards a former name for FormerNamesConfig.Duration.
+	FormerNamesFinite = config.FormerNamesFinite
+	// FormerNamesForever forwards a former name indefinitely.
+	FormerNamesForever = config.FormerNamesForever
+	// FormerNamesImmediate releases a former name at once.
+	FormerNamesImmediate = config.FormerNamesImmediate
 
-	User      = billingauth.User
-	Machine   = billingauth.Machine
+	// CustomerSelfService is the full customer self-service API.
+	CustomerSelfService = config.CustomerSelfService
+	// CustomerSubscriptionManagement is cancellation, resumption,
+	// subscription payment-method changes and invoice collection-method
+	// selection only.
+	CustomerSubscriptionManagement = config.CustomerSubscriptionManagement
+	// CustomerBillingManagement adds billing history, purchased access, saved
+	// methods and payment recovery, without checkout or plan purchases.
+	CustomerBillingManagement = config.CustomerBillingManagement
+
+	// User is a person's own credential.
+	User = billingauth.User
+	// Machine is an API key or service credential.
+	Machine = billingauth.Machine
+	// Delegated is a credential another application issued for a customer.
 	Delegated = billingauth.Delegated
 
+	// CredentialUserSession is the customer's own interactive session.
 	CredentialUserSession = billingauth.CredentialClassUserSession
-	CredentialAutomation  = billingauth.CredentialClassAutomation
+	// CredentialAutomation acts for a customer who is not present.
+	CredentialAutomation = billingauth.CredentialClassAutomation
 
+	// MerchantScope is an operation on a merchant.
 	MerchantScope = billingauth.MerchantScope
+	// CustomerScope is an operation on one customer of a merchant.
 	CustomerScope = billingauth.CustomerScope
+	// PlatformScope is an operation across merchants.
 	PlatformScope = billingauth.PlatformScope
 )
 

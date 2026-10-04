@@ -3,7 +3,7 @@ package intents
 import "fmt"
 
 // ModeView is the minimal operating-mode surface the executor's gate needs
-// (#346). *config.Config satisfies it.
+// (#346). config.Mode satisfies it.
 type ModeView interface {
 	// IsProviderReadOnly reports mode=readonly: EVERY provider write is
 	// blocked, even reactive user-initiated ones.

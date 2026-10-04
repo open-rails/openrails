@@ -70,6 +70,9 @@ type PullProviderOptions struct {
 	// bootstrap.DefaultMerchantConfigManifestPath (optional); an explicit path
 	// must load. Used only for snapshot credentials.
 	MerchantManifestPath string
+	// MerchantManifestOverlays are files in the manifest's shape merged over
+	// the one read from MerchantManifestPath, in order.
+	MerchantManifestOverlays []string
 
 	// Endpoints overrides provider base URLs on store-armed pull clients — a
 	// test seam for fake provider HTTP servers (mirrors the refresh worker's
@@ -384,7 +387,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	// read zero providers and reported success-shaped output over a snapshot it
 	// never fetched. There is no credential plane to fall back to; say so.
 	var merchantsSvc *merchants.Service
-	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
+	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
 		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
 		if err != nil {
 			cleanup()
@@ -400,7 +403,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 			cleanup()
 			return nil, nil, fmt.Errorf("pull-provider: merchant secret store unavailable, so no rail can be armed: %w", err)
 		}
-		svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
+		svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
 		if err != nil {
 			cleanup()
 			return nil, nil, fmt.Errorf("pull-provider: merchants service unavailable, so no rail can be armed: %w", err)
@@ -410,7 +413,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	stripeClients := opts.StripeClients
 	if stripeClients == nil {
 		stripeClients = stripeapi.NewFactory(nil)
-		if api := cfg.SandboxStripeAPIURL(); api != "" {
+		if api := config.SandboxStripeAPIURL(cfg); api != "" {
 			stripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
 		}
 	}
@@ -449,7 +452,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		if err != nil {
 			return nil, fmt.Errorf("pull-provider: read merchant manifest %s: %w", path, err)
 		}
-		overlays, err := boot.ReadMerchantManifestOverlays(cfg.MerchantManifestOverlays)
+		overlays, err := boot.ReadMerchantManifestOverlays(opts.MerchantManifestOverlays)
 		if err != nil {
 			return nil, fmt.Errorf("pull-provider: %w", err)
 		}
@@ -495,7 +498,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	if err := boot.SeedMerchantManifestSecretPlane(ctx, cfg, opts.MerchantID, *selected, seeder, transit); err != nil {
 		return nil, fmt.Errorf("pull-provider: seed merchant %s: %w", opts.MerchantID, err)
 	}
-	svc, err := merchants.NewService(database.DataPool(), plane, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
+	svc, err := merchants.NewService(database.DataPool(), plane, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
 	if err != nil {
 		return nil, fmt.Errorf("pull-provider: build merchants service over the manifest plane: %w", err)
 	}

@@ -307,7 +307,7 @@ func (s *StripeService) readEngineIntent(ctx context.Context, p StripeEnginePaym
 }
 func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentParams, pi stripeEngineIntent) (StripeEnginePaymentResult, error) {
 	r := StripeEnginePaymentResult{State: StripeEnginePending, PaymentIntentID: pi.ID}
-	if pi.LiveMode == nil || *pi.LiveMode == s.Config.IsTestMode() {
+	if pi.LiveMode == nil || *pi.LiveMode == config.IsTestMode(s.Config) {
 		return StripeEnginePaymentResult{}, errors.New("Stripe engine payment environment mismatch")
 	}
 	if err := pi.matches(p); err != nil {

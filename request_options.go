@@ -7,20 +7,10 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CredentialScope distinguishes merchant operations from authorized platform
-// operations. An omitted merchant on a merchant operation is never platform scope.
-type CredentialScope string
-
-const (
-	CredentialScopeMerchant CredentialScope = "merchant"
-	CredentialScopePlatform CredentialScope = "platform"
-)
-
-// CredentialTarget is the immutable target requested by one SDK operation.
-// Merchant scope has exactly one selector. It is not verified authority:
-// the server resolves the merchant and authorizes the credential independently.
+// CredentialTarget is the merchant one operation addresses, by exactly one of
+// its slug and ID. It is not verified authority: the server resolves the
+// merchant and authorizes the credential independently.
 type CredentialTarget struct {
-	Scope        CredentialScope
 	MerchantSlug string
 	MerchantID   billing.MerchantID
 }
@@ -115,6 +105,5 @@ func (c *Client) requestTarget(options []RequestOption) (CredentialTarget, error
 	if request.target.MerchantSlug == "" && request.target.MerchantID.IsZero() {
 		return CredentialTarget{}, invalidErr("merchant is required: use WithMerchant, ForMerchantID, or a Client default")
 	}
-	request.target.Scope = CredentialScopeMerchant
 	return request.target, nil
 }

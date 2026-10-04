@@ -133,7 +133,7 @@ merchants:
           - {kty: "%s", kid: "%s", n: "%s", e: "%s"}
 `, shop, issuer, jwk.Kty, jwk.Kid, jwk.N, jwk.E)), 0o600))
 	graph := engine.Graph(cp)
-	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, ""))
+	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, nil, ""))
 	mid, _, err := cp.ResolveMerchantForGroup(t.Context(), shop)
 	require.NoError(t, err)
 	handler, err := standaloneHandler(cp)

@@ -15,6 +15,9 @@ import (
 // remote transport. External HTTP exposure is a server construction decision.
 type PaymentProviderClient struct{ client *Client }
 
+// List returns the merchant's PSPs, optionally only those on one rail
+// (params.Provider), in one environment or with one status, with the rails'
+// definitions. Credential values are never returned.
 func (p *PaymentProviderClient) List(ctx context.Context, params *billing.PaymentProviderListParams, requestOptions ...RequestOption) (*billing.PaymentProviderList, error) {
 	query := url.Values{}
 	if params != nil {
@@ -31,10 +34,16 @@ func (p *PaymentProviderClient) List(ctx context.Context, params *billing.Paymen
 	return &out, nil
 }
 
+// Retrieve reads the merchant's active PSP on a rail; provider is the rail
+// (nmi, ccbill, stripe, solana). Several active accounts on the rail are a
+// conflict.
 func (p *PaymentProviderClient) Retrieve(ctx context.Context, provider string, requestOptions ...RequestOption) (*billing.PaymentProviderConfig, error) {
 	return p.request(ctx, http.MethodGet, provider, "", nil, requestOptions...)
 }
 
+// Upsert creates or changes the merchant's PSP on a rail; provider is the
+// rail. Credentials are write-only. Retry with the same OperationID and
+// payload.
 func (p *PaymentProviderClient) Upsert(ctx context.Context, provider string, params *billing.UpsertPaymentProviderParams, requestOptions ...RequestOption) (*billing.PaymentProviderConfig, error) {
 	if params == nil {
 		return nil, fmt.Errorf("payment provider configuration is required")
@@ -42,7 +51,8 @@ func (p *PaymentProviderClient) Upsert(ctx context.Context, provider string, par
 	return p.request(ctx, http.MethodPut, provider, "", params, requestOptions...)
 }
 
-// Archive archives a particular account without deleting historical obligations.
+// Archive archives one account on a rail: it takes no new work and keeps its
+// existing obligations.
 func (p *PaymentProviderClient) Archive(ctx context.Context, provider string, accountID uuid.UUID, params *billing.ArchivePaymentProviderAccountParams, requestOptions ...RequestOption) (*billing.PaymentProviderConfig, error) {
 	if accountID == uuid.Nil {
 		return nil, fmt.Errorf("payment provider account ID is required")

@@ -11,9 +11,10 @@ import (
 // vendor-owned browser assets. Merchant settings cannot change either target.
 // The SDK is a separate server in the vendor product, hence its explicit URL.
 type HyperSwitchConfig struct {
-	AllowLoopbackHTTP bool   `koanf:"allow_loopback_http"`
-	APIBaseURL        string `koanf:"api_base_url"`
-	SDKURL            string `koanf:"sdk_url"`
+	// AllowLoopbackHTTP admits an http loopback fixture with TestMode sandbox.
+	AllowLoopbackHTTP bool
+	APIBaseURL        string
+	SDKURL            string
 }
 
 func validateHyperSwitch(cfg *Config) error {

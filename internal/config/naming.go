@@ -1,48 +1,48 @@
-package merchant
+package config
 
 import (
 	"fmt"
 	"time"
 )
 
-// NamingConfig is the site naming policy (config key auth.naming): whether a
-// name may change, how often, and how long a former name keeps forwarding. It
-// governs merchant names and AuthKit usernames. Unset fields take the defaults:
-// renames on, every 72 hours, former names kept 90 days.
+// NamingConfig is the site naming policy for merchant names and usernames:
+// whether a name may change, how often, and how long a former name keeps
+// forwarding. Unset fields take the defaults: renames on, every 72 hours,
+// former names kept 90 days.
 type NamingConfig struct {
-	Enabled        *bool             `json:"enabled,omitempty" koanf:"enabled"`
-	RenameInterval *time.Duration    `json:"rename_interval,omitempty" koanf:"rename_interval"`
-	FormerNames    FormerNamesConfig `json:"former_names,omitempty" koanf:"former_names"`
+	Enabled        *bool
+	RenameInterval *time.Duration
+	FormerNames    FormerNamesConfig
 }
 
 // FormerNamesConfig says how long a former name keeps forwarding. Duration
 // applies to FormerNamesFinite only.
 type FormerNamesConfig struct {
-	Mode     FormerNames    `json:"mode,omitempty" koanf:"mode"`
-	Duration *time.Duration `json:"duration,omitempty" koanf:"duration"`
+	Mode     FormerNamesMode
+	Duration *time.Duration
 }
 
-// FormerNames selects how long a former name keeps forwarding.
-type FormerNames string
+// FormerNamesMode selects how long a former name keeps forwarding.
+type FormerNamesMode string
 
 const (
-	FormerNamesFinite    FormerNames = "finite"
-	FormerNamesForever   FormerNames = "forever"
-	FormerNamesImmediate FormerNames = "immediate"
+	FormerNamesFinite    FormerNamesMode = "finite"
+	FormerNamesForever   FormerNamesMode = "forever"
+	FormerNamesImmediate FormerNamesMode = "immediate"
 )
 
 // NamingPolicy is a validated NamingConfig.
 type NamingPolicy struct {
 	Enabled        bool
 	RenameInterval time.Duration
-	FormerNames    FormerNames
+	FormerNames    FormerNamesMode
 	// FormerNameRetention is the alias lifetime under FormerNamesFinite.
 	FormerNameRetention time.Duration
 }
 
-// Normalize validates c and applies its defaults. A finite retention of zero is
-// immediate; the other modes take no duration.
-func (c NamingConfig) Normalize() (NamingPolicy, error) {
+// NormalizeNaming validates c and applies its defaults. A finite retention of
+// zero is immediate; the other modes take no duration.
+func NormalizeNaming(c NamingConfig) (NamingPolicy, error) {
 	p := NamingPolicy{Enabled: true, RenameInterval: 72 * time.Hour, FormerNames: FormerNamesFinite, FormerNameRetention: 90 * 24 * time.Hour}
 	if c.Enabled != nil {
 		p.Enabled = *c.Enabled

@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 )
 
@@ -54,7 +55,7 @@ func runSolanaSignerApprove(ctx context.Context, cfg *config.Config, merchantSlu
 	if err := graph.Runtime.MerchantSecretBackend.Await(ctx, merchantsecrets.AwaitTimeout); err != nil {
 		return err
 	}
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, manifestPath, ""); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, manifestPath, hostconfig.FromContext(ctx).MerchantManifestOverlays, ""); err != nil {
 		return err
 	}
 	mid, err := resolveCLIMerchant(ctx, graph.Runtime.DB, merchantSlug)

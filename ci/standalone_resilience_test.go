@@ -56,7 +56,7 @@ merchants:
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		graph := engine.Graph(rt)
-		return rt, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, "")
+		return rt, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, nil, "")
 	}
 	activeFor := func(account string) int {
 		var n int

@@ -12,6 +12,8 @@ import (
 // provider credentials have their own operation identity and publication contract.
 type MerchantConfigurationClient struct{ client *Client }
 
+// Retrieve reads the merchant's current non-secret configuration and its
+// revision.
 func (c *MerchantConfigurationClient) Retrieve(ctx context.Context, options ...RequestOption) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
 	if err := c.client.do(ctx, http.MethodGet, "/v1/merchant/configuration", nil, &out, options...); err != nil {
@@ -20,6 +22,8 @@ func (c *MerchantConfigurationClient) Retrieve(ctx context.Context, options ...R
 	return &out, nil
 }
 
+// Apply commits one configuration update: omitted fields keep their stored
+// values, and the same application replays its original receipt.
 func (c *MerchantConfigurationClient) Apply(ctx context.Context, params *billing.MerchantConfigurationApplyParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error) {
 	if params == nil {
 		return nil, fmt.Errorf("merchant configuration application is required")

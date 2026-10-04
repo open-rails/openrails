@@ -57,7 +57,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("database config is nil")
 	}
-	url := cfg.DB.GetConnectionString()
+	url := config.DBConnectionString(cfg.DB)
 	if url == "" {
 		return nil, fmt.Errorf("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
@@ -69,7 +69,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(cfg.SchemaName())}, nil
+	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg))}, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
@@ -153,7 +153,7 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
 // host keeps ownership of its pool; Close() is a no-op for it. schema is the
-// OpenRails Postgres schema (config.DBConfig.SchemaName()); when it differs from
+// OpenRails Postgres schema (config.SchemaName); when it differs from
 // the default, runtime queries are rewritten to it (#471) — essential here
 // because OpenRails shares the host's pool and cannot repoint its search_path.
 func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {

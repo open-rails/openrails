@@ -81,7 +81,7 @@ func newRootCmd() *cobra.Command {
 			if cfg.Auth != nil {
 				cfg.Config.ControlPlane = &config.ControlPlaneConfig{Auth: *cfg.Auth}
 			}
-			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config))
+			cmd.SetContext(hostconfig.NewContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config), cfg))
 			return nil
 		},
 		Long:    "Standalone OpenRails server for payments, credits, usage, and subscriptions",
@@ -212,7 +212,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), graph.Config, graph, manifestPath, bootNMIProbeV5BaseURL); err != nil {
+	listener := hostconfig.FromContext(cmd.Context())
+	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), graph.Config, graph, manifestPath, listener.MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
 		cleanupOnError = true
 		return err
 	}
@@ -247,7 +248,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// a keep-alive connection between requests.
 	publicSrv := &http.Server{
 		Handler:           publicHandler,
-		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Addr:              fmt.Sprintf("%s:%d", listener.Host, listener.Port),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -328,7 +329,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		}
 	}()
 	graph := engine.Graph(client)
-	if err := serverboot.ReconcileBootMerchantManifest(cmd.Context(), graph.Config, graph, manifestPath, bootNMIProbeV5BaseURL); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(cmd.Context(), graph.Config, graph, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
 		return err
 	}
 
@@ -347,7 +348,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 // applyStandaloneMigrations migrates like any host (openrails.Migrate): billing,
 // managed River and, with the control plane, AuthKit.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
-	pool, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
+	pool, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}

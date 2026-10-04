@@ -154,7 +154,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool, options ...Bu
 			opts.AlertBackend = supplied.AlertBackend
 		}
 	}
-	if cfg.SecretStoreBackend() != "snapshot" {
+	if config.SecretStoreBackend(cfg) != "snapshot" {
 		return buildManaged(ctx, cfg, pool, opts)
 	}
 	if opts.Snapshot == nil {
@@ -208,7 +208,7 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, option
 	if len(options) > 0 {
 		opts = options[0]
 	}
-	backend := cfg.SecretStoreBackend()
+	backend := config.SecretStoreBackend(cfg)
 
 	// Open a Vault connection whenever Vault is configured. Login runs in the
 	// background (only Postgres may block construction); capabilities are

@@ -129,7 +129,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		if err != nil {
 			return err
 		}
-		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
+		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 			return &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
 		label := psp.ID.String()

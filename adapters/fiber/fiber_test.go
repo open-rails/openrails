@@ -48,8 +48,8 @@ type routeSource struct {
 	root   bool
 }
 
-func denyDelegated(calls *int) func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
-	return func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
+func denyDelegated(calls *int) func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
+	return func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
 		*calls++
 		return nil, billingauth.ErrUnauthenticated
 	}
@@ -67,8 +67,8 @@ func inventoryBundle(t *testing.T) *Bundle {
 			return billingauth.ErrUnauthenticated
 		}),
 	}
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: denyDelegated(new(int))}},
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: denyDelegated(new(int))}}
+	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
@@ -185,7 +185,8 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 	for _, prefix := range []string{"/portal/*audience", "/portal/+audience", "/api/v1/merchants/{slug}/billing/me"} {
 		calls := 0
-		policy := &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Authenticate: denyDelegated(&calls)}}}
+		graph.Runtime.AuthenticateCustomer = denyDelegated(&calls)
+		policy := &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Delegated: true}}}
 		saas := strings.Contains(prefix, "{slug}")
 		if err := embedhttp.ValidateHTTPConfig(policy, nil); err != nil {
 			require.False(t, saas, err)

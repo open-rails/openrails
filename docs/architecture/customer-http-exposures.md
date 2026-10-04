@@ -7,18 +7,26 @@ registrations. Process health endpoints remain host-owned. Hosted control-plane
 posture selects Host-bound provider callbacks; private standalone posture retains
 provider-account routing.
 
-A host can additionally expose a customer audience with its own authenticator:
+A host can additionally expose a customer audience with its own authenticator.
+`Config` marks the profile `Delegated`; the authenticator itself is
+`Deps.AuthenticateCustomer`, which receives the profile's `Prefix`:
 
 ```go
 cfg.HTTP = &openrails.HTTPConfig{
     CustomerRoutes: []openrails.CustomerRoutesConfig{
-        {Prefix: "/billing/v1/me", Authenticate: portalIdentity},
+        {Prefix: "/billing/v1/me", Delegated: true},
         {
-            Prefix:       "/api/v1/merchants/{slug}/billing/me",
-            Scope:        openrails.CustomerSubscriptionManagement,
-            Authenticate: platformCustomerIdentity,
+            Prefix:    "/api/v1/merchants/{slug}/billing/me",
+            Scope:     openrails.CustomerSubscriptionManagement,
+            Delegated: true,
         },
     },
+}
+deps.AuthenticateCustomer = func(r *http.Request, profile string) (*openrails.DelegatedPrincipal, error) {
+    if profile == "/billing/v1/me" {
+        return portalIdentity(r)
+    }
+    return platformCustomerIdentity(r)
 }
 client, err := openrails.New(ctx, cfg, deps)
 if err != nil { return err }
@@ -31,7 +39,7 @@ subscription payment-method changes and invoice collection-method selection.
 Both profiles reuse the same route registration and payer ownership checks.
 Neither exposes merchant administration, credentials, treasury or callbacks.
 
-An ordinary native audience uses `Deps.Authenticate` and the declared merchant. Each advanced delegated audience supplies its own authenticator. The authenticator verifies the
+An ordinary native audience uses `Deps.Authenticate` and the declared merchant. A `Delegated` audience is authenticated by `Deps.AuthenticateCustomer`. The authenticator verifies the
 actual credential and derives its merchant and payer from trusted host policy;
 a URL parameter or request-body merchant field is not authority. Route parameters
 are available through `Request.PathValue` before authentication. Original URL,

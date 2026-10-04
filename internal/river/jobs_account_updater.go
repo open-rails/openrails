@@ -276,7 +276,7 @@ func (w AccountUpdaterBatchWorker) instrumentBatch() int {
 }
 
 func (w AccountUpdaterBatchWorker) environment() string {
-	return config.ExpectedProviderEnvironment(w.Config != nil && w.Config.IsTestMode())
+	return config.ExpectedProviderEnvironment(w.Config != nil && config.IsTestMode(w.Config))
 }
 
 // ingestMerchant polls this merchant's open batches and folds whatever the
@@ -529,7 +529,7 @@ func (w AccountUpdaterBatchWorker) client(ctx context.Context, custodianID uuid.
 		APIKey:        cc.APIKey,
 		BaseURL:       baseURL,
 		WebhookKeyURL: cc.WebhookKeyURL,
-		ReadOnly:      w.Config != nil && w.Config.IsProviderReadOnly(),
+		ReadOnly:      w.Config != nil && config.IsProviderReadOnly(w.Config),
 		Outbound:      w.Outbound,
 	})
 }

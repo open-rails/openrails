@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224):
@@ -40,7 +39,7 @@ type ControlPlane struct {
 	// anchored at construction (nil when no extra pattern is declared).
 	merchantCreationPattern *regexp.Regexp
 	// naming is the rename policy for merchant names (#1106).
-	naming merchant.NamingPolicy
+	naming config.NamingPolicy
 	// pool is the schema-aware wrapper for OpenRails' own tables (#471).
 	pool *db.Pool
 	// authPrefix is the path prefix AuthKit's JSON API is served beneath.
@@ -56,7 +55,7 @@ type ControlPlane struct {
 }
 
 type options struct {
-	naming                       *merchant.NamingConfig
+	naming                       *config.NamingConfig
 	nameAdmission                func(context.Context, iam.NameAdmissionRequest) error
 	hosted                       bool
 	passwordlessLogin            bool
@@ -148,7 +147,7 @@ func WithRedis(rd *redis.Client) Option {
 }
 
 // WithNaming overrides auth.naming, the site naming policy.
-func WithNaming(n merchant.NamingConfig) Option {
+func WithNaming(n config.NamingConfig) Option {
 	return func(o *options) { o.naming = &n }
 }
 
@@ -232,15 +231,15 @@ func inlineKeySource(auth *config.AuthConfig) (keys.Source, error) {
 }
 
 // usernames maps the site naming policy onto AuthKit's username rule.
-func usernames(p merchant.NamingPolicy) authkit.UsernameConfig {
+func usernames(p config.NamingPolicy) authkit.UsernameConfig {
 	u := authkit.UsernameConfig{Renames: p.Enabled, RenameInterval: p.RenameInterval}
 	if u.RenameInterval == 0 {
 		u.RenameInterval = -1 // AuthKit reads 0 as its default; ours is no wait.
 	}
 	switch p.FormerNames {
-	case merchant.FormerNamesForever:
+	case config.FormerNamesForever:
 		u.FormerNames.Mode = authkit.FormerNamesForever
-	case merchant.FormerNamesImmediate:
+	case config.FormerNamesImmediate:
 		u.FormerNames.Mode = authkit.FormerNamesImmediate
 	default:
 		u.FormerNames = authkit.FormerNamesConfig{Mode: authkit.FormerNamesFinite, Duration: p.FormerNameRetention}
@@ -249,7 +248,7 @@ func usernames(p merchant.NamingPolicy) authkit.UsernameConfig {
 }
 
 // authConfig is the AuthKit configuration of the control plane.
-func authConfig(auth *config.AuthConfig, options options, naming merchant.NamingPolicy, httpCfg *authkit.HTTPConfig) authkit.Config {
+func authConfig(auth *config.AuthConfig, options options, naming config.NamingPolicy, httpCfg *authkit.HTTPConfig) authkit.Config {
 	return authkit.Config{
 		Token: authkit.TokenConfig{
 			Issuer:                  strings.TrimSpace(auth.Issuer),
@@ -281,7 +280,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	if cfg == nil || auth == nil {
 		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
 	}
-	if err := auth.ValidateTransport(); err != nil {
+	if err := config.ValidateAuthTransport(auth); err != nil {
 		return nil, err
 	}
 	if pool == nil {
@@ -306,7 +305,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	if options.naming != nil {
 		namingConfig = *options.naming
 	}
-	naming, err := namingConfig.Normalize()
+	naming, err := config.NormalizeNaming(namingConfig)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: naming policy: %w", err)
 	}
@@ -320,7 +319,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	cp := &ControlPlane{
 		hosted: options.hosted, merchantCreation: options.merchantCreation,
 		merchantCreationPattern: pattern, naming: naming,
-		pool: db.WrapPool(pool, cfg.SchemaName()), authPrefix: authPrefix(auth.Issuer),
+		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Issuer),
 	}
 	httpCfg, err := clientIPPosture(cfg, auth, options)
 	if err != nil {

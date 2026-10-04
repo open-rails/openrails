@@ -73,8 +73,8 @@ eligibility. Former-name modes are `finite`, `forever`, and `immediate`; omit
 `duration` for the latter two. Environment equivalents are
 `AUTH_NAMING_ENABLED`, `AUTH_NAMING_RENAME_INTERVAL`,
 `AUTH_NAMING_FORMER_NAMES_MODE`, and `AUTH_NAMING_FORMER_NAMES_DURATION`.
-Embedded hosts pass it through `cfg.Auth.Naming`; a non-nil
-`AttachOptions.Naming` replaces it.
+Hosts running the control plane in process set
+`Config.ControlPlane.Auth.Naming` (`openrails.NamingConfig`).
 
 Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
 (`merchant:settings:update`), subject to the rename interval and, on hosted

@@ -95,12 +95,11 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	// Programmatic standalone construction needs the same protective defaults
 	// as the file loader and embedded constructor. Omission never disables them.
 	if !cfg.RateLimitsDisabled {
-		defaults := config.GetDefaultBillingConfig()
 		if cfg.RateLimits == nil {
-			cfg.RateLimits = defaults.RateLimits
+			cfg.RateLimits = config.DefaultRateLimits()
 		}
 		if cfg.Captcha == nil {
-			cfg.Captcha = defaults.Captcha
+			cfg.Captcha = config.DefaultCaptcha()
 		}
 	}
 	if err := config.Validate(cfg); err != nil {
@@ -120,7 +119,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	var dbOverride *db.DB
 	if opts != nil && opts.PGXPool != nil {
-		dbo, err := db.NewWithPGXPool(opts.PGXPool, cfg.SchemaName())
+		dbo, err := db.NewWithPGXPool(opts.PGXPool, config.SchemaName(cfg))
 		if err != nil {
 			return nil, fmt.Errorf("use pgx pool: %w", err)
 		}

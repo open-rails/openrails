@@ -188,7 +188,7 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 }
 
 func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[ProviderRefreshArgs]) error {
-	if w.Config != nil && w.Config.IsProviderReadOnly() {
+	if w.Config != nil && config.IsProviderReadOnly(w.Config) {
 		log.WithContext(ctx).Warn("Readonly mode: provider refresh scheduling skipped (pure observer; no local convergence)")
 		return nil
 	}
@@ -315,7 +315,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	if w.DB == nil {
 		return fmt.Errorf("provider refresh: db not configured")
 	}
-	if w.Config != nil && w.Config.IsProviderReadOnly() {
+	if w.Config != nil && config.IsProviderReadOnly(w.Config) {
 		log.WithContext(ctx).Warn("Readonly mode: provider refresh skipped (pure observer; no local convergence)")
 		return nil
 	}

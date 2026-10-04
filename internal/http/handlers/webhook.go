@@ -371,7 +371,7 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 }
 
 func webhookProviderEnvironment(r *httprequest.Request) string {
-	return config.ExpectedProviderEnvironment(r != nil && r.State != nil && r.State.Config != nil && r.State.Config.IsTestMode())
+	return config.ExpectedProviderEnvironment(r != nil && r.State != nil && r.State.Config != nil && config.IsTestMode(r.State.Config))
 }
 
 // ccbillWebhookIPAllowed binds the request to the ONE CCBill source-IP gate

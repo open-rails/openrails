@@ -20,6 +20,10 @@ func refuseCard(payment billing.CheckoutPaymentOptions) error {
 	return invalidErr("a card cannot be sent through a Client: post it to OpenRails' own routes")
 }
 
+// CreateCheckoutSession starts a purchase of one price, named by exactly one
+// of PriceID and PriceKey. Retries with the same IdempotencyKey never charge
+// twice. A card cannot travel through a Client: card entry goes to OpenRails'
+// own routes.
 func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
 	if err := refuseCard(request.PaymentOptions); err != nil {
 		return nil, err
@@ -76,6 +80,7 @@ func (c *Client) LookupCheckoutSession(ctx context.Context, request billing.Crea
 	return &out, nil
 }
 
+// CreatePaymentMethodSession starts saving a card without a purchase.
 func (c *Client) CreatePaymentMethodSession(ctx context.Context, request billing.CreatePaymentMethodSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
 	if err := refuseCard(request.PaymentOptions); err != nil {
 		return nil, err
@@ -87,6 +92,8 @@ func (c *Client) CreatePaymentMethodSession(ctx context.Context, request billing
 	return &out, nil
 }
 
+// CreateSolanaCancelSession prepares the transaction a customer signs to
+// cancel a Solana subscription.
 func (c *Client) CreateSolanaCancelSession(ctx context.Context, request billing.CreateSolanaCancelSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
 	if err := refuseCard(request.PaymentOptions); err != nil {
 		return nil, err
@@ -98,6 +105,8 @@ func (c *Client) CreateSolanaCancelSession(ctx context.Context, request billing.
 	return &out, nil
 }
 
+// CreateSolanaTierChangeSession prepares the transaction a customer signs to
+// change a Solana subscription's tier.
 func (c *Client) CreateSolanaTierChangeSession(ctx context.Context, request billing.CreateSolanaTierChangeSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
 	if err := refuseCard(request.PaymentOptions); err != nil {
 		return nil, err
@@ -109,6 +118,7 @@ func (c *Client) CreateSolanaTierChangeSession(ctx context.Context, request bill
 	return &out, nil
 }
 
+// GetCheckoutSession reads one of a customer's checkout sessions.
 func (c *Client) GetCheckoutSession(ctx context.Context, customerID string, sessionID string, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
@@ -149,6 +159,8 @@ func (c *Client) GetCheckoutSessionByKey(ctx context.Context, customerID, idempo
 	return &out, nil
 }
 
+// ConfirmCheckoutSession completes a session that awaits the customer, such
+// as a signed Solana transaction.
 func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID string, request billing.ConfirmCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
 	typedSession, err := billing.ParseCheckoutSessionID(sessionID)
 	if err != nil {
@@ -165,6 +177,8 @@ func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID string, r
 	return &out, nil
 }
 
+// ListCheckoutRailOptions returns the ways checkout can sell a price now: one
+// option per armed PSP whose rail can make the sale.
 func (c *Client) ListCheckoutRailOptions(ctx context.Context, priceID string, requestOptions ...RequestOption) ([]billing.CheckoutRailOption, error) {
 	price, err := requirePriceID(priceID)
 	if err != nil {
@@ -199,6 +213,8 @@ func (c *Client) GetCheckoutConfig(ctx context.Context, requestOptions ...Reques
 	return &out, nil
 }
 
+// ResolveEffectiveTier returns the tier a customer currently holds in a tier
+// group, nil when none.
 func (c *Client) ResolveEffectiveTier(ctx context.Context, customerID string, group string, requestOptions ...RequestOption) (*billing.EffectiveTier, error) {
 	path, err := customerPath(customerID)
 	if err != nil {

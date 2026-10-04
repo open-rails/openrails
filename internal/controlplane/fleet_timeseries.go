@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,14 +50,14 @@ type FleetTimeseriesResult struct {
 
 // FleetTimeseries aggregates the weekly fleet series over the trailing window.
 // exclude removes one merchant from every series (the platform's own
-// self-billing book); zero excludes nothing. weeks outside 4..52 falls back
-// to 12.
+// self-billing book); zero excludes nothing. weeks outside 4..52 is refused
+// (billing.ErrInvalid).
 func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude billing.MerchantID, weeks int) (*FleetTimeseriesResult, error) {
+	if weeks < 4 || weeks > 52 {
+		return nil, invalidRange("weeks", 4, 52)
+	}
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for fleet timeseries")
-	}
-	if weeks < 4 || weeks > 52 {
-		weeks = 12
 	}
 	since := time.Now().UTC().AddDate(0, 0, -7*(weeks-1))
 	var excludeArg *uuid.UUID
@@ -122,4 +123,11 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude billing.Merc
 		out.Volume = append(out.Volume, FleetWeeklyVolume{WeekStart: v.WeekStart.UTC(), Currency: v.Currency, Payments: v.Payments, SettledAmount: v.SettledAmount})
 	}
 	return out, nil
+}
+
+// invalidRange refuses an out-of-range argument instead of substituting a default.
+func invalidRange(name string, low, high int) error {
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{
+		Type: "invalid_request_error", Code: "invalid_param", Message: fmt.Sprintf("%s must be between %d and %d", name, low, high),
+	}}
 }

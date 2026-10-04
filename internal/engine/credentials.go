@@ -15,7 +15,7 @@ func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values
 	if len(values) == 0 {
 		return nil
 	}
-	if rt.Config.SecretStoreBackend() != config.SecretBackendSnapshot || rt.ManifestSecrets == nil {
+	if config.SecretStoreBackend(rt.Config) != config.SecretBackendSnapshot || rt.ManifestSecrets == nil {
 		return fmt.Errorf("openrails: Deps.ProviderCredentials requires snapshot credential custody")
 	}
 	type entry struct {
@@ -33,7 +33,7 @@ func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("provider snapshot contains an empty credential")
 			}
-			name, err := merchants.PSPSecretName(provider.Rail, config.ExpectedProviderEnvironment(rt.Config.IsTestMode()), provider.AccountID, key)
+			name, err := merchants.PSPSecretName(provider.Rail, config.ExpectedProviderEnvironment(config.IsTestMode(rt.Config)), provider.AccountID, key)
 			if err != nil {
 				return err
 			}

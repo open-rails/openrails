@@ -41,7 +41,7 @@ func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, pr
 	if !ok || checkoutService == nil || checkoutService.Rails == nil {
 		return nil, fmt.Errorf("checkout rail options unavailable")
 	}
-	if s.config == nil || s.config.IsProviderReadOnly() {
+	if s.config == nil || config.IsProviderReadOnly(s.config) {
 		return []CheckoutRailOption{}, nil
 	}
 	merchantID, err := merchant.Require(ctx)

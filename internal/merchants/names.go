@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // OpenRails owns merchant names (#1106). merchants.slug is the name of every
@@ -35,7 +35,7 @@ func (e *RenameTooSoonError) Error() string {
 
 // Rename gives a live merchant a new name. The former name becomes an alias
 // under policy, and a name the merchant itself held before is reclaimed.
-func (s *Service) Rename(ctx context.Context, id billing.MerchantID, name string, policy merchant.NamingPolicy) (*Merchant, error) {
+func (s *Service) Rename(ctx context.Context, id billing.MerchantID, name string, policy config.NamingPolicy) (*Merchant, error) {
 	name = normalizeSlug(name)
 	if err := billing.ValidateMerchantSlug(name); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidName, err)
@@ -60,12 +60,12 @@ func (s *Service) Rename(ctx context.Context, id billing.MerchantID, name string
 		if err := q.RenameMerchant(ctx, gen.RenameMerchantParams{ID: id.UUID(), Slug: name}); err != nil {
 			return err
 		}
-		if policy.FormerNames == merchant.FormerNamesImmediate {
+		if policy.FormerNames == config.FormerNamesImmediate {
 			return nil
 		}
 		return q.InsertMerchantSlugAlias(ctx, gen.InsertMerchantSlugAliasParams{
 			Slug: row.Slug, MerchantID: id.UUID(),
-			Forever:          policy.FormerNames == merchant.FormerNamesForever,
+			Forever:          policy.FormerNames == config.FormerNamesForever,
 			RetentionSeconds: policy.FormerNameRetention.Seconds(),
 		})
 	})

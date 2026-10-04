@@ -153,7 +153,7 @@ func (w *SolanaCrankWorker) now() time.Time {
 }
 
 func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankArgs]) error {
-	if w.Config != nil && w.Config.IsLimitedMode() {
+	if w.Config != nil && config.IsLimitedMode(w.Config) {
 		log.WithContext(ctx).Warn("limited mode: skipping Solana recurring pulls (#345)")
 		return nil
 	}

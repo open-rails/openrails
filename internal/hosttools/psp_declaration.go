@@ -45,7 +45,7 @@ func DeclarePSP(ctx context.Context, application *app.App, merchantID billing.Me
 		return uuid.Nil, fmt.Errorf("embedded billing: DeclarePSP requires an account ID")
 	}
 
-	environment := config.ExpectedProviderEnvironment(application.Runtime.Config.IsTestMode())
+	environment := config.ExpectedProviderEnvironment(config.IsTestMode(application.Runtime.Config))
 	database := application.Runtime.DB
 	if err := merchants.AssertPSPUnowned(
 		ctx,

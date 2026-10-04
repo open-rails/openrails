@@ -17,11 +17,11 @@ import (
 func TestEnabledCaptchaAlwaysHasVerifier(t *testing.T) {
 	for _, provider := range []string{"turnstile", "recaptcha-v3", "hcaptcha", "recaptcha", "not-a-provider", ""} {
 		cfg := &config.CaptchaConfig{SiteKey: "site", SecretKey: "secret", Provider: provider}
-		require.True(t, cfg.IsEnabled())
+		require.True(t, config.CaptchaEnabled(cfg))
 		require.NotNil(t, captcha.NewVerifier(cfg, nil), "provider %q", provider)
 	}
 	for _, cfg := range []*config.CaptchaConfig{nil, {}, {SiteKey: "site"}, {SecretKey: "secret"}, {SiteKey: " ", SecretKey: "secret"}} {
-		require.False(t, cfg.IsEnabled())
+		require.False(t, config.CaptchaEnabled(cfg))
 		require.Nil(t, captcha.NewVerifier(cfg, nil))
 		require.False(t, captcha.ShouldApply(cfg, "checkout"), "disabled captcha must never enforce")
 	}

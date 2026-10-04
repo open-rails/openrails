@@ -39,7 +39,7 @@ func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal)
 		return mid, uuid.Nil, err
 	}
 	customer, err := uuid.Parse(p.SubjectID)
-	if err != nil || customer == uuid.Nil || p.Validate() != nil || p.CredentialClass != billingauth.CredentialClassUserSession || p.Invoker != "" || p.MerchantID != mid.String() {
+	if err != nil || customer == uuid.Nil || billingauth.ValidateDelegatedPrincipal(&p) != nil || p.CredentialClass != billingauth.CredentialClassUserSession || p.Invoker != "" || p.MerchantID != mid.String() {
 		return mid, uuid.Nil, apperr.New(403, "customer_session_required", "saved card setup requires its interactive customer session")
 	}
 	return mid, customer, nil
@@ -49,7 +49,7 @@ func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.
 	if err != nil {
 		return StripeMethodSetupResponse{}, err
 	}
-	if s == nil || s.SubscriptionService == nil || s.Config == nil || s.Config.IsProviderReadOnly() || s.customerStore() == nil || resolver == nil {
+	if s == nil || s.SubscriptionService == nil || s.Config == nil || config.IsProviderReadOnly(s.Config) || s.customerStore() == nil || resolver == nil {
 		return StripeMethodSetupResponse{}, errors.New("Stripe method setup unavailable")
 	}
 	if psp == uuid.Nil || key == "" || len(key) > 255 || strings.TrimSpace(key) != key || cardguard.ContainsPAN(key) {
@@ -72,7 +72,7 @@ func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.
 		return StripeMethodSetupResponse{}, err
 	}
 	account, err := d.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
-	if err != nil || account.Archived || account.Rail != "stripe" || account.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
+	if err != nil || account.Archived || account.Rail != "stripe" || account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 		return StripeMethodSetupResponse{}, ErrCheckoutSessionValidation
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, mid.UUID(), &psp)

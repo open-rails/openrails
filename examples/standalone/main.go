@@ -35,7 +35,6 @@ func run(ctx context.Context, getenv func(string) string) error {
 	client, err := openrails.NewRemote(baseURL,
 		openrails.WithAPIKey(key),
 		openrails.WithMerchantID(merchantID),
-		openrails.WithCurrency("USD"),
 	)
 	if err != nil {
 		return err

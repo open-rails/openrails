@@ -105,11 +105,11 @@ func (b MerchantFetcherBuilder) Build(ctx context.Context, mid billing.MerchantI
 }
 
 func (b MerchantFetcherBuilder) testMode() bool {
-	return b.Config != nil && b.Config.IsTestMode()
+	return b.Config != nil && config.IsTestMode(b.Config)
 }
 
 func (b MerchantFetcherBuilder) readOnly() bool {
-	return b.Config != nil && b.Config.IsProviderReadOnly()
+	return b.Config != nil && config.IsProviderReadOnly(b.Config)
 }
 
 // environment is the deployment's PSP environment: test under
@@ -326,7 +326,7 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 		}
 		// A sandbox run's loopback RPC replaces the public one here as it does
 		// for the runtime's own Solana clients (hermetic CI never reaches devnet).
-		endpoint := b.Config.SandboxSolanaRPCURL()
+		endpoint := config.SandboxSolanaRPCURL(b.Config)
 		rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
 			Endpoint:        endpoint,
 			LoopbackFixture: endpoint != "",

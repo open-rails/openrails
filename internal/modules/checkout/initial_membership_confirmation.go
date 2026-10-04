@@ -46,7 +46,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if err != nil {
 		return nil, err
 	}
-	if principal.Validate() != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != accepted.CustomerID.String() {
+	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != accepted.CustomerID.String() {
 		return nil, apperr.New(403, "customer_session_required", "initial membership requires its interactive customer session")
 	}
 	if accepted.CollectionPolicy != models.CollectionPolicyEngine || accepted.Amount <= 0 || accepted.Amount != accepted.RecurringAmount || accepted.Pending {
@@ -152,7 +152,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err != nil {
 			return err
 		}
-		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
+		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 			return errors.New("new membership provider account is no longer available")
 		}
 		if method.CustodianID != nil {

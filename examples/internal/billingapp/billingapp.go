@@ -123,7 +123,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.DeniedBy = denied.BlockedBy
 	r.UnknownRelease = errors.Is(client.Release(ctx, uuid.NewString()), billing.ErrNotFound)
-	balance, err := client.Balance(ctx, payer)
+	balance, err := client.GetCreditAccount(ctx, payer, in.Currency)
 	if err != nil {
 		return r, fmt.Errorf("balance: %w", err)
 	}

@@ -185,10 +185,11 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 	})
 	require.NoError(t, err)
 	routes := openrails.CustomerRoutesConfig{Merchant: slug, Scope: scope}
-	if len(delegated) > 0 {
-		routes.Authenticate = delegated[0]
-	}
 	deps := hooks(identity)
+	if len(delegated) > 0 {
+		routes.Delegated = true
+		deps.AuthenticateCustomer = func(r *http.Request, _ string) (*billingauth.DelegatedPrincipal, error) { return delegated[0](r) }
+	}
 	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = w.pool, w.stripe, w.nmi, w.clock
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Schema: w.schema, River: openrails.RiverHostOwned,

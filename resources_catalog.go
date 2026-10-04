@@ -23,6 +23,7 @@ func (c *Client) initResources() {
 	c.Prices = &PriceClient{client: c}
 }
 
+// Create adds a product.
 func (p *ProductClient) Create(ctx context.Context, params *billing.ProductCreateParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	var out billing.Product
 	if err := p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/products", params, &out, requestOptions...); err != nil {
@@ -30,6 +31,8 @@ func (p *ProductClient) Create(ctx context.Context, params *billing.ProductCreat
 	}
 	return &out, nil
 }
+
+// Retrieve reads one product by ID.
 func (p *ProductClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.Product, error) {
 	id, err := resourceProductID(id)
 	if err != nil {
@@ -41,6 +44,8 @@ func (p *ProductClient) Retrieve(ctx context.Context, id string, requestOptions 
 	}
 	return &out, nil
 }
+
+// RetrieveByKey reads one product by its merchant-unique key.
 func (p *ProductClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Product, error) {
 	key, err := pathID("key", key)
 	if err != nil {
@@ -52,6 +57,8 @@ func (p *ProductClient) RetrieveByKey(ctx context.Context, key string, requestOp
 	}
 	return &out, nil
 }
+
+// Update changes a product's mutable fields; omitted ones keep their values.
 func (p *ProductClient) Update(ctx context.Context, id string, params *billing.ProductUpdateParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	id, err := resourceProductID(id)
 	if err != nil {
@@ -64,6 +71,7 @@ func (p *ProductClient) Update(ctx context.Context, id string, params *billing.P
 	return &out, nil
 }
 
+// List returns one page of products matching params.
 func (p *ProductClient) List(ctx context.Context, params *billing.ProductListParams, requestOptions ...RequestOption) (*billing.CatalogPage[billing.Product], error) {
 	if params == nil {
 		params = &billing.ProductListParams{}
@@ -80,6 +88,10 @@ func (p *ProductClient) List(ctx context.Context, params *billing.ProductListPar
 	}
 	return &out, nil
 }
+
+// Create adds a price to a product named by exactly one of ProductID,
+// ProductKey and ProductData. A price's amount and terms never change;
+// selling at another price means another price.
 func (p *PriceClient) Create(ctx context.Context, params *billing.PriceCreateParams, requestOptions ...RequestOption) (*billing.Price, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
@@ -109,6 +121,8 @@ func (p *PriceClient) Create(ctx context.Context, params *billing.PriceCreatePar
 	}
 	return &out, nil
 }
+
+// Retrieve reads one price by ID.
 func (p *PriceClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.Price, error) {
 	id, err := resourcePriceID(id)
 	if err != nil {
@@ -120,6 +134,8 @@ func (p *PriceClient) Retrieve(ctx context.Context, id string, requestOptions ..
 	}
 	return &out, nil
 }
+
+// RetrieveByKey reads the price currently holding a merchant-unique key.
 func (p *PriceClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Price, error) {
 	key, err := pathID("key", key)
 	if err != nil {
@@ -131,6 +147,8 @@ func (p *PriceClient) RetrieveByKey(ctx context.Context, key string, requestOpti
 	}
 	return &out, nil
 }
+
+// Update changes a price's mutable fields, such as archiving it.
 func (p *PriceClient) Update(ctx context.Context, id string, params *billing.PriceUpdateParams, requestOptions ...RequestOption) (*billing.Price, error) {
 	id, err := resourcePriceID(id)
 	if err != nil {
@@ -143,6 +161,7 @@ func (p *PriceClient) Update(ctx context.Context, id string, params *billing.Pri
 	return &out, nil
 }
 
+// List returns one page of prices matching params.
 func (p *PriceClient) List(ctx context.Context, params *billing.PriceListParams, requestOptions ...RequestOption) (*billing.CatalogPage[billing.Price], error) {
 	if params == nil {
 		params = &billing.PriceListParams{}

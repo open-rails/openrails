@@ -91,7 +91,7 @@ func (t *guardTransport) transport() http.RoundTripper {
 
 // Client returns the *http.Client all Stripe API calls must go through. Writes
 // (non-GET/HEAD) are blocked with ErrProviderReadOnly when
-// cfg.IsProviderReadOnly() (mode=readonly); reads always pass.
+// config.IsProviderReadOnly(cfg) (mode=readonly); reads always pass.
 //
 // A nil cfg FAILS CLOSED — it yields a read-only client (or#865). It used to be
 // treated as "not read-only", which meant the one input that tells us nothing
@@ -138,7 +138,7 @@ type Factory struct{ base http.RoundTripper }
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return f.newClient(cfg == nil || cfg.IsProviderReadOnly(), cfg != nil && cfg.IsTestMode(), timeout)
+	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), cfg != nil && config.IsTestMode(cfg), timeout)
 }
 
 func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {

@@ -7,6 +7,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// PreviewEngineTakeover reports what taking over a provider-billed
+// subscription's billing would do, without changing anything.
 func (c *Client) PreviewEngineTakeover(ctx context.Context, subscriptionID billing.SubscriptionID, requestOptions ...RequestOption) (*billing.EngineTakeover, error) {
 	return c.engineTakeover(ctx, http.MethodPost, subscriptionID, "/engine-takeover/preview", nil, requestOptions...)
 }

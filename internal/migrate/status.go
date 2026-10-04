@@ -17,12 +17,12 @@ func PostgresStatus(ctx context.Context, cfg *config.Config) (status migratekit.
 	if cfg == nil || cfg.DB == nil {
 		return status, fmt.Errorf("missing database config")
 	}
-	schema := cfg.SchemaName()
+	schema := config.SchemaName(cfg)
 	migrations, err := loadMigrations(schema)
 	if err != nil {
 		return status, err
 	}
-	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
+	sqlDB, err := sql.Open("pgx", config.DBConnectionString(cfg.DB))
 	if err != nil {
 		return status, fmt.Errorf("open postgres: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -78,7 +79,7 @@ func (s *CheckoutSessionService) validateReturnURLs(urls ...string) error {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		if s == nil || !s.config.ReturnURLAllowed(raw) {
+		if s == nil || !config.ReturnURLAllowed(s.config, raw) {
 			return fmt.Errorf("%w: return URL origin is not allowed", ErrCheckoutSessionValidation)
 		}
 	}

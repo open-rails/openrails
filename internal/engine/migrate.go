@@ -21,11 +21,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 		return fmt.Errorf("openrails: Migrate requires a Postgres pool")
 	}
 	cfg.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.RiverSchema))
-	schema := cfg.SchemaName()
+	schema := config.SchemaName(&cfg)
 	if !validIdentifier(schema) {
 		return fmt.Errorf("openrails: invalid database schema %q", schema)
 	}
-	opts := migrate.Options{Schema: schema, HostRiver: cfg.River.HostOwned()}
+	opts := migrate.Options{Schema: schema, HostRiver: cfg.River == config.RiverHostOwned}
 	switch cfg.River {
 	case "", config.RiverManaged:
 		opts.RiverSchema = cfg.RiverSchema

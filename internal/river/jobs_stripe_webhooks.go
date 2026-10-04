@@ -129,7 +129,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 					return fmt.Errorf("list stripe psps: %w", err)
 				}
 				for _, psp := range psps {
-					if psp.Environment != config.ExpectedProviderEnvironment(w.Config.IsTestMode()) {
+					if psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(w.Config)) {
 						continue
 					}
 					verdict := gate.CheckMerchant(mctx, merchantID.UUID())

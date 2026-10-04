@@ -362,9 +362,10 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | `MerchantAPI` | Service and API-key routes; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
-slug). An advanced, delegated audience can mount a profile under its own
-`Prefix` with its own `Authenticate` returning an explicit merchant and paying
-subject; it confers no permissions by default and keeps verified credential
+slug). An advanced, delegated audience mounts a profile under its own `Prefix`
+with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
+returning an explicit merchant and paying subject. It confers no permissions
+by default and keeps verified credential
 class and invoker restrictions. An invoker-scoped principal may read only its
 own `/v1/me/spend-limits`.
 
@@ -421,8 +422,10 @@ billing is an empty slice, never an error. Deny verdicts are `(Allowed=false, ni
 error)`.
 
 `Admit` is the batch-of-one convenience on the same client in every mode.
-`openrails.WithCurrency` and `openrails.WithTimeout` configure the same call behavior
-as the remote constructor. Both modes default to a two-second call deadline;
+`openrails.WithTimeout` configures the same call behavior as the remote
+constructor; the credential and transport options (`WithAPIKey`,
+`WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient`) belong to
+`NewRemote` and `New` refuses them. Both modes default to a two-second call deadline;
 `openrails.WithTimeout(0)` explicitly delegates the deadline to the caller.
 
 Checkout creation/read/confirmation, checkout provider options and effective-tier

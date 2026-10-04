@@ -18,6 +18,8 @@ func pageQuery(options billing.PageOptions) url.Values {
 	return url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(options.Offset)}}
 }
 
+// ListSubscriptions returns one page of the merchant's subscriptions matching
+// filter.
 func (c *Client) ListSubscriptions(ctx context.Context, filter billing.SubscriptionFilter, requestOptions ...RequestOption) (*billing.Page[billing.Subscription], error) {
 	q := pageQuery(filter.PageOptions)
 	if filter.CustomerID != "" {
@@ -52,6 +54,7 @@ func customerPath(customerID string) (string, error) {
 	return "/v1/merchant/customers/" + customer, nil
 }
 
+// GetSubscription reads one subscription.
 func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
@@ -64,6 +67,8 @@ func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID,
 	return &out, nil
 }
 
+// CancelSubscription cancels at the end of the paid period or, with
+// RevokeAccess, immediately. Both stop provider billing.
 func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, request billing.CancelSubscriptionRequest, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
@@ -82,6 +87,8 @@ func (c *Client) ResumeSubscription(ctx context.Context, id billing.Subscription
 	return c.do(ctx, http.MethodPost, path+"/resume", nil, nil, requestOptions...)
 }
 
+// UpdateSubscriptionPaymentMethod charges a subscription's renewals to
+// another of the customer's saved payment methods.
 func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, request billing.UpdateSubscriptionPaymentMethodRequest, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
@@ -93,6 +100,8 @@ func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing
 	return c.do(ctx, http.MethodPut, path+"/payment-method", request, nil, requestOptions...)
 }
 
+// PreviewTierChange reports what moving a subscription to another price
+// would charge and when it would take effect, without changing anything.
 func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionID, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangePreviewResponse, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
@@ -108,6 +117,8 @@ func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionI
 	return &out, nil
 }
 
+// ChangeTier moves a subscription to another price. The same key replays the
+// change.
 func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, key string, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangeResponse, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
@@ -123,6 +134,7 @@ func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, key 
 	return &out, nil
 }
 
+// ListPaymentMethods returns one page of a customer's saved payment methods.
 func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options billing.PageOptions, requestOptions ...RequestOption) (*billing.Page[billing.PaymentMethod], error) {
 	path, err := customerPath(customerID)
 	if err != nil {
@@ -153,6 +165,9 @@ func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string,
 	return &out, nil
 }
 
+// DeletePaymentMethod removes a saved payment method. The result says
+// whether it is deleted or awaits the provider; pending is never reported
+// deleted.
 func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethodDeletion, error) {
 	path, err := customerPath(customerID)
 	if err != nil {

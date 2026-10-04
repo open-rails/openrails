@@ -35,7 +35,7 @@ import (
 // Under live posture every NMI account must prove it is not in test mode
 // (SEC-33): an account left in test mode approves without moving money.
 func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
-	if r == nil || r.Config == nil || r.Config.IsProviderReadOnly() || r.DB == nil || r.Merchants == nil {
+	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {
 		if r != nil {
 			r.posturePending.Store(0)
 		}
@@ -56,7 +56,7 @@ func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
 // verifyProviderPosture verifies every loaded PSP whose verdict is not yet
 // known and returns how many remain unknown.
 func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID) int {
-	live := !r.Config.IsTestMode()
+	live := !config.IsTestMode(r.Config)
 	environment := config.ExpectedProviderEnvironment(!live)
 	registry := providerposture.Process()
 	pending := 0

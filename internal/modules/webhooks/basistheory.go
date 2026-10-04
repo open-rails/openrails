@@ -116,7 +116,7 @@ func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.
 		APIKey:        cc.APIKey,
 		BaseURL:       cc.APIBaseURL,
 		WebhookKeyURL: cc.WebhookKeyURL,
-		ReadOnly:      s.d.Config != nil && s.d.Config.IsProviderReadOnly(),
+		ReadOnly:      s.d.Config != nil && config.IsProviderReadOnly(s.d.Config),
 	})
 }
 
@@ -525,7 +525,7 @@ func auExpiry(month, year string) string {
 // BasisTheoryWebhookKeyURL selects the CDN public key for a deployment posture
 // (config-level helper; tests override the URL through the rail settings).
 func BasisTheoryWebhookKeyURL(cfg *config.Config) string {
-	if cfg != nil && cfg.IsTestMode() {
+	if cfg != nil && config.IsTestMode(cfg) {
 		return basistheory.TestWebhookKeyURL
 	}
 	return basistheory.ProdWebhookKeyURL

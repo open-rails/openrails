@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -169,7 +170,7 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingRail
 }
 
 func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.BillingRailIntent, p payments.NMISalePayload) intents.Outcome {
-	if h.Sale.Config == nil || h.Sale.Config.IsProviderReadOnly() {
+	if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
 		return intents.Parked("Stripe sale writes unavailable")
 	}
 	if _, err := h.stripeService(ctx, in); err != nil {

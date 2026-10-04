@@ -59,7 +59,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	// observer. Its pending_stale branch cancels and its grant_effect.mismatch
 	// branch closes entitlement windows, every 15 minutes, RunOnStart, across
 	// every active merchant.
-	if w.Config != nil && w.Config.IsProviderReadOnly() {
+	if w.Config != nil && config.IsProviderReadOnly(w.Config) {
 		log.WithContext(ctx).WithField("worker", KindConvergeSweep).
 			Warn("Readonly mode: converge sweep skipped (pure observer; no local convergence)")
 		return nil

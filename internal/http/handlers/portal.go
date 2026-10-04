@@ -47,7 +47,7 @@ func portalReturnOrigin(r *httprequest.Request) string {
 	if r == nil || r.State == nil || r.State.Config == nil {
 		return ""
 	}
-	allowed := r.State.Config.AllowedReturnOrigins()
+	allowed := config.AllowedReturnOrigins(r.State.Config)
 	if len(allowed) == 0 {
 		return ""
 	}

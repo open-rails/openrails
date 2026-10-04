@@ -274,7 +274,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		default:
 			// One-off tools fail closed on a changed Transit key too.
 			transit = &signeridentity.Transit{TransitClient: transit, DB: database, Directory: directory, Slug: slug,
-				Environment: config.ExpectedProviderEnvironment(cfg.IsTestMode())}
+				Environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}
 		}
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantRequest{
 			Config:        cfg,
@@ -318,7 +318,7 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 		}
 		return opts.SecretStore, transitStore.SolanaTransit, nil
 	}
-	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
+	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
 		log.Info("merchant bootstrap: snapshot credentials validate in memory and are not persisted")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err == nil {

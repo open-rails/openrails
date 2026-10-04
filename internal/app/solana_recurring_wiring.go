@@ -25,11 +25,11 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		solanaTransit,
 		r.DB,
 		0,
-		config.ExpectedProviderEnvironment(r.Config.IsTestMode()),
+		config.ExpectedProviderEnvironment(config.IsTestMode(r.Config)),
 	)
 	submitter := recurring.NewSignerSubmitterWithResolver(solanaSigner, r.SolanaRPCResolver.Resolve)
 	network := "mainnet"
-	if r.Config.IsTestMode() {
+	if config.IsTestMode(r.Config) {
 		network = "devnet"
 	}
 	// or#881: a mint LOOKUP table for the recurring plan services, NOT an

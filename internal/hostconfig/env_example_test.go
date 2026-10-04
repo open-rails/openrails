@@ -66,6 +66,6 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 	cfg, err := Load("")
 	require.NoError(t, err, ".env.example must boot Load as-is")
 	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode, "the example pins the sandbox posture explicitly")
-	require.Equal(t, billing.ProviderWriteModeFull, cfg.GetProviderWriteMode())
+	require.Equal(t, billing.ProviderWriteModeFull, billing.GetProviderWriteMode(cfg.Config))
 	require.Contains(t, cfg.DB.URL, ":5434/openrails_db")
 }

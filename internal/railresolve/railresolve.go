@@ -83,11 +83,11 @@ func (s *MerchantsSource) service() *merchants.Service {
 // environment is the deployment's PSP environment: test under
 // test_mode, live otherwise (#681).
 func (s *MerchantsSource) environment() string {
-	return config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
+	return config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
 }
 
 func (s *MerchantsSource) testMode() bool {
-	return s.Config != nil && s.Config.IsTestMode()
+	return s.Config != nil && config.IsTestMode(s.Config)
 }
 
 // Armed is true only when the active account resolves with every required

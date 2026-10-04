@@ -148,7 +148,7 @@ func (s *CheckoutCustodianSaleService) btClient(cfg *custodialPSP) (*basistheory
 		APIKey:        cfg.Custody.APIKey,
 		BaseURL:       baseURL,
 		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
-		ReadOnly:      s.Config != nil && s.Config.IsProviderReadOnly(),
+		ReadOnly:      s.Config != nil && config.IsProviderReadOnly(s.Config),
 	})
 }
 

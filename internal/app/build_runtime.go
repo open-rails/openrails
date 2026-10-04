@@ -88,7 +88,7 @@ type runtimeOverrides struct {
 // axis — devnet under test_mode, mainnet otherwise. There is deliberately no
 // override knob (#349): test_mode already answers the question.
 func effectiveSolanaNetwork(cfg *config.Config) string {
-	if cfg != nil && cfg.IsTestMode() {
+	if cfg != nil && config.IsTestMode(cfg) {
 		return "devnet"
 	}
 	return "mainnet"
@@ -197,7 +197,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
 	var stripeTransport http.RoundTripper
-	if api := cfg.SandboxStripeAPIURL(); api != "" {
+	if api := config.SandboxStripeAPIURL(cfg); api != "" {
 		stripeTransport = stripeapi.HostRewriteTransport(api)
 	}
 	if overrides != nil && overrides.StripeTransport != nil {
@@ -223,7 +223,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
 		Config:      cfg,
 		MerchantsFn: merchantsFn,
-		Endpoint:    cfg.SandboxSolanaRPCURL(),
+		Endpoint:    config.SandboxSolanaRPCURL(cfg),
 	}
 
 	var userDirectory billing.UserDirectory
@@ -289,7 +289,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// the ledger's blocks are the whole policy.
 	captchaStore := captcha.NewChallengeStore(redisClient)
 	var cardAbuseGuard *abuse.CardAbuseGuard
-	if redisClient != nil && cfg.Captcha.IsEnabled() {
+	if redisClient != nil && config.CaptchaEnabled(cfg.Captcha) {
 		cardAbuseGuard = abuse.NewCardAbuseGuard(
 			ratelimit.NewLimiter(redisClient),
 			captchaStore,
@@ -365,7 +365,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// MODE 1 (#723): the in-memory credential plane exists from boot; manifest
 	// provisioning seeds it and every store consumer reads it. No persistent
 	// merchant-secret store is ever constructed in this mode.
-	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
+	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
 		runtime.ManifestSecrets, err = merchants.NewManifestSecretStoreWithIdentity(cfg.CredentialSnapshotID)
 		if err != nil {
 			return nil, fmt.Errorf("initialize snapshot credential store: %w", err)
@@ -521,7 +521,7 @@ func buildRiverProducer(ctx context.Context, cfg *config.Config, schema string) 
 	if cfg.DB == nil {
 		return nil, nil, fmt.Errorf("missing database configuration for River producer")
 	}
-	dbURL := cfg.DB.GetConnectionString()
+	dbURL := config.DBConnectionString(cfg.DB)
 	if dbURL == "" {
 		return nil, nil, fmt.Errorf("missing database configuration for River producer (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
@@ -564,7 +564,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("database config is nil")
 	}
-	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
+	sqlDB, err := sql.Open("pgx", config.DBConnectionString(cfg.DB))
 	if err != nil {
 		return fmt.Errorf("open db for migration validation: %w", err)
 	}
@@ -578,7 +578,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	// HOST process down on a library precondition. Return the error and let the
 	// host refuse to boot with it.
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
-		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: cfg.SchemaName()},
+		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: config.SchemaName(cfg)},
 	); err != nil {
 		log.WithError(err).Error("Postgres migrations validation failed")
 		return err
@@ -689,13 +689,13 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	// (aggregate query results flow to the provider) and is rate-limited
 	// per merchant (Redis-backed when available, in-process fallback).
 	var dashboardLLM dashboard.LLM
-	if cfg.LLM.IsConfigured() {
+	if config.LLMConfigured(cfg.LLM) {
 		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
-		switch cfg.LLM.ResolvedProvider() {
+		switch config.LLMProvider(cfg.LLM) {
 		case config.LLMProviderOpenAI:
-			dashboardLLM = dashboard.NewOpenAILLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), llmBaseURL)
+			dashboardLLM = dashboard.NewOpenAILLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
 		default: // anthropic — unknown providers refuse boot in config.Validate
-			dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, cfg.LLM.ResolvedModel(), llmBaseURL)
+			dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
 		}
 	}
 	var askLimiter dashboard.AskLimiter

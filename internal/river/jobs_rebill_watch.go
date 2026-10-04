@@ -216,7 +216,7 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 	if sub.Price == nil {
 		return errors.New("subscription price not loaded")
 	}
-	collect := reason == MissProviderSkipped && (w.Config == nil || !w.Config.IsProviderReadOnly())
+	collect := reason == MissProviderSkipped && (w.Config == nil || !config.IsProviderReadOnly(w.Config))
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := w.DB.NewWithPgxTx(tx)
 		q := txdb.Gen(ctx)

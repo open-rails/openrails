@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -16,7 +17,7 @@ import (
 // The concrete custody read and contract check precede the durable fence. They
 // prove the observed binding, not a remote lock; Charge rechecks before dispatch.
 func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
-	if h.Checkout.Config == nil || h.Checkout.Config.HyperSwitch == nil || h.Checkout.Config.IsProviderReadOnly() || gateway.ReadOnly || p.HyperSwitch == nil {
+	if h.Checkout.Config == nil || h.Checkout.Config.HyperSwitch == nil || config.IsProviderReadOnly(h.Checkout.Config) || gateway.ReadOnly || p.HyperSwitch == nil {
 		return nil, errors.New("initial membership custody is not armed")
 	}
 	custodian, err := h.database().Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: in.MerchantID, ID: *p.Instrument.CustodianID})

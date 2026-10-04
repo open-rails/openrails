@@ -48,8 +48,8 @@ type routeSource struct {
 	root   bool
 }
 
-func denyDelegated(calls *int) func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
-	return func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
+func denyDelegated(calls *int) func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
+	return func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
 		*calls++
 		return nil, billingauth.ErrUnauthenticated
 	}
@@ -67,8 +67,8 @@ func inventoryBundle(t *testing.T) *Bundle {
 			return billingauth.ErrUnauthenticated
 		}),
 	}
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: denyDelegated(new(int))}},
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: denyDelegated(new(int))}}
+	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
@@ -184,9 +184,10 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		{[]string{"/api/v1/merchants/{slug}/billing/me"}, true},
 	} {
 		calls := 0
+		graph.Runtime.AuthenticateCustomer = denyDelegated(&calls)
 		policy := &config.HTTPConfig{}
 		for _, prefix := range tc.prefixes {
-			policy.CustomerRoutes = append(policy.CustomerRoutes, config.CustomerRoutesConfig{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Authenticate: denyDelegated(&calls)})
+			policy.CustomerRoutes = append(policy.CustomerRoutes, config.CustomerRoutesConfig{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Delegated: true})
 		}
 		err := embedhttp.ValidateHTTPConfig(policy, nil)
 		if err == nil {

@@ -24,7 +24,7 @@ type DataLinkClient struct {
 	DevMode      bool
 	// ReadOnly blocks every SMS mutation (CancelSubscription) at the transport
 	// with ErrProviderReadOnly; reads stay available. Set from
-	// cfg.IsProviderReadOnly() in build_runtime (mode=readonly, #346).
+	// config.IsProviderReadOnly(cfg) in build_runtime (mode=readonly, #346).
 	ReadOnly bool
 	// LoopbackFixture marks an explicitly declared loopback fake DataLink.
 	LoopbackFixture bool

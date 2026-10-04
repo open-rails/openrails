@@ -115,7 +115,7 @@ func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 // NewService builds the lifecycle service. pool is required (it owns the merchant
 // directory). secrets may be nil (credential management disabled).
 // providerEnvironment is the deployment's PSP environment —
-// derive it via config.ExpectedProviderEnvironment(cfg.IsTestMode()).
+// derive it via config.ExpectedProviderEnvironment(config.IsTestMode(cfg)).
 func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment string) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")

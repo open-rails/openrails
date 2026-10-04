@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -104,7 +105,7 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 }
 
 func (a *solanaAdapter) defaultRecurringToken() string {
-	if a.svc != nil && a.svc.rt != nil && a.svc.rt.Config != nil && a.svc.rt.Config.IsTestMode() {
+	if a.svc != nil && a.svc.rt != nil && a.svc.rt.Config != nil && config.IsTestMode(a.svc.rt.Config) {
 		return solanaDUSDRecurringToken
 	}
 	return solanaDefaultRecurringToken

@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // AttachOptions configures the embedded AuthKit control plane: the only seam
@@ -40,7 +39,7 @@ type AttachOptions struct {
 
 	// Naming overrides Auth.Naming, the site naming policy for usernames and
 	// merchant names. Nil uses config.
-	Naming *merchant.NamingConfig
+	Naming *config.NamingConfig
 	// NameAdmission is a side-effect-free username policy; merchant creation
 	// charges use MerchantCreation.Admission.
 	NameAdmission func(context.Context, iam.NameAdmissionRequest) error
@@ -138,7 +137,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	pool := injectedPool
 	ownedPool := false
 	if pool == nil {
-		p, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
+		p, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
 		if err != nil {
 			return fmt.Errorf("control plane: build pgx pool: %w", err)
 		}

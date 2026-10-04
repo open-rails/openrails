@@ -64,7 +64,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 	}
 	var fallback *signeridentity.Transit
 	switch {
-	case conf.SecretStoreBackend() == config.SecretBackendSnapshot:
+	case config.SecretStoreBackend(conf) == config.SecretBackendSnapshot:
 		// Load the host-owned snapshot into this process. Metadata initialization
 		// is create-only; authorized edits and archived accounts survive restarts.
 		if a.Runtime == nil || a.Runtime.ManifestSecrets == nil {
@@ -78,7 +78,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 		req.SolanaTransit = backend.SolanaTransit
 		if backend.SolanaTransit != nil {
 			fallback = &signeridentity.Transit{TransitClient: backend.SolanaTransit, DB: database, Directory: directory, Slug: slug,
-				Environment: config.ExpectedProviderEnvironment(conf.IsTestMode()), Tolerate: tolerateVault, OnChange: a.Runtime.ReportSignerKeyChange}
+				Environment: config.ExpectedProviderEnvironment(config.IsTestMode(conf)), Tolerate: tolerateVault, OnChange: a.Runtime.ReportSignerKeyChange}
 			req.SolanaTransit = fallback
 			req.Options.DeferPSP = fallback.Defers
 		}
@@ -110,7 +110,7 @@ func approveSolanaSigner(ctx context.Context, a *app.App, declaration config.Mer
 	if err != nil {
 		return err
 	}
-	environment := config.ExpectedProviderEnvironment(a.Config.IsTestMode())
+	environment := config.ExpectedProviderEnvironment(config.IsTestMode(a.Config))
 	if _, err := signeridentity.Approve(ctx, a.Runtime.DB, directory, backend.SolanaTransit, mid, environment, key); err != nil {
 		return fmt.Errorf("openrails: %w", err)
 	}
