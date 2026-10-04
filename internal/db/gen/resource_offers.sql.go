@@ -168,7 +168,7 @@ SELECT cardinality($1::text[])>0 AND NOT EXISTS (
      AND e.entitlement=wanted.key AND e.end_at IS NULL AND e.start_at<=$4::timestamptz
      AND e.revoked_at IS NULL AND e.deleted_at IS NULL
  ) AND NOT ($5::boolean AND (
-   EXISTS (SELECT 1 FROM billing.checkout_sessions s
+   EXISTS (SELECT 1 FROM billing.checkout_attempts s
     WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
       AND s.id<>$6::uuid AND s.mode='one_off' AND s.status<>'succeeded'
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))

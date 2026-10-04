@@ -39,7 +39,7 @@ func CreatePaymentMethodSetup(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.CreateStripeMethodSetup(r.Request.Context(), req.PSPID, r.Header("Idempotency-Key"), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return
 	}
 	r.SuccessJSON(result)
@@ -48,7 +48,7 @@ func CreatePaymentMethodSetup(r *httprequest.Request) {
 // GetPaymentMethodSetup (GET /me/payment-method-setups/{id}) reads a setup.
 func GetPaymentMethodSetup(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	id, err := billing.ParseCheckoutSessionID(r.Param("id"))
+	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid setup id")
 		return
@@ -59,7 +59,7 @@ func GetPaymentMethodSetup(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.StripeMethodSetup(r.Request.Context(), id.UUID(), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return
 	}
 	r.SuccessJSON(result)
@@ -68,7 +68,7 @@ func GetPaymentMethodSetup(r *httprequest.Request) {
 // ConfirmPaymentMethodSetup verifies a setup with the provider.
 func ConfirmPaymentMethodSetup(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	id, err := billing.ParseCheckoutSessionID(r.Param("id"))
+	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid setup id")
 		return
@@ -79,7 +79,7 @@ func ConfirmPaymentMethodSetup(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.ConfirmStripeMethodSetup(r.Request.Context(), id.UUID(), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return
 	}
 	r.SuccessJSON(result)

@@ -59,7 +59,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrPaymentRefused)
 	session, err := h.pay("pay-fixed", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", session.Status)
+	require.Equal(t, "succeeded", string(session.Status))
 	w.settle()
 
 	rows := w.attempts(h.c.id)

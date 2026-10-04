@@ -184,7 +184,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if v == "attempted" {
 				return bad()
 			}
-		case "checkout_sessions.status":
+		case "checkout_attempts.status":
 			if v != "succeeded" && v != "failed" && v != "expired" && v != "canceled" {
 				return bad()
 			}
@@ -206,7 +206,7 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		}
 	}
-	if p.Name == "checkout_sessions" {
+	if p.Name == "checkout_attempts" {
 		field := func(name string) string {
 			if v := value(p, values, name); v != nil {
 				return *v
@@ -252,7 +252,7 @@ func ValidateValues(p Profile, values []*string) error {
 				return fmt.Errorf("invalid retained engine checkout quote")
 			}
 		}
-		if field("mode") == string(models.CheckoutSessionModePaymentMethod) && field("rail") == "stripe" {
+		if field("mode") == string(models.CheckoutAttemptModePaymentMethod) && field("rail") == "stripe" {
 			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "transaction_id"} {
 				if value(p, values, name) != nil {
 					return fmt.Errorf("Stripe setup contains monetary terms")
@@ -267,7 +267,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if field("status") == "succeeded" && (field("reference") == "" || !uuidPattern.MatchString(state.PaymentMethodID)) {
 				return fmt.Errorf("completed Stripe setup lacks retained method")
 			}
-		} else if field("mode") == string(models.CheckoutSessionModePaymentMethod) {
+		} else if field("mode") == string(models.CheckoutAttemptModePaymentMethod) {
 			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
 				if value(p, values, name) != nil {
 					return fmt.Errorf("capture setup contains monetary/provider payment terms")
@@ -283,7 +283,7 @@ func ValidateValues(p Profile, values []*string) error {
 			owner, _ := uuid.Parse(field("merchant_id"))
 			customer, _ := uuid.Parse(field("customer_id"))
 			psp, _ := uuid.Parse(field("psp_id"))
-			if _, err = models.DecodeCheckoutCapture(state.Capture, owner, customer, psp, models.CheckoutSessionStatus(field("status")), &expiry); err != nil {
+			if _, err = models.DecodeCheckoutCapture(state.Capture, owner, customer, psp, models.CheckoutAttemptStatus(field("status")), &expiry); err != nil {
 				return fmt.Errorf("invalid terminal capture binding: %w", err)
 			}
 		} else if len(state.Capture) != 0 {

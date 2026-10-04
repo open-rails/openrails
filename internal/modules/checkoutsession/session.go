@@ -1,8 +1,8 @@
-// Package hostedcheckout stores hosted checkout sessions (#1124): one buyer,
+// Package checkoutsession stores checkout sessions (#1124): one buyer,
 // one offer, addressed by a session id that is the only credential. A session
-// is immutable after mint except for its payment attempt and the engine
-// checkout session that attempt created.
-package hostedcheckout
+// is immutable after mint except for its payment attempt number and the
+// checkout attempt that attempt created.
+package checkoutsession
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -48,12 +47,12 @@ var (
 	ErrInvalid   = apperr.New(http.StatusUnprocessableEntity, "checkout_request_invalid", "Checkout request is invalid.")
 )
 
-// Option is one payment option as minted: the browser-facing rail plus the
-// engine selector and PSP it is bound to. Only the rail leaves the server.
+// Option is one payment option as minted: the browser-facing option plus the
+// engine selector it is bound to. Only CheckoutSessionOption leaves the
+// server.
 type Option struct {
-	billing.HostedCheckoutRail
+	CheckoutSessionOption
 	Selector string `json:"selector"`
-	PSPID    string `json:"psp_id"`
 }
 
 // Buyer is the buyer's identity as the minting app knew it.
@@ -64,24 +63,24 @@ type Buyer struct {
 
 // Offer is what the session sells, as minted.
 type Offer struct {
-	MerchantDisplayName string                     `json:"merchant_display_name"`
-	Plan                billing.HostedCheckoutPlan `json:"plan"`
-	DueToday            int64                      `json:"due_today,string"`
-	Options             []Option                   `json:"options"`
-	Buyer               Buyer                      `json:"buyer"`
+	MerchantDisplayName string              `json:"merchant_display_name"`
+	Plan                CheckoutSessionPlan `json:"plan"`
+	DueToday            int64               `json:"due_today,string"`
+	Options             []Option            `json:"options"`
+	Buyer               Buyer               `json:"buyer"`
 }
 
 // Session is one stored session. ID is set only on the value Get returns.
 type Session struct {
-	ID              string
-	CustomerID      uuid.UUID
-	PriceID         uuid.UUID
-	Offer           Offer
-	SuccessURL      string
-	Origin          string
-	Attempt         int32
-	EngineSessionID *uuid.UUID
-	ExpiresAt       time.Time
+	ID         string
+	CustomerID uuid.UUID
+	PriceID    uuid.UUID
+	Offer      Offer
+	SuccessURL string
+	Origin     string
+	Attempt    int32
+	AttemptID  *uuid.UUID
+	ExpiresAt  time.Time
 }
 
 // Expired reports whether the session's time to pay has passed.
@@ -161,7 +160,7 @@ func (s *Store) Create(ctx context.Context, id string, session Session, now time
 		if err := db.EnsureCustomerRowQ(ctx, q, mid.UUID(), session.CustomerID); err != nil {
 			return err
 		}
-		n, err := q.CreateHostedCheckoutSession(ctx, gen.CreateHostedCheckoutSessionParams{
+		n, err := q.CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
 			MerchantID: mid.UUID(), IDHash: IDHash(id), CustomerID: session.CustomerID, PriceID: session.PriceID,
 			Offer: offer, SuccessUrl: session.SuccessURL, Origin: session.Origin,
 			ExpiresAt: session.ExpiresAt, PurgeAt: session.ExpiresAt.Add(ReconciliationWindow), Now: now,
@@ -183,7 +182,7 @@ func (s *Store) Get(ctx context.Context, id string, now time.Time) (Session, err
 	if err != nil {
 		return Session{}, err
 	}
-	row, err := s.db.Gen(ctx).GetHostedCheckoutSession(ctx, gen.GetHostedCheckoutSessionParams{MerchantID: mid.UUID(), IDHash: IDHash(id), Now: now})
+	row, err := s.db.Gen(ctx).GetCheckoutSession(ctx, gen.GetCheckoutSessionParams{MerchantID: mid.UUID(), IDHash: IDHash(id), Now: now})
 	if db.IsNotFound(err) {
 		return Session{}, ErrNotFound
 	}
@@ -191,7 +190,7 @@ func (s *Store) Get(ctx context.Context, id string, now time.Time) (Session, err
 		return Session{}, err
 	}
 	out := Session{ID: id, CustomerID: row.CustomerID, PriceID: row.PriceID, SuccessURL: row.SuccessUrl, Origin: row.Origin,
-		Attempt: row.Attempt, EngineSessionID: row.EngineSessionID, ExpiresAt: row.ExpiresAt}
+		Attempt: row.Attempt, AttemptID: row.AttemptID, ExpiresAt: row.ExpiresAt}
 	if err := json.Unmarshal(row.Offer, &out.Offer); err != nil {
 		return Session{}, fmt.Errorf("decode checkout offer: %w", err)
 	}
@@ -200,13 +199,13 @@ func (s *Store) Get(ctx context.Context, id string, now time.Time) (Session, err
 
 // Bind records the engine session the current attempt created. An attempt
 // already bound or advanced is left alone.
-func (s *Store) Bind(ctx context.Context, session Session, engineSessionID uuid.UUID) error {
+func (s *Store) Bind(ctx context.Context, session Session, attemptID uuid.UUID) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Gen(ctx).BindHostedCheckoutEngineSession(ctx, gen.BindHostedCheckoutEngineSessionParams{
-		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: session.Attempt, EngineSessionID: engineSessionID,
+	_, err = s.db.Gen(ctx).BindCheckoutSessionAttempt(ctx, gen.BindCheckoutSessionAttemptParams{
+		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: session.Attempt, AttemptID: attemptID,
 	})
 	return err
 }
@@ -222,7 +221,7 @@ func (s *Store) Advance(ctx context.Context, session Session, now time.Time) (Se
 	if err != nil {
 		return Session{}, err
 	}
-	if _, err := s.db.Gen(ctx).AdvanceHostedCheckoutAttempt(ctx, gen.AdvanceHostedCheckoutAttemptParams{
+	if _, err := s.db.Gen(ctx).AdvanceCheckoutSessionAttempt(ctx, gen.AdvanceCheckoutSessionAttemptParams{
 		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: session.Attempt, Now: now,
 	}); err != nil {
 		return Session{}, err
@@ -233,5 +232,5 @@ func (s *Store) Advance(ctx context.Context, session Session, now time.Time) (Se
 // DeleteExpired deletes up to limit sessions past their reconciliation
 // window, across every merchant.
 func DeleteExpired(ctx context.Context, database *db.DB, now time.Time, limit int32) (int64, error) {
-	return database.GenDirectory().DeleteExpiredHostedCheckoutSessions(ctx, gen.DeleteExpiredHostedCheckoutSessionsParams{Now: now, RowLimit: limit})
+	return database.GenDirectory().DeleteExpiredCheckoutSessions(ctx, gen.DeleteExpiredCheckoutSessionsParams{Now: now, RowLimit: limit})
 }

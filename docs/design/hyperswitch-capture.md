@@ -1,5 +1,10 @@
 # HyperSwitch card setup through checkout sessions
 
+> v1 (#1130): the browser checkout routes this design reused are gone. Engine
+> checkout is merchant-API only, and a `payment_method` checkout attempt is
+> created only inside the engine; card setup belongs to the payment-method
+> surface.
+
 First bounded #297 adoption cut. The pinned vendor corrections, charge/invoice adapter, and engine-owned recurring scheduler are separate qualification steps. This cut prepares a vendor capture session and attaches only its completed, owned payment method. PAN/CVC travels from vendor-owned browser fields to the vendor, never through OpenRails.
 
 ## Shared Go/HTTP contract

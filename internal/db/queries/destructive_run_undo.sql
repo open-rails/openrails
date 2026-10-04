@@ -17,10 +17,10 @@ SELECT
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         AND destructive_run_id = sqlc.arg(run_id)::uuid
         AND deleted_at IS NOT NULL)::bigint AS payments,
-    (SELECT count(*) FROM billing.checkout_sessions
+    (SELECT count(*) FROM billing.checkout_attempts
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         AND destructive_run_id = sqlc.arg(run_id)::uuid
-        AND deleted_at IS NOT NULL)::bigint AS checkout_sessions,
+        AND deleted_at IS NOT NULL)::bigint AS checkout_attempts,
     (SELECT count(*) FROM billing.entitlements
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         AND destructive_run_id = sqlc.arg(run_id)::uuid
@@ -78,8 +78,8 @@ SELECT
     (SELECT count(*) FROM billing.payments
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL
         AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
-    (SELECT count(*) FROM billing.checkout_sessions
-      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
+    (SELECT count(*) FROM billing.checkout_attempts
+      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_attempts,
     -- payment_methods carries no soft-delete column; every row is live. A
     -- card a third-party custodian holds names no PSP: no PSP-scoped
     -- operation reaches it.

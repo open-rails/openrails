@@ -22,18 +22,18 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// CheckoutSessionStore is the exported alias of the checkout-session surface
+// CheckoutAttemptStore is the exported alias of the checkout-session surface
 // webhook/converge paths use, so the River converge worker can inject the
-// runtime's checkout session service without importing the checkout package.
-type CheckoutSessionStore = webhookCheckoutSessionStore
+// runtime's checkout attempt service without importing the checkout package.
+type CheckoutAttemptStore = webhookCheckoutAttemptStore
 
-type webhookCheckoutSessionStore interface {
-	FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error)
-	FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error)
+type webhookCheckoutAttemptStore interface {
+	FindOpenCCBillReservation(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutAttempt, error)
+	FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutAttempt, error)
 	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
 	MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error
 	MarkFailed(ctx context.Context, sessionID uuid.UUID, failureMessage, failureCode string) error
-	MarkProviderCheckoutClosed(ctx context.Context, sessionID uuid.UUID, status models.CheckoutSessionStatus) error
+	MarkProviderCheckoutClosed(ctx context.Context, sessionID uuid.UUID, status models.CheckoutAttemptStatus) error
 }
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.
@@ -79,7 +79,7 @@ type WebhookDispatcher struct {
 	// NMIResolver arms an NMI account's client for the reads a notice needs.
 	NMIResolver            railresolve.NMIClientResolver
 	PurchaseRegistrar      stripePurchaseRegistrar
-	CheckoutSessionService webhookCheckoutSessionStore
+	CheckoutAttemptService webhookCheckoutAttemptStore
 	MoneyService           *money.MoneyService
 	// ConvergeEnqueuer (#684): schedules the coalesced fetch-and-converge job
 	// the slimmed Stripe/NMI subscription-state handlers enqueue.
@@ -150,7 +150,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ProfileRepo:                  d.ProfileRepo,
 		PaymentService:               d.PaymentService,
 		DeduplicationService:         d.DeduplicationService,
-		CheckoutSessionService:       d.CheckoutSessionService,
+		CheckoutAttemptService:       d.CheckoutAttemptService,
 		MoneyService:                 d.MoneyService,
 	}
 	return service.HandleCCBillWebhook(ctx)
@@ -234,7 +234,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		MoneyService:                 d.MoneyService,
 		DeduplicationService:         d.DeduplicationService,
 		RailCustomerService:          d.RailCustomerService,
-		CheckoutSessionService:       d.CheckoutSessionService,
+		CheckoutAttemptService:       d.CheckoutAttemptService,
 		Clock:                        d.Clock,
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 		StripePaymentState:           paymentState,

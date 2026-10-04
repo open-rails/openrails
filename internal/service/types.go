@@ -24,34 +24,6 @@ type PaginatedResult[T any] struct {
 	Offset     int
 }
 
-// -------------------------------- Checkout Sessions --------------------------------
-
-// CheckoutRailOption is a locally ready payment-provider choice for a price.
-// Selector is the exact value accepted by CheckoutPayment.Rail; PSPID is the
-// stable provider identity used for server-side method matching; Rail is the
-// canonical gateway and Mode is "one_off" or "subscription".
-type CheckoutRailOption = billing.CheckoutRailOption
-
-// CheckoutCustomerIdentity is the host-resolved customer identity used by
-// checkout rails that require verified account attributes in addition to the
-// stable customer ID.
-type CheckoutCustomerIdentity = billing.CheckoutCustomerIdentity
-
-// CreateCheckoutSessionRequest specifies checkout session creation parameters.
-type CreateCheckoutSessionRequest = billing.CreateCheckoutSessionRequest
-
-// CheckoutPayment specifies payment details for checkout.
-type CheckoutPaymentOptions = billing.CheckoutPaymentOptions
-
-// CheckoutSession represents a checkout session.
-type CheckoutSession = billing.CheckoutSession
-
-// ConfirmCheckoutSessionRequest specifies checkout confirmation parameters.
-type ConfirmCheckoutSessionRequest = billing.ConfirmCheckoutSessionRequest
-
-// ConfirmPayment specifies payment confirmation details (primarily for Solana).
-type ConfirmPayment = billing.ConfirmPayment
-
 // -------------------------------- Billing Status --------------------------------
 
 // EffectiveTier is the single winning tier for a user within one tier group

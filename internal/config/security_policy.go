@@ -55,7 +55,7 @@ func AllowedReturnOrigins(cfg *Config) []string {
 	}
 	// The sites framing this host's payment page are where its redirect
 	// rails return the buyer.
-	for _, raw := range HostedCheckout(cfg).EmbedOrigins {
+	for _, raw := range PublishedCheckout(cfg).EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
 			out = append(out, origin)
 		}
@@ -82,8 +82,8 @@ func ReturnURLAllowed(cfg *Config, raw string) bool {
 	return false
 }
 
-// HostedCheckout is Config.HTTP.Checkout, zero when checkout is not published.
-func HostedCheckout(cfg *Config) CheckoutConfig {
+// PublishedCheckout is Config.HTTP.Checkout, zero when checkout is not published.
+func PublishedCheckout(cfg *Config) CheckoutConfig {
 	if cfg == nil || cfg.HTTP == nil || cfg.HTTP.Checkout == nil {
 		return CheckoutConfig{}
 	}
@@ -96,7 +96,7 @@ func CheckoutEmbedAllowed(cfg *Config, origin string) bool {
 	if origin == "" {
 		return false
 	}
-	checkout := HostedCheckout(cfg)
+	checkout := PublishedCheckout(cfg)
 	if page, ok := URLOrigin(checkout.PageURL); ok && page == origin {
 		return true
 	}
@@ -112,7 +112,7 @@ func CheckoutEmbedAllowed(cfg *Config, origin string) bool {
 // this host serves: only the host itself and EmbedOrigins may frame it.
 func CheckoutFrameAncestors(cfg *Config) string {
 	policy := "frame-ancestors 'self'"
-	for _, raw := range HostedCheckout(cfg).EmbedOrigins {
+	for _, raw := range PublishedCheckout(cfg).EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
 			policy += " " + origin
 		}

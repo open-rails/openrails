@@ -48,11 +48,11 @@ type tierChangeStore interface {
 type ConfirmTierChangeInput struct {
 	Signature string // the wallet's atomic tier-change tx signature
 
-	// CheckoutSessionID and Reference bind a checkout-driven change: the
+	// CheckoutAttemptID and Reference bind a checkout-driven change: the
 	// transaction must carry the checkout's reference and is claimed for it.
 	// Both empty for the subscription route, which binds by the subscription
 	// accounts alone.
-	CheckoutSessionID uuid.UUID
+	CheckoutAttemptID uuid.UUID
 	Reference         string
 
 	// OldSubscriptionID is the lifecycle subscription being changed FROM (the
@@ -269,8 +269,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	)
 	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := db.NewWithPgxTx(tx)
-		if in.CheckoutSessionID != uuid.Nil {
-			if err := settlement.ClaimCheckout(ctx, txDB, in.CheckoutSessionID, in.Signature); err != nil {
+		if in.CheckoutAttemptID != uuid.Nil {
+			if err := settlement.ClaimCheckout(ctx, txDB, in.CheckoutAttemptID, in.Signature); err != nil {
 				return err
 			}
 		}
@@ -331,7 +331,7 @@ func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, oldRow *mod
 	if err != nil {
 		return 0, err
 	}
-	if in.CheckoutSessionID != uuid.Nil {
+	if in.CheckoutAttemptID != uuid.Nil {
 		if err := payment.references(in.Reference); err != nil {
 			return 0, err
 		}

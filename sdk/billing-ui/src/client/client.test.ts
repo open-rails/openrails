@@ -190,7 +190,7 @@ describe("server errors", () => {
   })
 })
 
-describe("hosted checkout", () => {
+describe("checkout sessions", () => {
   it("mints with the customer's bearer and pays with the id alone", async () => {
     const calls: { url: string; init: RequestInit }[] = []
     const replies = [
@@ -221,7 +221,7 @@ describe("hosted checkout", () => {
       .pay({ option_id: "option_1" })
     expect(paid.status).toBe("succeeded")
 
-    expect(calls[0].url).toBe("/billing/v1/me/checkout/sessions")
+    expect(calls[0].url).toBe("/billing/v1/me/checkout-sessions")
     expect(new Headers(calls[0].init.headers).get("Authorization")).toBe(
       "Bearer user-token"
     )

@@ -4,7 +4,7 @@ import "errors"
 
 // ErrPaymentRefused classifies HTTP 402: the payment was not made and no money
 // moved. Checkout refusals carry one of the codes below; the customer may try
-// again with another instrument in a new checkout session.
+// again with another instrument in a new checkout attempt.
 var ErrPaymentRefused = errors.New("openrails: payment refused")
 
 // Payment refusal codes. They are stable; human messages are not.

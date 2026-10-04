@@ -31,7 +31,6 @@ var (
 // the HTTP wire. The guard fails when a listed field becomes a decimal string
 // or stops existing, so the list can only shrink.
 var pendingNumericMoney = map[string]string{
-	"internal/http/handlers/service_commerce.go:func ServiceCreateCheckoutSession.NewPriceID new_price_id":                   "not money: rejected legacy price reference; any presence fails before executing checkout",
 	"internal/intents/nmi_provider_cutover.go:nmiCutoverPayload.Amount amount":                                               notHTTPIntentPayload,
 	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":    "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
 	"billing/control_plane.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                              notMoneyCount,
@@ -54,7 +53,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/db/models/billing_policy.go:BillingPolicy.DelinquencyAmountFloor delinquency_amount_floor":                     notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.OutstandingCapAmount outstanding_cap_amount":                         notHTTPStorageRow,
 	"internal/db/models/budget_window_policy.go:BudgetWindowPolicy.Limit limit":                                              notHTTPStorageRow,
-	"internal/db/models/checkout_session.go:CheckoutSession.Amount amount":                                                   notHTTPStorageRow,
+	"internal/db/models/checkout_attempt.go:CheckoutAttempt.Amount amount":                                                   notHTTPStorageRow,
 	"internal/db/models/invoice.go:Invoice.AmountDue amount_due":                                                             notHTTPStorageRow,
 	"internal/db/models/invoice.go:Invoice.AmountPaid amount_paid":                                                           notHTTPStorageRow,
 	"internal/db/models/invoice.go:Invoice.ClosingBalance closing_balance":                                                   notHTTPStorageRow,
@@ -174,7 +173,7 @@ var pendingDynamicMoney = map[string]string{
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                       notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                              notMoneyPurgeInventory,
 	"internal/modules/checkout/solana_settlement.go:func creditSolanaPurchase \"solana_token_amount\"":   notHTTPStoredMetadata,
-	"internal/modules/checkout/session_service.go:func setSolanaQuoteState \"token_price_usd\"":          notHTTPStoredMetadata,
+	"internal/modules/checkout/attempt_service.go:func setSolanaQuoteState \"token_price_usd\"":          notHTTPStoredMetadata,
 	"internal/modules/delinquency/service.go:func apply \"amount_floor\"":                                notHTTPStoredPayload,
 	"internal/modules/delinquency/service.go:func apply \"overdue_amount\"":                              notHTTPStoredPayload,
 	"internal/solanafake/solanafake.go:func Pay \"fee\"":                                                 notHTTPProviderWire,

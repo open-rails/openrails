@@ -1,6 +1,6 @@
 {
   "id": "ocs_fixture",
-  "status": "created",
+  "status": "requires_action",
   "merchant": {
     "display_name": "Acme Demo"
   },
@@ -20,14 +20,16 @@
     },
     {
       "label": "Launch discount",
+      "sublabel": null,
       "amount": "-9223372036854775808"
     }
   ],
   "tax": "0",
   "due_today": "9223372036854775807",
-  "rails": [
+  "options": [
     {
       "id": "option_card",
+      "psp_id": "55555555-5555-5555-5555-555555555555",
       "rail": "nmi",
       "mode": "subscription",
       "driver": "collect_js",
@@ -38,6 +40,7 @@
     },
     {
       "id": "option_wallet",
+      "psp_id": "66666666-6666-4666-8666-666666666666",
       "rail": "solana",
       "mode": "one_off",
       "driver": "solana_pay",
@@ -47,15 +50,19 @@
       }
     },
     {
-      "id": "option_redirect",
-      "rail": "ccbill",
+      "id": "option_elements",
+      "psp_id": "77777777-7777-4777-8777-777777777777",
+      "rail": "stripe",
       "mode": "subscription",
-      "driver": "redirect"
+      "driver": "stripe_elements",
+      "public_config": {
+        "publishable_key": "pk_test_fixture"
+      }
     }
   ],
   "saved_methods": [
     {
-      "id": "pm_fixture",
+      "id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "option_id": "option_card",
       "rail": "nmi",
       "card": {
@@ -66,6 +73,20 @@
       }
     }
   ],
+  "next_action": {
+    "type": "solana_pay",
+    "url": "solana:https://pay.example/billing/v1/checkout-attempts/chk_ffffffff-ffff-4fff-8fff-ffffffffffff/solana-pay",
+    "transactions": null
+  },
+  "operation": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "status": "pending"
+  },
+  "payment_id": null,
+  "subscription_id": null,
+  "failure_message": null,
+  "failure": null,
   "success_url": "https://merchant.example/thanks?checkout=ocs_fixture",
+  "embed_origin": null,
   "expires_at": "2026-09-16T00:00:00.123456789Z"
 }

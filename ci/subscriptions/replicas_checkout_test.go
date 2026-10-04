@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #1099: an embedded CreateCheckoutSession claims its request key in
+// #1099: an embedded CreateCheckoutAttempt claims its request key in
 // PostgreSQL. Replicas racing one key charge once, and a replica that dies
 // after its provider charge left the claim processing: the claim lapses, a
 // retry on another replica reclaims it and resumes the same sale operation,
@@ -36,9 +36,9 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 				}
 				return len(f.base.nmi.ledger(""))
 			}
-			request := func(c *customer, method, key string) billing.CreateCheckoutSessionRequest {
-				return billing.CreateCheckoutSessionRequest{
-					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID.String(),
+			request := func(c *customer, method, key string) billing.CreateCheckoutAttemptRequest {
+				return billing.CreateCheckoutAttemptRequest{
+					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
@@ -49,7 +49,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			req := request(racer, racer.saveCard(rail, visa), "checkout:"+uuid.NewString()+":1")
 			before := charges()
 			start := make(chan struct{})
-			sessions := make([]*billing.CheckoutSession, 16)
+			sessions := make([]*billing.CheckoutAttempt, 16)
 			errs := make([]error, 16)
 			var wg sync.WaitGroup
 			for i := range 16 {
@@ -57,12 +57,12 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					<-start
-					sessions[i], errs[i] = f.replicas[i%2].client[embedded].CreateCheckoutSession(t.Context(), req)
+					sessions[i], errs[i] = f.replicas[i%2].client[embedded].CreateCheckoutAttempt(t.Context(), req)
 				}()
 			}
 			close(start)
 			wg.Wait()
-			var id string
+			var id billing.CheckoutAttemptID
 			for i := range 16 {
 				if errs[i] != nil {
 					var status *billing.StatusError
@@ -70,18 +70,18 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 					require.Equal(t, http.StatusConflict, status.Status, "only in-progress refusals: %v", errs[i])
 					continue
 				}
-				if id == "" {
+				if id.IsZero() {
 					id = sessions[i].ID
 				}
 				require.Equal(t, id, sessions[i].ID, "one session for the key")
 			}
-			require.NotEmpty(t, id, "one request ran")
+			require.False(t, id.IsZero(), "one request ran")
 			f.settle()
 			require.Equal(t, before+1, charges(), "one provider charge for the key")
-			replay, err := b.client[embedded].CreateCheckoutSession(t.Context(), req)
+			replay, err := b.client[embedded].CreateCheckoutAttempt(t.Context(), req)
 			require.NoError(t, err)
 			require.Equal(t, id, replay.ID)
-			require.Equal(t, "succeeded", replay.Status)
+			require.Equal(t, "succeeded", string(replay.Status))
 			require.True(t, racer.entitled("content:post"))
 
 			// Replica a dies after the provider charged, before it recorded the
@@ -91,7 +91,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			before, attempts := charges(), f.submissionCount(rail)
 			h := f.hold(rail, submission(rail), true)
 			ctx, die := context.WithCancel(t.Context())
-			go func() { _, _ = a.client[embedded].CreateCheckoutSession(ctx, req) }()
+			go func() { _, _ = a.client[embedded].CreateCheckoutAttempt(ctx, req) }()
 			require.Equal(t, a, h.wait())
 			f.crash(a) // nothing it does from here is recorded
 			die()      // its request dies with it; the provider already took the charge
@@ -99,7 +99,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			require.Eventually(t, func() bool { return charges() == before+1 }, 10*time.Second, 10*time.Millisecond, "the provider charged")
 			f.unhold()
 
-			_, err = b.client[embedded].CreateCheckoutSession(t.Context(), req)
+			_, err = b.client[embedded].CreateCheckoutAttempt(t.Context(), req)
 			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "the dead replica's claim holds until its lease lapses: %v", err)
 			require.Equal(t, http.StatusConflict, status.Status)
@@ -107,9 +107,9 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			f.lapseCheckoutClaims(victim.id)
 			f.recover()
 			f.settle()
-			var retried *billing.CheckoutSession
+			var retried *billing.CheckoutAttempt
 			require.Eventually(t, func() bool {
-				retried, err = b.client[embedded].CreateCheckoutSession(t.Context(), req)
+				retried, err = b.client[embedded].CreateCheckoutAttempt(t.Context(), req)
 				if err == nil && retried.Status == "succeeded" {
 					return true
 				}
@@ -125,7 +125,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			require.True(t, owned["content:post"])
 			var claims int64
 			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claims FROM billing.idempotency_keys
-				WHERE operation = 'checkout_session_create' AND idempotency_key LIKE $1`), victim.id+":%").Scan(&claims))
+				WHERE operation = 'checkout_attempt_create' AND idempotency_key LIKE $1`), victim.id+":%").Scan(&claims))
 			require.EqualValues(t, 2, claims, "the dead replica's claim was reclaimed once")
 			require.Empty(t, f.base.stripe.unexpected())
 			require.Empty(t, f.base.nmi.Unexpected())
@@ -138,7 +138,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 func (f *fleet) lapseCheckoutClaims(customerID string) {
 	f.t.Helper()
 	_, err := f.base.pool.Exec(f.t.Context(), f.q(`UPDATE billing.idempotency_keys SET lease_expires_at = now() - interval '1 millisecond'
-		WHERE operation = 'checkout_session_create' AND idempotency_key LIKE $1 AND status = 'processing'`), customerID+":%")
+		WHERE operation = 'checkout_attempt_create' AND idempotency_key LIKE $1 AND status = 'processing'`), customerID+":%")
 	require.NoError(f.t, err)
 }
 
@@ -160,15 +160,15 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	a, b := f.replicas[0], f.replicas[1]
 	price := a.permanent("content:pass")
 	charges := func() int { return len(f.base.nmi.ledger("")) }
-	request := func(c *customer, key, token string) billing.CreateCheckoutSessionRequest {
-		return billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: key, Confirm: true,
+	request := func(c *customer, key, token string) billing.CreateCheckoutAttemptRequest {
+		return billing.CreateCheckoutAttemptRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: key,
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: token, NameOnCard: "Pass Payer", Zip: "10001", Country: "US"},
 		}
 	}
 	firstSessionStatus := func(c *customer) string {
 		var status string
-		require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT status FROM billing.checkout_sessions
+		require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT status FROM billing.checkout_attempts
 			WHERE customer_id = $1 ORDER BY created_at LIMIT 1`), c.id).Scan(&status))
 		return status
 	}
@@ -182,18 +182,16 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	}, true)
 	owner := make(chan error, 1)
 	go func() {
-		_, err := a.client[embedded].CreateCheckoutSession(context.WithoutCancel(t.Context()), req1)
+		_, err := a.client[embedded].CreateCheckoutAttempt(context.WithoutCancel(t.Context()), req1)
 		owner <- err
 	}()
 	require.Equal(t, a, vault.wait())
-	_, err := b.client[embedded].LookupCheckoutSession(t.Context(), req1)
+	_, err := b.client[embedded].CreateCheckoutAttempt(t.Context(), req1)
 	requireStatus(t, err, http.StatusConflict) // a host never moves on while the owner works
-	_, err = b.client[embedded].CreateCheckoutSession(t.Context(), req1)
-	requireStatus(t, err, http.StatusConflict)
 
 	f.lapseCheckoutClaims(c.id)
 	f.base.nmi.DeclineValidations(1)
-	_, err = b.client[embedded].CreateCheckoutSession(t.Context(), req1) // reclaims; its card verification is declined
+	_, err = b.client[embedded].CreateCheckoutAttempt(t.Context(), req1) // reclaims; its card verification is declined
 	refused := requireStatus(t, err, http.StatusPaymentRequired)
 	require.Equal(t, "failed", firstSessionStatus(c), "a definite refusal fails the session")
 
@@ -205,15 +203,15 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	require.Equal(t, before, charges(), "the superseded owner never charges")
 
 	// The host moves on to attempt 2, which charges once.
-	s2, err := b.client[embedded].CreateCheckoutSession(t.Context(), request(c, "checkout:"+uuid.NewString()+":2", f.base.nmi.Tokenize(visa)))
+	s2, err := b.client[embedded].CreateCheckoutAttempt(t.Context(), request(c, "checkout:"+uuid.NewString()+":2", f.base.nmi.Tokenize(visa)))
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", s2.Status)
+	require.Equal(t, "succeeded", string(s2.Status))
 	f.settle()
 	require.Equal(t, before+1, charges())
 
 	// A stale request for attempt 1 reclaims its key: failed is final.
 	for _, r := range []*world{a, b} {
-		_, err = r.client[embedded].CreateCheckoutSession(t.Context(), req1)
+		_, err = r.client[embedded].CreateCheckoutAttempt(t.Context(), req1)
 		again := requireStatus(t, err, refused.Status)
 		require.Equal(t, refused.Code, again.Code, "a replay answers as the refusal did")
 	}
@@ -223,11 +221,11 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	// A declined sale settles its claim at once: the replay is the decline.
 	d := b.newCustomer()
 	req3 := request(d, "checkout:"+uuid.NewString()+":1", f.base.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"}))
-	_, err = b.client[embedded].CreateCheckoutSession(t.Context(), req3)
+	_, err = b.client[embedded].CreateCheckoutAttempt(t.Context(), req3)
 	declined := requireStatus(t, err, http.StatusPaymentRequired)
 	require.Equal(t, billing.CodeCardDeclined, declined.Code)
 	for _, r := range []*world{a, b} {
-		_, err = r.client[embedded].CreateCheckoutSession(t.Context(), req3)
+		_, err = r.client[embedded].CreateCheckoutAttempt(t.Context(), req3)
 		again := requireStatus(t, err, http.StatusPaymentRequired)
 		require.Equal(t, declined.Code, again.Code)
 	}
@@ -259,9 +257,9 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 		require.NoError(t, err)
 		return len(subs.Data)
 	}
-	request := func(c *customer, key string) billing.CreateCheckoutSessionRequest {
-		return billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: key, Confirm: true,
+	request := func(c *customer, key string) billing.CreateCheckoutAttemptRequest {
+		return billing.CreateCheckoutAttemptRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: key,
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
 		}
 	}
@@ -274,14 +272,14 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	}, true)
 	owner := make(chan error, 1)
 	go func() {
-		_, err := a.client[embedded].CreateCheckoutSession(context.WithoutCancel(t.Context()), req1)
+		_, err := a.client[embedded].CreateCheckoutAttempt(context.WithoutCancel(t.Context()), req1)
 		owner <- err
 	}()
 	require.Equal(t, a, vault.wait()) // frozen before its session exists
 
 	f.lapseCheckoutClaims(c.id)
 	f.base.nmi.DeclineValidations(1)
-	_, err := b.client[embedded].CreateCheckoutSession(t.Context(), req1) // reclaims; the card save is refused
+	_, err := b.client[embedded].CreateCheckoutAttempt(t.Context(), req1) // reclaims; the card save is refused
 	requireStatus(t, err, http.StatusPaymentRequired)
 
 	// The host moves on; the frozen owner wakes and must not commit anything.
@@ -291,12 +289,12 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	require.Equal(t, before, charges(), "the frozen owner never charges")
 	require.Zero(t, subscriptions(c), "nor enrolls")
 	var sessions int
-	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT count(*) FROM billing.checkout_sessions WHERE customer_id = $1`), c.id).Scan(&sessions))
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT count(*) FROM billing.checkout_attempts WHERE customer_id = $1`), c.id).Scan(&sessions))
 	require.Zero(t, sessions, "nor creates its session")
 
-	s2, err := b.client[embedded].CreateCheckoutSession(t.Context(), request(c, "checkout:"+uuid.NewString()+":2"))
+	s2, err := b.client[embedded].CreateCheckoutAttempt(t.Context(), request(c, "checkout:"+uuid.NewString()+":2"))
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", s2.Status)
+	require.Equal(t, "succeeded", string(s2.Status))
 	f.settle()
 	require.Equal(t, before+1, charges(), "the attempt the host moved to charges once")
 	require.Equal(t, 1, subscriptions(c))

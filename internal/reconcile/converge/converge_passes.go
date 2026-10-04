@@ -460,7 +460,7 @@ type lifePass struct{ e *ConvergeEngine }
 
 func (*lifePass) Plane() string { return "LIFE" }
 func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
-	// life.checkout_session.stale — an expired, non-terminal checkout session is
+	// life.checkout_attempt.stale — an expired, non-terminal checkout attempt is
 	// cleaned up. EXCESS but time-driven (NOT confirmed-absence gated), so AUTO.
 	// Subscription lifecycle checks (period/dunning/grace/pending) + provider-intent
 	// staleness follow.
@@ -470,28 +470,28 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// shared by overlapping runs. Its dependencies are fixed during wiring.
 	lc := *p.e.lifecycle
 	lc.SetClock(clockwork.NewFakeClockAt(now.UTC()))
-	stale, err := q.ListStaleCheckoutSessions(ctx, gen.ListStaleCheckoutSessionsParams{
+	stale, err := q.ListStaleCheckoutAttempts(ctx, gen.ListStaleCheckoutAttemptsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("life: scan stale checkout sessions: %w", err)
+		return nil, fmt.Errorf("life: scan stale checkout attempts: %w", err)
 	}
 	out := make([]ConvergeFinding, 0, len(stale))
 	for i := range stale {
 		id := stale[i]
 		out = append(out, ConvergeFinding{
-			Type:  "life.checkout_session.stale",
+			Type:  "life.checkout_attempt.stale",
 			Shape: ShapeExcess,
 			Class: ClassAuto,
-			// Ungated: expiring an abandoned checkout session retracts no
+			// Ungated: expiring an abandoned checkout attempt retracts no
 			// access, no money and no provider object.
 			Ungated:    true,
 			Severity:   "low",
-			SubjectKey: "checkout_session:" + id.String(),
+			SubjectKey: "checkout_attempt:" + id.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"checkout_session_id": billing.CheckoutSessionID(id).String()},
+			Evidence:   map[string]any{"checkout_attempt_id": billing.CheckoutAttemptID(id).String()},
 			Repair: func(ctx context.Context) error {
-				_, e := q.ExpireCheckoutSessionByID(ctx, gen.ExpireCheckoutSessionByIDParams{
+				_, e := q.ExpireCheckoutAttemptByID(ctx, gen.ExpireCheckoutAttemptByIDParams{
 					MerchantID: scope.Merchant.UUID(), ID: id, Now: p.e.Now(),
 				})
 				return e
@@ -1226,7 +1226,7 @@ func (*derivePass) Standing() []string {
 // Standing leaves out life.provider_intent.stuck, which resolves by its own
 // criteria (AutoResolveRecoveredStuckIntentFindings).
 func (*lifePass) Standing() []string {
-	return []string{"life.checkout_session.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
+	return []string{"life.checkout_attempt.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
 		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
 		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld,
 		findingNewCardDeclineSpike, findingRebillFailureSpike, findingSystemErrors, findingDeclineUnmapped, findingWebhookSilence}

@@ -1,6 +1,6 @@
 // Customer-facing rail vocabulary. Unknown rails are not rendered — a rail
 // the UI cannot execute must not be offered.
-import type { PaymentRailOption } from "#orck/types"
+import type { PaymentOption } from "#orck/types"
 
 export interface RailMeta {
   label: string
@@ -8,7 +8,7 @@ export interface RailMeta {
 }
 
 // A card taken in the page reads "Card" whichever PSP charges it.
-export function railMeta(option: PaymentRailOption): RailMeta {
+export function railMeta(option: PaymentOption): RailMeta {
   if (
     option.driver === "collect_js" ||
     option.driver === "card" ||
@@ -42,9 +42,7 @@ export interface SolanaToken {
   network?: string
 }
 
-export function solanaToken(
-  option: PaymentRailOption
-): SolanaToken | undefined {
+export function solanaToken(option: PaymentOption): SolanaToken | undefined {
   const symbol = option.public_config?.token_symbol?.trim().toUpperCase()
   if (!symbol) return undefined
   const name = option.public_config?.token_name?.trim()
@@ -68,9 +66,7 @@ export function solanaHint(token: SolanaToken): string {
   return `${label} on ${chain}`
 }
 
-export function supportedOptions(
-  options: PaymentRailOption[]
-): PaymentRailOption[] {
+export function supportedOptions(options: PaymentOption[]): PaymentOption[] {
   return options.filter((option) => {
     if (RAIL_META[option.rail] === undefined) return false
     if (option.driver === "collect_js" || option.driver === "card")

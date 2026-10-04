@@ -761,7 +761,7 @@ func stripeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeResponse, er
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
 		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: (billing.PriceID(p.PriceID)).String(),
-		Payment: CheckoutSessionPaymentResponse{Rail: string(models.RailStripe)}, SubscriptionID: &subID,
+		Payment: CheckoutAttemptPaymentResponse{Rail: string(models.RailStripe)}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(), Effective: effectiveOf(p.Action),
 	}

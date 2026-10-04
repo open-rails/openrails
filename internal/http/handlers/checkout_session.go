@@ -1,353 +1,128 @@
 package handlers
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/cardguard"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/integrations/vault"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/openrails/internal/modules/checkoutsession"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-type checkoutSessionPaymentParams struct {
-	PSPID uuid.UUID `json:"psp_id,omitzero"`
-	// Rail is the PSP the caller wants (the #848 selector). OPTIONAL since
-	// or#288: omitting it hands the choice to the merchant's routing policy.
-	Rail            string `json:"rail,omitempty" binding:"omitempty"`
-	PaymentMethodID string `json:"payment_method_id,omitempty" binding:"omitempty"`
-	PaymentToken    string `json:"payment_token,omitempty"`
-	TokenSymbol     string `json:"token_symbol,omitempty" binding:"omitempty"`
-	Flow            string `json:"flow,omitempty" binding:"omitempty,oneof=transfer_request transaction_request"`
-	Wallet          string `json:"wallet,omitempty" binding:"omitempty"`
-	Email           string `json:"email,omitempty" binding:"omitempty,email"`
-	NameOnCard      string `json:"name_on_card,omitempty" binding:"omitempty,max=200"`
-	Address1        string `json:"address1,omitempty" binding:"omitempty,max=200"`
-	City            string `json:"city,omitempty" binding:"omitempty,max=100"`
-	State           string `json:"state,omitempty" binding:"omitempty,max=50"`
-	Zip             string `json:"zip,omitempty" binding:"omitempty,max=20"`
-	Country         string `json:"country,omitempty" binding:"omitempty,max=2"`
-	LastFour        string `json:"last_four,omitempty" binding:"omitempty"`
-	CardType        string `json:"card_type,omitempty" binding:"omitempty"`
-	ExpiryDate      string `json:"expiry_date,omitempty" binding:"omitempty"`
+// Checkout sessions (#1124). Minting needs the signed-in customer or the
+// merchant; reading and paying need only the session id, which is never
+// logged.
 
-	// Card is a new card for a PSP whose card_entry is server (#1129).
-	Card *cardguard.Card `json:"card,omitempty"`
+// CheckoutSessionMintRequest is the signed-in customer's mint body.
+type CheckoutSessionMintRequest struct {
+	PriceID    billing.PriceID `json:"price_id"`
+	PriceKey   string          `json:"price_key"`
+	SuccessURL string          `json:"success_url" binding:"omitempty,url"`
 }
 
-type CheckoutSessionCreateRequest struct {
-	// Exactly one PriceID or PriceKey is required for purchase/subscribe. For solana_cancel /
-	// solana_tier_change it is optional (cancel uses the subscription's current
-	// price; tier-change uses new_price_id).
-	PriceID        string                       `json:"price_id,omitempty" binding:"omitempty"`
-	PriceKey       string                       `json:"price_key,omitempty" binding:"omitempty"`
-	Entitlement    string                       `json:"entitlement,omitempty" binding:"omitempty"`
-	OfferKind      billing.OfferKind            `json:"offer_kind,omitempty"`
-	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription solana_cancel solana_tier_change payment_method"`
-	Payment        checkoutSessionPaymentParams `json:"payment" binding:"required"`
-	Metadata       map[string]string            `json:"metadata,omitempty"`
-	IdempotencyKey string                       `json:"-"`
-
-	// SubscriptionID is required for the solana_cancel / solana_tier_change modes:
-	// the caller's existing Solana subscription to act on (ownership enforced).
-	SubscriptionID string `json:"subscription_id,omitempty" binding:"omitempty"`
-	// NewPriceID is required for the solana_tier_change mode: the price to change to.
-	NewPriceID string `json:"new_price_id,omitempty" binding:"omitempty"`
-
-	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
-	// Stripe Checkout. The frontend supplies them (it knows its own origin);
-	// #521 moved these off rail config and onto the request, but only the
-	// direct CheckoutRequest carried them — the session path (this struct) had
-	// no field, so the Stripe hosted flow always errored "success_url required".
-	// Optional here because non-Stripe rails (Solana, NMI, CCBill) don't use them.
-	SuccessURL string `json:"success_url,omitempty" binding:"omitempty,url"`
-	CancelURL  string `json:"cancel_url,omitempty" binding:"omitempty,url"`
-}
-
-type CheckoutSessionConfirmRequest struct {
-	Payment struct {
-		Capture   *billing.CustodianCaptureReference `json:"capture,omitempty"`
-		Rail      string                             `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi stripe"`
-		Signature string                             `json:"signature,omitempty"`
-		Wallet    string                             `json:"wallet,omitempty"`
-	} `json:"payment" binding:"required"`
-}
-
+// CreateCheckoutSession handles POST /v1/me/checkout-sessions.
 func CreateCheckoutSession(r *httprequest.Request) {
-	r.SetHeader("Cache-Control", "no-store")
-	var req CheckoutSessionCreateRequest
-	if !r.BindJSON(&req) {
+	var body CheckoutSessionMintRequest
+	if !r.BindJSON(&body) {
 		return
 	}
-	defer req.Payment.Card.Zero()
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if r.State.CheckoutSessionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
+	// The id pays with the customer's saved cards: only the customer mints one.
+	if !customerInitiatedChargeAllowed(r) {
 		return
 	}
-	// A saved method, card token or card is charged at creation.
-	if (strings.TrimSpace(req.Payment.PaymentMethodID) != "" || strings.TrimSpace(req.Payment.PaymentToken) != "" || req.Payment.Card != nil) && !customerInitiatedChargeAllowed(r) {
+	customerID, err := billing.ParseCustomerID(user.ID)
+	if err != nil || customerID.IsZero() {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return
 	}
-	// Every other field of the request is scanned by the session service.
-	if req.Payment.Card != nil && !cardFieldAdmitted(r, strings.TrimSpace(req.Payment.PaymentToken) != "") {
+	customer := billing.CheckoutCustomerIdentity{ID: customerID, Username: user.Username}
+	if user.Email != nil {
+		customer.VerifiedEmail = *user.Email
+	}
+	mintCheckoutSession(r, billing.CreateCheckoutSessionRequest{Customer: customer, PriceID: body.PriceID, PriceKey: body.PriceKey, SuccessURL: body.SuccessURL})
+}
+
+// ServiceCreateCheckoutSession handles POST /v1/merchant/checkout-sessions:
+// the merchant hands a purchase to its customer.
+func ServiceCreateCheckoutSession(r *httprequest.Request) {
+	var body billing.CreateCheckoutSessionRequest
+	if !r.BindJSON(&body) {
 		return
 	}
-	// The pre-gate checks a NAMED PSP. An omitted selector is the routing
-	// request (or#288) — there is nothing to pre-gate, and routing itself fails
-	// closed when no PSP can serve the price.
-	if req.Mode != "payment_method" && strings.TrimSpace(req.Payment.Rail) != "" {
-		if err := checkoutRailUsable(r, req.Payment.Rail); err != nil {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
+	if _, ok := commerceCustomer(r, body.Customer.ID); !ok {
+		return
 	}
-	req.IdempotencyKey = r.Header("Idempotency-Key")
-	e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID"))
-	if e2eRunID != "" {
-		if req.Metadata == nil {
-			req.Metadata = map[string]string{}
-		}
-		if _, ok := req.Metadata["e2e_run_id"]; !ok {
-			req.Metadata["e2e_run_id"] = e2eRunID
-		}
+	mintCheckoutSession(r, body)
+}
+
+func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessionRequest) {
+	r.SetHeader("Cache-Control", "no-store")
+	config, ok := checkoutConfig(r)
+	if !ok {
+		return
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, Card: req.Payment.Card, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
-	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
-	if checkout.CardAttemptFailed(resp, err) {
-		recordCardFailure(r)
-	}
+	svc, err := billingservice.New(r.State)
 	if err != nil {
-		log.WithError(err).WithField("request_id", r.RequestID()).Error("Failed to create checkout session")
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
-			Rail:   req.Payment.Rail,
-			Wallet: req.Payment.Wallet,
-		})
+		r.InternalError("billing service unavailable", err)
 		return
 	}
-	r.SuccessJSON(resp)
+	link, err := svc.CreateCheckoutSession(r.Request.Context(), billingservice.CheckoutSessionMint{
+		CreateCheckoutSessionRequest: req,
+		Advertise:                    func(options []billing.CheckoutOption) { advertiseCheckoutOptions(options, config) },
+	})
+	if err != nil {
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		return
+	}
+	r.JSON(http.StatusCreated, link)
 }
 
-// checkoutRailUsable pre-gates the wire payment.rail selector: a PSP key, or a
-// rail kind resolving to exactly one armed PSP, must land on an armed account
-// for the request merchant + environment (#848; #775/#788 — the ONE resolution
-// seam via checkout's resolveRailTarget; how the account was armed, manifest
-// or API, is invisible here). nil = usable; the error is the 400 message.
-// Fail closed on missing wiring/merchant and on resolution errors.
-func checkoutRailUsable(r *httprequest.Request, rail string) error {
-	unsupported := errors.New("unsupported rail")
-	if r == nil || r.State == nil || r.State.CheckoutService == nil {
-		return unsupported
-	}
-	if _, ok := merchant.FromContext(r.Request.Context()); !ok {
-		return unsupported
-	}
-	return r.State.CheckoutService.CheckoutRailUsable(r.Request.Context(), rail)
-}
-
+// GetCheckoutSession handles GET /v1/checkout-sessions/{id}.
 func GetCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	sessionID := strings.TrimSpace(r.Param("id"))
-	if sessionID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "id is required")
-		return
-	}
-	user := r.GetUser()
-	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
-		return
-	}
-	if r.State.CheckoutSessionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
-		return
-	}
-	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
-	if err != nil || typedParsedID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
-		return
-	}
-	parsedID := typedParsedID.UUID()
-	resp, err := r.State.CheckoutSessionService.GetSession(r.Request.Context(), parsedID, user)
+	svc, err := billingservice.New(r.State)
 	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{CheckoutSessionID: sessionID})
+		r.InternalError("billing service unavailable", err)
 		return
 	}
-	r.SuccessJSON(resp)
-}
-
-// checkoutVerifiedPrincipal copies middleware-verified facts without promoting
-// any credential class. The engine branch alone requires interactive initiation.
-func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.DelegatedPrincipal {
-	principal, ok := middleware.PrincipalFromRequest(r)
-	if !ok {
-		return billingauth.DelegatedPrincipal{}
+	session, err := svc.GetCheckoutSession(r.Request.Context(), r.Param("id"))
+	if err != nil {
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		return
 	}
-	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: principal.Subject, Invoker: principal.Invoker}
+	r.SuccessJSON(session)
 }
 
-func ConfirmCheckoutSession(r *httprequest.Request) {
+// PayCheckoutSession handles POST /v1/checkout-sessions/{id}/pay.
+func PayCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	sessionID := strings.TrimSpace(r.Param("id"))
-	if sessionID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "id is required")
+	var body checkoutsession.CheckoutSessionPayRequest
+	if !r.BindJSON(&body) {
 		return
 	}
-	var req CheckoutSessionConfirmRequest
-	if !r.BindJSON(&req) {
+	defer body.Card.Zero()
+	// Every other field is scanned by the engine's checkout.
+	if body.Card != nil && !cardFieldAdmitted(r, strings.TrimSpace(body.PaymentToken) != "") {
 		return
 	}
-	user := r.GetUser()
-	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
 		return
 	}
-	if r.State.CheckoutSessionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
+	result, err := svc.PayCheckoutSession(r.Request.Context(), r.Param("id"), body, r.ClientIP())
+	if err != nil {
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return
 	}
-	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
-	if err != nil || typedParsedID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
-		return
-	}
-	parsedID := typedParsedID.UUID()
-	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Capture: req.Payment.Capture, Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
-	principal := checkoutVerifiedPrincipal(r)
-	resp, err := r.State.CheckoutSessionService.ConfirmCustomerSession(r.Request.Context(), parsedID, svcReq, user, principal)
-	if checkout.CardAttemptFailed(resp, err) {
+	if result.Status == "failed" && result.Failure != nil {
 		recordCardFailure(r)
 	}
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
-			Rail:              req.Payment.Rail,
-			Wallet:            req.Payment.Wallet,
-			CheckoutSessionID: sessionID,
-		})
-		return
-	}
-	if resp.Status == "processing" {
-		r.JSON(http.StatusAccepted, resp)
-		return
-	}
-	r.SuccessJSON(resp)
-}
-
-// checkoutSessionErrorContext carries per-request context threaded into
-// actionable checkout error metadata (e.g. the usdc_funding payload on the
-// pre-flight insufficient-USDC 402), so the frontend can drive a funding flow.
-type checkoutSessionErrorContext struct {
-	Rail              string
-	Wallet            string
-	CheckoutSessionID string
-}
-
-func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
-	var blocked *checkout.CardAttemptsBlockedError
-	if errors.As(err, &blocked) {
-		writeCardAttemptsBlocked(r, blocked.RetryAfter)
-		return
-	}
-	if errors.Is(err, billing.ErrIdempotencyKeyReused) {
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "idempotency_key_reused", "idempotency key reused with different checkout session parameters"))
-		return
-	}
-	var pmErr *paymentmethods.PaymentMethodError
-	if errors.As(err, &pmErr) {
-		writePaymentMethodError(r, pmErr)
-		return
-	}
-	if writeCardEntryError(r, err) {
-		return
-	}
-	if errors.Is(err, checkout.ErrPaymentMethodStale) {
-		writePaymentMethodStale(r)
-		return
-	}
-	if errors.Is(err, checkout.ErrPaymentMethodRequired) {
-		writePaymentMethodRequired(r)
-		return
-	}
-	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an
-	// internal failure). Surface a clear payment-error code + the have/need amounts
-	// so the frontend can show "need $X, have $Y -> buy USDC" (MoonPay).
-	var insufficientUSDC *recurring.InsufficientUSDCError
-	if errors.As(err, &insufficientUSDC) {
-		param := "usdc_balance"
-		apiErr := api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, api.CodeInsufficientFunds, insufficientUSDC.Error())
-		apiErr.Param = &param
-		need, have := insufficientUSDC.NeedBaseUnits, insufficientUSDC.HaveBaseUnits
-		var short uint64
-		if need > have {
-			short = need - have
-		}
-		funding := map[string]any{
-			"asset":                "USDC",
-			"network":              "solana",
-			"amount":               formatUSDCBaseUnits(need),
-			"balance":              formatUSDCBaseUnits(have),
-			"shortfall":            formatUSDCBaseUnits(short),
-			"amount_base_units":    strconv.FormatUint(need, 10),
-			"balance_base_units":   strconv.FormatUint(have, 10),
-			"shortfall_base_units": strconv.FormatUint(short, 10),
-		}
-		if w := strings.TrimSpace(ectx.Wallet); w != "" {
-			funding["wallet"] = w
-		}
-		if id := strings.TrimSpace(ectx.CheckoutSessionID); id != "" {
-			funding["checkout_session_id"] = id
-		}
-		if p := strings.TrimSpace(ectx.Rail); p != "" {
-			funding["rail"] = p
-		}
-		r.APIError(apiErr.WithMetadata(map[string]any{"usdc_funding": funding}))
-		return
-	}
-	switch {
-	case errors.Is(err, vault.ErrUnavailable):
-		// Before validation: a refused signer is unavailable, not a bad request.
-		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable, "payment signer is temporarily unavailable"))
-	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
-		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "custodian_capture_unavailable", "custodian capture is unavailable"))
-	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):
-		r.ErrorJSON(http.StatusNotFound, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutSessionForbidden):
-		r.ErrorJSON(http.StatusForbidden, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutSessionExpired):
-		r.ErrorJSON(http.StatusGone, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutSessionPending), errors.Is(err, checkout.ErrCheckoutProcessing):
-		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutSessionConflict):
-		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutSessionValidation):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-	default:
-		writeRefusal(r, err, "checkout session request failed")
-	}
-}
-
-// formatUSDCBaseUnits renders USDC token base units (6 decimals) as a trimmed
-// decimal string: 1500000 -> "1.5", 250000 -> "0.25".
-func formatUSDCBaseUnits(v uint64) string {
-	whole := v / 1_000_000
-	frac := v % 1_000_000
-	if frac == 0 {
-		return strconv.FormatUint(whole, 10)
-	}
-	return strconv.FormatUint(whole, 10) + "." + strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
+	r.SuccessJSON(result)
 }

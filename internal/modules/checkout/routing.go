@@ -38,7 +38,7 @@ type RoutingInput struct {
 	Price   *models.Price
 	Product *models.Product
 	// Mode is the checkout mode this price implies (one_off | subscription).
-	Mode models.CheckoutSessionMode
+	Mode models.CheckoutAttemptMode
 	// Country is the payer's country when the request carries one, else "".
 	Country string
 	// Selector is an EXPLICIT client preference (the wire payment.rail). When
@@ -115,7 +115,7 @@ var ErrNoRoutableProcessor = errors.New("no payment provider is available for th
 
 // Route picks the PSP for a checkout. The returned decision always carries the
 // full candidate trace, including on the no-winner error path.
-func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*RoutingDecision, error) {
+func (s *CheckoutAttemptService) Route(ctx context.Context, in RoutingInput) (*RoutingDecision, error) {
 	targets := s.checkoutService
 	if targets == nil || targets.railSource() == nil {
 		return nil, fmt.Errorf("checkout routing unavailable")
@@ -215,7 +215,7 @@ func unresolvedRailTarget(selector string) railTarget {
 
 // routingOrder resolves the candidate order for these inputs: the first
 // matching merchant rule, else the built-in default.
-func (s *CheckoutSessionService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {
+func (s *CheckoutAttemptService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {
 	rules, err := s.routingRules(ctx)
 	if err != nil {
 		return nil, "", nil, err
@@ -238,7 +238,7 @@ func (s *CheckoutSessionService) routingOrder(ctx context.Context, in RoutingInp
 
 // routingRules loads the merchant's declared policy. No stored config (or no
 // DB, as in unit fixtures) means no policy, which means the default order.
-func (s *CheckoutSessionService) routingRules(ctx context.Context) ([]models.CheckoutRoutingRule, error) {
+func (s *CheckoutAttemptService) routingRules(ctx context.Context) ([]models.CheckoutRoutingRule, error) {
 	if s.db == nil {
 		return nil, nil
 	}
@@ -278,7 +278,7 @@ func routingRuleMatches(m models.CheckoutRoutingMatch, in RoutingInput) bool {
 
 // evaluateCandidate resolves one selector and reports whether it can serve this
 // price now. The empty skip class means eligible.
-func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets checkoutRailTargets, in RoutingInput, selector string) (railTarget, string) {
+func (s *CheckoutAttemptService) evaluateCandidate(ctx context.Context, targets checkoutRailTargets, in RoutingInput, selector string) (railTarget, string) {
 	target, err := targets.resolveRailTarget(ctx, selector)
 	if err != nil {
 		var ambiguous *AmbiguousRailError
@@ -319,7 +319,7 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets 
 // creating anything. It resolves the price/product exactly as checkout does and
 // runs the SAME Route call, so the trace it returns is the decision a real
 // session would record — not a re-implementation that can drift.
-func (s *CheckoutSessionService) DryRunRouting(ctx context.Context, priceID, priceKey, country, selector string) (*RoutingDecision, models.CheckoutSessionMode, error) {
+func (s *CheckoutAttemptService) DryRunRouting(ctx context.Context, priceID, priceKey, country, selector string) (*RoutingDecision, models.CheckoutAttemptMode, error) {
 	if err := validateCheckoutPriceSelector(priceID, priceKey); err != nil {
 		return nil, "", err
 	}

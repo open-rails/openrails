@@ -22,7 +22,7 @@ func TestCheckoutConfigDegradesOnePSP(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, tp := range []topology{embedded, remote} {
-		cfg, err := w.client[tp].GetCheckoutConfig(t.Context())
+		cfg, err := w.client[tp].GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
 		require.NoError(t, err, "%s: the document is served", tp)
 		byRail := map[string]billing.CheckoutPSPConfig{}
 		for _, psp := range cfg.PSPs {

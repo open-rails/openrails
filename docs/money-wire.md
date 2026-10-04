@@ -1,14 +1,14 @@
 # Money on the HTTP wire
 
-Go uses signed int64 native currency units. Balance, checkout-session,
+Go uses signed int64 native currency units. Balance, checkout-attempt,
 capture, admission, usage-event and usage, wasted-spend, invoice, merchant
 settings/billing policy, spend delegation and self spend-window,
 credit-limit, credit grant and credit transaction, delinquency,
 Solana token base-unit, control-plane fleet analytics/timeseries, catalog
 price and copilot price draft, public price, payment and refund,
-subscription price/payment, tier-change and rate-card DTOs, and the hosted
-checkout document (`HostedCheckoutSession`, `GET /v1/checkout-sessions/{id}`,
-with `plan.unit_decimals` stamped from the registry), encode monetary values
+subscription price/payment, tier-change and rate-card DTOs, and the checkout
+session document (`GET /v1/checkout-sessions/{id}`, with `plan.unit_decimals`
+stamped from the registry), encode monetary values
 as decimal JSON strings. Fleet values
 use `<thing>_amount` names (`settled_amount`, `monthly_amount`); the currency's
 registered scale is the unit. Rate cards keep the same representation in
@@ -22,8 +22,8 @@ Invoice responses include unit_decimals. For USD, "1234567" with scale 6 means
 Currency codes are the registry's uppercase ISO-4217 spelling on every wire
 surface, whatever case a request sent; requests are read case-insensitively.
 Identifiers are typed (`ids.go`): products, prices, subscriptions, payments,
-payment methods and checkout sessions travel as `prod_`, `price_`, `sub_`,
-`pay_`, `pm_` and `cs_` text on every DTO, path and query parameter that names
+payment methods and checkout attempts travel as `prod_`, `price_`, `sub_`,
+`pay_`, `pm_` and `chk_` text on every DTO, path and query parameter that names
 them, and only that spelling is accepted — a bare UUID or another kind's prefix
 is `invalid_param`. Customer, merchant and PSP ids are plain UUIDs. Go callers
 hold `billing.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.

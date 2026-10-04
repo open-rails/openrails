@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 )
 
 func requireFixture(t *testing.T, name string, value any) []byte {
@@ -38,30 +39,23 @@ func TestCurrencyRegistry(t *testing.T) {
 	require.False(t, ok, "a scale is never guessed")
 }
 
-func TestHostedCheckoutPlanStampsRegistryScale(t *testing.T) {
+func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
 	hours := 720
-	product := &billing.Product{ID: billing.ProductID(uuid.New()), DisplayName: "Premium"}
-	price := &billing.Price{ID: billing.PriceID(uuid.New()), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
-	plan, err := billing.NewHostedCheckoutPlan(product, price)
+	plan, err := checkoutsession.NewPlan("Premium", math.MaxInt64, "jpy", &hours, true)
 	require.NoError(t, err)
-	require.Equal(t, billing.HostedCheckoutPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, PeriodHours: &hours, AutomaticallyRenews: true}, plan)
+	require.Equal(t, checkoutsession.CheckoutSessionPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, PeriodHours: &hours, AutomaticallyRenews: true}, plan)
 	raw, err := json.Marshal(plan)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"unit_amount":"9223372036854775807"`)
-	for _, bad := range []struct {
-		product *billing.Product
-		price   *billing.Price
-	}{{nil, price}, {product, nil}, {product, &billing.Price{Currency: "XYZ"}}} {
-		_, err := billing.NewHostedCheckoutPlan(bad.product, bad.price)
-		require.ErrorIs(t, err, billing.ErrInvalid)
-	}
+	_, err = checkoutsession.NewPlan("Premium", 1, "XYZ", nil, false)
+	require.ErrorIs(t, err, billing.ErrInvalid, "a scale is never guessed")
 	// OpenRails advertises the browser driver per option (#1078); an option
 	// no browser can drive carries none.
-	option := billing.CheckoutRailOption{Selector: "solana", PSPID: "psp", Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
+	option := billing.CheckoutOption{Selector: "solana", PSPID: "psp", Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
 	raw, err = json.Marshal(option)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"selector":"solana","psp_id":"psp","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
-	raw, err = json.Marshal(billing.CheckoutRailOption{Selector: "stripe", PSPID: "psp", Rail: "stripe", Mode: "subscription"})
+	raw, err = json.Marshal(billing.CheckoutOption{Selector: "stripe", PSPID: "psp", Rail: "stripe", Mode: "subscription"})
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "driver")
 }

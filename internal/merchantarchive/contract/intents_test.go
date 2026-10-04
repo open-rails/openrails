@@ -32,7 +32,7 @@ func TestAcceptedPurchaseMustMatchCheckoutAndBeResolved(t *testing.T) {
 	} {
 		state := fmt.Sprintf(`{"accepted_purchase":{"price_id":%q,"product_id":%q,"payment_id":%q,"product_key":"post","product_name":"Post","amount":%q,"currency":"USD","access_duration_hours":null,"entitlements":{"post:one":null},"accepted_at":"2026-09-23T00:00:00Z","entitlement_start":"2026-09-23T00:00:00Z"},"purchase_submitted":%t,"provider_closed":%t}`,
 			testMerchant, testMerchant, testMerchant, tc.amount, tc.submitted, tc.closed)
-		cases = append(cases, rowCase{tc.name, "checkout_sessions", map[string]string{
+		cases = append(cases, rowCase{tc.name, "checkout_attempts", map[string]string{
 			"mode": "one_off", "rail": tc.rail, "status": tc.status, "price_id": testMerchant, "amount": "100", "currency": "USD", "rail_state": state,
 		}, tc.valid})
 	}
@@ -54,13 +54,13 @@ func TestCheckoutRailStateContracts(t *testing.T) {
 		`{"_openrails_request_fingerprint":"` + digest + `","message":"4111111111111111"}`: false,
 		`{"_openrails_request_fingerprint":"` + digest + `","unknown":"retained"}`:         false,
 	} {
-		if err := validateJSON("checkout_sessions.rail_state", raw); (err == nil) != valid {
+		if err := validateJSON("checkout_attempts.rail_state", raw); (err == nil) != valid {
 			t.Errorf("%s: valid=%v, error=%v", raw, valid, err)
 		}
 	}
 	const session = `"12345678-1234-4234-8234-123456789012"`
-	for _, raw := range []string{session, `"checkout_session:12345678-1234-4234-8234-123456789012"`, `"bad"`, `null`, `true`, `{}`} {
-		err := validateJSON("rail_intents.initial_membership.payload", `{"checkout_session_id":`+raw+`}`)
+	for _, raw := range []string{session, `"checkout_attempt:12345678-1234-4234-8234-123456789012"`, `"bad"`, `null`, `true`, `{}`} {
+		err := validateJSON("rail_intents.initial_membership.payload", `{"checkout_attempt_id":`+raw+`}`)
 		if (err == nil) != (raw == session) {
 			t.Errorf("session binding %s: %v", raw, err)
 		}

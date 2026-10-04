@@ -66,7 +66,7 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		tokens,
 	))
 
-	if r.CheckoutSessionService == nil {
+	if r.CheckoutAttemptService == nil {
 		return
 	}
 	prepare := recurring.NewPrepareSubscribeService(
@@ -76,25 +76,5 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		network,
 		tokens,
 	)
-	r.CheckoutSessionService.SetSolanaRecurring(prepare, enroll)
-	confirmCancel := recurring.NewConfirmCancelService(
-		chainReader,
-		r.SubscriptionLifecycleService,
-	)
-	confirmTierChange := recurring.NewConfirmTierChangeService(
-		chainReader,
-		r.SubscriptionLifecycleService,
-		subscriptions,
-		r.DB,
-		network,
-		tokens,
-	)
-	r.CheckoutSessionService.SetSolanaLifecycle(
-		r.SolanaPrepareCancelService,
-		r.SolanaPrepareTierChangeService,
-		confirmCancel,
-		confirmTierChange,
-		r.SubscriptionService,
-		subscriptions,
-	)
+	r.CheckoutAttemptService.SetSolanaRecurring(prepare, enroll)
 }

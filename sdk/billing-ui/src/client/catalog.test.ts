@@ -116,7 +116,10 @@ describe("catalog", () => {
       "/billing/v1/prices?currency=USD&product_id=prod_1&auto_renew=true&limit=100"
     )
     expect(page.data.map((p) => p.id)).toEqual(["price_1", "price_2"])
-    expect(page.data[0]).toMatchObject({ unit_amount: MAX, product_id: "prod_1" })
+    expect(page.data[0]).toMatchObject({
+      unit_amount: MAX,
+      product_id: "prod_1",
+    })
 
     const err = await client
       .listPrices({ productId: "nope" })
@@ -299,38 +302,39 @@ describe("Solana", () => {
     recurring_eligible: true,
   }
 
-  it("reads the runtime config", async () => {
+  it("reads the network and tokens from the checkout configuration", async () => {
     const { client, request } = served(
       json(200, {
-        network: "devnet",
-        chain: "solana:devnet",
-        explorerCluster: "devnet",
-        preferredToken: "USDC",
-        tokens: [token],
-        features: {
-          solanaPay: true,
-          recurringSubscriptions: true,
-          solanaPayRecurringSubscriptions: true,
+        object: "checkout_config",
+        psps: [],
+        solana: {
+          network: "devnet",
+          chain: "solana:devnet",
+          preferred_token: "USDC",
+          tokens: [token],
         },
+        options: null,
       }),
       json(500, {
         error: {
           type: "api_error",
           code: "internal_error",
-          message: "Solana configuration missing",
+          message: "failed to load checkout configuration",
         },
       })
     )
-    expect(await client.getSolanaConfig()).toMatchObject({
-      network: "devnet",
-      chain: "solana:devnet",
-      explorerCluster: "devnet",
-      preferredToken: "USDC",
-      tokens: [{ symbol: "USDC", decimals: 6, recurring_eligible: true }],
-      features: { recurringSubscriptions: true },
+    expect(await client.getCheckoutConfig()).toMatchObject({
+      psps: [],
+      solana: {
+        network: "devnet",
+        chain: "solana:devnet",
+        preferred_token: "USDC",
+        tokens: [{ symbol: "USDC", decimals: 6, recurring_eligible: true }],
+      },
     })
-    expect(request().url).toBe("/billing/v1/solana/config")
-    await expect(client.getSolanaConfig()).rejects.toMatchObject({
+    expect(request().url).toBe("/billing/v1/checkout-config")
+    expect(request().headers.get("Authorization")).toBeNull()
+    await expect(client.getCheckoutConfig()).rejects.toMatchObject({
       status: 500,
       code: "internal_error",
     })

@@ -15,8 +15,8 @@ import (
 
 // acceptedOperationSessionResponse reads existing financial authority, never
 // current catalog state, provider state, or a token-bearing creation request.
-func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Context, session *models.CheckoutSession) (*CheckoutSessionResponse, bool, error) {
-	if (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.Mode != models.CheckoutSessionModeOneOff || s.db == nil {
+func (s *CheckoutAttemptService) acceptedOperationSessionResponse(ctx context.Context, session *models.CheckoutAttempt) (*CheckoutAttemptResponse, bool, error) {
+	if (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.Mode != models.CheckoutAttemptModeOneOff || s.db == nil {
 		return s.initialMembershipSessionResponse(ctx, session)
 	}
 	native := "checkout_native_session:" + session.ID.String()
@@ -56,15 +56,15 @@ func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Co
 		if err := validateSaleTerminal(operation, custodian); err != nil {
 			return nil, true, err
 		}
-		projection.Status = models.CheckoutSessionStatusFailed
+		projection.Status = models.CheckoutAttemptStatusFailed
 	case intents.StatusExpired:
-		projection.Status = models.CheckoutSessionStatusExpired
+		projection.Status = models.CheckoutAttemptStatusExpired
 	case intents.StatusSuperseded:
-		projection.Status = models.CheckoutSessionStatusCanceled
+		projection.Status = models.CheckoutAttemptStatusCanceled
 	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusUnknownNeedsVerify:
-		projection.Status = models.CheckoutSessionStatus("processing")
+		projection.Status = models.CheckoutAttemptStatus("processing")
 		if authenticationRequired(operation) {
-			projection.Status = models.CheckoutSessionStatusRequiresAction
+			projection.Status = models.CheckoutAttemptStatusRequiresAction
 		}
 	default:
 		return nil, true, fmt.Errorf("unrecognized sale operation status %q", operation.Status)
@@ -87,7 +87,7 @@ func authenticationRequired(operation gen.BillingRailIntent) bool {
 	return json.Unmarshal(operation.ResultEvidence, &evidence) == nil && evidence.AuthenticationRequired
 }
 
-func saleOwnedBySession(operation gen.BillingRailIntent, session *models.CheckoutSession, custodian bool) error {
+func saleOwnedBySession(operation gen.BillingRailIntent, session *models.CheckoutAttempt, custodian bool) error {
 	if custodian {
 		var p CustodianSalePayload
 		if err := json.Unmarshal(operation.Payload, &p); err != nil {
@@ -102,7 +102,7 @@ func saleOwnedBySession(operation gen.BillingRailIntent, session *models.Checkou
 	if err != nil {
 		return err
 	}
-	if terms.CheckoutSessionID != session.ID || terms.UserID != session.CustomerID.String() || session.PriceID == nil || terms.PriceID != *session.PriceID || terms.Instrument.PSPID != session.PspID {
+	if terms.CheckoutAttemptID != session.ID || terms.UserID != session.CustomerID.String() || session.PriceID == nil || terms.PriceID != *session.PriceID || terms.Instrument.PSPID != session.PspID {
 		return fmt.Errorf("sale receipt contradicts checkout identity")
 	}
 	return nil

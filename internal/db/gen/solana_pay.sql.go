@@ -24,7 +24,7 @@ FROM (
     FOR UPDATE SKIP LOCKED
 ) due
 WHERE r.merchant_id = due.merchant_id AND r.reference = due.reference
-RETURNING r.merchant_id, r.reference, r.checkout_session_id, r.kind, r.status, r.settle_until, r.watch_until, r.next_poll_at, r.signature, r.seen_until, r.scan_stack, r.scan_below, r.built_transaction, r.built_valid_height, r.created_at, r.updated_at
+RETURNING r.merchant_id, r.reference, r.checkout_attempt_id, r.kind, r.status, r.settle_until, r.watch_until, r.next_poll_at, r.signature, r.seen_until, r.scan_stack, r.scan_below, r.built_transaction, r.built_valid_height, r.created_at, r.updated_at
 `
 
 type ClaimDueSolanaPayReferencesParams struct {
@@ -47,7 +47,7 @@ func (q *Queries) ClaimDueSolanaPayReferences(ctx context.Context, arg ClaimDueS
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.Reference,
-			&i.CheckoutSessionID,
+			&i.CheckoutAttemptID,
 			&i.Kind,
 			&i.Status,
 			&i.SettleUntil,
@@ -151,7 +151,7 @@ func (q *Queries) ExpireSolanaPayReference(ctx context.Context, arg ExpireSolana
 }
 
 const getSolanaPayReceipt = `-- name: GetSolanaPayReceipt :one
-SELECT merchant_id, reference, signature, checkout_session_id, disposition, review_reason, recipient, token_mint, expected_amount, received_amount, payer, landed_at, payment_id, resolved_at, resolution, created_at FROM billing.solana_pay_receipts
+SELECT merchant_id, reference, signature, checkout_attempt_id, disposition, review_reason, recipient, token_mint, expected_amount, received_amount, payer, landed_at, payment_id, resolved_at, resolution, created_at FROM billing.solana_pay_receipts
 WHERE merchant_id = $1::uuid AND reference = $2::text AND signature = $3::text
 `
 
@@ -168,7 +168,7 @@ func (q *Queries) GetSolanaPayReceipt(ctx context.Context, arg GetSolanaPayRecei
 		&i.MerchantID,
 		&i.Reference,
 		&i.Signature,
-		&i.CheckoutSessionID,
+		&i.CheckoutAttemptID,
 		&i.Disposition,
 		&i.ReviewReason,
 		&i.Recipient,
@@ -186,7 +186,7 @@ func (q *Queries) GetSolanaPayReceipt(ctx context.Context, arg GetSolanaPayRecei
 }
 
 const getSolanaPayReference = `-- name: GetSolanaPayReference :one
-SELECT merchant_id, reference, checkout_session_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
+SELECT merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
 WHERE merchant_id = $1::uuid AND reference = $2::text
 `
 
@@ -201,7 +201,7 @@ func (q *Queries) GetSolanaPayReference(ctx context.Context, arg GetSolanaPayRef
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Reference,
-		&i.CheckoutSessionID,
+		&i.CheckoutAttemptID,
 		&i.Kind,
 		&i.Status,
 		&i.SettleUntil,
@@ -220,7 +220,7 @@ func (q *Queries) GetSolanaPayReference(ctx context.Context, arg GetSolanaPayRef
 }
 
 const insertSolanaPayReceipt = `-- name: InsertSolanaPayReceipt :execrows
-INSERT INTO billing.solana_pay_receipts (merchant_id, reference, signature, checkout_session_id, disposition, review_reason, recipient, token_mint, expected_amount, received_amount, payer, landed_at, payment_id, created_at)
+INSERT INTO billing.solana_pay_receipts (merchant_id, reference, signature, checkout_attempt_id, disposition, review_reason, recipient, token_mint, expected_amount, received_amount, payer, landed_at, payment_id, created_at)
 VALUES ($1::uuid, $2::text, $3::text, $4::uuid, $5::text,
         $6::text, $7::text, $8::text, $9::bigint, $10::bigint,
         $11::text, $12::timestamptz, $13::uuid, $14::timestamptz)
@@ -231,7 +231,7 @@ type InsertSolanaPayReceiptParams struct {
 	MerchantID        uuid.UUID
 	Reference         string
 	Signature         string
-	CheckoutSessionID uuid.UUID
+	CheckoutAttemptID uuid.UUID
 	Disposition       string
 	ReviewReason      *string
 	Recipient         string
@@ -252,7 +252,7 @@ func (q *Queries) InsertSolanaPayReceipt(ctx context.Context, arg InsertSolanaPa
 		arg.MerchantID,
 		arg.Reference,
 		arg.Signature,
-		arg.CheckoutSessionID,
+		arg.CheckoutAttemptID,
 		arg.Disposition,
 		arg.ReviewReason,
 		arg.Recipient,
@@ -301,7 +301,7 @@ func (q *Queries) ListSolanaPayReceiptSignatures(ctx context.Context, arg ListSo
 }
 
 const lockSolanaPayReference = `-- name: LockSolanaPayReference :one
-SELECT merchant_id, reference, checkout_session_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
+SELECT merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
 WHERE merchant_id = $1::uuid AND reference = $2::text
 FOR UPDATE
 `
@@ -317,7 +317,7 @@ func (q *Queries) LockSolanaPayReference(ctx context.Context, arg LockSolanaPayR
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Reference,
-		&i.CheckoutSessionID,
+		&i.CheckoutAttemptID,
 		&i.Kind,
 		&i.Status,
 		&i.SettleUntil,
@@ -336,17 +336,17 @@ func (q *Queries) LockSolanaPayReference(ctx context.Context, arg LockSolanaPayR
 }
 
 const registerSolanaPayReference = `-- name: RegisterSolanaPayReference :one
-INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_session_id, kind, status, settle_until, watch_until, next_poll_at, created_at, updated_at)
+INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, created_at, updated_at)
 VALUES ($1::uuid, $2::text, $3::uuid, $4::text, 'pending',
         $5::timestamptz, $6::timestamptz, $7::timestamptz, $7::timestamptz, $7::timestamptz)
-ON CONFLICT (merchant_id, checkout_session_id) DO UPDATE SET updated_at = billing.solana_pay_references.updated_at
-RETURNING merchant_id, reference, checkout_session_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at
+ON CONFLICT (merchant_id, checkout_attempt_id) DO UPDATE SET updated_at = billing.solana_pay_references.updated_at
+RETURNING merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at
 `
 
 type RegisterSolanaPayReferenceParams struct {
 	MerchantID        uuid.UUID
 	Reference         string
-	CheckoutSessionID uuid.UUID
+	CheckoutAttemptID uuid.UUID
 	Kind              string
 	SettleUntil       time.Time
 	WatchUntil        time.Time
@@ -357,7 +357,7 @@ func (q *Queries) RegisterSolanaPayReference(ctx context.Context, arg RegisterSo
 	row := q.db.QueryRow(ctx, registerSolanaPayReference,
 		arg.MerchantID,
 		arg.Reference,
-		arg.CheckoutSessionID,
+		arg.CheckoutAttemptID,
 		arg.Kind,
 		arg.SettleUntil,
 		arg.WatchUntil,
@@ -367,7 +367,7 @@ func (q *Queries) RegisterSolanaPayReference(ctx context.Context, arg RegisterSo
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Reference,
-		&i.CheckoutSessionID,
+		&i.CheckoutAttemptID,
 		&i.Kind,
 		&i.Status,
 		&i.SettleUntil,

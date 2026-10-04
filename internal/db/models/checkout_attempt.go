@@ -8,47 +8,36 @@ import (
 	"github.com/google/uuid"
 )
 
-type CheckoutSessionMode string
+type CheckoutAttemptMode string
 
 const (
-	CheckoutSessionModeOneOff        CheckoutSessionMode = "one_off"
-	CheckoutSessionModePaymentMethod CheckoutSessionMode = "payment_method"
-	CheckoutSessionModeSubscription  CheckoutSessionMode = "subscription"
-	// CheckoutSessionModeSolanaCancel and CheckoutSessionModeSolanaTierChange
-	// extend the Solana Pay transaction-request machinery to the recurring
-	// subscription lifecycle (#272+). A cancel session carries the target
-	// subscription_id in RailState; a tier-change session additionally
-	// carries new_price_id. The public Solana Pay endpoint builds the unsigned
-	// (or cranker-co-signed) on-chain tx with the Solana Pay reference attached,
-	// and the reference poller mirrors the confirmed cancel / tier-change into
-	// the DB — the same protocol as a checkout/subscribe session, just a
-	// different on-chain action.
-	CheckoutSessionModeSolanaCancel     CheckoutSessionMode = "solana_cancel"
-	CheckoutSessionModeSolanaTierChange CheckoutSessionMode = "solana_tier_change"
+	CheckoutAttemptModeOneOff        CheckoutAttemptMode = "one_off"
+	CheckoutAttemptModePaymentMethod CheckoutAttemptMode = "payment_method"
+	CheckoutAttemptModeSubscription  CheckoutAttemptMode = "subscription"
 )
 
-type CheckoutSessionStatus string
+type CheckoutAttemptStatus string
 
 const (
-	CheckoutSessionStatusCreated        CheckoutSessionStatus = "created"
-	CheckoutSessionStatusRequiresAction CheckoutSessionStatus = "requires_action"
-	CheckoutSessionStatusSucceeded      CheckoutSessionStatus = "succeeded"
-	CheckoutSessionStatusFailed         CheckoutSessionStatus = "failed"
-	CheckoutSessionStatusExpired        CheckoutSessionStatus = "expired"
-	CheckoutSessionStatusCanceled       CheckoutSessionStatus = "canceled"
+	CheckoutAttemptStatusCreated        CheckoutAttemptStatus = "created"
+	CheckoutAttemptStatusRequiresAction CheckoutAttemptStatus = "requires_action"
+	CheckoutAttemptStatusSucceeded      CheckoutAttemptStatus = "succeeded"
+	CheckoutAttemptStatusFailed         CheckoutAttemptStatus = "failed"
+	CheckoutAttemptStatusExpired        CheckoutAttemptStatus = "expired"
+	CheckoutAttemptStatusCanceled       CheckoutAttemptStatus = "canceled"
 )
 
-type CheckoutSession struct {
+type CheckoutAttempt struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
 	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
 	PriceID *uuid.UUID          `json:"price_id"`
-	Mode    CheckoutSessionMode `json:"mode"`
+	Mode    CheckoutAttemptMode `json:"mode"`
 
 	Rail   Rail                  `json:"rail"`
-	Status CheckoutSessionStatus `json:"status"`
+	Status CheckoutAttemptStatus `json:"status"`
 
 	Amount   *int64  `json:"amount"`
 	Currency *string `json:"currency"`
@@ -135,7 +124,7 @@ const (
 )
 
 // CheckoutRoutingReason is the compact decision trace persisted on
-// checkout_sessions.routing_reason.
+// checkout_attempts.routing_reason.
 type CheckoutRoutingReason struct {
 	// Policy is who decided: explicit | merchant | default.
 	Policy string `json:"policy"`
@@ -160,18 +149,18 @@ type CheckoutRoutingSkip struct {
 
 // ValidateTerms keeps setup sessions free of monetary terms while preserving
 // the required price/amount/currency contract of every priced/lifecycle mode.
-func (s *CheckoutSession) ValidateTerms() error {
+func (s *CheckoutAttempt) ValidateTerms() error {
 	if s == nil {
-		return fmt.Errorf("checkout session is required")
+		return fmt.Errorf("checkout attempt is required")
 	}
-	if s.Mode == CheckoutSessionModePaymentMethod {
+	if s.Mode == CheckoutAttemptModePaymentMethod {
 		if s.PriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil || (s.Rail != RailNMI && s.Rail != RailStripe) {
 			return fmt.Errorf("payment-method setup cannot carry monetary terms")
 		}
 		return nil
 	}
 	if s.PriceID == nil || *s.PriceID == uuid.Nil || s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
-		return fmt.Errorf("priced checkout session requires price, amount and currency")
+		return fmt.Errorf("priced checkout attempt requires price, amount and currency")
 	}
 	return nil
 }

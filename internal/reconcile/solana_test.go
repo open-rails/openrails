@@ -268,7 +268,7 @@ func TestSolanaWalletScan(t *testing.T) {
 	customerID, priceID := uuid.New(), uuid.New()
 	cleanID, mismatchID, dupID, noneID, valuelessID, failedID, pullIntentID, oldID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	session := func(amount uint64) *SolanaLocalRecord {
-		return &SolanaLocalRecord{Kind: SolanaLocalKindCheckoutSession, Rail: "solana", CustomerID: customerID, PriceID: priceID,
+		return &SolanaLocalRecord{Kind: SolanaLocalKindCheckoutAttempt, Rail: "solana", CustomerID: customerID, PriceID: priceID,
 			ExpectedRecipient: wallet.String(), ExpectedMint: usdcMint.String(), ExpectedTokenAmount: amount}
 	}
 	records := map[uuid.UUID]*SolanaLocalRecord{
@@ -506,9 +506,9 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 			}
 			return rawJSON(raw)
 		}
-		clean := &solanaDiscovery{Verdict: "clean", Kind: solanaDiscoveryKindOneOff, MemoLocalID: sessionID.String(), LocalKind: SolanaLocalKindCheckoutSession, CustomerID: customerID.String(), PriceID: priceID.String()}
-		parked := &solanaDiscovery{Verdict: "park", ParkReason: "transfer of 1 base units disagrees with the session's quoted 2", Kind: solanaDiscoveryKindOneOff, MemoLocalID: uuid.New().String(), LocalKind: SolanaLocalKindCheckoutSession}
-		unpriced := &solanaDiscovery{Verdict: "clean", Kind: solanaDiscoveryKindOneOff, MemoLocalID: uuid.New().String(), LocalKind: SolanaLocalKindCheckoutSession, CustomerID: customerID.String(), PriceID: priceID.String()}
+		clean := &solanaDiscovery{Verdict: "clean", Kind: solanaDiscoveryKindOneOff, MemoLocalID: sessionID.String(), LocalKind: SolanaLocalKindCheckoutAttempt, CustomerID: customerID.String(), PriceID: priceID.String()}
+		parked := &solanaDiscovery{Verdict: "park", ParkReason: "transfer of 1 base units disagrees with the session's quoted 2", Kind: solanaDiscoveryKindOneOff, MemoLocalID: uuid.New().String(), LocalKind: SolanaLocalKindCheckoutAttempt}
+		unpriced := &solanaDiscovery{Verdict: "clean", Kind: solanaDiscoveryKindOneOff, MemoLocalID: uuid.New().String(), LocalKind: SolanaLocalKindCheckoutAttempt, CustomerID: customerID.String(), PriceID: priceID.String()}
 		pull := &solanaDiscovery{Verdict: "clean", Kind: solanaDiscoveryKindPull, MemoLocalID: uuid.New().String(), LocalKind: SolanaLocalKindPullIntent}
 		sale := func(sig string, cents int64, raw json.RawMessage) RemoteTransaction {
 			txn := RemoteTransaction{TransactionID: sig, Type: TransactionTypeSale, Success: true, AmountCents: cents, OccurredAt: now, Raw: raw}
@@ -544,7 +544,7 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 		require.Equal(t, "USD", b.Currency, "CUR-6 canonical upper case")
 		require.Equal(t, customerID, b.CustomerID)
 		require.Equal(t, priceID, b.PriceID)
-		require.Equal(t, billing.CheckoutSessionID(sessionID).String(), fc.LocalEvidence["checkout_session_id"])
+		require.Equal(t, billing.CheckoutAttemptID(sessionID).String(), fc.LocalEvidence["checkout_attempt_id"])
 		require.Equal(t, "purchase_memo", fc.LocalEvidence["correlated_via"])
 
 		for sig, reason := range map[string]string{sigFromByte(2): "disagrees", sigFromByte(3): "unpriced"} {

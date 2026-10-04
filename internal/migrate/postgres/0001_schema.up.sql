@@ -318,6 +318,7 @@ BEGIN
                   'catalog_meters',
                   'catalog_rate_cards',
                   'catalogs',
+                  'checkout_attempts',
                   'checkout_sessions',
                   'credential_publications',
                   'custodians',
@@ -330,7 +331,6 @@ BEGIN
                   'entitlements',
                   'grants',
                   'host_outbox',
-                  'hosted_checkout_sessions',
                   'idempotency_keys',
                   'invoice_items',
                   'invoice_payments',
@@ -2039,7 +2039,7 @@ ALTER TABLE ONLY billing.payments
 
 CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.enqueue_payment_settlement_event();
 
-CREATE TABLE billing.checkout_sessions (
+CREATE TABLE billing.checkout_attempts (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid,
     mode text NOT NULL,
@@ -2064,51 +2064,51 @@ CREATE TABLE billing.checkout_sessions (
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     routing_reason jsonb,
-    CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
-    CONSTRAINT checkout_sessions_status_check CHECK (status IN ('created', 'requires_action', 'succeeded', 'failed', 'expired', 'canceled')),
-    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text, 'payment_method'::text]))),
-    CONSTRAINT checkout_sessions_monetary_terms CHECK (
+    CONSTRAINT checkout_attempts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT checkout_attempts_status_check CHECK (status IN ('created', 'requires_action', 'succeeded', 'failed', 'expired', 'canceled')),
+    CONSTRAINT checkout_attempts_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'payment_method'::text]))),
+    CONSTRAINT checkout_attempts_monetary_terms CHECK (
       (mode = 'payment_method' AND price_id IS NULL AND amount IS NULL AND currency IS NULL AND payment_id IS NULL AND subscription_id IS NULL)
       OR (mode <> 'payment_method' AND price_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL)
     )
 );
-COMMENT ON TABLE billing.checkout_sessions IS 'One provider checkout attempt: the PSP, mode and terms a checkout created at the provider.';
-COMMENT ON COLUMN billing.checkout_sessions.psp_id IS 'PSP selected for this provider checkout/session. Required.';
-COMMENT ON COLUMN billing.checkout_sessions.deleted_at IS 'Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.';
-COMMENT ON COLUMN billing.checkout_sessions.routing_reason IS 'Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.';
+COMMENT ON TABLE billing.checkout_attempts IS 'One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly.';
+COMMENT ON COLUMN billing.checkout_attempts.psp_id IS 'PSP selected for this attempt. Required.';
+COMMENT ON COLUMN billing.checkout_attempts.deleted_at IS 'Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.';
+COMMENT ON COLUMN billing.checkout_attempts.routing_reason IS 'Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.';
 
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_pkey PRIMARY KEY (merchant_id, id);
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX checkout_sessions_expires_at_idx ON billing.checkout_sessions USING btree (expires_at);
-CREATE INDEX checkout_sessions_customer_id_idx ON billing.checkout_sessions USING btree (merchant_id, customer_id);
-CREATE INDEX idx_checkout_sessions_destructive_run ON billing.checkout_sessions USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_checkout_sessions_payment_id ON billing.checkout_sessions USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
-CREATE INDEX idx_checkout_sessions_psp ON billing.checkout_sessions USING btree (merchant_id, psp_id);
-CREATE INDEX idx_checkout_sessions_subscription_id ON billing.checkout_sessions USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
-CREATE INDEX ix_checkout_sessions_expirable ON billing.checkout_sessions USING btree (merchant_id, expires_at) WHERE ((expires_at IS NOT NULL) AND (deleted_at IS NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text])));
-CREATE UNIQUE INDEX uq_checkout_sessions_merchant_psp_reference ON billing.checkout_sessions USING btree (merchant_id, rail, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
-CREATE UNIQUE INDEX uq_checkout_sessions_merchant_psp_transaction ON billing.checkout_sessions USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
-CREATE INDEX checkout_sessions_price_id_idx ON billing.checkout_sessions USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_checkout_sessions_solana_signature ON billing.checkout_sessions USING btree (transaction_id)
+CREATE INDEX checkout_attempts_expires_at_idx ON billing.checkout_attempts USING btree (expires_at);
+CREATE INDEX checkout_attempts_customer_id_idx ON billing.checkout_attempts USING btree (merchant_id, customer_id);
+CREATE INDEX idx_checkout_attempts_destructive_run ON billing.checkout_attempts USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+CREATE INDEX idx_checkout_attempts_payment_id ON billing.checkout_attempts USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
+CREATE INDEX idx_checkout_attempts_psp ON billing.checkout_attempts USING btree (merchant_id, psp_id);
+CREATE INDEX idx_checkout_attempts_subscription_id ON billing.checkout_attempts USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
+CREATE INDEX ix_checkout_attempts_expirable ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((expires_at IS NOT NULL) AND (deleted_at IS NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text])));
+CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_reference ON billing.checkout_attempts USING btree (merchant_id, rail, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_transaction ON billing.checkout_attempts USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
+CREATE INDEX checkout_attempts_price_id_idx ON billing.checkout_attempts USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL);
+CREATE UNIQUE INDEX uq_checkout_attempts_solana_signature ON billing.checkout_attempts USING btree (transaction_id)
 WHERE rail = 'solana' AND transaction_id IS NOT NULL AND deleted_at IS NULL;
 
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id);
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
-ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id);
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id);
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.checkout_attempts
+    ADD CONSTRAINT checkout_attempts_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id);
 
-CREATE TABLE billing.hosted_checkout_sessions (
+CREATE TABLE billing.checkout_sessions (
     merchant_id uuid NOT NULL,
     id_hash bytea NOT NULL,
     customer_id uuid NOT NULL,
@@ -2117,26 +2117,28 @@ CREATE TABLE billing.hosted_checkout_sessions (
     success_url text DEFAULT '' NOT NULL,
     origin text DEFAULT '' NOT NULL,
     attempt integer DEFAULT 0 NOT NULL,
-    engine_session_id uuid,
+    attempt_id uuid,
     expires_at timestamp with time zone NOT NULL,
     purge_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT hosted_checkout_sessions_pkey PRIMARY KEY (merchant_id, id_hash),
-    CONSTRAINT hosted_checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
-    CONSTRAINT hosted_checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE,
-    CONSTRAINT chk_hosted_checkout_sessions_id_hash CHECK (octet_length(id_hash) = 32),
-    CONSTRAINT chk_hosted_checkout_sessions_attempt CHECK (attempt >= 0),
-    CONSTRAINT chk_hosted_checkout_sessions_purge CHECK (purge_at >= expires_at)
+    CONSTRAINT checkout_sessions_pkey PRIMARY KEY (merchant_id, id_hash),
+    CONSTRAINT checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
+    CONSTRAINT checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT checkout_sessions_attempt_fk FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT chk_checkout_sessions_id_hash CHECK (octet_length(id_hash) = 32),
+    CONSTRAINT chk_checkout_sessions_attempt CHECK (attempt >= 0),
+    CONSTRAINT chk_checkout_sessions_purge CHECK (purge_at >= expires_at)
 );
-COMMENT ON TABLE billing.hosted_checkout_sessions IS 'One hosted checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt is the current payment attempt and engine_session_id the checkout session it created; attempt advances only after that session failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it.';
+COMMENT ON TABLE billing.checkout_sessions IS 'One checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt numbers the current payment attempt and attempt_id is the checkout attempt it created; attempt advances only after that attempt failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it.';
 
-CREATE INDEX idx_hosted_checkout_sessions_purge_at ON billing.hosted_checkout_sessions USING btree (purge_at);
-CREATE INDEX idx_hosted_checkout_sessions_customer ON billing.hosted_checkout_sessions USING btree (merchant_id, customer_id);
+CREATE INDEX idx_checkout_sessions_purge_at ON billing.checkout_sessions USING btree (purge_at);
+CREATE INDEX idx_checkout_sessions_customer ON billing.checkout_sessions USING btree (merchant_id, customer_id);
+CREATE INDEX idx_checkout_sessions_attempt ON billing.checkout_sessions USING btree (merchant_id, attempt_id) WHERE (attempt_id IS NOT NULL);
 
 CREATE TABLE billing.solana_pay_references (
     merchant_id uuid NOT NULL,
     reference text NOT NULL,
-    checkout_session_id uuid NOT NULL,
+    checkout_attempt_id uuid NOT NULL,
     kind text NOT NULL,
     status text NOT NULL,
     settle_until timestamp with time zone NOT NULL,
@@ -2151,9 +2153,9 @@ CREATE TABLE billing.solana_pay_references (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT solana_pay_references_pkey PRIMARY KEY (merchant_id, reference),
-    CONSTRAINT solana_pay_references_session_key UNIQUE (merchant_id, checkout_session_id),
+    CONSTRAINT solana_pay_references_session_key UNIQUE (merchant_id, checkout_attempt_id),
     CONSTRAINT solana_pay_references_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
-    CONSTRAINT chk_solana_pay_references_kind CHECK (kind IN ('purchase', 'subscribe', 'lifecycle')),
+    CONSTRAINT chk_solana_pay_references_kind CHECK (kind IN ('purchase', 'subscribe')),
     CONSTRAINT chk_solana_pay_references_status CHECK (status IN ('pending', 'confirmed', 'expired')),
     CONSTRAINT chk_solana_pay_references_signature CHECK ((status = 'confirmed') = (signature IS NOT NULL)),
     CONSTRAINT chk_solana_pay_references_window CHECK (watch_until >= settle_until),
@@ -2168,7 +2170,7 @@ CREATE TABLE billing.solana_pay_receipts (
     merchant_id uuid NOT NULL,
     reference text NOT NULL,
     signature text NOT NULL,
-    checkout_session_id uuid NOT NULL,
+    checkout_attempt_id uuid NOT NULL,
     disposition text NOT NULL,
     review_reason text,
     recipient text NOT NULL,

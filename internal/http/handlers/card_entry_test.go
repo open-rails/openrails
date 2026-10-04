@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -71,9 +72,9 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 	var update billing.ReplacePaymentMethodCardParams
 	require.Empty(t, bind(`{`+cardBody+`}`, &update).Body.String())
 	require.NotNil(t, update.Card)
-	var session CheckoutSessionCreateRequest
-	require.Empty(t, bind(`{"price_key":"k","payment":{"rail":"nmi",`+cardBody+`}}`, &session).Body.String())
-	require.NotNil(t, session.Payment.Card)
+	var pay checkoutsession.CheckoutSessionPayRequest
+	require.Empty(t, bind(`{"option_id":"option_card",`+cardBody+`}`, &pay).Body.String())
+	require.NotNil(t, pay.Card)
 
 	// A card number in a field of its own is an unknown field, never echoed.
 	rec := bind(`{"psp_id":"x","card_number":"4111111111111111"}`, new(billing.CreatePaymentMethodParams))

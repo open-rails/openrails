@@ -101,13 +101,12 @@ func TestClassifyBucket(t *testing.T) {
 		{"POST", "/v1/webhooks/stripe", "webhook"},
 		{"POST", "/billing/v1/webhooks/stripe/acct_test", "webhook"},
 		{"GET", "/billing/v1/captcha/client.js", "captcha"},
-		{"POST", "/v1/checkout", "checkout"},
-		{"POST", "/v1/checkout/checkout_123/confirm", "checkout"},
-		{"GET", "/v1/me/checkout/checkout_123", "default"},
-		{"POST", "/v1/me/checkout/sessions", "checkout"},
+		{"POST", "/v1/me/checkout-sessions", "checkout"},
 		{"POST", "/billing/v1/checkout-sessions/ocs_1/pay", "checkout"},
+		{"POST", "/v1/checkout-attempts/chk_1/solana-pay", "checkout"},
 		{"GET", "/v1/checkout-sessions/ocs_1", "default"},
 		{"POST", "/v1/checkout-config", "default"},
+		{"POST", "/v1/merchant/checkout-attempts", "default"},
 		{"POST", "/v1/me/payment-methods", "payment-methods"},
 		{"POST", "/v1/customers/customer_123/checkout", "default"},
 		{"POST", "/v1/me/subscriptions/sub_123/cancel", "subscriptions"},
@@ -128,14 +127,14 @@ func TestRateLimitSubjects(t *testing.T) {
 		resolver *iputil.TrustedProxies
 		calls    []call
 	}{
-		{"per ip", nil, []call{{path: "/v1/checkout", ip: a, want: 200}, {path: "/v1/checkout", ip: a, want: 429}, {path: "/v1/checkout", ip: b, want: 200}}},
-		{"buckets are independent", nil, []call{{path: "/v1/checkout", ip: a, want: 200}, {path: "/v1/checkout", ip: a, want: 429}, {method: "GET", path: "/v1/products", ip: a, want: 200}}},
-		{"embedded prefix", nil, []call{{path: "/billing/v1/checkout", ip: a, want: 200}, {path: "/v1/checkout", ip: a, want: 429}}},
-		{"per user across ips", nil, []call{{path: "/v1/checkout", ip: a, user: user, want: 200}, {path: "/v1/checkout", ip: b, user: user, want: 429}}},
+		{"per ip", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: a, want: 429}, {path: "/v1/me/checkout-sessions", ip: b, want: 200}}},
+		{"buckets are independent", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: a, want: 429}, {method: "GET", path: "/v1/products", ip: a, want: 200}}},
+		{"embedded prefix", nil, []call{{path: "/billing/v1/me/checkout-sessions", ip: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: a, want: 429}}},
+		{"per user across ips", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, user: user, want: 200}, {path: "/v1/me/checkout-sessions", ip: b, user: user, want: 429}}},
 		{"trusted proxy keys the client", iputil.ParseTrustedProxies([]string{"10.0.0.0/8"}), []call{
-			{path: "/v1/checkout", ip: lb, xff: a, want: 200}, {path: "/v1/checkout", ip: lb, xff: a, want: 429}, {path: "/v1/checkout", ip: lb, xff: b, want: 200},
+			{path: "/v1/me/checkout-sessions", ip: lb, xff: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: lb, xff: a, want: 429}, {path: "/v1/me/checkout-sessions", ip: lb, xff: b, want: 200},
 		}},
-		{"untrusted forwarded header is ignored", nil, []call{{path: "/v1/checkout", ip: lb, xff: a, want: 200}, {path: "/v1/checkout", ip: lb, xff: b, want: 429}}},
+		{"untrusted forwarded header is ignored", nil, []call{{path: "/v1/me/checkout-sessions", ip: lb, xff: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: lb, xff: b, want: 429}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
@@ -154,11 +153,11 @@ func TestRateLimitSubjects(t *testing.T) {
 
 	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
 	h := RateLimitHTTP(&limits, nil, nil, nil, nil)(okHandler())
-	first := call{path: "/v1/checkout", ip: a, want: 200}.do(t, h)
+	first := call{path: "/v1/me/checkout-sessions", ip: a, want: 200}.do(t, h)
 	require.Equal(t, "1", first.Header().Get("X-RateLimit-Limit"))
 	require.Equal(t, "0", first.Header().Get("X-RateLimit-Remaining"))
 	require.NotEmpty(t, first.Header().Get("X-RateLimit-Reset"))
-	blocked := call{path: "/v1/checkout", ip: a, want: 429, body: "Rate limit exceeded"}.do(t, h)
+	blocked := call{path: "/v1/me/checkout-sessions", ip: a, want: 429, body: "Rate limit exceeded"}.do(t, h)
 	require.NotEmpty(t, blocked.Header().Get("Retry-After"))
 	require.Nil(t, RateLimitHTTP(nil, nil, nil, nil, nil)(nil), "no limits config mounts nothing")
 }
@@ -174,20 +173,20 @@ func TestRateLimitPayloadCaps(t *testing.T) {
 	}))
 	limit := BucketMaxContentLength["checkout"]
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/me/checkout-sessions", nil)
 	req.ContentLength = limit + 1
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	require.Empty(t, deps.Store.Snapshot(), "rejected before any counting")
 
-	req = httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(strings.Repeat("a", int(limit)+1)))
+	req = httptest.NewRequest(http.MethodPost, "/v1/me/checkout-sessions", strings.NewReader(strings.Repeat("a", int(limit)+1)))
 	req.ContentLength = -1
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	var tooLarge *http.MaxBytesError
 	require.ErrorAs(t, readErr, &tooLarge)
 
-	req = httptest.NewRequest(http.MethodPost, "/v1/checkout", strings.NewReader(strings.Repeat("a", int(limit))))
+	req = httptest.NewRequest(http.MethodPost, "/v1/me/checkout-sessions", strings.NewReader(strings.Repeat("a", int(limit))))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	require.NoError(t, readErr, "a body exactly at the cap is readable")
 }
@@ -200,9 +199,9 @@ func TestCaptchaEscalation(t *testing.T) {
 	h := engine(newDeps(limits, captchaOn, v), okHandler())
 	const ip = "203.0.113.72"
 	for _, c := range []call{
-		{path: "/v1/checkout", want: 200},
-		{path: "/v1/checkout", want: 429},
-		{path: "/v1/checkout", want: 403, body: `"site_key":"site-key"`},
+		{path: "/v1/me/checkout-sessions", want: 200},
+		{path: "/v1/me/checkout-sessions", want: 429},
+		{path: "/v1/me/checkout-sessions", want: 403, body: `"site_key":"site-key"`},
 		{path: "/v1/me/payment-methods", want: 403, body: "captcha_required"},
 		{path: "/v1/webhooks/stripe", want: 200},
 		{path: "/v1/webhooks/stripe", want: 429},
@@ -210,7 +209,7 @@ func TestCaptchaEscalation(t *testing.T) {
 		{method: "GET", path: "/billing/v1/captcha/client.js", want: 200},
 		{path: "/v1/me/payment-methods", token: "bad", want: 403, body: "captcha_invalid"},
 		{path: "/v1/me/payment-methods", token: "good", want: 200},
-		{path: "/v1/checkout", want: 200},
+		{path: "/v1/me/checkout-sessions", want: 200},
 	} {
 		c.ip = ip
 		w := c.do(t, h)
@@ -235,7 +234,7 @@ func TestCaptchaChallenges(t *testing.T) {
 			require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, key, time.Minute))
 			deps.Store.SeedCounter("checkout", key, 9, time.Now().Add(time.Minute))
 		}
-		call{path: "/v1/checkout", ip: ip, user: user, token: "good", want: 200}.do(t, engine(deps, okHandler()))
+		call{path: "/v1/me/checkout-sessions", ip: ip, user: user, token: "good", want: 200}.do(t, engine(deps, okHandler()))
 		for _, key := range []string{"ip:" + ip, "user:" + user} {
 			challenged, err := deps.ChallengeStore.IsChallenged(ctx, key)
 			require.NoError(t, err)
@@ -248,7 +247,7 @@ func TestCaptchaChallenges(t *testing.T) {
 	t.Run("verifier error fails closed", func(t *testing.T) {
 		deps := newDeps(limits, captchaOn, &stubVerifier{err: errors.New("siteverify down")})
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
-		call{path: "/v1/checkout", ip: ip, token: "anything", want: 403, body: "captcha verification failed"}.do(t, engine(deps, okHandler()))
+		call{path: "/v1/me/checkout-sessions", ip: ip, token: "anything", want: 403, body: "captcha verification failed"}.do(t, engine(deps, okHandler()))
 	})
 
 	// #371: attack mode challenges everyone on the attacked merchant's card
@@ -259,12 +258,12 @@ func TestCaptchaChallenges(t *testing.T) {
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute))
 		h := engine(deps, okHandler())
-		call{path: "/v1/checkout", ip: ip, merchant: attacked, want: 403, body: "captcha_required"}.do(t, h)
-		call{path: "/v1/checkout", ip: ip, merchant: attacked, token: "good", want: 200}.do(t, h)
-		call{path: "/v1/checkout", ip: "198.51.100.3", merchant: attacked, want: 403}.do(t, h)
+		call{path: "/v1/me/checkout-sessions", ip: ip, merchant: attacked, want: 403, body: "captcha_required"}.do(t, h)
+		call{path: "/v1/me/checkout-sessions", ip: ip, merchant: attacked, token: "good", want: 200}.do(t, h)
+		call{path: "/v1/me/checkout-sessions", ip: "198.51.100.3", merchant: attacked, want: 403}.do(t, h)
 		call{method: "GET", path: "/v1/merchant/findings", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
-		call{path: "/v1/checkout", ip: "198.51.100.3", merchant: other, want: 200}.do(t, h)
-		call{path: "/v1/checkout", ip: "198.51.100.4", want: 200}.do(t, h)
+		call{path: "/v1/me/checkout-sessions", ip: "198.51.100.3", merchant: other, want: 200}.do(t, h)
+		call{path: "/v1/me/checkout-sessions", ip: "198.51.100.4", want: 200}.do(t, h)
 	})
 
 	t.Run("a challenged subject meets the captcha on card routes only", func(t *testing.T) {
@@ -285,7 +284,7 @@ func TestCaptchaChallenges(t *testing.T) {
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute))
 		h := engine(deps, okHandler())
-		call{path: "/v1/checkout", ip: ip, merchant: attacked, want: 200}.do(t, h)
+		call{path: "/v1/me/checkout-sessions", ip: ip, merchant: attacked, want: 200}.do(t, h)
 		call{path: "/v1/me/payment-methods", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
 	})
 }
@@ -333,7 +332,7 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 		canonical, actual, bucket, limit string
 		captcha                          bool
 	}{
-		{"/billing/v1/me/checkout", "/api/pay/v1/tenants/a%2Fb/me/checkout?x=1", "checkout", "checkout", true},
+		{"/billing/v1/checkout-sessions/{id}/pay", "/api/pay/v1/checkout-sessions/ocs_a%2Fb/pay?x=1", "checkout", "checkout", true},
 		{"/billing/v1/me/payment-methods", "/api/pay/v1/me/payment-methods", "payment-methods", "payment", true},
 		{"/billing/v1/webhooks/{provider}/{account_id}", "/api/pay/v1/webhooks/stripe/acct_test", "webhook", "webhook", false},
 		{"/billing/v1/captcha/status", "/api/pay/v1/captcha/status", "captcha", "", false},
@@ -350,15 +349,15 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 		})).ServeHTTP(httptest.NewRecorder(), req)
 	}
 
-	h := WithRoutePath("/billing/v1/checkout")(engine(newDeps(limits, captchaOn, &stubVerifier{}), okHandler()))
+	h := WithRoutePath("/billing/v1/me/checkout-sessions")(engine(newDeps(limits, captchaOn, &stubVerifier{}), okHandler()))
 	for _, want := range []int{200, 429, 403} {
-		call{path: "/api/pay/v1/checkout", ip: "203.0.113.88", want: want}.do(t, h)
+		call{path: "/api/pay/v1/me/checkout-sessions", ip: "203.0.113.88", want: want}.do(t, h)
 	}
 }
 
-// A hosted checkout session id is limited whatever address presents it, and
+// A checkout session id is limited whatever address presents it, and
 // never reaches a log line.
-func TestCheckoutSessionRateLimit(t *testing.T) {
+func TestCheckoutAttemptRateLimit(t *testing.T) {
 	limits := config.RateLimitsConfig{"default": {RequestsPerMinute: 1000}}
 	rt := &app.Runtime{Config: &config.Config{RateLimits: &limits}}
 	table := &router.Table{}

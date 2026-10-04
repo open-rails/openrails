@@ -61,8 +61,8 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 
 func (c *customer) buyWith(rail, method string, price *billing.Price, kind billing.OfferKind, entitlement string) {
 	c.w.t.Helper()
-	_, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), billing.CreateCheckoutSessionRequest{
-		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID.String(),
+	_, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptRequest{
+		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: price.ID,
 		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
@@ -239,17 +239,15 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	basic := w.tierPrice(group, 1, 1000, monthHours, false)
 	plus := w.tierPrice(group, 2, 2000, monthHours, false)
 	c, sub := w.engineMember("nmi", embedded, basic)
-	method := w.subscription(embedded, sub).PaymentMethodID.String()
 	post := w.finitePass("content:post")
 	bot := w.auth.token(t, "auto-"+c.id)
 	charges := len(w.railLedger("nmi"))
 
 	status, body := w.callAt(self.server.URL, bot, http.MethodPost, "/subscriptions/"+sub.String()+"/change-tier", "bot-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
-	status, body = w.callAt(self.server.URL, bot, http.MethodPost, "/checkout", "bot-"+uuid.NewString(), map[string]any{
-		"price_id": post.ID, "entitlement": "content:post", "offer_kind": "finite",
-		"payment": map[string]any{"rail": "nmi", "payment_method_id": method},
-	})
+	// An automation credential cannot mint a session that pays with the
+	// customer's saved card.
+	status, body = w.callAt(self.server.URL, bot, http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": post.ID})
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
 	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges, "no charge from an automation credential")
@@ -322,8 +320,8 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "live@example.test"}, PriceID: price.ID.String(), Entitlement: "content:live",
+		_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
 			OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 		})
@@ -339,7 +337,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {"nmi": {AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}}
 		r := w.peer("script-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, w.auth, psps)
-		cfg, err := r.client.GetCheckoutConfig(t.Context())
+		cfg, err := r.client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
 		require.NoError(t, err)
 		found := false
 		for _, psp := range cfg.PSPs {

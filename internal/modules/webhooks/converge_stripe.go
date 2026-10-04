@@ -52,7 +52,7 @@ type StripeConvergeService struct {
 	MoneyService                 *money.MoneyService
 	NotificationService          *subscriptions.NotificationService
 	RailCustomerService          *payments.RailCustomerService
-	CheckoutSessionService       webhookCheckoutSessionStore
+	CheckoutAttemptService       webhookCheckoutAttemptStore
 }
 
 func (s *StripeConvergeService) now() time.Time {
@@ -199,7 +199,7 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 		"rail_subscription_id": railSubID, "subscription_id": sub.ID, "user_id": userID,
 	}).Info("stripe converge: membership created from fetched record")
 
-	s.markCheckoutSessionSucceeded(ctx, rec, userID, priceID, transactionID, sub.ID)
+	s.markCheckoutAttemptSucceeded(ctx, rec, userID, priceID, transactionID, sub.ID)
 	return sub.CustomerID, nil
 }
 
@@ -290,15 +290,15 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 	return false, nil
 }
 
-// markCheckoutSessionSucceeded closes the open checkout session that started
+// markCheckoutAttemptSucceeded closes the open checkout attempt that started
 // this subscription (creation leg only — renewals have no open session).
-func (s *StripeConvergeService) markCheckoutSessionSucceeded(ctx context.Context, rec subscriptions.StripeLivenessRecord, userID string, priceID uuid.UUID, transactionID string, subscriptionID uuid.UUID) {
-	if s.CheckoutSessionService == nil {
+func (s *StripeConvergeService) markCheckoutAttemptSucceeded(ctx context.Context, rec subscriptions.StripeLivenessRecord, userID string, priceID uuid.UUID, transactionID string, subscriptionID uuid.UUID) {
+	if s.CheckoutAttemptService == nil {
 		return
 	}
-	sessionID := parseCheckoutSessionID(rec.Metadata)
+	sessionID := parseCheckoutAttemptID(rec.Metadata)
 	if sessionID == uuid.Nil {
-		if session, err := s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
+		if session, err := s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
 			sessionID = session.ID
 		}
 	}
@@ -311,9 +311,9 @@ func (s *StripeConvergeService) markCheckoutSessionSucceeded(ctx context.Context
 			paymentID = payment.ID
 		}
 	}
-	if err := s.CheckoutSessionService.MarkSucceededWithSubscription(ctx, sessionID, paymentID, transactionID, subscriptionID); err != nil {
+	if err := s.CheckoutAttemptService.MarkSucceededWithSubscription(ctx, sessionID, paymentID, transactionID, subscriptionID); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"checkout_session_id": sessionID, "transaction_id": transactionID,
+			"checkout_attempt_id": sessionID, "transaction_id": transactionID,
 		}).Warn("stripe converge: failed to update checkout session")
 	}
 }

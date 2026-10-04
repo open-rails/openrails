@@ -101,16 +101,18 @@ Prices are defined in fiat; the token amount is quoted at checkout from live
 token pricing (quotes carry an expiry). `GET /v1/solana/tokens` (public) lists
 the accepted tokens with current pricing.
 
-1. `POST /v1/checkout` with `payment: { rail: "solana", token_symbol: "USDC" }`
-   and optionally `flow`:
-   - `transfer_request` (default) — the session returns a Solana Pay URL with a
-     unique reference key; any wallet can pay it (QR-scannable).
-   - `transaction_request` — the session returns a `solana_pay_url`; the wallet
-     POSTs its account there and receives a server-built transaction to sign.
+1. A checkout session lists one Solana option per accepted token. Paying it
+   answers `next_action: {type: "solana_pay", url}`: a Solana Pay transfer URL with
+   a unique reference key that any wallet can pay (QR-scannable).
 2. The buyer pays from their own wallet — no card, no stored credentials.
-3. `POST /v1/me/checkout/:id/confirm` with
-   `payment: { rail: "solana", signature: "...", wallet?: "..." }` verifies the
-   transaction on-chain and grants access.
+3. OpenRails watches the reference on chain and settles the payment; the session
+   then reads `succeeded`.
+
+A merchant checkout attempt (`CreateCheckoutAttempt` with `payment: {rail:
+"solana", token_symbol, flow}`) may instead use `flow: transaction_request`: its
+`solana_pay` link points at `/v1/checkout-attempts/:id/solana-pay`, where the
+wallet POSTs its account and receives a server-built transaction to sign.
+`ConfirmCheckoutAttempt` with the signature verifies the transaction on chain.
 
 ### Recurring subscriptions
 
@@ -191,7 +193,7 @@ To exercise the flows on devnet:
   Circle faucet at faucet.circle.com) plus a little SOL — the recurring
   allowlist resolves the configured USDC mint, so a self-minted token won't work.
 - Browser testing: point a wallet extension (Phantom/Backpack) at Devnet; the
-  checkout returns `next_action: solana_sign_transactions` and the wallet
+  merchant checkout attempt returns `next_action: solana_sign_transactions` and the wallet
   approves one transaction (a first-timer's bundle folds
   `initialize_subscription_authority` in front of subscribe + first pull, using
   the program's `UNKNOWN_INIT_ID` same-slot check).

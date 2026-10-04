@@ -51,7 +51,7 @@ type CheckoutRequest struct {
 	CancelURL       string `json:"cancel_url,omitempty"`
 
 	IdempotencyKey    string            `json:"-"`
-	CheckoutSessionID string            `json:"-"`
+	CheckoutAttemptID string            `json:"-"`
 	CheckoutStartedAt time.Time         `json:"-"`
 	Email             string            `json:"email,omitempty"`
 	NameOnCard        string            `json:"name_on_card,omitempty"`

@@ -66,12 +66,12 @@ type Deps struct {
 	// Delegated.
 	AuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)
 
-	// CheckoutCustomer is the buyer's current identity, asked on every hosted
-	// checkout action, which carries no user token: return ErrForbidden for a
+	// CheckoutCustomer is the buyer's current identity, asked on every
+	// checkout session action, which carries no user token: return ErrForbidden for a
 	// customer who may no longer buy. Default with AuthKit (and no
 	// CustomerFor): the AuthKit user, refused when banned or deleted.
 	// Otherwise nil keeps the identity given when the session was minted.
-	CheckoutCustomer func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error)
+	CheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)
 
 	// UserExists and UserEmail let OpenRails address billing notices; nil
 	// sends none.

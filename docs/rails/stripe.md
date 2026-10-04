@@ -170,11 +170,17 @@ alert-only — it reports drift and never mutates your Stripe objects.
 
 ### Checkout
 
-`POST /v1/checkout` with `payment.rail: "stripe"` creates a Stripe-hosted Checkout
-session; the response's `next_action` carries the redirect URL. `success_url` and
-`cancel_url` are supplied on the request (not configured server-side) and are
-required for the hosted flow. Completion arrives via `checkout.session.completed`
-(and the async-payment variants) on the webhook.
+With a declared `publishable_key`, a checkout session's Stripe option has driver
+`stripe_elements`: the page saves the card with Stripe Elements
+(`/v1/me/payment-method-setups`), pays the session with that
+`payment_method_id`, and runs 3-D Secure in the page through `operation`. This is
+how Stripe subscriptions are sold.
+
+Without one, a one-off price pays through a Stripe-hosted Checkout session: paying
+answers `next_action: {type: "redirect_to_url", url}`, and the buyer returns to
+the session's `success_url`. Completion arrives via `checkout.session.completed`
+(and the async-payment variants) on the webhook; the Stripe session carries the
+`checkout_attempt_id` metadata key.
 
 ### Subscriptions Stripe bills
 

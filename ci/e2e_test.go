@@ -246,8 +246,8 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	customer := uuid.NewString()
-	request := billing.CreateCheckoutSessionRequest{
-		Customer:       billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "reader@example.test"},
+	request := billing.CreateCheckoutAttemptRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: cid(customer), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:premium",
 		OfferKind:      billing.OfferPermanent,
@@ -256,13 +256,15 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 		SuccessURL:     "https://e2e.test/success",
 		CancelURL:      "https://e2e.test/cancel",
 	}
-	first, err := client.CreateCheckoutSession(t.Context(), request)
+	first, err := client.CreateCheckoutAttempt(t.Context(), request)
 	require.NoError(t, err)
-	require.Equal(t, "stripe", first.RailData["rail"])
+	require.NotNil(t, first.NextAction, "Stripe's hosted page is the next step: %+v", first)
+	require.Equal(t, "redirect_to_url", first.NextAction.Type)
+	require.Equal(t, "https://checkout.stripe.test/e2e", *first.NextAction.URL)
 	require.NotNil(t, first.PriceID)
-	require.Equal(t, price.ID.String(), *first.PriceID)
+	require.Equal(t, price.ID, *first.PriceID)
 
-	replay, err := client.CreateCheckoutSession(t.Context(), request)
+	replay, err := client.CreateCheckoutAttempt(t.Context(), request)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, replay.ID)
 	require.NotNil(t, first.Amount)
@@ -272,13 +274,14 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 
 	changed := request
 	changed.SuccessURL = "https://e2e.test/changed"
-	_, err = client.CreateCheckoutSession(t.Context(), changed)
+	_, err = client.CreateCheckoutAttempt(t.Context(), changed)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "conflicting replay must not contact Stripe")
 
-	lookup, err := client.LookupCheckoutSession(t.Context(), request)
+	read, err := client.GetCheckoutAttempt(t.Context(), first.ID)
 	require.NoError(t, err)
-	require.Equal(t, first.ID, lookup.ID)
+	require.Equal(t, first.ID, read.ID)
+	require.Equal(t, request.Customer.ID, read.CustomerID)
 
 	before, err := client.CheckEntitlements(t.Context(), customer, []string{"content:premium"}, time.Time{})
 	require.NoError(t, err)

@@ -199,7 +199,7 @@ remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
 timeouts, and 5xx. Every server error is a `*StatusError` carrying the HTTP
 status and wire code/message ([api/errors.md](api/errors.md)). Identifiers are typed (`billing.CustomerID`,
 `ProductID`, `PriceID`, `SubscriptionID`, `PaymentID`, `PaymentMethodID`,
-`CheckoutSessionID`): a zero id, or a blank, whitespace or dot key, is refused
+`CheckoutAttemptID`): a zero id, or a blank, whitespace or dot key, is refused
 by the Client before any request with the same `400 invalid_param`
 `StatusError` the server returns for a malformed identifier, so embedded and
 remote callers observe one error.

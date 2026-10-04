@@ -15,13 +15,13 @@ const client = createBillingClient({
     if (init?.method === "POST") {
       return Response.json({
         status: "requires_action",
-        redirect_url: redirectURL,
+        next_action: { type: "redirect_to_url", url: redirectURL },
       })
     }
     return Response.json(
       fixtureSession({
         id: "ocs_browser_redirect",
-        rails: [
+        options: [
           {
             id: "option_ccbill",
             rail: "ccbill",

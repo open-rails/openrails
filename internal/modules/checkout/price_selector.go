@@ -14,11 +14,11 @@ import (
 
 func validateCheckoutPriceSelector(id, key string) error {
 	if (strings.TrimSpace(id) == "") == (strings.TrimSpace(key) == "") {
-		return fmt.Errorf("%w: exactly one of price_id or price_key is required", ErrCheckoutSessionValidation)
+		return fmt.Errorf("%w: exactly one of price_id or price_key is required", ErrCheckoutAttemptValidation)
 	}
 	if id != "" {
 		if parsed, err := billing.ParsePriceID(id); err != nil || parsed.IsZero() {
-			return fmt.Errorf("%w: price_id must be a valid price ID; use price_key for an opaque key", ErrCheckoutSessionValidation)
+			return fmt.Errorf("%w: price_id must be a valid price ID; use price_key for an opaque key", ErrCheckoutAttemptValidation)
 		}
 	}
 	return nil
@@ -27,19 +27,19 @@ func validateCheckoutPriceSelector(id, key string) error {
 func validateOfferAssertion(price *models.Price, product *models.Product, key string, kind billing.OfferKind) error {
 	if key != "" {
 		if strings.TrimSpace(key) == "" || len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
-			return fmt.Errorf("%w: invalid entitlement", ErrCheckoutSessionValidation)
+			return fmt.Errorf("%w: invalid entitlement", ErrCheckoutAttemptValidation)
 		}
 		duration, ok := product.EntitlementsSpec[key]
 		if !ok {
-			return fmt.Errorf("%w: selected offer does not grant requested entitlement", ErrCheckoutSessionValidation)
+			return fmt.Errorf("%w: selected offer does not grant requested entitlement", ErrCheckoutAttemptValidation)
 		}
 		if kind == billing.OfferPermanent && duration != nil && *duration > 0 {
-			return fmt.Errorf("%w: selected entitlement is not permanent", ErrCheckoutSessionValidation)
+			return fmt.Errorf("%w: selected entitlement is not permanent", ErrCheckoutAttemptValidation)
 		}
 	}
 	valid := kind == "" || kind == billing.OfferPermanent && permanentPurchase(price) || kind == billing.OfferFinite && !price.AutoRenew && price.AccessDurationHours != nil || kind == billing.OfferRecurring && price.AutoRenew
 	if !valid {
-		return fmt.Errorf("%w: selected price does not match requested offer kind", ErrCheckoutSessionValidation)
+		return fmt.Errorf("%w: selected price does not match requested offer kind", ErrCheckoutAttemptValidation)
 	}
 	return nil
 }

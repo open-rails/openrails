@@ -44,12 +44,12 @@ products:
 	return key, err
 }
 
-func (w *world) options(priceKey string) map[string]billing.CheckoutRailOption {
+func (w *world) options(priceKey string) map[string]billing.CheckoutOption {
 	w.t.Helper()
-	list, err := w.client[remote].ListCheckoutRailOptionsByKey(w.t.Context(), priceKey)
+	config, err := w.client[remote].GetCheckoutConfig(w.t.Context(), billing.CheckoutConfigQuery{PriceKey: priceKey})
 	require.NoError(w.t, err)
-	out := map[string]billing.CheckoutRailOption{}
-	for _, option := range list {
+	out := map[string]billing.CheckoutOption{}
+	for _, option := range config.Options {
 		out[option.Rail] = option
 	}
 	return out
@@ -127,16 +127,18 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	// The advertised Solana option is sellable: a subscription session opens
 	// a Solana Pay request for the published plan.
 	buyer := w.newCustomer()
-	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: priceID(t, w, key+"-monthly"),
+	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(priceID(t, w, key+"-monthly")),
 		IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: solana.Selector, PSPID: solana.PSPID, TokenSymbol: solana.PublicConfig["token_symbol"]},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "subscription", session.Mode)
-	require.Equal(t, "requires_action", session.Status)
-	require.True(t, strings.HasPrefix(fmt.Sprint(session.RailData["solana_pay_url"]), "solana:https://e2e.test/billing/v1/"), "%+v", session.RailData)
+	require.Equal(t, billing.CheckoutAttemptRequiresAction, session.Status)
+	require.NotNil(t, session.NextAction, "%+v", session)
+	require.Equal(t, "solana_pay", session.NextAction.Type)
+	require.True(t, strings.HasPrefix(*session.NextAction.URL, "solana:https://e2e.test/billing/v1/checkout-attempts/"+session.ID.String()+"/solana-pay"), "%+v", session.NextAction)
 }
 
 func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
@@ -183,8 +185,8 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	require.Contains(t, options, "nmi")
 
 	buyer := w.newCustomer()
-	_, err = w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: buyer.id, VerifiedEmail: "buyer@e2e.test"}, PriceID: priceID(t, w, key+"-monthly"),
+	_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id), VerifiedEmail: "buyer@e2e.test"}, PriceID: pid(priceID(t, w, key+"-monthly")),
 		IdempotencyKey: "ccbill-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "E2E Payer", Zip: "10001", Country: "US"},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",

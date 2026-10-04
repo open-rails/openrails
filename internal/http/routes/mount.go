@@ -127,8 +127,8 @@ func (e *Env) enabled(f Feature) bool {
 		return e.providers.SolanaSigning
 	case FeatureStripePortal:
 		return e.providers.StripePortal
-	case FeatureHostedCheckout:
-		return HostedCheckoutPublished(rt)
+	case FeatureCheckoutSessions:
+		return CheckoutSessionsPublished(rt)
 	case FeatureMerchantDirectory:
 		return rt != nil && rt.Merchants != nil
 	case FeatureCatalogCopilot:
@@ -143,10 +143,10 @@ func (e *Env) enabled(f Feature) bool {
 	panic("routes: unknown feature " + string(f))
 }
 
-// HostedCheckoutPublished reports whether this runtime serves hosted checkout
+// CheckoutSessionsPublished reports whether this runtime serves checkout
 // sessions: the standalone surface always, an embedded host with
 // Config.HTTP.Checkout.
-func HostedCheckoutPublished(rt *app.Runtime) bool {
+func CheckoutSessionsPublished(rt *app.Runtime) bool {
 	if rt == nil || rt.Config == nil {
 		return true
 	}

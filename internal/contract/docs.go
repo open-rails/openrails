@@ -17,7 +17,7 @@ var groupTitles = []struct {
 	blurb string
 }{
 	{routes.Meta, "Process", "Health, metrics and capability discovery. Only the standalone server serves the root paths."},
-	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, hosted checkout sessions."},
+	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
 	{routes.Merchant, "Merchant", "The merchant API: staff, machines and the Go client alike, each route gated by its merchant permission."},
 	{routes.CatalogOwned, "Owned catalog (`/v1/catalog`)", "A creator managing its own catalog."},

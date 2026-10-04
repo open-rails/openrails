@@ -57,8 +57,8 @@ func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, chain
 // EnrollInput describes the checkout whose first payment activates a subscription.
 type EnrollInput struct {
 	MerchantID billing.MerchantID
-	// CheckoutSessionID is the checkout the first payment settles.
-	CheckoutSessionID uuid.UUID
+	// CheckoutAttemptID is the checkout the first payment settles.
+	CheckoutAttemptID uuid.UUID
 	UserID            string
 	UserEmail         string
 	PriceID           uuid.UUID
@@ -89,7 +89,7 @@ type EnrollInput struct {
 // signature (the claim repeats and CreateMembership upserts on the rail
 // subscription id).
 func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (*models.Subscription, error) {
-	if in.UserID == "" || in.SubscriberWallet == "" || in.CheckoutSessionID == uuid.Nil {
+	if in.UserID == "" || in.SubscriberWallet == "" || in.CheckoutAttemptID == uuid.Nil {
 		return nil, fmt.Errorf("recurring: user, subscriber wallet and checkout are required")
 	}
 	if in.AmountBaseUnits == 0 || in.PeriodHours == 0 {
@@ -138,7 +138,7 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	if solanaint.SettlementTooLate(landedAt, in.ValidUntil) {
 		return nil, &LatePaymentError{LandedAt: *landedAt, ValidUntil: in.ValidUntil}
 	}
-	if err := settlement.ClaimCheckout(ctx, s.db, in.CheckoutSessionID, payment.signature); err != nil {
+	if err := settlement.ClaimCheckout(ctx, s.db, in.CheckoutAttemptID, payment.signature); err != nil {
 		return nil, err
 	}
 

@@ -86,8 +86,8 @@ const (
 	FeatureSolanaSigning Feature = "solana_signing"
 	// FeatureStripePortal: a Stripe PSP is armed.
 	FeatureStripePortal Feature = "stripe_portal"
-	// FeatureHostedCheckout: the deployment publishes hosted checkout.
-	FeatureHostedCheckout Feature = "hosted_checkout"
+	// FeatureCheckoutSessions: the deployment publishes checkout sessions.
+	FeatureCheckoutSessions Feature = "checkout_sessions"
 	// FeatureMerchantDirectory: the deployment has a merchant directory.
 	FeatureMerchantDirectory Feature = "merchant_directory"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
@@ -118,7 +118,7 @@ const (
 type Throttle string
 
 const (
-	// ThrottleSessionRead and ThrottleSessionPay bound hosted checkout per
+	// ThrottleSessionRead and ThrottleSessionPay bound a checkout session per
 	// session id.
 	ThrottleSessionRead Throttle = "checkout_session_read"
 	ThrottleSessionPay  Throttle = "checkout_session_pay"

@@ -295,8 +295,8 @@ func withoutRouteSet(routeSets []RouteSet, remove RouteSet) []RouteSet {
 }
 
 func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
-	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer]) && (s == nil || s.Authenticator == nil) {
-		return fmt.Errorf("embedded billing: user route groups require Options.Authenticator")
+	if routeSets[RouteSetCustomer] && (s == nil || s.Authenticator == nil) {
+		return fmt.Errorf("embedded billing: the customer route group requires Options.Authenticator")
 	}
 	if routeSets[RouteSetMerchant] && (s == nil || s.Gate == nil) {
 		return fmt.Errorf("embedded billing: the merchant route group requires Options.Gate")

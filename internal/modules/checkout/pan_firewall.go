@@ -36,7 +36,7 @@ func cardEntryFor(target railTarget) string {
 
 // describeCard stamps a request's card onto the display fields it names
 // (nothing the caller says about the card is used) and returns its wipe.
-func describeCard(req *CheckoutSessionCreateRequest) func() {
+func describeCard(req *CheckoutAttemptCreateRequest) func() {
 	if req == nil || req.Payment.Card == nil {
 		return func() {}
 	}

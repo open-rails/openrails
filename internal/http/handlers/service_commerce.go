@@ -1,19 +1,16 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// commerceCustomer resolves a customer id from a request body field or a
-// path/query string and enforces the caller's customer scope.
+// commerceCustomer requires a customer id and the caller's scope over it.
 func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (identity.CustomerID, bool) {
 	id := servicePayer(customerID)
 	if id == nil {
@@ -26,19 +23,11 @@ func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (id
 	return *id, true
 }
 
-func ServiceCreateCheckoutSession(r *httprequest.Request) {
+// ServiceCreateCheckoutAttempt handles POST /v1/merchant/checkout-attempts.
+func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input struct {
-		billing.CreateCheckoutSessionRequest
-		Mode           json.RawMessage `json:"mode"`
-		SubscriptionID json.RawMessage `json:"subscription_id"`
-		NewPriceID     json.RawMessage `json:"new_price_id"`
-	}
+	var input billing.CreateCheckoutAttemptRequest
 	if !r.BindJSON(&input) {
-		return
-	}
-	defer input.PaymentOptions.Card.Zero()
-	if input.PaymentOptions.Card != nil && !cardFieldAdmitted(r, strings.TrimSpace(input.PaymentOptions.PaymentToken) != "") {
 		return
 	}
 	if raw := input.PaymentOptions.PaymentMethodID; raw != "" {
@@ -48,15 +37,9 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 			return
 		}
 	}
-	if len(input.Mode) > 0 || len(input.SubscriptionID) > 0 || len(input.NewPriceID) > 0 {
-		r.ErrorJSON(http.StatusBadRequest, "priced checkout derives its operation from the price; use a dedicated setup or subscription action endpoint")
+	if _, ok := commerceCustomer(r, input.Customer.ID); !ok {
 		return
 	}
-	payer, ok := commerceCustomer(r, customerIDParam(input.Customer.ID))
-	if !ok {
-		return
-	}
-	input.Customer.ID = payer.String()
 	input.IdempotencyKey = r.Header("Idempotency-Key")
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
@@ -67,136 +50,76 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	out, err := svc.CreateCheckoutSessionForCustomer(r.Request.Context(), input.Customer, input.CreateCheckoutSessionRequest)
+	out, err := svc.CreateCheckoutAttempt(r.Request.Context(), input)
 	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{Rail: input.PaymentOptions.Rail, Wallet: input.PaymentOptions.Wallet})
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{Rail: input.PaymentOptions.Rail, Wallet: input.PaymentOptions.Wallet})
 		return
 	}
 	r.SuccessJSON(out)
 }
 
-func ServiceLookupCheckoutSession(r *httprequest.Request) {
+// attemptInScope reads the {id} attempt's customer and checks the caller may
+// act for it.
+func attemptInScope(r *httprequest.Request, svc *billingservice.Service) (billing.CheckoutAttemptID, bool) {
+	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
+		return id, false
+	}
+	owner, err := svc.CheckoutAttemptOwner(r.Request.Context(), id)
+	if err != nil {
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		return id, false
+	}
+	_, ok := commerceCustomer(r, owner)
+	return id, ok
+}
+
+// ServiceGetCheckoutAttempt handles GET /v1/merchant/checkout-attempts/{id}.
+func ServiceGetCheckoutAttempt(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input billing.CreateCheckoutSessionRequest
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	id, ok := attemptInScope(r, svc)
+	if !ok {
+		return
+	}
+	out, err := svc.GetCheckoutAttempt(r.Request.Context(), id)
+	if err != nil {
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		return
+	}
+	r.SuccessJSON(out)
+}
+
+// ServiceConfirmCheckoutAttempt handles POST
+// /v1/merchant/checkout-attempts/{id}/confirm.
+func ServiceConfirmCheckoutAttempt(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
+	var input billing.ConfirmCheckoutAttemptRequest
 	if !r.BindJSON(&input) {
 		return
 	}
-	defer input.PaymentOptions.Card.Zero()
-	payer, ok := commerceCustomer(r, customerIDParam(input.Customer.ID))
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	id, ok := attemptInScope(r, svc)
 	if !ok {
 		return
 	}
-	input.Customer.ID = payer.String()
-	input.IdempotencyKey = r.Header("Idempotency-Key")
-	if strings.TrimSpace(input.IdempotencyKey) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
-		return
-	}
-	svc, err := billingservice.New(r.State)
+	out, err := svc.ConfirmCheckoutAttempt(r.Request.Context(), id, input)
 	if err != nil {
-		r.InternalError("billing service unavailable", err)
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{CheckoutAttemptID: id.String(), Rail: "solana", Wallet: input.Wallet})
 		return
 	}
-	out, err := svc.LookupCheckoutSessionForCustomer(r.Request.Context(), input.Customer, input)
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+	if out.Status == billing.CheckoutAttemptProcessing {
+		r.JSON(http.StatusAccepted, out)
 		return
-	}
-	r.SuccessJSON(out)
-}
-
-func ServiceGetCheckoutSessionByKey(r *httprequest.Request) {
-	r.SetHeader("Cache-Control", "no-store")
-	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))
-	if !ok {
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	out, err := svc.GetCheckoutSessionByKey(r.Request.Context(), payer.String(), r.Header("Idempotency-Key"), r.Query("entitlement"))
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
-		return
-	}
-	r.SuccessJSON(out)
-}
-
-func ServiceGetCheckoutSession(r *httprequest.Request) {
-	r.SetHeader("Cache-Control", "no-store")
-	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))
-	if !ok {
-		return
-	}
-	typedId, err := billing.ParseCheckoutSessionID(r.Param("id"))
-	if err != nil || typedId.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
-		return
-	}
-	id := typedId.UUID()
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	out, err := svc.GetCheckoutSession(r.Request.Context(), payer.String(), id)
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
-		return
-	}
-	r.SuccessJSON(out)
-}
-
-func ServiceConfirmCheckoutSession(r *httprequest.Request) {
-	r.SetHeader("Cache-Control", "no-store")
-	var input billing.ConfirmCheckoutSessionRequest
-	if !r.BindJSON(&input) {
-		return
-	}
-	payer, ok := commerceCustomer(r, customerIDParam(input.CustomerID))
-	if !ok {
-		return
-	}
-	typedId, err := billing.ParseCheckoutSessionID(r.Param("id"))
-	if err != nil || typedId.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
-		return
-	}
-	id := typedId.UUID()
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	out, err := svc.ConfirmCheckoutSession(r.Request.Context(), payer.String(), id, input)
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{CheckoutSessionID: id.String(), Rail: input.Payment.Rail, Wallet: input.Payment.Wallet})
-		return
-	}
-	r.SuccessJSON(out)
-}
-
-func ServiceListCheckoutRailOptions(r *httprequest.Request) {
-	price := strings.TrimSpace(r.Query("price_id"))
-	key := r.Query("price_key")
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	out, err := svc.ListCheckoutRailOptions(r.Request.Context(), price, key)
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
-		return
-	}
-	if len(out) > 0 {
-		config, ok := checkoutConfig(r)
-		if !ok {
-			return
-		}
-		advertiseCheckoutOptions(out, config)
 	}
 	r.SuccessJSON(out)
 }
@@ -222,65 +145,4 @@ func ServiceResolveEffectiveTier(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(out)
-}
-
-func ServiceCreatePaymentMethodSession(r *httprequest.Request) {
-	var input billing.CreatePaymentMethodSessionRequest
-	if !r.BindJSON(&input) {
-		return
-	}
-	input.IdempotencyKey = r.Header("Idempotency-Key")
-	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*billing.CheckoutSession, error) {
-		return svc.CreatePaymentMethodSessionForCustomer(r.Request.Context(), input)
-	})
-}
-
-func ServiceCreateSolanaCancelSession(r *httprequest.Request) {
-	var input billing.CreateSolanaCancelSessionRequest
-	if !r.BindJSON(&input) {
-		return
-	}
-	input.IdempotencyKey = r.Header("Idempotency-Key")
-	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*billing.CheckoutSession, error) {
-		return svc.CreateSolanaCancelSessionForCustomer(r.Request.Context(), input)
-	})
-}
-
-func ServiceCreateSolanaTierChangeSession(r *httprequest.Request) {
-	var input billing.CreateSolanaTierChangeSessionRequest
-	if !r.BindJSON(&input) {
-		return
-	}
-	input.IdempotencyKey = r.Header("Idempotency-Key")
-	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*billing.CheckoutSession, error) {
-		return svc.CreateSolanaTierChangeSessionForCustomer(r.Request.Context(), input)
-	})
-}
-
-func serviceCreateCheckoutAction(r *httprequest.Request, customer billing.CheckoutCustomerIdentity, key string, payment billing.CheckoutPaymentOptions, create func(*billingservice.Service) (*billing.CheckoutSession, error)) {
-	r.SetHeader("Cache-Control", "no-store")
-	// None of these actions takes a card (#1129).
-	if payment.Card != nil {
-		payment.Card.Zero()
-		r.ErrorJSON(http.StatusBadRequest, paymentmethods.ErrCardEntryNotEnabled.Error())
-		return
-	}
-	if _, ok := commerceCustomer(r, customerIDParam(customer.ID)); !ok {
-		return
-	}
-	if strings.TrimSpace(key) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	result, err := create(svc)
-	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{Rail: payment.Rail, Wallet: payment.Wallet})
-		return
-	}
-	r.SuccessJSON(result)
 }

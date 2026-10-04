@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 )
 
 var updateWireFixtures = flag.Bool("update-wire-fixtures", false, "rewrite testdata/wire fixtures from the Go contract")
@@ -61,20 +62,21 @@ func canonicalWireFixtures() map[string]any {
 			{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker-1", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: "sha256:fixture"},
 			{Scope: billing.SpendDelegationInvokerTier, ScopeKey: "free", Windows: []billing.BudgetWindow{}},
 		}},
-		"hosted_checkout_session.json": billing.HostedCheckoutSession{
-			ID: "ocs_fixture", Status: "created", Merchant: billing.HostedCheckoutMerchant{DisplayName: "Acme Demo"},
-			Plan:      billing.HostedCheckoutPlan{DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, PeriodHours: &periodHours, AutomaticallyRenews: true},
-			LineItems: []billing.HostedCheckoutLineItem{{Label: "Premium Membership", Sublabel: "Renews monthly", Amount: maxMoney}, {Label: "Launch discount", Amount: minMoney}},
+		"checkout_session.json": checkoutsession.CheckoutSession{
+			ID: "ocs_fixture", Status: "requires_action", Merchant: checkoutsession.CheckoutSessionMerchant{DisplayName: "Acme Demo"},
+			Plan:      checkoutsession.CheckoutSessionPlan{DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, PeriodHours: &periodHours, AutomaticallyRenews: true},
+			LineItems: []checkoutsession.CheckoutSessionLineItem{{Label: "Premium Membership", Sublabel: ptr("Renews monthly"), Amount: maxMoney}, {Label: "Launch discount", Amount: minMoney}},
 			Tax:       &zero, DueToday: &maxMoney,
-			Rails: []billing.HostedCheckoutRail{
-				{ID: "option_card", Rail: "nmi", Mode: "subscription", Driver: "collect_js", PublicConfig: map[string]string{"tokenization_key": "public-key", "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js"}},
-				{ID: "option_wallet", Rail: "solana", Mode: "one_off", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "USDC", "network": "devnet"}},
-				{ID: "option_redirect", Rail: "ccbill", Mode: "subscription", Driver: "redirect"},
+			Options: []checkoutsession.CheckoutSessionOption{
+				{ID: "option_card", PSPID: "55555555-5555-5555-5555-555555555555", Rail: "nmi", Mode: "subscription", Driver: "collect_js", PublicConfig: map[string]string{"tokenization_key": "public-key", "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js"}},
+				{ID: "option_wallet", PSPID: "66666666-6666-4666-8666-666666666666", Rail: "solana", Mode: "one_off", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "USDC", "network": "devnet"}},
+				{ID: "option_elements", PSPID: "77777777-7777-4777-8777-777777777777", Rail: "stripe", Mode: "subscription", Driver: "stripe_elements", PublicConfig: map[string]string{"publishable_key": "pk_test_fixture"}},
 			},
-			SavedMethods: []billing.HostedCheckoutSavedMethod{{ID: methodFixture.String(), OptionID: "option_card", Rail: "nmi", Card: card}},
-			PaymentID:    paymentFixture.String(), SubscriptionID: subscriptionFixture.String(),
-			SuccessURL: "https://merchant.example/thanks?checkout=ocs_fixture",
-			ExpiresAt:  when,
+			SavedMethods: []checkoutsession.CheckoutSessionSavedMethod{{ID: methodFixture, OptionID: "option_card", Rail: "nmi", Card: card}},
+			NextAction:   &billing.NextAction{Type: "solana_pay", URL: ptr("solana:https://pay.example/billing/v1/checkout-attempts/chk_ffffffff-ffff-4fff-8fff-ffffffffffff/solana-pay")},
+			Operation:    &billing.PaymentOperation{ID: uuid.MustParse("88888888-8888-4888-8888-888888888888"), Status: "pending"},
+			SuccessURL:   ptr("https://merchant.example/thanks?checkout=ocs_fixture"),
+			ExpiresAt:    when,
 		},
 		"subscription.json": subscriptionFixtureValue(when, maxMoney, card),
 		"notification.json": billing.Notification{
@@ -84,9 +86,10 @@ func canonicalWireFixtures() map[string]any {
 		"price.json": priceFixtureValue,
 		"product.json": billing.Product{ID: productFixture, CatalogID: billing.CatalogID(productFixture), Key: "pro", DisplayName: "Pro", EntitlementsSpec: map[string]*int{"pro": nil},
 			Prices: []billing.Price{priceFixtureValue}, CreatedAt: when, UpdatedAt: when},
-		"checkout_session.json": billing.CheckoutSession{
-			ID: sessionFixture.String(), Status: "succeeded", Mode: "subscription", PriceID: new(priceFixture.String()), Amount: new(maxMoney), Currency: new("USD"), PaymentStatus: "paid",
-			SubscriptionID: new(subscriptionFixture.String()), PaymentID: new(paymentFixture.String()), ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"}, RailData: map[string]any{"rail": "nmi"},
+		"checkout_attempt.json": billing.CheckoutAttempt{
+			Object: "checkout_attempt", ID: sessionFixture, CustomerID: customerFixture, Status: billing.CheckoutAttemptSucceeded, Mode: "subscription",
+			PriceID: &priceFixture, Amount: new(maxMoney), Currency: new("USD"), SubscriptionID: &subscriptionFixture, PaymentID: &paymentFixture,
+			ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"},
 		},
 		"payment.json": paymentFixtureValue(when, maxMoney, card),
 		"payment_method.json": billing.PaymentMethod{
@@ -146,7 +149,7 @@ var (
 	subscriptionFixture   = billing.SubscriptionID(uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 	methodFixture         = billing.PaymentMethodID(uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 	paymentFixture        = billing.PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
-	sessionFixture        = billing.CheckoutSessionID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
+	sessionFixture        = billing.CheckoutAttemptID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
 	invoiceFixture        = billing.InvoiceID(uuid.MustParse("99999999-9999-4999-8999-999999999999"))
 )
 

@@ -90,7 +90,7 @@ func TestHTTPConfigValidation(t *testing.T) {
 		ok   bool
 	}{
 		{"no HTTP", nil, nil, true},
-		{"checkout without authentication", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, nil, false},
+		{"checkout needs no authenticator: a session id is its credential", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, nil, true},
 		{"checkout", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, authn, true},
 		{"merchant without authorization", &config.HTTPConfig{Merchant: true}, authn, false},
 		{"merchant", &config.HTTPConfig{Merchant: true}, full, true},
@@ -110,7 +110,7 @@ func TestHTTPConfigValidation(t *testing.T) {
 // The combined handler refuses to mount a surface without its auth boundary,
 // and only checkout routes join the permissive-CORS browser tier.
 func TestNewRoutes(t *testing.T) {
-	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout}}) })
+	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetCustomer}}) })
 	require.Panics(t, func() {
 		(&Assembler{Authenticator: billingauth.AuthenticatorFunc(nil)}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchant}})
 	})
@@ -130,7 +130,7 @@ func TestNewRoutes(t *testing.T) {
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/capabilities")
-	require.Contains(t, keys, "OPTIONS /billing/v1/checkout")
+	require.Contains(t, keys, "OPTIONS /billing/v1/checkout-sessions/{id}/pay")
 	require.Contains(t, keys, "GET /billing/v1/merchant/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/merchant/payments")
 }

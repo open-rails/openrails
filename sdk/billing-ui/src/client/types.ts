@@ -4,6 +4,8 @@
 // src/test/fixtures/wire.
 import { z } from "zod"
 
+import { pspConfigSchema } from "../psp"
+
 import type { CardEntry } from "../lib/card-entry"
 import { isAmount } from "../lib/money"
 
@@ -302,7 +304,6 @@ export const currencyRegistrySchema = z.object({
   currencies: z.array(currencySchema),
 })
 
-
 export const tierChangePreviewSchema = z.object({
   /** `upgrade | downgrade` */
   action: z.string(),
@@ -403,29 +404,40 @@ export const solanaTokensSchema = z.object({
     .transform((v) => v ?? []),
 })
 
-export const solanaConfigSchema = z.object({
-  /** `mainnet | devnet | testnet` */
-  network: z.string(),
-  /** `solana:<network>` */
-  chain: z.string().nullish(),
-  /** Never set by OpenRails: wallets bring their own RPC. */
-  rpcUrl: z.string().nullish(),
-  /** Explorer `?cluster=` value; absent on mainnet. */
-  explorerCluster: z.string().nullish(),
-  preferredToken: z.string().nullish(),
-  tokens: z
-    .array(solanaTokenSchema)
+/**
+ * The merchant's public checkout configuration (`GET /checkout-config`): its
+ * armed PSPs with their public values and, with a Solana PSP, the network and
+ * accepted tokens a wallet adapter is configured with.
+ */
+export const checkoutConfigSchema = z.object({
+  psps: z
+    .array(pspConfigSchema)
     .nullish()
     .transform((v) => v ?? []),
-  features: z
+  solana: z
     .object({
-      solanaPay: z.boolean().nullish(),
-      recurringSubscriptions: z.boolean().nullish(),
-      solanaPayRecurringSubscriptions: z.boolean().nullish(),
+      /** `mainnet | devnet | testnet` */
+      network: z.string(),
+      /** `solana:<network>` */
+      chain: z.string(),
+      preferred_token: z.string().nullish(),
+      tokens: z
+        .array(
+          z.object({
+            symbol: z.string(),
+            name: z.string().nullish(),
+            mint: z.string(),
+            decimals: z.number().int(),
+            preferred: z.boolean().nullish(),
+            recurring_eligible: z.boolean().nullish(),
+          })
+        )
+        .nullish()
+        .transform((v) => v ?? []),
     })
     .nullish(),
 })
-export type SolanaConfig = z.infer<typeof solanaConfigSchema>
+export type CheckoutConfig = z.infer<typeof checkoutConfigSchema>
 
 export const solanaTierChangeTxSchema = z.object({
   /** Base64; partially signed for an upgrade, unsigned for a downgrade. */
@@ -488,14 +500,14 @@ export type NewCard = NewCardFields &
   )
 
 /**
- * A minted hosted checkout session. `id` reads and pays it with no other
- * credential (`client.checkoutSource(id)`); hand it to this customer's
- * browser only. `url` is the shared payment page (`<CheckoutFrame url>`),
- * absent when the app renders `<Checkout>` itself.
+ * A minted checkout session. `id` reads and pays it with no other credential
+ * (`client.checkoutSource(id)`); hand it to this customer's browser only.
+ * `url` is the shared payment page (`<CheckoutFrame url>`), null when the app
+ * renders `<Checkout>` itself.
  */
-export const hostedCheckoutLinkSchema = z.object({
+export const checkoutSessionLinkSchema = z.object({
   id: z.string().startsWith("ocs_"),
-  url: z.string().url().optional(),
+  url: z.string().url().nullish(),
   expires_at: time,
 })
-export type HostedCheckoutLink = z.infer<typeof hostedCheckoutLinkSchema>
+export type CheckoutSessionLink = z.infer<typeof checkoutSessionLinkSchema>

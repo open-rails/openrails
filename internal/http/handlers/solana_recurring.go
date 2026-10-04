@@ -359,11 +359,11 @@ func parseResolvedPlanTerms(cfg map[string]string) (solanaResolvedPlanTerms, boo
 	return t, true
 }
 
-// nowOrDefault reads the clock the checkout session service uses (so tests can
+// nowOrDefault reads the clock the checkout attempt service uses (so tests can
 // pin time), falling back to wall-clock.
 func nowOrDefault(r *httprequest.Request) time.Time {
-	if r.State != nil && r.State.CheckoutSessionService != nil {
-		if c := r.State.CheckoutSessionService.Clock(); c != nil {
+	if r.State != nil && r.State.CheckoutAttemptService != nil {
+		if c := r.State.CheckoutAttemptService.Clock(); c != nil {
 			return c.Now()
 		}
 	}

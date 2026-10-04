@@ -41,14 +41,11 @@ const (
 )
 
 // CheckoutSettler is the checkout side of a landed Solana Pay transaction.
-// Implemented by *checkout.CheckoutSessionService.
+// Implemented by *checkout.CheckoutAttemptService.
 type CheckoutSettler interface {
 	// SettleSolanaTransfer records one transfer on a purchase reference
 	// exactly once and credits the checkout when the transfer settles it.
 	SettleSolanaTransfer(ctx context.Context, reference string, t ObservedTransfer) (*Receipt, error)
-	// ConfirmSolanaLifecycleSession mirrors a confirmed on-chain cancel or
-	// tier change. Idempotent.
-	ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error
 	// ConfirmSolanaSubscribeSession enrolls a recurring subscribe once the
 	// signature is verified as its first payment, returning
 	// ErrSolanaSubscribePending while the transaction is not yet readable.
@@ -185,11 +182,11 @@ func (p *SolanaPayPoller) check(ctx context.Context, rpc *solanarpc.RPCClient, l
 	if err != nil {
 		return 0, err
 	}
-	row, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: mid.UUID(), ID: ref.CheckoutSessionID})
+	row, err := p.db.Gen(ctx).GetCheckoutAttemptByID(ctx, gen.GetCheckoutAttemptByIDParams{MerchantID: mid.UUID(), ID: ref.CheckoutAttemptID})
 	if err != nil {
 		return 0, err
 	}
-	session, err := models.CheckoutSessionFromGen(row)
+	session, err := models.CheckoutAttemptFromGen(row)
 	if err != nil {
 		return 0, err
 	}
@@ -244,7 +241,7 @@ var errHistoryGap = errors.New("solana: node does not hold the reference's histo
 // otherwise newer signatures arrived and the walk goes down again. A short
 // answer is trusted only from a node that holds both its cursor and the
 // newest signature already processed.
-func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference, session *models.CheckoutSession) error {
+func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference, session *models.CheckoutAttempt) error {
 	known, err := ledger.KnownSignatures(ctx, ref.Reference)
 	if err != nil {
 		return err
@@ -339,7 +336,7 @@ func nonEmptyAll(values ...string) []string {
 // settleSignature reads one transaction and records it through the checkout.
 // Only an error worth retrying is returned: a transaction that is foreign,
 // failed or unreadable is recorded as such.
-func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.BillingSolanaPayReference, session *models.CheckoutSession, signature string) error {
+func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.BillingSolanaPayReference, session *models.CheckoutAttempt, signature string) error {
 	policy := solanarpc.MemoRequired
 	if stateString(session.RailState, "flow") == "transfer_request" {
 		policy = solanarpc.MemoPresenceOptional
@@ -372,8 +369,8 @@ func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RP
 	return nil
 }
 
-// confirmMirror routes a landed cancel, tier change or subscribe to its
-// session mirror. awaiting reports a subscribe whose funded step has not landed.
+// confirmMirror routes a landed subscribe to its attempt's enrollment.
+// awaiting reports a subscribe whose funded step has not landed.
 func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, ref gen.BillingSolanaPayReference, sigs []solanarpc.SignatureInfo) (bool, error) {
 	if ref.Status != ReferencePending {
 		return false, nil
@@ -382,12 +379,7 @@ func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, 
 		if sig.HasError {
 			continue
 		}
-		var err error
-		if ReferenceKind(ref.Kind) == ReferenceSubscribe {
-			err = p.checkout.ConfirmSolanaSubscribeSession(ctx, ref.CheckoutSessionID, sig.Signature)
-		} else {
-			err = p.checkout.ConfirmSolanaLifecycleSession(ctx, ref.CheckoutSessionID, sig.Signature)
-		}
+		err := p.checkout.ConfirmSolanaSubscribeSession(ctx, ref.CheckoutAttemptID, sig.Signature)
 		if errors.Is(err, ErrSolanaSubscribePending) {
 			return true, nil
 		}

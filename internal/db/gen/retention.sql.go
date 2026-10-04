@@ -34,7 +34,7 @@ const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 SELECT q.mid AS merchant_id
 FROM (
     (SELECT DISTINCT cs.merchant_id AS mid
-       FROM billing.checkout_sessions cs
+       FROM billing.checkout_attempts cs
       WHERE ($1::uuid IS NULL OR cs.merchant_id > $1::uuid)
         AND cs.expires_at IS NOT NULL AND cs.expires_at < $2::timestamptz
         AND cs.deleted_at IS NULL

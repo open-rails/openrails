@@ -101,7 +101,7 @@ func (s *SolanaTransactionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// BuildPaymentTransactionFromQuote creates a payment transaction from the quote already bound to a checkout session.
+// BuildPaymentTransactionFromQuote creates a payment transaction from the quote already bound to a checkout attempt.
 func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.Context, req *PaymentTransactionBuildRequest) (*TransactionBuildResponse, error) {
 	rpc := s.rpcClient(ctx)
 	if rpc == nil {
@@ -128,7 +128,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 	if req.SessionID == uuid.Nil {
 		// #713: every purchase tx we construct carries the memo stamp; refuse to
 		// build unstamped rather than silently omit it.
-		return nil, fmt.Errorf("checkout session id is required (purchase memo local-id)")
+		return nil, fmt.Errorf("checkout attempt id is required (purchase memo local-id)")
 	}
 
 	referenceStr := ""

@@ -20,7 +20,7 @@ export function fixtureSession(
       automatically_renews: true,
     },
     tax: "0",
-    rails: [
+    options: [
       {
         id: "option_1",
         rail: "nmi",

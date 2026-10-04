@@ -61,7 +61,7 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 		return refusal.Error.Metadata.Table, refusal.Error.Metadata.Count
 	}
 	_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.idempotency_keys (merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
-		SELECT id, 'checkout_session_create', k, s, gen_random_uuid(), CASE WHEN s = 'succeeded' THEN '{}'::jsonb END, now() + interval '1 hour', now() + interval '1 day'
+		SELECT id, 'checkout_attempt_create', k, s, gen_random_uuid(), CASE WHEN s = 'succeeded' THEN '{}'::jsonb END, now() + interval '1 hour', now() + interval '1 day'
 		FROM billing.merchants, (VALUES ('running', 'processing'), ('done', 'succeeded')) AS v(k, s) WHERE slug = $1`), w.slug)
 	require.NoError(t, err)
 	table, count := archiveRefusal()

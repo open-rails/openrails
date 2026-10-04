@@ -108,32 +108,32 @@ func TestStripeRefundAndDisputeDecisions(t *testing.T) {
 	}
 }
 
-type recordingCheckoutSessionStore struct {
+type recordingCheckoutAttemptStore struct {
 	closedID     uuid.UUID
-	closedStatus models.CheckoutSessionStatus
+	closedStatus models.CheckoutAttemptStatus
 }
 
-func (*recordingCheckoutSessionStore) FindOpenCCBillReservation(context.Context, string, string, uuid.UUID) (*models.CheckoutSession, error) {
+func (*recordingCheckoutAttemptStore) FindOpenCCBillReservation(context.Context, string, string, uuid.UUID) (*models.CheckoutAttempt, error) {
 	return nil, nil
 }
 
-func (*recordingCheckoutSessionStore) FindOpenByUserPriceRail(context.Context, string, uuid.UUID, models.Rail) (*models.CheckoutSession, error) {
+func (*recordingCheckoutAttemptStore) FindOpenByUserPriceRail(context.Context, string, uuid.UUID, models.Rail) (*models.CheckoutAttempt, error) {
 	return nil, nil
 }
 
-func (*recordingCheckoutSessionStore) MarkSucceeded(context.Context, uuid.UUID, uuid.UUID, string) error {
+func (*recordingCheckoutAttemptStore) MarkSucceeded(context.Context, uuid.UUID, uuid.UUID, string) error {
 	return nil
 }
 
-func (*recordingCheckoutSessionStore) MarkSucceededWithSubscription(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) error {
+func (*recordingCheckoutAttemptStore) MarkSucceededWithSubscription(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) error {
 	return nil
 }
 
-func (*recordingCheckoutSessionStore) MarkFailed(context.Context, uuid.UUID, string, string) error {
+func (*recordingCheckoutAttemptStore) MarkFailed(context.Context, uuid.UUID, string, string) error {
 	return nil
 }
 
-func (s *recordingCheckoutSessionStore) MarkProviderCheckoutClosed(_ context.Context, id uuid.UUID, status models.CheckoutSessionStatus) error {
+func (s *recordingCheckoutAttemptStore) MarkProviderCheckoutClosed(_ context.Context, id uuid.UUID, status models.CheckoutAttemptStatus) error {
 	s.closedID, s.closedStatus = id, status
 	return nil
 }
@@ -199,17 +199,17 @@ func TestStripeWebhookRouting(t *testing.T) {
 	require.Error(t, bare.HandleStripeWebhook(ctx, []byte(`{"id":"evt_1","type":"invoice.paid"} {}`)), "trailing data")
 
 	sessionID := uuid.New()
-	store := &recordingCheckoutSessionStore{}
-	svc := &StripeWebhookService{CheckoutSessionService: store}
-	meta := map[string]any{"metadata": map[string]string{"checkout_session_id": billing.CheckoutSessionID(sessionID).String()}}
+	store := &recordingCheckoutAttemptStore{}
+	svc := &StripeWebhookService{CheckoutAttemptService: store}
+	meta := map[string]any{"metadata": map[string]string{"checkout_attempt_id": billing.CheckoutAttemptID(sessionID).String()}}
 	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.async_payment_failed", meta)))
 	require.Equal(t, sessionID, store.closedID)
-	require.Equal(t, models.CheckoutSessionStatusFailed, store.closedStatus)
-	*store = recordingCheckoutSessionStore{}
+	require.Equal(t, models.CheckoutAttemptStatusFailed, store.closedStatus)
+	*store = recordingCheckoutAttemptStore{}
 	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.expired", meta)))
 	require.Equal(t, sessionID, store.closedID)
-	require.Equal(t, models.CheckoutSessionStatusExpired, store.closedStatus)
-	*store = recordingCheckoutSessionStore{}
-	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.expired", map[string]any{"metadata": map[string]string{"checkout_session_id": "garbage"}})))
+	require.Equal(t, models.CheckoutAttemptStatusExpired, store.closedStatus)
+	*store = recordingCheckoutAttemptStore{}
+	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.expired", map[string]any{"metadata": map[string]string{"checkout_attempt_id": "garbage"}})))
 	require.Equal(t, uuid.Nil, store.closedID, "an unparseable session id closes nothing")
 }

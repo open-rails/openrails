@@ -69,8 +69,9 @@ import type { CheckoutSource } from "#orck/source"
 import type {
   CheckoutPhase,
   CheckoutSession,
+  NextAction,
   PaymentFailure,
-  PaymentRailOption,
+  PaymentOption,
   PayRequest,
   PayResult,
   SavedPaymentMethod,
@@ -145,7 +146,7 @@ function solanaAmountLabel(
 
 function savedFrom(
   method: PaymentMethod,
-  rail: PaymentRailOption
+  rail: PaymentOption
 ): SavedPaymentMethod {
   return {
     id: method.id,
@@ -175,6 +176,10 @@ function describe(cause: unknown, fallback: string): string {
   if (isBillingError(cause)) return cause.message || fallback
   return cause instanceof Error && cause.message ? cause.message : fallback
 }
+
+// solanaLink is the Solana Pay link a payment awaits, if any.
+const solanaLink = (next?: NextAction | null) =>
+  next?.type === "solana_pay" ? next.url : undefined
 
 const awaitingPayment = (session: CheckoutSession | null) =>
   session?.status === "processing" ||
@@ -256,7 +261,7 @@ export function Checkout({
   // Card rails that save a card in the page need the customer's billing
   // client; without one (a hosted page) only token rails are offered.
   const usable = React.useCallback(
-    (rails: PaymentRailOption[]) =>
+    (rails: PaymentOption[]) =>
       supportedOptions(rails).filter(
         (option) => option.driver !== "stripe_elements" || !!client
       ),
@@ -276,8 +281,8 @@ export function Checkout({
       .then((loaded) => {
         if (cancelled || !mounted.current) return
         setSession(loaded)
-        setSolanaURL(loaded.transaction_url)
-        const options = usable(loaded.rails)
+        setSolanaURL(solanaLink(loaded.next_action))
+        const options = usable(loaded.options)
         if (loaded.status === "succeeded") {
           changePhase("succeeded")
           onCompleteRef.current?.({
@@ -344,7 +349,7 @@ export function Checkout({
   }, [session, changePhase])
 
   const options = React.useMemo(
-    () => (session ? usable(session.rails) : []),
+    () => (session ? usable(session.options) : []),
     [session, usable]
   )
   const active = options.find((option) => option.id === selected)
@@ -427,7 +432,7 @@ export function Checkout({
   // Saves a newly entered card to the customer's account and selects it, so
   // a retry after a decline never enters or saves the card again.
   const saveNewCard = React.useCallback(
-    async (rail: PaymentRailOption): Promise<PayRequest | null> => {
+    async (rail: PaymentOption): Promise<PayRequest | null> => {
       if (rail.driver === "stripe_elements") {
         if (!client || !stripeCard.current) return null
         const id = await stripeCard.current.save()
@@ -576,27 +581,24 @@ export function Checkout({
       attempted.current = true
       const result = await source.pay(request)
       if (!mounted.current || sourceRef.current !== source) return
-      if (active.driver === "redirect" && result.redirect_url) {
+      const next = result.next_action
+      if (active.driver === "redirect" && next?.type === "redirect_to_url") {
         onCompleteRef.current?.(result)
-        if (onRedirectRef.current) onRedirectRef.current(result.redirect_url)
-        else navigateTop(result.redirect_url)
+        if (onRedirectRef.current) onRedirectRef.current(next.url)
+        else navigateTop(next.url)
         return
       }
       if (
         active.driver === "solana_pay" &&
         result.status === "requires_action" &&
-        result.transaction_url
+        next?.type === "solana_pay"
       ) {
         setSession((current) =>
           current
-            ? {
-                ...current,
-                status: "requires_action",
-                transaction_url: result.transaction_url,
-              }
+            ? { ...current, status: "requires_action", next_action: next }
             : current
         )
-        setSolanaURL(result.transaction_url)
+        setSolanaURL(next.url)
         changePhase("ready")
         return
       }
@@ -630,15 +632,15 @@ export function Checkout({
         changePhase("expired")
         return
       }
-      if (result.status === "requires_action" && result.operation_id) {
-        const operation = { id: result.operation_id, status: "pending" }
+      if (result.status === "requires_action" && result.operation) {
+        const operation = result.operation
         setSession((current) =>
           current
             ? { ...current, status: "requires_action", operation }
             : current
         )
         changePhase("processing")
-        await authenticate(result.operation_id)
+        await authenticate(operation.id)
         return
       }
       setSession((current) =>
@@ -823,7 +825,7 @@ export function Checkout({
     payError && active && isCardRail(active) && !inlineFailure
       ? payError
       : undefined
-  const cardBody = (option: PaymentRailOption, isActive: boolean) => {
+  const cardBody = (option: PaymentOption, isActive: boolean) => {
     const stripe = option.driver === "stripe_elements"
     const native = option.driver === "card"
     const entryOpen = isActive && !usingSavedMethod

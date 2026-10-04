@@ -79,7 +79,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		},
 		Catalog: declared,
 		HTTP: &openrails.HTTPConfig{
-			Checkout: &openrails.CheckoutConfig{}, // products, prices, hosted checkout sessions and processor webhooks
+			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
 				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
 			},

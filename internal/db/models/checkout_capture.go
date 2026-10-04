@@ -38,7 +38,7 @@ type CheckoutCapture struct {
 	AcceptedTokenHash string    `json:"accepted_token_hash,omitempty"`
 }
 
-func DecodeCheckoutCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid.UUID, status CheckoutSessionStatus, expiry *time.Time) (CheckoutCapture, error) {
+func DecodeCheckoutCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid.UUID, status CheckoutAttemptStatus, expiry *time.Time) (CheckoutCapture, error) {
 	var capture CheckoutCapture
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -60,20 +60,20 @@ func DecodeCheckoutCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid
 		return capture, ErrCheckoutCaptureBinding
 	}
 	switch status {
-	case CheckoutSessionStatusCreated:
+	case CheckoutAttemptStatusCreated:
 		if capture.VendorSessionID != "" || capture.SecretCiphertext != "" || capture.PaymentMethodID != uuid.Nil {
 			return capture, ErrCheckoutCaptureBinding
 		}
-	case CheckoutSessionStatusRequiresAction:
+	case CheckoutAttemptStatusRequiresAction:
 		if capture.VendorSessionID == "" || capture.SecretCiphertext == "" || capture.PaymentMethodID != uuid.Nil {
 			return capture, ErrCheckoutCaptureBinding
 		}
-	case CheckoutSessionStatusSucceeded:
+	case CheckoutAttemptStatusSucceeded:
 		decoded, err := hex.DecodeString(capture.AcceptedTokenHash)
 		if capture.SecretCiphertext != "" || capture.VendorSessionID == "" || capture.PaymentMethodID == uuid.Nil || capture.VendorMethodID == "" || err != nil || len(decoded) != 32 {
 			return capture, ErrCheckoutCaptureBinding
 		}
-	case CheckoutSessionStatusExpired, CheckoutSessionStatusCanceled, CheckoutSessionStatusFailed:
+	case CheckoutAttemptStatusExpired, CheckoutAttemptStatusCanceled, CheckoutAttemptStatusFailed:
 		if capture.SecretCiphertext != "" || capture.PaymentMethodID != uuid.Nil {
 			return capture, ErrCheckoutCaptureBinding
 		}

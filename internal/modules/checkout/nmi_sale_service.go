@@ -150,7 +150,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		// #1099: a new operation is admitted only for a session still open,
 		// under its lock, so a request whose claim lapsed can never charge a
 		// session another request already settled.
-		if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutSessionID); err != nil {
+		if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutAttemptID); err != nil {
 			return err
 		}
 		prepared, err := s.prepareAcceptedSale(ctx, bound, req, user, price.ID, resolvedMethod.ID, target, fingerprint)

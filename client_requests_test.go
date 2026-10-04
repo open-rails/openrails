@@ -52,7 +52,7 @@ func TestClientRequestShapes(t *testing.T) {
 		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
 	})
 	key := "operation-key"
-	who := billing.CheckoutCustomerIdentity{ID: customer}
+	who := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.MustParse(customer))}
 	expires := time.Now().Add(time.Hour)
 	window := []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}}
 	typedCustomer := billing.CustomerID(uuid.MustParse(customer))
@@ -64,36 +64,25 @@ func TestClientRequestShapes(t *testing.T) {
 		query  string
 		check  func(t *testing.T, body map[string]any)
 	}{
-		{"checkout purchase", func() error {
-			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{Customer: who, PriceID: billing.PriceID(uuid.New()).String(), IdempotencyKey: key})
+		{"checkout attempt", func() error {
+			_, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{Customer: who, PriceID: billing.PriceID(uuid.New()), IdempotencyKey: key})
 			return err
-		}, http.MethodPost, "/v1/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/checkout-attempts", "", func(t *testing.T, b map[string]any) {
 			require.Contains(t, b, "price_id")
 			require.NotContains(t, b, "subscription_id")
-			require.NotContains(t, b, "mode", "the endpoint selects the operation")
+			require.NotContains(t, b, "mode", "the price selects the operation")
 		}},
-		{"payment method session", func() error {
-			_, err := client.CreatePaymentMethodSession(t.Context(), billing.CreatePaymentMethodSessionRequest{Customer: who, IdempotencyKey: key})
+		{"checkout session", func() error {
+			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{Customer: who, PriceKey: "pro-monthly"})
 			return err
-		}, http.MethodPost, "/v1/merchant/payment-method-sessions", "", func(t *testing.T, b map[string]any) {
-			require.NotContains(t, b, "price_id")
-			require.NotContains(t, b, "mode")
+		}, http.MethodPost, "/v1/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, "pro-monthly", b["price_key"])
+			require.Equal(t, who.ID.String(), b["customer"].(map[string]any)["id"])
 		}},
-		{"solana cancel", func() error {
-			_, err := client.CreateSolanaCancelSession(t.Context(), billing.CreateSolanaCancelSessionRequest{Customer: who, SubscriptionID: billing.SubscriptionID(uuid.New()).String(), IdempotencyKey: key})
+		{"checkout config for a price", func() error {
+			_, err := client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{PriceKey: "pro-monthly"})
 			return err
-		}, http.MethodPost, "/v1/merchant/solana-cancel-sessions", "", func(t *testing.T, b map[string]any) {
-			require.Contains(t, b, "subscription_id")
-			require.NotContains(t, b, "price_id")
-			require.NotContains(t, b, "new_price_id")
-		}},
-		{"solana tier change", func() error {
-			_, err := client.CreateSolanaTierChangeSession(t.Context(), billing.CreateSolanaTierChangeSessionRequest{Customer: who, SubscriptionID: billing.SubscriptionID(uuid.New()).String(), NewPriceID: billing.PriceID(uuid.New()).String(), IdempotencyKey: key})
-			return err
-		}, http.MethodPost, "/v1/merchant/solana-tier-change-sessions", "", func(t *testing.T, b map[string]any) {
-			require.Contains(t, b, "subscription_id")
-			require.Contains(t, b, "new_price_id")
-		}},
+		}, http.MethodGet, "/v1/merchant/checkout-config", "price_key=pro-monthly", nil},
 		{"settings carry named policies and tier bindings", func() error {
 			return client.SetMerchantSettings(t.Context(), billing.MerchantSettings{
 				BillingPolicies:       []billing.BillingPolicyInput{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
@@ -209,7 +198,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	require.NoError(t, err)
 	now := time.Now()
 	customer, price, subscription, method := billing.CustomerID(uuid.New()).String(), billing.PriceID(uuid.New()), billing.SubscriptionID(uuid.New()), billing.PaymentMethodID(uuid.New())
-	noCustomer, noPrice := billing.CustomerID{}.String(), billing.PriceID{}.String()
+	noCustomer := billing.CustomerID{}.String()
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
@@ -328,18 +317,21 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ListRateOverrides(ctx, billing.CustomerID{}, billing.PageRequest{})
 			return err
 		},
-		"checkout rails":   func() error { _, err := c.ListCheckoutRailOptions(ctx, noPrice); return err },
-		"checkout session": func() error { _, err := c.GetCheckoutSession(ctx, customer, ""); return err },
-		"checkout session kind": func() error {
-			_, err := c.GetCheckoutSession(ctx, customer, subscription.String())
+		"checkout options": func() error {
+			_, err := c.GetCheckoutConfig(ctx, billing.CheckoutConfigQuery{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
 			return err
 		},
-		"checkout session holder": func() error {
-			_, err := c.GetCheckoutSession(ctx, "", billing.CheckoutSessionID(uuid.New()).String())
-			return err
-		},
+		"checkout attempt": func() error { _, err := c.GetCheckoutAttempt(ctx, billing.CheckoutAttemptID{}); return err },
 		"confirm checkout": func() error {
-			_, err := c.ConfirmCheckoutSession(ctx, "", billing.ConfirmCheckoutSessionRequest{})
+			_, err := c.ConfirmCheckoutAttempt(ctx, billing.CheckoutAttemptID{}, billing.ConfirmCheckoutAttemptRequest{})
+			return err
+		},
+		"checkout customer": func() error {
+			_, err := c.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{PriceKey: "k", IdempotencyKey: "k"})
+			return err
+		},
+		"checkout price": func() error {
+			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}})
 			return err
 		},
 		"access check product": func() error {

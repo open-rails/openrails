@@ -418,7 +418,7 @@ func TestStripeEngineDeclineFinalization(t *testing.T) {
 	}
 }
 
-// Card setup moves no money, is bound to the checkout session and customer,
+// Card setup moves no money, is bound to the checkout attempt and customer,
 // and its client secret never serializes.
 func TestStripeEngineSetupBinding(t *testing.T) {
 	s, payment := engineFixture()

@@ -29,12 +29,13 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 			sale := w.permanent("content:post")
 			member := w.membership("content:members", 9_990_000)
 			for _, offer := range []struct {
-				price, entitlement string
-				kind               billing.OfferKind
-			}{{sale.ID.String(), "content:post", billing.OfferPermanent}, {member.ID.String(), "content:members", billing.OfferRecurring}} {
-				_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-					OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: offer.entitlement, PriceID: offer.price,
-					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi"}, Confirm: true,
+				price       billing.PriceID
+				entitlement string
+				kind        billing.OfferKind
+			}{{sale.ID, "content:post", billing.OfferPermanent}, {member.ID, "content:members", billing.OfferRecurring}} {
+				_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+					OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: offer.entitlement, PriceID: offer.price,
+					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi"},
 				})
 				require.ErrorIs(t, err, billing.ErrPaymentMethodRequired)
 				require.ErrorIs(t, err, billing.ErrInvalid)

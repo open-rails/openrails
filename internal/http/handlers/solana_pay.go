@@ -31,17 +31,17 @@ func GetSolanaPay(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return
 	}
-	if r.State.CheckoutSessionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
+	if r.State.CheckoutAttemptService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "checkout attempt service unavailable")
 		return
 	}
-	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
+	typedParsedID, err := billing.ParseCheckoutAttemptID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
+		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
 		return
 	}
 	parsedID := typedParsedID.UUID()
-	session, err := r.State.CheckoutSessionService.GetSessionForSolanaPay(r.Request.Context(), parsedID)
+	session, err := r.State.CheckoutAttemptService.GetSessionForSolanaPay(r.Request.Context(), parsedID)
 	if err != nil {
 		writeSolanaPayError(r, err)
 		return
@@ -76,17 +76,17 @@ func PostSolanaPay(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "account is required")
 		return
 	}
-	if r.State.CheckoutSessionService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
+	if r.State.CheckoutAttemptService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "checkout attempt service unavailable")
 		return
 	}
-	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
+	typedParsedID, err := billing.ParseCheckoutAttemptID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
+		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
 		return
 	}
 	parsedID := typedParsedID.UUID()
-	resp, err := r.State.CheckoutSessionService.BuildSolanaPayTransaction(r.Request.Context(), parsedID, req.Account)
+	resp, err := r.State.CheckoutAttemptService.BuildSolanaPayTransaction(r.Request.Context(), parsedID, req.Account)
 	if err != nil {
 		writeSolanaPayError(r, err)
 		return
@@ -96,15 +96,15 @@ func PostSolanaPay(r *httprequest.Request) {
 
 func writeSolanaPayError(r *httprequest.Request, err error) {
 	switch {
-	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):
-		r.ErrorJSON(http.StatusNotFound, "checkout session not found")
-	case errors.Is(err, checkout.ErrCheckoutSessionExpired):
-		r.ErrorJSON(http.StatusGone, "checkout session expired")
-	case errors.Is(err, checkout.ErrCheckoutSessionNotSolana):
-		r.ErrorJSON(http.StatusBadRequest, "not a solana checkout session")
-	case errors.Is(err, checkout.ErrCheckoutSessionAlreadyCompleted):
-		r.ErrorJSON(http.StatusConflict, "checkout session already completed")
-	case errors.Is(err, checkout.ErrCheckoutSessionConflict):
+	case errors.Is(err, checkout.ErrCheckoutAttemptNotFound):
+		r.ErrorJSON(http.StatusNotFound, "checkout attempt not found")
+	case errors.Is(err, checkout.ErrCheckoutAttemptExpired):
+		r.ErrorJSON(http.StatusGone, "checkout attempt expired")
+	case errors.Is(err, checkout.ErrCheckoutAttemptNotSolana):
+		r.ErrorJSON(http.StatusBadRequest, "not a solana checkout attempt")
+	case errors.Is(err, checkout.ErrCheckoutAttemptAlreadyCompleted):
+		r.ErrorJSON(http.StatusConflict, "checkout attempt already completed")
+	case errors.Is(err, checkout.ErrCheckoutAttemptConflict):
 		r.ErrorJSON(http.StatusConflict, "a payment for this checkout is already in progress")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "failed to process request")

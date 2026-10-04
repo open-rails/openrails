@@ -128,7 +128,7 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 		fmt.Fprintf(w, "  scope   : merchant %s (merchant-wide — the pass was not account-bound)\n", plan.Scope.MerchantID)
 	}
 	fmt.Fprintln(w, "\nwould restore:")
-	for _, table := range []string{"subscriptions", "payments", "checkout_sessions", "entitlements"} {
+	for _, table := range []string{"subscriptions", "payments", "checkout_attempts", "entitlements"} {
 		if n, ok := plan.Restorable[table]; ok {
 			fmt.Fprintf(w, "  %-18s %d\n", table, n)
 		}
@@ -164,7 +164,7 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 
 func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID billing.MerchantID) {
 	fmt.Fprintf(w, "reversed run %s (kind %s)\n", res.Plan.RunID, res.Plan.Kind)
-	for _, table := range []string{"subscriptions", "payments", "checkout_sessions", "entitlements"} {
+	for _, table := range []string{"subscriptions", "payments", "checkout_attempts", "entitlements"} {
 		if n, ok := res.Restored[table]; ok {
 			fmt.Fprintf(w, "  restored %-18s %d\n", table, n)
 		}

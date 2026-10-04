@@ -116,7 +116,7 @@ func TestInventoryMountsNatively(t *testing.T) {
 		{http.MethodHead, "/api/pay/v1/capabilities", []int{http.StatusOK}},
 		{http.MethodPost, "/api/pay/v1/merchant/customers/entitlements:batch", []int{http.StatusUnauthorized}},
 		{http.MethodPost, "/api/pay/v1/merchant/customers/entitlementsXYZ", []int{http.StatusNotFound, http.StatusMethodNotAllowed}},
-		{http.MethodOptions, "/api/pay/v1/checkout", []int{http.StatusNoContent}},
+		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", []int{http.StatusNoContent}},
 		{http.MethodGet, "/API/pay/v1/capabilities", []int{http.StatusNotFound}},
 	} {
 		require.Contains(t, tc.codes, status(t, engine, tc.method, tc.path, nil), tc.method+" "+tc.path)

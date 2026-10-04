@@ -272,7 +272,7 @@ var jsonRules = map[string]jsonRule{
 	// Successful checkout intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.
 	"rail_intents.nmi_sale.payload": object(map[string]jsonRule{
-		"checkout_session_id": uuidValue,
+		"checkout_attempt_id": uuidValue,
 		"request_fingerprint": sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
 		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
@@ -283,7 +283,7 @@ var jsonRules = map[string]jsonRule{
 		"duplicate_refused": booleanValue, "failure_code": textValue, "resolved_absent": booleanValue,
 	})),
 	"rail_intents.initial_membership.payload": object(map[string]jsonRule{
-		"checkout_session_id": uuidValue,
+		"checkout_attempt_id": uuidValue,
 		"terms":               initialMembershipTermsJSON,
 		"instrument":          object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
 		"native_schedule":     object(map[string]jsonRule{"plan_id": textValue, "start_date": textValue, "day_frequency": integerValue, "plan_payments": integerValue, "card": object(map[string]jsonRule{"FirstName": textValue, "LastName": textValue, "Address1": textValue, "City": textValue, "State": textValue, "Zip": textValue, "Country": textValue})}),
@@ -337,9 +337,9 @@ var jsonRules = map[string]jsonRule{
 	"invoker_spend_limits.windows":  array(budgetWindow),
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),
-	"checkout_sessions.metadata":    nullable(emptyObject),
-	"checkout_sessions.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
-	"checkout_sessions.rail_state": nullable(object(map[string]jsonRule{"initial_membership_quote": func(v any) bool {
+	"checkout_attempts.metadata":    nullable(emptyObject),
+	"checkout_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
+	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{"initial_membership_quote": func(v any) bool {
 		raw, ok := v.(string)
 		if !ok {
 			return false
@@ -349,7 +349,7 @@ var jsonRules = map[string]jsonRule{
 		d.UseNumber()
 		return d.Decode(&decoded) == nil && d.Decode(new(any)) == io.EOF && initialMembershipTermsJSON(decoded)
 	}, "accepted_purchase": acceptedPurchaseJSON, "purchase_submitted": booleanValue, "provider_closed": booleanValue, "requested_entitlement": textValue, "requested_offer_kind": func(v any) bool { return v == "permanent" || v == "finite" || v == "recurring" }, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": sha256Value, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
-	"checkout_sessions.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
+	"checkout_attempts.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_since": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
 	"rail_intents.payload":               nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"rail_intents.result_evidence":       nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),

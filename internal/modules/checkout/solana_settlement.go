@@ -31,7 +31,7 @@ import (
 // receipt. The only errors returned are ones worth retrying; anything that
 // would fail the same way again is recorded for review instead, so one bad
 // transfer never blocks the reference.
-func (s *CheckoutSessionService) SettleSolanaTransfer(ctx context.Context, reference string, t solanamodule.ObservedTransfer) (*solanamodule.Receipt, error) {
+func (s *CheckoutAttemptService) SettleSolanaTransfer(ctx context.Context, reference string, t solanamodule.ObservedTransfer) (*solanamodule.Receipt, error) {
 	if s.db == nil {
 		return nil, errors.New("checkout settlement database unavailable")
 	}
@@ -50,7 +50,7 @@ func (s *CheckoutSessionService) SettleSolanaTransfer(ctx context.Context, refer
 			out = seen
 			return err
 		}
-		session, err := NewCheckoutSessionRepo(d).GetByID(ctx, ref.CheckoutSessionID)
+		session, err := NewCheckoutAttemptRepo(d).GetByID(ctx, ref.CheckoutAttemptID)
 		if err != nil {
 			return err
 		}
@@ -61,7 +61,7 @@ func (s *CheckoutSessionService) SettleSolanaTransfer(ctx context.Context, refer
 			ExpectedAmount: getUint64Field(session.RailState, "token_amount"),
 			ReceivedAmount: t.Amount, Payer: t.Payer, LandedAt: t.LandedAt,
 		}
-		open := session.Status == models.CheckoutSessionStatusCreated || session.Status == models.CheckoutSessionStatusRequiresAction || session.Status == models.CheckoutSessionStatusExpired
+		open := session.Status == models.CheckoutAttemptStatusCreated || session.Status == models.CheckoutAttemptStatusRequiresAction || session.Status == models.CheckoutAttemptStatusExpired
 		receipt.Disposition, receipt.ReviewReason = solanamodule.Decide(ref, open, receipt.ExpectedAmount, t, now)
 		if receipt.Disposition == solanamodule.Credited {
 			err = s.creditSolanaTransfer(ctx, d, session, &receipt, t, now)
@@ -94,7 +94,7 @@ func (s *CheckoutSessionService) SettleSolanaTransfer(ctx context.Context, refer
 // creditSolanaTransfer credits the checkout from its accepted terms, confirms
 // the reference and records the credit, all inside a savepoint: a transfer
 // already recorded elsewhere, or a purchase that refuses, leaves nothing.
-func (s *CheckoutSessionService) creditSolanaTransfer(ctx context.Context, d *db.DB, session *models.CheckoutSession, receipt *solanamodule.Receipt, t solanamodule.ObservedTransfer, now time.Time) error {
+func (s *CheckoutAttemptService) creditSolanaTransfer(ctx context.Context, d *db.DB, session *models.CheckoutAttempt, receipt *solanamodule.Receipt, t solanamodule.ObservedTransfer, now time.Time) error {
 	return d.RunInTx(ctx, func(ctx context.Context, sp pgx.Tx) error {
 		inner := s.db.NewWithPgxTx(sp)
 		// One landed transfer settles at most one checkout, across merchants
@@ -125,14 +125,14 @@ func (s *CheckoutSessionService) creditSolanaTransfer(ctx context.Context, d *db
 
 // creditSolanaPurchase registers the checkout's payment from its accepted
 // terms inside the settlement transaction.
-func (s *CheckoutSessionService) creditSolanaPurchase(ctx context.Context, d *db.DB, session *models.CheckoutSession, reference string, t solanamodule.ObservedTransfer) (uuid.UUID, error) {
+func (s *CheckoutAttemptService) creditSolanaPurchase(ctx context.Context, d *db.DB, session *models.CheckoutAttempt, reference string, t solanamodule.ObservedTransfer) (uuid.UUID, error) {
 	if terms, err := purchaseTerms(session); err != nil || terms == nil {
 		return uuid.Nil, errors.Join(err, errors.New("solana checkout has no accepted purchase terms"))
 	}
 	purchase := NewCheckoutPurchaseService(catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
 	purchase.SubscriptionService = subscriptions.NewSubscriptionService(d, purchase.PriceService, purchase.ProductService, nil, s.clock)
 	result, err := purchase.RegisterPurchase(db.WithPSPID(ctx, session.PspID), &payments.RegisterPurchaseRequest{
-		CheckoutSessionID: session.ID,
+		CheckoutAttemptID: session.ID,
 		UserID:            session.CustomerID.String(),
 		PriceID:           *session.PriceID,
 		Rail:              string(models.RailSolana),
@@ -143,7 +143,7 @@ func (s *CheckoutSessionService) creditSolanaPurchase(ctx context.Context, d *db
 		WalletPurchase:    true,
 		Metadata: map[string]any{
 			"solana_reference":    reference,
-			"checkout_session_id": session.ID.String(),
+			"checkout_attempt_id": session.ID.String(),
 			"solana_payer_wallet": strings.TrimSpace(t.Payer),
 			"solana_token_symbol": getStringField(session.RailState, "token_symbol"),
 			"solana_token_mint":   getStringField(session.RailState, "token_mint"),
@@ -164,8 +164,8 @@ func (s *CheckoutSessionService) creditSolanaPurchase(ctx context.Context, d *db
 var transactionIDConstraints = map[string]bool{
 	"uq_payments_merchant_offrail_transaction":      true,
 	"uq_payments_merchant_psp_transaction":          true,
-	"uq_checkout_sessions_merchant_psp_transaction": true,
-	"uq_checkout_sessions_solana_signature":         true,
+	"uq_checkout_attempts_merchant_psp_transaction": true,
+	"uq_checkout_attempts_solana_signature":         true,
 }
 
 // transientSettleError is a failure another attempt can get past: the
@@ -194,13 +194,13 @@ func transientSettleError(err error) bool {
 
 // ResolveSolanaPayReview closes a review receipt once an operator refunded
 // or otherwise settled its money.
-func (s *CheckoutSessionService) ResolveSolanaPayReview(ctx context.Context, signature, resolution string) error {
+func (s *CheckoutAttemptService) ResolveSolanaPayReview(ctx context.Context, signature, resolution string) error {
 	resolved, err := solanamodule.NewPayLedger(s.db).Resolve(ctx, strings.TrimSpace(signature), resolution, s.now())
 	if err != nil {
 		return err
 	}
 	if !resolved {
-		return fmt.Errorf("%w: no open Solana Pay review for signature %s", ErrCheckoutSessionNotFound, signature)
+		return fmt.Errorf("%w: no open Solana Pay review for signature %s", ErrCheckoutAttemptNotFound, signature)
 	}
 	return nil
 }

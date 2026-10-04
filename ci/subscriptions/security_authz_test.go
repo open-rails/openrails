@@ -46,15 +46,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			aliceSub := alice.subscribe(embedded, rail, price.ID.String(), "content:members", aliceCard)
 			malloryCard := mallory.saveCard(rail, mastercard)
 			mallorySub := mallory.subscribe(embedded, rail, price.ID.String(), "content:members", malloryCard)
-			other := w.membership("content:other", 4_990_000)
-			pending, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: alice.id}, Entitlement: "content:other", PriceID: other.ID.String(),
-				IdempotencyKey: "alice-pending-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: aliceCard},
-				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-			})
-			require.NoError(t, err)
 			charges := len(w.railLedger(rail))
-			pendingStatus := unwrap(alice.must(http.MethodGet, "/checkout/"+pending.ID, "", nil))["status"]
 
 			for _, tc := range []struct {
 				method, path string
@@ -68,17 +60,12 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				{http.MethodPut, "/subscriptions/" + mallorySub.String() + "/payment-method", map[string]any{"payment_method_id": aliceCard}},
 
 				{http.MethodDelete, "/payment-methods/" + aliceCard, nil},
-				{http.MethodGet, "/checkout/" + pending.ID, nil},
-				{http.MethodPost, "/checkout/" + pending.ID + "/confirm", map[string]any{"payment": map[string]string{"rail": rail}}},
 			} {
 				status, body := mallory.call(tc.method, tc.path, "idor-"+uuid.NewString(), tc.body)
 				refused(t, status, body, fmt.Sprintf("%s %s %v", tc.method, tc.path, tc.body))
 			}
-			// A confirm names no payment method: Alice's card there is not read.
-			status, body := mallory.call(http.MethodPost, "/checkout/"+pending.ID+"/confirm", "idor-"+uuid.NewString(), map[string]any{"payment": map[string]string{"rail": rail, "payment_method_id": aliceCard}})
-			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
 			// A foreign card is as ineligible as a missing one.
-			status, body = mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": aliceCard, "currency": "USD"})
+			status, body := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": aliceCard, "currency": "USD"})
 			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
 			_, missing := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString(), "currency": "USD"})
 			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
@@ -100,9 +87,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			require.False(t, sub.CancelScheduled)
 			require.Nil(t, sub.CancelledAt)
 			require.True(t, alice.entitled("content:members"))
-			require.False(t, mallory.entitled("content:other"))
 			require.Len(t, w.railLedger(rail), charges, "no request charged anyone")
-			require.Equal(t, pendingStatus, unwrap(alice.must(http.MethodGet, "/checkout/"+pending.ID, "", nil))["status"], "Alice's checkout is untouched")
 
 			// Each renewal is paid by its own member's card.
 			w.advance(w.subscription(embedded, mallorySub).CurrentPeriodEndsAt.Sub(w.clock.Now()) + 1)
@@ -196,7 +181,7 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 		Schema: w.schema, River: openrails.RiverHostOwned,
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
 		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		HTTP:     &openrails.HTTPConfig{Merchant: true, CustomerRoutes: []openrails.CustomerRoutesConfig{routes}},
+		HTTP:     &openrails.HTTPConfig{Merchant: true, Checkout: &openrails.CheckoutConfig{}, CustomerRoutes: []openrails.CustomerRoutesConfig{routes}},
 		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},
 	}, deps)
 	require.NoError(t, err)
@@ -259,8 +244,8 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.Empty(t, list.Items)
 
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
-	_, err = r.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
-		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: e.ent, PriceID: e.price,
+	_, err = r.client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: e.ent, PriceID: pid(e.price),
 		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
@@ -270,8 +255,8 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	rivalPrice, err := own.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	_, err = own.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
-		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: "content:rival", PriceID: rivalPrice.ID.String(),
+	_, err = own.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
 		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})

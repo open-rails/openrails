@@ -25,7 +25,7 @@ type (
 	RiverOwnership = config.RiverOwnership
 	// HTTPConfig is Config.HTTP: the route groups Client.Routes publishes.
 	HTTPConfig = config.HTTPConfig
-	// CheckoutConfig is HTTPConfig.Checkout: the hosted checkout routes.
+	// CheckoutConfig is HTTPConfig.Checkout: the checkout session routes.
 	CheckoutConfig = config.CheckoutConfig
 	// CustomerRoutesConfig is one customer route profile of
 	// HTTPConfig.CustomerRoutes.

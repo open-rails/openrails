@@ -22,8 +22,8 @@ const (
 type HTTPConfig struct {
 	// CustomerRoutes publishes customer self-service profiles (/v1/me/*).
 	CustomerRoutes []CustomerRoutesConfig
-	// Checkout publishes products, prices, checkout config and the hosted
-	// checkout session routes (the mint route needs a CustomerSelfService
+	// Checkout publishes products, prices, checkout config and the checkout
+	// session read and pay routes (the mint route needs a CustomerSelfService
 	// profile); nil publishes none.
 	Checkout *CheckoutConfig
 	// Merchant publishes the merchant API (/v1/merchant/*, /v1/import/* and
@@ -36,7 +36,7 @@ type HTTPConfig struct {
 	CookieOrigin string
 }
 
-// CheckoutConfig configures hosted checkout. The zero value is the single-site
+// CheckoutConfig configures checkout sessions. The zero value is the single-site
 // case: the app renders billing-ui's <Checkout> itself against the session
 // routes, with no payment page and no frame.
 type CheckoutConfig struct {

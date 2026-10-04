@@ -143,7 +143,7 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 		return &EligibilityResult{Status: EligibilityBlocked, Reason: "product is not available for purchase"}, nil
 	}
 	if err := s.checkPermanentOwnership(ctx, userID, price, product); err != nil {
-		if errors.Is(err, ErrCheckoutSessionConflict) {
+		if errors.Is(err, ErrCheckoutAttemptConflict) {
 			return &EligibilityResult{Status: EligibilityBlocked, Reason: err.Error()}, nil
 		}
 		return nil, err
@@ -404,7 +404,7 @@ func (e paymentTransactionTaken) Error() string        { return string(e) }
 func (e paymentTransactionTaken) Is(target error) bool { return target == ErrPaymentTransactionTaken }
 
 func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
-	if req != nil && req.CheckoutSessionID != uuid.Nil {
+	if req != nil && req.CheckoutAttemptID != uuid.Nil {
 		return s.registerSessionPurchase(ctx, req)
 	}
 	if req.UserID == "" {

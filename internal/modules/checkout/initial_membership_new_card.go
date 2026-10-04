@@ -45,7 +45,7 @@ func (s *CheckoutService) discardEnrollmentCard(ctx context.Context, method *mod
 	}
 }
 
-func (s *CheckoutSessionService) vaultEnrollmentCard(ctx context.Context, payment *CheckoutSessionPaymentRequest, session *models.CheckoutSession, target railTarget, user *UserIdentity) (*models.PaymentMethod, error) {
+func (s *CheckoutAttemptService) vaultEnrollmentCard(ctx context.Context, payment *CheckoutAttemptPaymentRequest, session *models.CheckoutAttempt, target railTarget, user *UserIdentity) (*models.PaymentMethod, error) {
 	vault, ok := s.checkoutService.(enrollmentCardVault)
 	if !ok {
 		return nil, errors.New("card vault unavailable")
@@ -74,7 +74,7 @@ func (s *CheckoutSessionService) vaultEnrollmentCard(ctx context.Context, paymen
 	return vault.vaultEnrollmentCard(ctx, req, user, target)
 }
 
-func (s *CheckoutSessionService) discardEnrollmentCard(ctx context.Context, method *models.PaymentMethod) {
+func (s *CheckoutAttemptService) discardEnrollmentCard(ctx context.Context, method *models.PaymentMethod) {
 	if vault, ok := s.checkoutService.(enrollmentCardVault); ok && method != nil {
 		vault.discardEnrollmentCard(context.WithoutCancel(ctx), method)
 	}
@@ -82,16 +82,16 @@ func (s *CheckoutSessionService) discardEnrollmentCard(ctx context.Context, meth
 
 // acceptQuoteOnCreate confirms a just-quoted membership for the present payer.
 // A definite decline removes a card this session vaulted from a token.
-func (s *CheckoutSessionService) acceptQuoteOnCreate(ctx context.Context, quoted *CheckoutSessionResponse, user *UserIdentity, payer billingauth.DelegatedPrincipal) (*CheckoutSessionResponse, error) {
+func (s *CheckoutAttemptService) acceptQuoteOnCreate(ctx context.Context, quoted *CheckoutAttemptResponse, user *UserIdentity, payer billingauth.DelegatedPrincipal) (*CheckoutAttemptResponse, error) {
 	id := quoted.ID.UUID()
-	resp, err := s.confirmCustomerSession(ctx, id, &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Rail: quoted.Payment.Rail}}, user, payer)
-	if err != nil || (resp != nil && resp.Status == string(models.CheckoutSessionStatusFailed)) {
+	resp, err := s.acceptQuote(ctx, id, &CheckoutAttemptConfirmRequest{Payment: CheckoutAttemptConfirmPayment{Rail: quoted.Payment.Rail}}, user, payer)
+	if err != nil || (resp != nil && resp.Status == string(models.CheckoutAttemptStatusFailed)) {
 		s.discardDeclinedEnrollmentCard(ctx, id)
 	}
 	return resp, err
 }
 
-func (s *CheckoutSessionService) discardDeclinedEnrollmentCard(ctx context.Context, sessionID uuid.UUID) {
+func (s *CheckoutAttemptService) discardDeclinedEnrollmentCard(ctx context.Context, sessionID uuid.UUID) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		return
@@ -102,7 +102,7 @@ func (s *CheckoutSessionService) discardDeclinedEnrollmentCard(ctx context.Conte
 		return
 	}
 	ctx = db.WithPSPID(ctx, session.PspID)
-	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey("checkout_session:"+session.ID.String()))
+	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey("checkout_attempt:"+session.ID.String()))
 	if err != nil || operation.Status != intents.StatusFailedTerminal {
 		return
 	}

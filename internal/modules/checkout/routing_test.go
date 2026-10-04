@@ -89,13 +89,13 @@ func scopesOf(armed railresolve.FixedSet) []merchants.PSPScope {
 	return out
 }
 
-func routingService(armed railresolve.FixedSet, extra ...merchants.PSPScope) *CheckoutSessionService {
+func routingService(armed railresolve.FixedSet, extra ...merchants.PSPScope) *CheckoutAttemptService {
 	return routingServiceWith(armed, pspCatalog{scopes: append(scopesOf(armed), extra...)})
 }
 
-func routingServiceWith(armed railresolve.FixedSet, catalog pspCatalog) *CheckoutSessionService {
+func routingServiceWith(armed railresolve.FixedSet, catalog pspCatalog) *CheckoutAttemptService {
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
-	return &CheckoutSessionService{config: cfg, checkoutService: &CheckoutService{Config: cfg, Rails: armed, ProviderSecrets: catalog}}
+	return &CheckoutAttemptService{config: cfg, checkoutService: &CheckoutService{Config: cfg, Rails: armed, ProviderSecrets: catalog}}
 }
 
 func recurringPrice() *models.Price {
@@ -189,7 +189,7 @@ func TestResolveRailTarget(t *testing.T) {
 func TestRouteDefaultPolicy(t *testing.T) {
 	require.Equal(t, []string{"stripe", "nmi", "ccbill", "solana"}, defaultRoutingOrder)
 
-	decision, err := routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription})
+	decision, err := routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutAttemptModeSubscription})
 	require.NoError(t, err)
 	require.Equal(t, models.CheckoutRoutingPolicyDefault, decision.Policy)
 	require.Equal(t, "stripe", decision.Selected())
@@ -205,7 +205,7 @@ func TestRouteDefaultPolicy(t *testing.T) {
 	delete(armed, "stripe")
 	oneOff := recurringPrice()
 	oneOff.AutoRenew = false
-	decision, err = routingService(armed).Route(merchantCtx(), RoutingInput{Price: oneOff, Mode: models.CheckoutSessionModeOneOff})
+	decision, err = routingService(armed).Route(merchantCtx(), RoutingInput{Price: oneOff, Mode: models.CheckoutAttemptModeOneOff})
 	require.NoError(t, err)
 	require.Equal(t, "nmi", decision.Selected())
 	require.Empty(t, decision.Reason().Fallbacks)
@@ -215,7 +215,7 @@ func TestRouteDefaultPolicy(t *testing.T) {
 		{Selector: "solana", Reason: models.CheckoutRoutingSkipNotArmed},
 	}, decision.Reason().Skipped)
 
-	decision, err = routingService(railresolve.FixedSet{}).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription})
+	decision, err = routingService(railresolve.FixedSet{}).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutAttemptModeSubscription})
 	require.ErrorIs(t, err, ErrNoRoutableProcessor, "routing never invents a processor")
 	require.Len(t, decision.Candidates, 4, "the full trace survives the failure")
 	require.Nil(t, decision.Reason())
@@ -223,7 +223,7 @@ func TestRouteDefaultPolicy(t *testing.T) {
 
 // A named PSP is used as named with no fallback, but must still be armed.
 func TestRouteExplicitSelector(t *testing.T) {
-	decision, err := routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription, Selector: " Stripe "})
+	decision, err := routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutAttemptModeSubscription, Selector: " Stripe "})
 	require.NoError(t, err)
 	require.Equal(t, models.CheckoutRoutingPolicyExplicit, decision.Policy)
 	require.Equal(t, "stripe", decision.Selected())
@@ -231,7 +231,7 @@ func TestRouteExplicitSelector(t *testing.T) {
 	require.Empty(t, decision.Reason().Skipped)
 
 	// #1078: a named PSP still has to be able to make the sale.
-	decision, err = routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription, Selector: "ccbill"})
+	decision, err = routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutAttemptModeSubscription, Selector: "ccbill"})
 	require.ErrorIs(t, err, ErrNoRoutableProcessor)
 	require.Empty(t, decision.Selected())
 	require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, decision.Candidates[0].Skip)
@@ -263,20 +263,20 @@ func TestRouteCandidateSkipClasses(t *testing.T) {
 		{"mobius", "nmi", models.CheckoutRoutingSkipNotArmed},
 		{"stripe", "stripe", ""},
 	} {
-		target, skip := svc.evaluateCandidate(merchantCtx(), svc.checkoutService, RoutingInput{Price: price, Mode: models.CheckoutSessionModeSubscription}, tc.selector)
+		target, skip := svc.evaluateCandidate(merchantCtx(), svc.checkoutService, RoutingInput{Price: price, Mode: models.CheckoutAttemptModeSubscription}, tc.selector)
 		require.Equal(t, tc.want, skip, tc.selector)
 		require.Equal(t, tc.rail, target.Rail, "a bare rail kind names itself even when skipped: %s", tc.selector)
 	}
 
 	failing := routingServiceWith(armedAll(), pspCatalog{err: errors.New("catalog down")})
-	_, skip := failing.evaluateCandidate(merchantCtx(), failing.checkoutService, RoutingInput{Price: price, Mode: models.CheckoutSessionModeSubscription}, "stripe")
+	_, skip := failing.evaluateCandidate(merchantCtx(), failing.checkoutService, RoutingInput{Price: price, Mode: models.CheckoutAttemptModeSubscription}, "stripe")
 	require.Equal(t, models.CheckoutRoutingSkipResolveFailed, skip)
-	_, err := failing.listCheckoutRailOptionsForPrice(merchantCtx(), price, &models.Product{})
+	_, err := failing.listCheckoutOptionsForPrice(merchantCtx(), price, &models.Product{})
 	require.ErrorContains(t, err, "resolution failed", "an outage is not an empty option list")
 }
 
 func TestRoutingRuleMatches(t *testing.T) {
-	in := RoutingInput{Price: recurringPrice(), Product: &models.Product{Key: "pro"}, Mode: models.CheckoutSessionModeSubscription, Country: "US"}
+	in := RoutingInput{Price: recurringPrice(), Product: &models.Product{Key: "pro"}, Mode: models.CheckoutAttemptModeSubscription, Country: "US"}
 	for _, tc := range []struct {
 		name  string
 		match models.CheckoutRoutingMatch
@@ -298,27 +298,27 @@ func TestRoutingRuleMatches(t *testing.T) {
 
 // The option list is a projection of routing: exactly the eligible
 // candidates, each executable through mode resolution and payment validation.
-func TestListCheckoutRailOptions(t *testing.T) {
+func TestListCheckoutOptions(t *testing.T) {
 	svc := routingService(armedAll())
 	price := recurringPrice()
-	options, err := svc.listCheckoutRailOptionsForPrice(merchantCtx(), price, &models.Product{})
+	options, err := svc.listCheckoutOptionsForPrice(merchantCtx(), price, &models.Product{})
 	require.NoError(t, err)
-	require.Equal(t, []CheckoutRailOption{
+	require.Equal(t, []CheckoutOption{
 		{Selector: "stripe", PSPID: merchants.PspID("stripe", "live", "acct_stripe"), Rail: "stripe", Mode: "subscription"},
 		{Selector: "nmi", PSPID: merchants.PspID("nmi", "live", "acct_nmi"), Rail: "nmi", Mode: "subscription"},
 	}, options)
 	for _, o := range options {
 		mode, err := svc.resolveMode(o.Mode, o.Selector, price)
 		require.NoError(t, err)
-		require.Equal(t, models.CheckoutSessionModeSubscription, mode)
-		payment := &CheckoutSessionPaymentRequest{Rail: o.Selector}
+		require.Equal(t, models.CheckoutAttemptModeSubscription, mode)
+		payment := &CheckoutAttemptPaymentRequest{Rail: o.Selector}
 		if o.Rail == "nmi" {
 			payment.PaymentToken = "token_test"
 		}
 		require.NoError(t, svc.validatePayment(merchantCtx(), o.Selector, payment, &UserIdentity{ID: uuid.NewString()}))
 	}
 
-	empty, err := routingService(railresolve.FixedSet{}).listCheckoutRailOptionsForPrice(merchantCtx(), price, &models.Product{})
+	empty, err := routingService(railresolve.FixedSet{}).listCheckoutOptionsForPrice(merchantCtx(), price, &models.Product{})
 	require.NoError(t, err)
 	require.Empty(t, empty)
 }
@@ -339,15 +339,15 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 	solanaLinked := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD", PSPLinks: map[string]map[string]string{"solana": {models.RailKeyRail: "solana"}}}
 	solanaPlan := recurringPrice()
 	solanaPlan.PSPLinks = map[string]map[string]string{"solana": {models.RailKeyRail: "solana", "plan_id": "7", "amount_base_units": "1000000", "period_hours": "720", "mint_symbol": "USDC"}}
-	recurringReady := &CheckoutSessionService{solanaPrepareSubscribe: &recurring.PrepareSubscribeService{}, solanaEnroll: &recurring.EnrollService{}}
-	const S, O = models.CheckoutSessionModeSubscription, models.CheckoutSessionModeOneOff
+	recurringReady := &CheckoutAttemptService{solanaPrepareSubscribe: &recurring.PrepareSubscribeService{}, solanaEnroll: &recurring.EnrollService{}}
+	const S, O = models.CheckoutAttemptModeSubscription, models.CheckoutAttemptModeOneOff
 
 	for _, tc := range []struct {
 		name  string
 		rail  string
 		price *models.Price
 		cfg   *config.ResolvedPSP
-		mode  models.CheckoutSessionMode
+		mode  models.CheckoutAttemptMode
 		want  string
 	}{
 		{"stripe engine subscription needs no provider catalog", "stripe", sub, stripeCfg, S, ""},
@@ -371,7 +371,7 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 		{"no provider config", "stripe", oneOff, nil, O, models.CheckoutRoutingSkipNotArmed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := (&CheckoutSessionService{}).checkoutRailSkipReason(tc.price, railTarget{PSP: tc.rail, Rail: tc.rail}, tc.cfg, tc.mode)
+			got := (&CheckoutAttemptService{}).checkoutRailSkipReason(tc.price, railTarget{PSP: tc.rail, Rail: tc.rail}, tc.cfg, tc.mode)
 			require.Equal(t, tc.want, got)
 		})
 	}
@@ -439,11 +439,11 @@ func TestCheckoutRequiresProviderWrites(t *testing.T) {
 		{&config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}, true},
 		{&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, true},
 	} {
-		err := (&CheckoutSessionService{config: tc.cfg}).requireProviderWrites()
+		err := (&CheckoutAttemptService{config: tc.cfg}).requireProviderWrites()
 		if tc.ok {
 			require.NoError(t, err)
 		} else {
-			require.ErrorIs(t, err, ErrCheckoutSessionValidation)
+			require.ErrorIs(t, err, ErrCheckoutAttemptValidation)
 		}
 	}
 }

@@ -37,10 +37,10 @@ export type OpenRailsErrorCode =
   | "catalog_revision_conflict"
   | "catalog_scope_mismatch"
   | "catalog_updates_disabled"
+  | "checkout_attempt_closed"
   | "checkout_offer_unavailable"
   | "checkout_payment_in_progress"
   | "checkout_request_invalid"
-  | "checkout_session_closed"
   | "checkout_session_expired"
   | "checkout_session_not_found"
   | "checkout_session_unavailable"
@@ -271,10 +271,10 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
   catalog_scope_mismatch: { status: 403, type: "authorization_error", meaning: "The catalog scope does not match the authorized merchant and catalog." },
   catalog_updates_disabled: { status: 403, type: "invalid_request_error", meaning: "Catalog updates over HTTP are disabled in this deployment." },
+  checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },
   checkout_offer_unavailable: { status: 422, type: "invalid_request_error", meaning: "The purchase is not available." },
   checkout_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this checkout session is already being processed." },
   checkout_request_invalid: { status: 422, type: "invalid_request_error", meaning: "The checkout request is invalid." },
-  checkout_session_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout session already completed or was canceled." },
   checkout_session_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout session expired." },
   checkout_session_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout session does not exist." },
   checkout_session_unavailable: { status: 403, type: "authorization_error", meaning: "The checkout session is not available to this caller." },

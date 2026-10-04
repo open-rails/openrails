@@ -206,7 +206,7 @@ func (s *CheckoutService) processEngineDowngrade(ctx context.Context, newPrice *
 	subID := billing.SubscriptionID(existingSub.ID)
 	return &TierChangeResponse{
 		Object: "tier_change", Status: "succeeded", Mode: "tier_change", Action: "downgrade", Effective: "period_end",
-		PriceID: billing.PriceID(newPrice.ID).String(), Payment: CheckoutSessionPaymentResponse{Rail: string(existingSub.Rail)}, SubscriptionID: &subID,
+		PriceID: billing.PriceID(newPrice.ID).String(), Payment: CheckoutAttemptPaymentResponse{Rail: string(existingSub.Rail)}, SubscriptionID: &subID,
 		Message:      fmt.Sprintf("Downgrade to %s scheduled. Your current plan stays active until the period ends.", newProduct.DisplayName),
 		DelayedStart: &end, Currency: newPrice.Currency, NextChargeAmount: newPrice.Amount, NextChargeDate: &end,
 	}, nil
@@ -268,7 +268,7 @@ func engineUpgradeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeRespo
 	end := p.Terms.PeriodEnd
 	resp := &TierChangeResponse{
 		Object: "tier_change", Mode: "tier_change", Action: "upgrade", Effective: "now", PriceID: billing.PriceID(p.Terms.PriceID).String(),
-		Payment: CheckoutSessionPaymentResponse{Rail: in.Rail}, SubscriptionID: &replaced,
+		Payment: CheckoutAttemptPaymentResponse{Rail: in.Rail}, SubscriptionID: &replaced,
 		Currency: p.Terms.Currency, AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(),
 	}
@@ -294,7 +294,7 @@ func engineUpgradeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeRespo
 	default:
 		if authenticationRequired(in) {
 			resp.Status = "requires_action"
-			resp.NextAction = &CheckoutSessionNextAction{Type: "payment_authentication"}
+			resp.NextAction = &CheckoutAttemptNextAction{Type: "payment_authentication"}
 			resp.Message = "The card issuer requires authentication; authenticate operation " + in.ID.String() + " to complete the upgrade"
 			return resp, nil
 		}

@@ -238,6 +238,6 @@ func TestTierChangeAdmission(t *testing.T) {
 func TestLegacySubscriptionEnrollmentIsClosed(t *testing.T) {
 	for _, rail := range []string{"stripe", "nmi", "ccbill", "solana"} {
 		_, err := (&CheckoutService{}).processSubscription(context.Background(), nil, nil, nil, nil, nil, rail)
-		require.ErrorContains(t, err, "saved-method checkout session and explicit agreement confirmation")
+		require.ErrorContains(t, err, "saved-method checkout attempt and explicit agreement confirmation")
 	}
 }

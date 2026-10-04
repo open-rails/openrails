@@ -44,8 +44,8 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 	if err != nil {
 		return err
 	}
-	if p.CheckoutSessionID != nil {
-		session, err := q.GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: op.MerchantID, ID: *p.CheckoutSessionID})
+	if p.CheckoutAttemptID != nil {
+		session, err := q.GetCheckoutAttemptByID(ctx, gen.GetCheckoutAttemptByIDParams{MerchantID: op.MerchantID, ID: *p.CheckoutAttemptID})
 		if err != nil {
 			return err
 		}

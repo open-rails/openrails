@@ -156,7 +156,7 @@ func TestSelfServiceAuthentication(t *testing.T) {
 	w := httptest.NewRecorder()
 	func() {
 		defer func() { _ = recover() }() // the handler may panic past auth on the bare runtime
-		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/me/checkout", nil))
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/me/balance", nil))
 	}()
 	require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound}, w.Code, w.Body.String())
 

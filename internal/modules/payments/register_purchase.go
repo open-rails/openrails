@@ -7,8 +7,8 @@ import (
 )
 
 type RegisterPurchaseRequest struct {
-	// CheckoutSessionID binds a provider observation to locally accepted terms.
-	CheckoutSessionID uuid.UUID
+	// CheckoutAttemptID binds a provider observation to locally accepted terms.
+	CheckoutAttemptID uuid.UUID
 	UserID            string
 	PriceID           uuid.UUID
 	Rail              string

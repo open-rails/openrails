@@ -98,7 +98,7 @@ type ConvergeFinding struct {
 	// Ungated opts a ShapeExcess repair OUT of the §3.2 confirmed-absence gate.
 	// Only legitimate when the retraction is justified by a LOCAL terminal fact
 	// rather than by an absence in provider data — retracting the effect of an
-	// already-terminated grant, expiring an abandoned checkout session. Every
+	// already-terminated grant, expiring an abandoned checkout attempt. Every
 	// use must say why in a comment. #842: the gate used to be skipped
 	// implicitly by leaving SourceDomain empty, so the dangerous sites and the
 	// harmless ones were indistinguishable.

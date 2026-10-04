@@ -363,7 +363,7 @@ func CheckoutDriver(psp PublicPSPConfig, mode string) string {
 	case FlowWallet:
 		driver = DriverSolanaPay
 	}
-	if mode == string(models.CheckoutSessionModeSubscription) &&
+	if mode == string(models.CheckoutAttemptModeSubscription) &&
 		rails.NewSubscriptionFor(models.Rail(psp.Rail)) == rails.NewSubscriptionEngine &&
 		driver != DriverCollectJS && driver != DriverCard && driver != DriverStripeElements {
 		return ""

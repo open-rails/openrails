@@ -40,9 +40,9 @@ SQL="\\set ON_ERROR_STOP on
 \\pset format aligned
 \\pset border 2
 
-\\echo '--- checkout_sessions ---'
+\\echo '--- checkout_attempts ---'
 SELECT merchant_id, id, status, rail, price_id, transaction_id, subscription_id, payment_id, created_at
-FROM billing.checkout_sessions
+FROM billing.checkout_attempts
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
    OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC

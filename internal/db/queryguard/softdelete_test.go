@@ -22,7 +22,7 @@ const (
 )
 
 // merchants.deleted_at is directory state (#721), deliberately not policed.
-var policedTables = []string{"checkout_sessions", "entitlements", "payments", "subscriptions"}
+var policedTables = []string{"checkout_attempts", "entitlements", "payments", "subscriptions"}
 
 var allow = map[string]string{
 	"CountErrorEpisodeTotals":                 "episode analytics end an entitlement window at its tombstone (deleted_at), so tombstoned windows are read on purpose",
@@ -40,15 +40,15 @@ var allow = map[string]string{
 	"ListHostEvents":                          "a settled event stays deliverable after its payment is tombstoned",
 	"RestoreSubscriptionsByDestructiveRun":    "prune rollback: finds soft-deleted rows",
 	"RestorePaymentsByDestructiveRun":         "prune rollback",
-	"RestoreCheckoutSessionsByDestructiveRun": "prune rollback",
+	"RestoreCheckoutAttemptsByDestructiveRun": "prune rollback",
 	"RestoreEntitlementsByDestructiveRun":     "prune rollback",
 	"CountPruneRestorableForRun":              "undo dry run counts exactly the rows the rollback would restore",
 	"CountMerchantRowsSubscriptions":          "merchant purge covers every row",
 	"PurgeMerchantRowsSubscriptions":          "merchant purge covers every row",
 	"CountMerchantRowsPayments":               "merchant purge covers every row",
 	"PurgeMerchantRowsPayments":               "merchant purge covers every row",
-	"CountMerchantRowsCheckoutSessions":       "merchant purge covers every row",
-	"PurgeMerchantRowsCheckoutSessions":       "merchant purge covers every row",
+	"CountMerchantRowsCheckoutAttempts":       "merchant purge covers every row",
+	"PurgeMerchantRowsCheckoutAttempts":       "merchant purge covers every row",
 	"CountMerchantRowsEntitlements":           "merchant purge covers every row",
 	"PurgeMerchantRowsEntitlements":           "merchant purge covers every row",
 }
