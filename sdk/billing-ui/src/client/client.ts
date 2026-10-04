@@ -14,6 +14,7 @@ import {
   readBillingError,
 } from "./errors"
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
+import type * as wire from "./generated/wire"
 import {
   billingStatusSchema,
   cardSetupSchema,
@@ -292,7 +293,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     ): Promise<void> {
       await send(`/me/subscriptions/${id(subscriptionId)}/cancel`, {
         method: "POST",
-        body: { feedback: input.feedback.trim() },
+        body: {
+          feedback: input.feedback.trim(),
+        } satisfies wire.CancelSubscriptionRequest,
       })
     },
 
@@ -310,7 +313,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     ): Promise<void> {
       await send(`/me/subscriptions/${id(subscriptionId)}/payment-method`, {
         method: "PUT",
-        body: { payment_method_id: paymentMethodId },
+        body: {
+          payment_method_id: paymentMethodId,
+        } satisfies wire.UpdateSubscriptionPaymentMethodRequest,
       })
     },
 
@@ -323,7 +328,11 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(
         tierChangePreviewSchema,
         `/me/subscriptions/${id(subscriptionId)}/change-tier/preview`,
-        { method: "POST", body: { price_id: priceId }, signal }
+        {
+          method: "POST",
+          body: { price_id: priceId } satisfies wire.ChangeTierRequest,
+          signal,
+        }
       )
     },
 
@@ -343,7 +352,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         `/me/subscriptions/${id(subscriptionId)}/change-tier`,
         {
           method: "POST",
-          body: { price_id: input.priceId },
+          body: { price_id: input.priceId } satisfies wire.ChangeTierRequest,
           headers: { "Idempotency-Key": input.idempotencyKey },
         }
       )
@@ -360,7 +369,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(
         solanaTierChangeTxSchema,
         `/me/subscriptions/${id(subscriptionId)}/solana-tier-change`,
-        { method: "POST", body: { new_price_id: newPriceId } }
+        {
+          method: "POST",
+          body: {
+            new_price_id: newPriceId,
+          } satisfies wire.SolanaTierChangeRequest,
+        }
       )
     },
 
@@ -377,7 +391,10 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         `/me/subscriptions/${id(subscriptionId)}/solana-tier-change/confirm`,
         {
           method: "POST",
-          body: { signature: input.signature, new_price_id: input.newPriceId },
+          body: {
+            signature: input.signature,
+            new_price_id: input.newPriceId,
+          } satisfies wire.SolanaTierChangeConfirmRequest,
         }
       )
     },
@@ -418,7 +435,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       onStage?.("confirming")
       await send(`/me/subscriptions/${id(subscriptionId)}/solana-cancel`, {
         method: "POST",
-        body: { signature },
+        body: { signature } satisfies wire.ConfirmSolanaCancelRequest,
       })
     },
 
@@ -436,7 +453,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     addPaymentMethod(card: NewCard): Promise<PaymentMethod> {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",
-        body: card,
+        body: card satisfies wire.CreatePaymentMethodRequest,
       })
     },
 
@@ -509,7 +526,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         body: {
           currency: input.currency.toUpperCase(),
           payment_method_id: input.paymentMethodId,
-        },
+        } satisfies wire.CollectionPaymentMethodRequest,
       })
     },
 
@@ -614,7 +631,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           price_key: input.priceKey,
           price_id: input.priceId,
           success_url: input.successUrl,
-        },
+        } satisfies wire.HostedCheckoutMintRequest,
       })
     },
 
@@ -633,7 +650,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           try {
             return await json(payResultSchema, `${path}/pay`, {
               method: "POST",
-              body: request,
+              body: request satisfies wire.HostedCheckoutPayRequest,
               anonymous: true,
             })
           } catch (err) {

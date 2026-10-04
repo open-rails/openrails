@@ -6,6 +6,17 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
+export type AdminCreditBalanceResponse = {
+  currency: string
+  trust_level?: string
+  display_name: string
+  unit: string
+  decimal_places: number
+  balance: string
+  held_balance: string
+  outstanding_owed_amount: string
+}
+
 export type AdminCustomerSummary = {
   id: string
   subject?: string
@@ -76,7 +87,7 @@ export type AdminUserBillingProfile = {
   entitlements: EntitlementRecord[] | null
   payments: Payment[] | null
   payment_methods: PaymentMethod[] | null
-  credit_balance: adminCreditBalanceResponse[] | null
+  credit_balance: AdminCreditBalanceResponse[] | null
   product_access: ProductAccessGrant[] | null
 }
 
@@ -268,6 +279,13 @@ export type CardDetails = {
   exp_year?: number
 }
 
+export type CardEntry = {
+  number?: string
+  exp_month?: number
+  exp_year?: number
+  cvc?: string
+}
+
 export type Catalog = {
   id: string
   merchant_id: string
@@ -417,7 +435,7 @@ export type CheckoutPaymentOptions = {
   last_four?: string
   card_type?: string
   expiry_date?: string
-  card?: cardEntry
+  card?: CardEntry
 }
 
 export type CheckoutRailOption = {
@@ -429,6 +447,12 @@ export type CheckoutRailOption = {
   public_config?: Record<string, string>
   status?: string
   retry_after?: number
+}
+
+export type CheckoutRoutingCandidateResponse = {
+  selector: string
+  rail?: string
+  skip?: string
 }
 
 export type CheckoutRoutingDryRunRequest = {
@@ -445,7 +469,7 @@ export type CheckoutRoutingDryRunResponse = {
   selected?: string
   rail?: string
   mode?: string
-  candidates: checkoutRoutingCandidateResponse[] | null
+  candidates: CheckoutRoutingCandidateResponse[] | null
   routing_reason?: unknown
 }
 
@@ -501,7 +525,7 @@ export type CheckoutSessionCreateRequest = {
   entitlement?: string
   offer_kind?: "finite" | "permanent" | "recurring"
   mode?: string
-  payment?: checkoutSessionPaymentParams
+  payment?: CheckoutSessionPaymentParams
   metadata?: Record<string, string>
   subscription_id?: string
   new_price_id?: string
@@ -519,6 +543,27 @@ export type CheckoutSessionNextAction = {
   type: string
   redirect_to_url?: CheckoutSessionRedirectToURL
   transactions?: string[]
+}
+
+export type CheckoutSessionPaymentParams = {
+  psp_id?: string
+  rail?: string
+  payment_method_id?: string
+  payment_token?: string
+  token_symbol?: string
+  flow?: string
+  wallet?: string
+  email?: string
+  name_on_card?: string
+  address1?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+  last_four?: string
+  card_type?: string
+  expiry_date?: string
+  card?: CardEntry
 }
 
 export type CheckoutSessionPaymentResponse = {
@@ -632,7 +677,7 @@ export type CreatePaymentMethodRequest = {
   last_four?: string
   card_type?: string
   expiry_date?: string
-  card?: cardEntry
+  card?: CardEntry
   card_number?: unknown
   number?: unknown
   pan?: unknown
@@ -999,9 +1044,21 @@ export type EffectiveTier = {
   product_key: string
 }
 
+export type EffectiveTierBody = {
+  entitlement: string
+  display_name: string
+  tier_rank: number
+  product: EffectiveTierRef
+}
+
+export type EffectiveTierRef = {
+  id: string
+  key: string
+}
+
 export type EffectiveTierResponse = {
   group: string
-  tier: effectiveTierBody | null
+  tier: EffectiveTierBody | null
 }
 
 export type EngineTakeover = {
@@ -1178,7 +1235,7 @@ export type HostedCheckoutPayRequest = {
   last_four?: string
   card_type?: string
   expiry_date?: string
-  card?: cardEntry
+  card?: CardEntry
 }
 
 export type HostedCheckoutPayResult = {
@@ -1773,6 +1830,11 @@ export type PaymentAttempt = {
   enriched_at?: string
 }
 
+export type PaymentCardJSON = {
+  brand?: string
+  last4?: string
+}
+
 export type PaymentFailure = {
   reason: string
   message: string
@@ -1995,10 +2057,16 @@ export type ProductArchive = {
   purchases: ArchivedPurchase[] | null
 }
 
+export type ProductArchivePurchases = {
+  action?: string
+  purchased_since?: string
+  window?: string
+}
+
 export type ProductArchiveRequest = {
   product_id?: string
   product_key?: string
-  purchases?: productArchivePurchases
+  purchases?: ProductArchivePurchases
   reason?: string
 }
 
@@ -2613,7 +2681,7 @@ export type UpdatePaymentMethodRequest = {
   last_four?: string | null
   card_type?: string | null
   expiry_date?: string | null
-  card?: cardEntry
+  card?: CardEntry
   card_number?: unknown
   number?: unknown
   pan?: unknown
@@ -2706,7 +2774,7 @@ export type UserPaymentObject = {
   created_at: string
   price?: PublicPrice
   product?: ProductSummary
-  card?: paymentCardJSON
+  card?: PaymentCardJSON
   failure?: PaymentFailure
 }
 
@@ -2768,72 +2836,4 @@ export type WorkerHealthItem = {
   consecutive_failures: number
   last_alerted_at?: string
   updated_at: string
-}
-
-export type adminCreditBalanceResponse = {
-  currency: string
-  trust_level?: string
-  display_name: string
-  unit: string
-  decimal_places: number
-  balance: string
-  held_balance: string
-  outstanding_owed_amount: string
-}
-
-export type cardEntry = {
-  number?: string
-  exp_month?: number
-  exp_year?: number
-  cvc?: string
-}
-
-export type checkoutRoutingCandidateResponse = {
-  selector: string
-  rail?: string
-  skip?: string
-}
-
-export type checkoutSessionPaymentParams = {
-  psp_id?: string
-  rail?: string
-  payment_method_id?: string
-  payment_token?: string
-  token_symbol?: string
-  flow?: string
-  wallet?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
-  card?: cardEntry
-}
-
-export type effectiveTierBody = {
-  entitlement: string
-  display_name: string
-  tier_rank: number
-  product: effectiveTierRef
-}
-
-export type effectiveTierRef = {
-  id: string
-  key: string
-}
-
-export type paymentCardJSON = {
-  brand?: string
-  last4?: string
-}
-
-export type productArchivePurchases = {
-  action?: string
-  purchased_since?: string
-  window?: string
 }

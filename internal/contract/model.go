@@ -53,9 +53,9 @@ var (
 	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
 )
 
-// cardEntry is the request form of a card (billing.Card): it decodes from
+// CardEntry is the request form of a card (billing.Card): it decodes from
 // this object and never encodes.
-type cardEntry struct {
+type CardEntry struct {
 	Number   string `json:"number"`
 	ExpMonth int    `json:"exp_month"`
 	ExpYear  int    `json:"exp_year"`
@@ -68,7 +68,7 @@ func wireForm(t reflect.Type) (reflect.Type, bool) {
 	name := t.String()
 	switch {
 	case name == "cardguard.Card":
-		return reflect.TypeFor[cardEntry](), true
+		return reflect.TypeFor[CardEntry](), true
 	case name == "billing.AmountMap":
 		return reflect.TypeFor[map[string]string](), true
 	case name == "billing.MerchantConfigurationApplyParams":
@@ -248,10 +248,11 @@ func pageItem(t reflect.Type) reflect.Type {
 	return items.Type.Elem()
 }
 
-// baseName is a type's name without its package: generic arguments become a
-// suffix (Page[billing.Subscription] is PageOfSubscription).
+// baseName is a struct's wire name: its Go name without its package,
+// capitalized; generic arguments become a suffix (Page[billing.Subscription]
+// is PageOfSubscription).
 func baseName(t reflect.Type) string {
-	name := t.Name()
+	name := strings.ToUpper(t.Name()[:1]) + t.Name()[1:]
 	open := strings.IndexByte(name, '[')
 	if open < 0 {
 		return name

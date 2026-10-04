@@ -943,7 +943,7 @@
     ],
     "internal/contract": [
       "func (o *obj) MarshalJSON() ([]byte, error) {\n\tvar b bytes.Buffer\n\tb.WriteByte('{')\n\tfor i, k := range o.keys {\n\t\tif i \u003e 0 {\n\t\t\tb.WriteByte(',')\n\t\t}\n\t\tkey, _ := json.Marshal(k)\n\t\tb.Write(key)\n\t\tb.WriteByte(':')\n\t\tval, err := marshal(o.vals[k])\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t\tb.Write(val)\n\t}\n\tb.WriteByte('}')\n\treturn b.Bytes(), nil\n}",
-      "type cardEntry struct {\n\tNumber   string `json:\"number\"`\n\tExpMonth int    `json:\"exp_month\"`\n\tExpYear  int    `json:\"exp_year\"`\n\tCVC      string `json:\"cvc\"`\n}"
+      "type CardEntry struct {\n\tNumber   string `json:\"number\"`\n\tExpMonth int    `json:\"exp_month\"`\n\tExpYear  int    `json:\"exp_year\"`\n\tCVC      string `json:\"cvc\"`\n}"
     ],
     "internal/contractaudit": [
       "type Snapshot struct {\n\tAPI map[string][]string `json:\"go_api\"`\n\n\tWire map[string][]string `json:\"wire_types\"`\n\n\tImports map[string]map[string]string `json:\"declaring_file_imports\"`\n}"

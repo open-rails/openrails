@@ -63,7 +63,9 @@ func TestTypeScriptIsClosed(t *testing.T) {
 		declared := map[string]bool{"ListPage": true, "Record": true, "T": true}
 		for _, line := range strings.Split(src, "\n") {
 			if rest, ok := strings.CutPrefix(line, "export type "); ok {
-				declared[strings.FieldsFunc(rest, func(r rune) bool { return r == ' ' || r == '<' })[0]] = true
+				typ := strings.FieldsFunc(rest, func(r rune) bool { return r == ' ' || r == '<' })[0]
+				require.True(t, typ[0] >= 'A' && typ[0] <= 'Z', "%s: type %s is not capitalized", name, typ)
+				declared[typ] = true
 			}
 		}
 		for _, line := range strings.Split(src, "\n") {

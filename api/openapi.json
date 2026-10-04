@@ -17148,6 +17148,47 @@
   },
   "components": {
     "schemas": {
+      "AdminCreditBalanceResponse": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "decimal_places": {
+            "type": "integer"
+          },
+          "balance": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "held_balance": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "outstanding_owed_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "currency",
+          "display_name",
+          "unit",
+          "decimal_places",
+          "balance",
+          "held_balance",
+          "outstanding_owed_amount"
+        ]
+      },
       "AdminCustomerSummary": {
         "type": "object",
         "properties": {
@@ -17455,7 +17496,7 @@
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/adminCreditBalanceResponse"
+                  "$ref": "#/components/schemas/AdminCreditBalanceResponse"
                 }
               },
               {
@@ -18293,6 +18334,23 @@
           }
         }
       },
+      "CardEntry": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "exp_month": {
+            "type": "integer"
+          },
+          "exp_year": {
+            "type": "integer"
+          },
+          "cvc": {
+            "type": "string"
+          }
+        }
+      },
       "Catalog": {
         "type": "object",
         "properties": {
@@ -18845,7 +18903,7 @@
             "type": "string"
           },
           "card": {
-            "$ref": "#/components/schemas/cardEntry"
+            "$ref": "#/components/schemas/CardEntry"
           }
         }
       },
@@ -18885,6 +18943,23 @@
           "psp_id",
           "rail",
           "mode"
+        ]
+      },
+      "CheckoutRoutingCandidateResponse": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "skip": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector"
         ]
       },
       "CheckoutRoutingDryRunRequest": {
@@ -18930,7 +19005,7 @@
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/checkoutRoutingCandidateResponse"
+                  "$ref": "#/components/schemas/CheckoutRoutingCandidateResponse"
                 }
               },
               {
@@ -19187,7 +19262,7 @@
             "type": "string"
           },
           "payment": {
-            "$ref": "#/components/schemas/checkoutSessionPaymentParams"
+            "$ref": "#/components/schemas/CheckoutSessionPaymentParams"
           },
           "metadata": {
             "type": "object",
@@ -19257,6 +19332,65 @@
         "required": [
           "type"
         ]
+      },
+      "CheckoutSessionPaymentParams": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "payment_method_id": {
+            "type": "string"
+          },
+          "payment_token": {
+            "type": "string"
+          },
+          "token_symbol": {
+            "type": "string"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "wallet": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name_on_card": {
+            "type": "string"
+          },
+          "address1": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "zip": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "last_four": {
+            "type": "string"
+          },
+          "card_type": {
+            "type": "string"
+          },
+          "expiry_date": {
+            "type": "string"
+          },
+          "card": {
+            "$ref": "#/components/schemas/CardEntry"
+          }
+        }
       },
       "CheckoutSessionPaymentResponse": {
         "type": "object",
@@ -19625,7 +19759,7 @@
             "type": "string"
           },
           "card": {
-            "$ref": "#/components/schemas/cardEntry"
+            "$ref": "#/components/schemas/CardEntry"
           },
           "card_number": {},
           "number": {},
@@ -20941,6 +21075,44 @@
           "product_key"
         ]
       },
+      "EffectiveTierBody": {
+        "type": "object",
+        "properties": {
+          "entitlement": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "tier_rank": {
+            "type": "integer"
+          },
+          "product": {
+            "$ref": "#/components/schemas/EffectiveTierRef"
+          }
+        },
+        "required": [
+          "entitlement",
+          "display_name",
+          "tier_rank",
+          "product"
+        ]
+      },
+      "EffectiveTierRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key"
+        ]
+      },
       "EffectiveTierResponse": {
         "type": "object",
         "properties": {
@@ -20950,7 +21122,7 @@
           "tier": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/effectiveTierBody"
+                "$ref": "#/components/schemas/EffectiveTierBody"
               },
               {
                 "type": "null"
@@ -21580,7 +21752,7 @@
             "type": "string"
           },
           "card": {
-            "$ref": "#/components/schemas/cardEntry"
+            "$ref": "#/components/schemas/CardEntry"
           }
         }
       },
@@ -23915,6 +24087,17 @@
           "attempted_at"
         ]
       },
+      "PaymentCardJSON": {
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string"
+          },
+          "last4": {
+            "type": "string"
+          }
+        }
+      },
       "PaymentFailure": {
         "type": "object",
         "properties": {
@@ -24717,6 +24900,21 @@
           "purchases"
         ]
       },
+      "ProductArchivePurchases": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "purchased_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window": {
+            "type": "string"
+          }
+        }
+      },
       "ProductArchiveRequest": {
         "type": "object",
         "properties": {
@@ -24727,7 +24925,7 @@
             "type": "string"
           },
           "purchases": {
-            "$ref": "#/components/schemas/productArchivePurchases"
+            "$ref": "#/components/schemas/ProductArchivePurchases"
           },
           "reason": {
             "type": "string"
@@ -27213,7 +27411,7 @@
             ]
           },
           "card": {
-            "$ref": "#/components/schemas/cardEntry"
+            "$ref": "#/components/schemas/CardEntry"
           },
           "card_number": {},
           "number": {},
@@ -27505,7 +27703,7 @@
             "$ref": "#/components/schemas/ProductSummary"
           },
           "card": {
-            "$ref": "#/components/schemas/paymentCardJSON"
+            "$ref": "#/components/schemas/PaymentCardJSON"
           },
           "failure": {
             "$ref": "#/components/schemas/PaymentFailure"
@@ -27731,204 +27929,6 @@
           "consecutive_failures",
           "updated_at"
         ]
-      },
-      "adminCreditBalanceResponse": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "trust_level": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "unit": {
-            "type": "string"
-          },
-          "decimal_places": {
-            "type": "integer"
-          },
-          "balance": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "held_balance": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "outstanding_owed_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "currency",
-          "display_name",
-          "unit",
-          "decimal_places",
-          "balance",
-          "held_balance",
-          "outstanding_owed_amount"
-        ]
-      },
-      "cardEntry": {
-        "type": "object",
-        "properties": {
-          "number": {
-            "type": "string"
-          },
-          "exp_month": {
-            "type": "integer"
-          },
-          "exp_year": {
-            "type": "integer"
-          },
-          "cvc": {
-            "type": "string"
-          }
-        }
-      },
-      "checkoutRoutingCandidateResponse": {
-        "type": "object",
-        "properties": {
-          "selector": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "skip": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "selector"
-        ]
-      },
-      "checkoutSessionPaymentParams": {
-        "type": "object",
-        "properties": {
-          "psp_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          },
-          "payment_token": {
-            "type": "string"
-          },
-          "token_symbol": {
-            "type": "string"
-          },
-          "flow": {
-            "type": "string"
-          },
-          "wallet": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "name_on_card": {
-            "type": "string"
-          },
-          "address1": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "zip": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "last_four": {
-            "type": "string"
-          },
-          "card_type": {
-            "type": "string"
-          },
-          "expiry_date": {
-            "type": "string"
-          },
-          "card": {
-            "$ref": "#/components/schemas/cardEntry"
-          }
-        }
-      },
-      "effectiveTierBody": {
-        "type": "object",
-        "properties": {
-          "entitlement": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "tier_rank": {
-            "type": "integer"
-          },
-          "product": {
-            "$ref": "#/components/schemas/effectiveTierRef"
-          }
-        },
-        "required": [
-          "entitlement",
-          "display_name",
-          "tier_rank",
-          "product"
-        ]
-      },
-      "effectiveTierRef": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "key"
-        ]
-      },
-      "paymentCardJSON": {
-        "type": "object",
-        "properties": {
-          "brand": {
-            "type": "string"
-          },
-          "last4": {
-            "type": "string"
-          }
-        }
-      },
-      "productArchivePurchases": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "purchased_since": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "window": {
-            "type": "string"
-          }
-        }
       },
       "ErrorEnvelope": {
         "type": "object",
