@@ -37,7 +37,7 @@ internal/http/handlers/merchant_catalog_copilot.go 6
 internal/http/handlers/merchant_checkout_routing.go 2
 internal/http/handlers/merchant_dashboard.go 7
 internal/http/handlers/merchant_metrics.go 7
-internal/http/handlers/merchant_payment_providers.go 8
+internal/http/handlers/merchant_payment_providers.go 7
 internal/http/handlers/notifications.go 4
 internal/http/handlers/payment_attempts.go 8
 internal/http/handlers/payment_methods.go 32
@@ -69,7 +69,7 @@ internal/http/handlers/webhook_basistheory.go 7
 internal/http/handlers/webhook.go 48
 internal/http/middleware/admin_ratelimit.go 1
 internal/http/middleware/ratelimit_neutral.go 1
-internal/http/request/request.go 4
+internal/http/request/request.go 1
 internal/http/routes/platform.go 4
 internal/standalonehandlers/merchant_api_keys.go 3
 internal/standalonehandlers/merchant_name.go 1
