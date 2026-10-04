@@ -13,7 +13,8 @@ import (
 
 // These commands commit in OpenRails-owned transactions in every deployment.
 // They cannot join a host database transaction; an embedding host that must
-// commit its provider obligation atomically uses embed.HostTransactions.
+// commit its provider obligation atomically uses the embedded Client's Tx
+// operations.
 
 // providerOperationPath refuses ids that cannot name a path segment with the
 // same invalid_param refusal the server-side validation returns. Operation ids

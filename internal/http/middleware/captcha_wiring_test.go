@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // FC-13 / or#865: evaluateCaptchaVerify dereferences deps.Verifier without a

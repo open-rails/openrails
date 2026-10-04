@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	auth "github.com/open-rails/helpers/auth"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -20,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -42,6 +43,10 @@ type Options struct {
 	// Gate has resolved the effective principal, so counters key the authorized
 	// user rather than an untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
+
+	// InProcess marks the embedded Client's own handler: catalog mutations are
+	// registered for its host principal whatever AllowCatalogUpdates says.
+	InProcess bool
 }
 
 type GateOptions struct {
@@ -484,7 +489,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				}
 				return billingauth.Principal{
 					MerchantID: resolved.MerchantID,
-					Kind:       billingauth.DelegatedUser,
+					Kind:       billingauth.Delegated,
 					Subject:    resolved.DelegatedSubject,
 					UserContext: billingauth.UserContext{
 						UserID:        resolved.DelegatedSubject,
@@ -512,7 +517,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 		return billingauth.Principal{
 			MerchantID: resolved.MerchantID,
-			Kind:       billingauth.DelegatedUser,
+			Kind:       billingauth.Delegated,
 			Subject:    resolved.DelegatedSubject,
 			UserContext: billingauth.UserContext{
 				UserID:        resolved.DelegatedSubject,
@@ -548,9 +553,9 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		switch {
 		case errors.Is(err, auth.ErrRevoked), errors.Is(err, billingauth.ErrUnauthenticated):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: credentialFailure(err)}
-		case errors.Is(err, authpolicy.ErrPermissionRequired):
+		case errors.Is(err, billing.ErrPermissionRequired):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
-		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
+		case errors.Is(err, billing.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 		default:
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
@@ -582,7 +587,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if mid != membershipMID {
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
-	return billingauth.Principal{MerchantID: mid, Kind: billingauth.NativeUser, Subject: uc.UserID, UserContext: uc}, nil
+	return billingauth.Principal{MerchantID: mid, Kind: billingauth.User, Subject: uc.UserID, UserContext: uc}, nil
 }
 
 // RequireRecentSignIn implements billingauth.Gate with the control plane's
@@ -665,7 +670,7 @@ func bearerToken(header string) string {
 
 func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	readActions := catalog
-	catalog = withCatalogWritePolicy(catalog, rt)
+	catalog = withCatalogWritePolicy(catalog, rt, opts)
 	read := opts.merchantActionPermissionMW(permissions.MerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
@@ -805,7 +810,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// overage). PUT rides the grant class; DELETE the destructive class —
 	// dropping a negotiated card silently reprices the customer at default.
 	customers.Handle(http.MethodGet, "/rate-overrides", h(httphandlers.ListAdminRateOverrides), customerRead...)
-	catalogRates := withCatalogWritePolicy(customers, rt)
+	catalogRates := withCatalogWritePolicy(customers, rt, opts)
 	catalogRates.Handle(http.MethodPut, "/rate-overrides/:meter_key", h(httphandlers.PutAdminRateOverride), grantWrite...)
 	catalogRates.Handle(http.MethodDelete, "/rate-overrides/:meter_key", h(httphandlers.DeleteAdminRateOverride), revokeWrite...)
 

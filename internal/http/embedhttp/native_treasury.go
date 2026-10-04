@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func nativeTreasury(authenticate router.Middleware, auth *billingauth.Integration) router.Middleware {
@@ -16,7 +16,7 @@ func nativeTreasury(authenticate router.Middleware, auth *billingauth.Integratio
 		return authenticate(func(r *request.Request) {
 			identity, err := authenticateIntegration(r.Request.Context(), r.Request, auth)
 			target, ok := merchanttarget.FromContext(r.Request.Context())
-			if err != nil || !ok || identity.Kind != billingauth.NativeUser || identity.CustomerID == "" {
+			if err != nil || !ok || identity.Kind != billingauth.User || identity.CustomerID == "" {
 				r.AbortJSON(http.StatusUnauthorized, "native customer identity required")
 				return
 			}

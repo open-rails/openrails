@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -70,7 +71,7 @@ func (c *ControlPlane) ProvisionMerchant(ctx context.Context, name, ownerUserID 
 		return m, false, err
 	}
 	m, err = c.CreateMerchant(ctx, name, ownerUserID, nil)
-	if errors.Is(err, merchants.ErrMerchantNameTaken) {
+	if errors.Is(err, billing.ErrMerchantNameTaken) {
 		// A concurrent claim won the name; report it as existing.
 		m, err = directory.GetBySlug(ctx, name)
 		return m, false, err
@@ -107,5 +108,5 @@ func (c *ControlPlane) CreateOwnedMerchant(ctx context.Context, name, userID str
 			return m, false, err
 		}
 	}
-	return nil, false, fmt.Errorf("%w: %q", merchants.ErrMerchantNameTaken, name)
+	return nil, false, fmt.Errorf("%w: %q", billing.ErrMerchantNameTaken, name)
 }

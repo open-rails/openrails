@@ -8,15 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/embed"
 )
 
 // declarePrevious declares a rotated-out webhook secret for rail, with an
 // overlap expiry when expires is non-zero.
-func declarePrevious(rail, old string, expires time.Time) func(map[string]embed.PSPConfig) {
-	return func(psps map[string]embed.PSPConfig) {
+func declarePrevious(rail, old string, expires time.Time) func(map[string]openrails.PSPConfig) {
+	return func(psps map[string]openrails.PSPConfig) {
 		account := psps[rail][rail]
 		account.Secrets["webhook_signing_secret_previous"] = old
 		if !expires.IsZero() {

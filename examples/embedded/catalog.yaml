@@ -1,0 +1,12 @@
+# catalog.yaml
+schema_version: 1 # the file format, not your catalog's version
+products:
+  - key: premium
+    display_name: Premium
+    entitlements_spec: {premium: null} # owning this product grants the "premium" entitlement
+    prices:
+      - key: premium-monthly
+        currency: USD
+        unit_amount: 9990000 # $9.99; every amount is micros (millionths of a dollar)
+        access_duration_hours: 720 # 30 days of access per payment
+        auto_renew: true # rebill every 30 days until cancelled

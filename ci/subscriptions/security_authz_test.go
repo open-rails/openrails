@@ -20,9 +20,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // refused is a customer or merchant request the engine must not honor: it
@@ -128,14 +126,14 @@ func lastFour(w *world, rail string, entry ledgerEntry) string {
 // multi-merchant host runs them. Its staff are authorized only for itself.
 type rival struct {
 	slug   string
-	rt     *embed.Runtime
+	rt     *openrails.Client
 	server *httptest.Server
 	client *openrails.Client
 }
 
 func (w *world) rival() *rival {
 	// Its own identity provider: merchant A's credentials mean nothing there.
-	return w.peer("rival-"+uuid.NewString()[:8], embed.CustomerBillingManagement, &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]embed.PSPConfig{
+	return w.peer("rival-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]openrails.PSPConfig{
 		"stripe": {"stripe": {AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}}},
 		"nmi":    {"nmi": {AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}}},
 	})
@@ -144,16 +142,16 @@ func (w *world) rival() *rival {
 // sibling is another process of the same merchant on the same database, as
 // hosts run several replicas behind one load balancer.
 func (w *world) sibling() *rival {
-	return w.siblingWith(embed.CustomerBillingManagement)
+	return w.siblingWith(openrails.CustomerBillingManagement)
 }
 
 // siblingWith is a sibling publishing the given customer route scope.
-func (w *world) siblingWith(scope embed.CustomerHTTPScope) *rival {
+func (w *world) siblingWith(scope openrails.CustomerHTTPScope) *rival {
 	return w.peer(w.slug, scope, w.auth, w.declaredPSPs())
 }
 
-func (w *world) declaredPSPs() map[string]embed.PSPConfig {
-	return map[string]embed.PSPConfig{
+func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
+	return map[string]openrails.PSPConfig{
 		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}}},
 		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}},
 		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}}},
@@ -162,7 +160,7 @@ func (w *world) declaredPSPs() map[string]embed.PSPConfig {
 
 // peer is another process on this database. Subjects "auto-<uuid>" are the
 // customer's automation credentials, not their interactive session.
-func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, psps map[string]embed.PSPConfig, delegated ...billingauth.DelegatedAuthenticator) *rival {
+func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier, psps map[string]openrails.PSPConfig, delegated ...func(*http.Request) (*billingauth.DelegatedPrincipal, error)) *rival {
 	t := w.t
 	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{
 		Verifier: v,
@@ -186,21 +184,19 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 		},
 	})
 	require.NoError(t, err)
-	var customers billingauth.DelegatedAuthenticator
+	routes := openrails.CustomerRoutesConfig{Merchant: slug, Scope: scope}
 	if len(delegated) > 0 {
-		customers = delegated[0]
+		routes.Authenticate = delegated[0]
 	}
-	rt, err := embed.New(t.Context(), embed.Options{
-		DelegatedAuthenticator: customers,
-		Auth:                   identity,
-		HTTP:                   &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: slug, Scope: scope}}},
-		Merchant:               &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps}},
-		Config: &config.Config{
-			TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, AllowCatalogUpdates: true,
-			DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		},
-		PGXPool: w.pool, River: embed.RiverFromHost(), StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock,
-	})
+	deps := hooks(identity)
+	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = w.pool, w.stripe, w.nmi, w.clock
+	rt, err := openrails.New(t.Context(), openrails.Config{
+		Schema: w.schema, River: openrails.RiverHostOwned,
+		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
+		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
+		HTTP:     &openrails.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []openrails.CustomerRoutesConfig{routes}},
+		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},
+	}, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	if slug != w.slug {
@@ -209,7 +205,7 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 	// A replica binds its own River producer and workers. Another merchant
 	// stays headless: one fleet per merchant runtime in this harness.
 	jobs, err := riverkit.New(t.Context(), w.pool, &river.Config{
-		Schema: w.schema, Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 2}},
+		Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
 		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
 	}, rt.RiverJobs())
 	require.NoError(t, err)
@@ -222,16 +218,13 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 	return w.serve(slug, rt)
 }
 
-func (w *world) serve(slug string, rt *embed.Runtime) *rival {
+func (w *world) serve(slug string, rt *openrails.Client) *rival {
 	t := w.t
-	bundle, err := openrailshttp.Routes(rt)
-	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, bundle.Mount(mux, mountPrefix))
+	require.NoError(t, openrailshttp.Mount(mux, rt, mountPrefix))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	client, err := rt.Client()
-	require.NoError(t, err)
+	client := rt
 	return &rival{slug: slug, rt: rt, server: server, client: client}
 }
 

@@ -11,10 +11,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func creditPagination(r *httprequest.Request) (limit, offset int, ok bool) {

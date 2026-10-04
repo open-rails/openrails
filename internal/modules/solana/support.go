@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -180,7 +180,7 @@ func FormatBaseUnits(units uint64, decimals int) string {
 // RequireSolanaRailConfig resolves the ctx merchant's armed Solana rail
 // account (Layer C, #788): the psps row's settings
 // materialized into the runtime Solana config. Unarmed fails closed.
-func RequireSolanaRailConfig(ctx context.Context, src railresolve.Source) (*config.PSPConfig, error) {
+func RequireSolanaRailConfig(ctx context.Context, src railresolve.Source) (*config.ResolvedPSP, error) {
 	if src == nil {
 		return nil, fmt.Errorf("solana not configured")
 	}

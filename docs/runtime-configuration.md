@@ -9,10 +9,10 @@ retired inputs and refuse configuration loading.
 
 ## Authentication
 
-Embedded billing receives `config.Config` and a provider-neutral authentication
-integration through `Options.Auth`; it does not load AuthKit configuration.
-Standalone hosts use `internal/hostconfig.Config`, which composes billing settings
-with `internal/hostconfig.AuthConfig`. Its loader handles YAML, environment variables
+Embedded billing receives `openrails.Config` and the host's authentication hooks
+in `openrails.Deps`; it does not load AuthKit configuration. Standalone hosts use
+`internal/hostconfig.Config`, which composes billing settings with the control
+plane's `auth` settings (`openrails.AuthConfig`). Its loader handles YAML, environment variables
 and mounted secret files. Remote consumers only construct a Client.
 
 An embedded host supplying authentication does not need a standalone issuer or
@@ -76,7 +76,7 @@ subscription ownership. Explicit historical provider catalog links remain usable
 
 ## Database schema
 
-`db.schema` / `DB_SCHEMA` (default `billing`) names the Postgres schema that
+`schema` / `DB_SCHEMA` (default `billing`; `Config.Schema` embedded) names the Postgres schema that
 holds every OpenRails table, function and type. It must be a plain identifier
 (letters, digits, underscore). All OpenRails SQL is authored in `billing` and
 runs there verbatim. Any other schema is reached by one token-aware rewrite,

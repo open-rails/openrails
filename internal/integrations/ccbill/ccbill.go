@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // GenerateFlexFormURLParams contains parameters for generating CCBill FlexForm

@@ -13,10 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
 )
 
 // SEC-25: a refunded purchase stays refunded. After the provider reports a
@@ -28,30 +27,19 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	const secret = "whsec_e2e_security"
 	const account = "acct_e2e_security"
 	slug := "security-" + uuid.NewString()[:8]
-	runtime, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{
-			TestMode:            config.CredentialPostureSandbox,
-			AllowCatalogUpdates: true,
-			ProviderWriteMode:   config.ProviderWriteModeFull,
-			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:       []string{"https://example.test"},
-		},
-		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{
-			DisplayName: slug,
-			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
-				AccountID: account,
-				Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
-			}}},
-		}},
-		HTTP:            &embed.HTTPConfig{},
-		PGXPool:         f.pool,
-		River:           embed.RiverManagedByOpenRails(f.schema),
-		StripeTransport: fake,
-	})
+	cfg := f.config()
+	cfg.ProviderWriteMode = openrails.ProviderWritesFull
+	cfg.ReturnOrigins = []string{"https://example.test"}
+	cfg.HTTP = &openrails.HTTPConfig{}
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug,
+		PSPs: map[string]openrails.PSPConfig{"stripe": {"stripe": {
+			AccountID: account,
+			Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
+		}}},
+	}
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, StripeTransport: fake})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
-	client, err := runtime.Client()
-	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 
 	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key: "refund-" + uuid.NewString()[:8], DisplayName: "Refunded post", EntitlementsSpec: map[string]*int{"content:refunded": nil},
@@ -70,10 +58,8 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	require.NoError(t, err)
 	providerSessionID, checkoutSessionID, metadataUserID, metadataPriceID := fake.metadata(t)
 
-	bundle, err := openrailshttp.Routes(runtime)
-	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, bundle.Mount(mux))
+	require.NoError(t, openrailshttp.Mount(mux, client))
 	deliver := func(payload []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, account, secret, payload, time.Now())

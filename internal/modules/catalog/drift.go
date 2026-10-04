@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -69,7 +69,7 @@ type DriftReport struct {
 
 // ActiveDriftPSP resolves the account that receives new catalog work on rail.
 // Unarmed rails report ok=false; resolution failures are errors.
-func ActiveDriftPSP(ctx context.Context, rails railresolve.Source, rail models.Rail) (*config.PSPConfig, bool, error) {
+func ActiveDriftPSP(ctx context.Context, rails railresolve.Source, rail models.Rail) (*config.ResolvedPSP, bool, error) {
 	if rails == nil {
 		return nil, false, nil
 	}

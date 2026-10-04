@@ -14,15 +14,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	auth "github.com/open-rails/helpers/auth"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {

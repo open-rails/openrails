@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/migratekit"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -41,7 +41,7 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Optio
 	}
 	riverSchema := opts.RiverSchema
 	if riverSchema == "" {
-		riverSchema = config.RiverSchema
+		riverSchema = config.DefaultRiverSchema
 	}
 
 	log.Infof("Running OpenRails migrations (schema %q)...", schema)
@@ -87,7 +87,7 @@ func runRiverMigrationsPool(ctx context.Context, pgxPool *pgxpool.Pool, schema s
 		return fmt.Errorf("missing postgres pool")
 	}
 	if schema == "" {
-		schema = config.RiverSchema
+		schema = config.DefaultRiverSchema
 	}
 	// Shared protocol with AuthKit: serialize schema creation and River's own
 	// version migrations without pinning the caller pool's only connection.

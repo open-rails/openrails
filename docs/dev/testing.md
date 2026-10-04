@@ -35,7 +35,7 @@ must be invoked explicitly and is not a merge check.
 
 Business time covers billing periods, entitlement validity, cancellation,
 renewal, dunning retries, checkout expiry, and credit/hold expiry. It uses the
-runtime `clockwork.Clock`; supply `embed.Options.Clock` before constructing a
+runtime `clockwork.Clock`; supply `Deps.Clock` before constructing a
 test runtime and advance the fake clock rather than sleeping. This seam is
 refused with live provider credentials. Infrastructure time (cache TTLs, rate
 limits, webhook signature tolerance, and transport retry backoff) may use wall

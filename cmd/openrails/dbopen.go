@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 )
 
@@ -17,7 +17,7 @@ func openCLIDB(ctx context.Context, cfg *config.Config) (*db.DB, error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(ctx, cfg.DB)
+	database, err := db.NewDB(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}

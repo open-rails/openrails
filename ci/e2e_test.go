@@ -21,8 +21,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
 )
 
 type fixture struct {
@@ -50,30 +48,40 @@ func newFixture(t *testing.T) *fixture {
 	})
 
 	// The fixture owns no migration files. OpenRails applies its own public
-	// migrations, and the second call proves replay is safe before a runtime is
+	// migrations, and the second call proves replay is safe before a client is
 	// constructed.
 	for range 2 {
-		require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{
-			Schema: f.schema,
-			River:  embed.RiverManagedByOpenRails(f.schema),
-		}))
+		require.NoError(t, openrails.Migrate(t.Context(), pool, f.config()))
 	}
 	return f
 }
 
-func (f *fixture) runtime(t *testing.T, slug string) (*embed.Runtime, *openrails.Client) {
+// config is the fixture's engine configuration: its own schema for billing
+// tables and managed River. Catalog updates stay unpublished: the in-process
+// Client writes its own catalog as the process owner.
+func (f *fixture) config() openrails.Config {
+	return openrails.Config{
+		Schema:            f.schema,
+		RiverSchema:       f.schema,
+		TestMode:          openrails.Sandbox,
+		ProviderWriteMode: openrails.ProviderWritesReadOnly,
+		ReturnOrigins:     []string{"https://e2e.test"},
+	}
+}
+
+func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
 	return f.runtimeWithStripe(t, slug, nil)
 }
 
-func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) (*embed.Runtime, *openrails.Client) {
+func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) *openrails.Client {
 	t.Helper()
-	providerWriteMode := config.ProviderWriteModeReadOnly
-	var stripeTransport http.RoundTripper
-	var psps map[string]embed.PSPConfig
+	cfg := f.config()
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
+	deps := openrails.Deps{Postgres: f.pool}
 	if transport != nil {
-		providerWriteMode = config.ProviderWriteModeFull
-		stripeTransport = transport
-		psps = map[string]embed.PSPConfig{"stripe": {"stripe": {
+		cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		deps.StripeTransport = transport
+		cfg.Merchant.PSPs = map[string]openrails.PSPConfig{"stripe": {"stripe": {
 			AccountID: "acct_e2e",
 			Secrets: map[string]string{
 				"secret_key":             "sk_test_e2e",
@@ -81,27 +89,10 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 			},
 		}}}
 	}
-	runtime, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{
-			TestMode:            config.CredentialPostureSandbox,
-			AllowCatalogUpdates: true,
-			ProviderWriteMode:   providerWriteMode,
-			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:       []string{"https://e2e.test"},
-		},
-		Merchant: &embed.MerchantDeclaration{
-			Slug:   slug,
-			Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps},
-		},
-		PGXPool:         f.pool,
-		River:           embed.RiverManagedByOpenRails(f.schema),
-		StripeTransport: stripeTransport,
-	})
+	client, err := openrails.New(t.Context(), cfg, deps)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
-	client, err := runtime.Client()
-	require.NoError(t, err)
-	return runtime, client
+	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	return client
 }
 
 func (f *fixture) dsn(t *testing.T) string {
@@ -112,7 +103,7 @@ func (f *fixture) dsn(t *testing.T) string {
 
 func TestFreshBootstrapAndReplay(t *testing.T) {
 	f := newFixture(t)
-	_, client := f.runtime(t, "bootstrap-"+uuid.NewString()[:8])
+	client := f.runtime(t, "bootstrap-"+uuid.NewString()[:8])
 
 	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key:              "welcome-" + uuid.NewString()[:8],
@@ -141,8 +132,8 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 
 func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	f := newFixture(t)
-	_, alice := f.runtime(t, "merchant-a-"+uuid.NewString()[:8])
-	_, bob := f.runtime(t, "merchant-b-"+uuid.NewString()[:8])
+	alice := f.runtime(t, "merchant-a-"+uuid.NewString()[:8])
+	bob := f.runtime(t, "merchant-b-"+uuid.NewString()[:8])
 
 	productA, err := alice.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "alice-post", DisplayName: "Alice post"})
 	require.NoError(t, err)
@@ -175,7 +166,7 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 
 func TestCatalogEnsureIsIdempotent(t *testing.T) {
 	f := newFixture(t)
-	_, client := f.runtime(t, "idempotent-"+uuid.NewString()[:8])
+	client := f.runtime(t, "idempotent-"+uuid.NewString()[:8])
 	key := "stable-product-" + uuid.NewString()[:8]
 
 	first, err := client.Products.Ensure(t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: "First title"})
@@ -194,7 +185,7 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 // A catalog application's meters and rate cards land in the runtime's own schema.
 func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	f := newFixture(t)
-	_, client := f.runtime(t, "metered-"+uuid.NewString()[:8])
+	client := f.runtime(t, "metered-"+uuid.NewString()[:8])
 	key := "metered-" + uuid.NewString()[:8]
 	apply := func(unitAmount string) {
 		revision, err := client.Catalog.Revision(t.Context())
@@ -237,7 +228,7 @@ products:
 func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	f := newFixture(t)
 	provider := &stripeCheckoutFake{t: t}
-	_, client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
+	client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
 
 	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key:              "premium-post-" + uuid.NewString()[:8],

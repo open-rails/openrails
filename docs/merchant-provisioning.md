@@ -37,7 +37,7 @@ snapshot credentials while preserving existing metadata and archived accounts.
 Catalog manifests are applied explicitly and are not replayed at ordinary boot.
 
 Embedded hosts provision merchants programmatically
-(`embed.Options.Merchant`, same manifest shape) and pass auth at
+(`Config.Merchant`, same manifest shape) and pass auth at
 Runtime construction; the issuer-as-owner path below is the standalone mechanism.
 
 ## Merchant identity and names
@@ -82,24 +82,31 @@ deployments, the reserved names and creation pattern. Hosts rename as the
 operator with `ControlPlane.RenameMerchant`. `GET /v1/platform/merchants?q=`
 searches current names. A signed-in user lists the merchants they hold a role in
 with `GET /v1/merchants` (`{id, slug, display_name, role}`, the user's role in
-each); hosts use `ControlPlane.ListUserMerchants`.
+each); hosts use `Client.ListUserMerchants`.
 
 ### Hosted creation recipe (registration is provisioning)
 
 A hosted product (openrails-saas shape) wires everything through
-`controlplane.Options.MerchantCreation` (`internal/embedcontrolplane`):
+`Config.ControlPlane.MerchantCreation`:
 
 ```go
-cp, err := controlplane.Attach(ctx, rt, controlplane.Options{
+cfg.ControlPlane = &openrails.ControlPlaneConfig{
+    Auth:          openrails.AuthConfig{Issuer: "https://api.my-brand.example"},
     HostedPosture: true,
-    EmailSender:   sender,
-    MerchantCreation: &controlplane.MerchantCreationConfig{
+    MerchantCreation: &openrails.MerchantCreationConfig{
         ReservedSlugs: []string{"my-brand"}, // + merchant.ReservedHostedSlugs, always
-        Admission: func(ctx context.Context, slug, ownerUserID string) error {
-            return nil // host cost gate: allowance / card-on-file (or#914 item 3)
-        },
+        FreeAllowance: 2,                    // owned merchants before a card on file is required
     },
-})
+}
+var client *openrails.Client
+deps := openrails.Deps{
+    EmailSender: sender,
+    // openrails-saas shape: the platform merchant's book holds the vault.
+    HasVaultedPaymentMethod: func(ctx context.Context, subject string) (bool, error) {
+        return client.SubjectHasVaultedPaymentMethod(ctx, platformMerchantID, subject)
+    },
+}
+client, err := openrails.New(ctx, cfg, deps)
 ```
 
 With it set, signed-in users create merchants they own with
@@ -109,49 +116,36 @@ Refusals: 400 `invalid_name`, 409 `name_taken` / `name_reserved`, 403
 `email_unverified` / `creation_refused`, 402 `payment_method_required`. Creation
 is capped at 12 per 24 hours per client IP and per user (429 with
 `Retry-After`). The same policy holds in-process `ProvisionMerchant` calls that
-name an `OwnerUserID` (typed refusals `controlplane.ErrSlugReserved` /
-`controlplane.ErrCreationRefused`) and merchant renames. Ownerless
+name an `OwnerUserID` (typed refusals `billing.ErrMerchantSlugReserved` /
+`billing.ErrMerchantCreationRefused`) and merchant renames. Ownerless
 `ProvisionMerchant` and Bootstrap are operator acts and stay ungated — that is
 how a platform merchant claims a reserved name.
 
-For the Admission gate itself, `controlplane.MerchantCreationAdmission` composes the
-standard hosted policy from openrails' own state — verified email always; a
-free allowance of OWNED merchants; beyond it, a vaulted payment method on
-file (no charge) unlocks more:
-
-```go
-admission, err := controlplane.MerchantCreationAdmission(rt, controlplane.MerchantCreationPolicy{
-    FreeAllowance: 2,
-    HasVaultedPaymentMethod: func(ctx context.Context, subject string) (bool, error) {
-        // openrails-saas shape: the platform merchant's book holds the vault.
-        return controlplane.SubjectHasVaultedPaymentMethod(ctx, rt, platformMerchantID, subject)
-    },
-})
-```
-
-The predicate is repair-safe: a name that resolves to a merchant the caller
-already owns bypasses the allowance and vault checks because it creates
-nothing. A genuinely new name still runs the full gate. The allowance counts
-live merchants the caller owns.
-
-Typed refusals: `controlplane.ErrEmailUnverified`, `controlplane.ErrVaultedPaymentMethodRequired`.
+`FreeAllowance` selects the standard hosted admission policy, composed from
+OpenRails' own state: verified email always; a free allowance of owned
+merchants; beyond it, a vaulted payment method on file (no charge,
+`Deps.HasVaultedPaymentMethod`) unlocks more. The predicate is repair-safe: a
+name that resolves to a merchant the caller already owns bypasses the allowance
+and vault checks because it creates nothing. Typed refusals:
+`billing.ErrMerchantCreationEmailUnverified`,
+`billing.ErrMerchantCreationPaymentMethodRequired`.
 
 ### Merchant retirement (never-used names go back in the pool)
 
 Core provides the mechanism; when to warn about and retire an unused merchant
 is the host's policy (openrails-saas owns its own, with its own notices).
 
-- `cp.ListMerchantRetirementCandidates(ctx, req)` pages live,
+- `client.ListMerchantRetirementCandidates(ctx, req)` pages live,
   group-bound merchants created before `req.CreatedBefore`, oldest first,
   excluding reserved slugs (`merchant.ReservedHostedSlugs` plus
   `MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
   with the merchant's own scoped queries.
-- `cp.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
+- `client.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
   row, refuses a missing/retired merchant, a different group UUID, a reserved
   slug or any activity, and otherwise commits the irreversible tombstone, which
   releases the name, before deleting exactly that AuthKit group. Refusals are
   returned in the result.
-- `cp.CompletePendingMerchantRetirements(ctx, limit)` retries committed
+- `client.CompletePendingMerchantRetirements(ctx, limit)` retries committed
   retirements whose group release failed, by UUID.
 
 Activity is any customer (and everything owned through customers), payment or
@@ -245,7 +239,7 @@ an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.
 
 - Embedded hosts pass them from their own config tree:
-  `embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)`.
+  `openrails.ParseMerchantDeclaration` for one merchant.
 - Standalone snapshot custody lists mounted files in `merchant_manifest_overlays`
   (env `MERCHANT_MANIFEST_OVERLAYS`).
 
@@ -373,7 +367,7 @@ Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
 configuration routes require explicit HTTP publication. Snapshot credential writes
 are unavailable, while authorized metadata operations and archive decisions remain
 available through the Client. Catalog mutation routes are omitted unless
-`allow_catalog_updates: true`; the same policy denies ordinary embedded Client
-writes. Catalog reads remain available, and trusted local operator application
+`allow_catalog_updates: true`. The embedded in-process Client is the process
+owner and writes its own catalog whatever the flag says. Catalog reads remain available, and trusted local operator application
 is independent of this flag. Catalog data always lives in the database.
 See [self-hosting-mode1.md](self-hosting-mode1.md).

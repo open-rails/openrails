@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -38,7 +38,7 @@ func resolveConfiguredCLIMerchant(ctx context.Context, cfg *config.Config, name 
 	if cfg == nil || cfg.DB == nil {
 		return merchant.ID{}, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(ctx, cfg.DB)
+	database, err := db.NewDB(ctx, cfg)
 	if err != nil {
 		return merchant.ID{}, err
 	}

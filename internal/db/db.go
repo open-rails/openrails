@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -53,11 +53,11 @@ const (
 // NewDB opens the application pool and waits for the database to answer.
 // ctx bounds the wait: it is the boot context (cancelled by SIGTERM in the
 // standalone binary), never a package clock.
-func NewDB(ctx context.Context, cfg *config.DBConfig) (_ *DB, err error) {
-	if cfg == nil {
+func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
+	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("database config is nil")
 	}
-	url := cfg.GetConnectionString()
+	url := cfg.DB.GetConnectionString()
 	if url == "" {
 		return nil, fmt.Errorf("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
@@ -65,7 +65,7 @@ func NewDB(ctx context.Context, cfg *config.DBConfig) (_ *DB, err error) {
 		ctx = context.Background()
 	}
 
-	pool, err := newTunedPGXPool(ctx, url, cfg.SQLTrace)
+	pool, err := newTunedPGXPool(ctx, url, cfg.DB.SQLTrace)
 	if err != nil {
 		return nil, err
 	}

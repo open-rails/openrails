@@ -1,163 +1,27 @@
-// Package serverboot is the standalone-server composition root (#285/#670):
-// NewServer wires the framework-neutral HTTP Server onto the application graph
-// built by app.BootstrapWithOptions, attaching the mandatory control plane.
+// Package serverboot converges the standalone server's boot merchant manifest
+// (#723) onto an engine built by openrails.New.
 package serverboot
 
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
-	"github.com/open-rails/openrails/internal/cache"
-	"github.com/open-rails/openrails/internal/hostconfig"
-	server "github.com/open-rails/openrails/internal/http"
+	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/signeridentity"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Result holds the application graph plus the HTTP server created by the
-// composition root.
-type Result struct {
-	App    *app.App
-	Server *server.Server
-}
-
-// Options controls optional dependency overrides for the standalone server
-// composition root.
-type Options struct {
-	Auth *hostconfig.AuthConfig
-
-	PGXPool *pgxpool.Pool
-	Redis   *redis.Client
-	Cache   cache.Cache
-	Clock   clockwork.Clock
-
-	// Authenticator protects user routes. When nil, standalone uses the attached
-	// control plane verifier.
-	Authenticator billingauth.Authenticator
-	// DelegatedAuthenticator is the optional host-pluggable identity seam for
-	// self-service routes. When nil, those routes use control-plane delegation.
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-
-	// MerchantManifestPath overrides where the MODE-1 boot merchant manifest is
-	// read from (#723). Empty uses the conventional
-	// bootstrap.DefaultMerchantConfigManifestPath when that file exists.
-	MerchantManifestPath string
-
-	// ConsoleAssets is the built admin console SPA (#754); nil = absent.
-	// admin_console.enabled without assets is a boot error.
-	ConsoleAssets fs.FS
-
-	// NMIProbeV5BaseURL is a test-only seam: overrides the v5 base URL the
-	// startup sandbox posture probe hits. Empty in production.
-	NMIProbeV5BaseURL string
-
-	ConfiguredMerchant merchant.ID
-}
-
-// NewServer constructs the application runtime and the HTTP server graph
-// together. ctx is the boot context (see app.BootstrapWithOptions).
-func NewServer(ctx context.Context, cfg *config.Config, opts *Options) (*Result, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	// #711: the bootstrap.Options relay layer is gone — call the app
-	// composition root directly.
-	application, err := app.BootstrapWithOptions(ctx, cfg, &app.BootstrapOptions{
-		PGXPool:            optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
-		Redis:              optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
-		Cache:              optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),
-		Clock:              optsValue(opts, func(o *Options) clockwork.Clock { return o.Clock }),
-		ConfiguredMerchant: optsValue(opts, func(o *Options) merchant.ID { return o.ConfiguredMerchant }),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bootstrap application: %w", err)
-	}
-
-	cleanupOnError := true
-	defer func() {
-		if cleanupOnError {
-			_ = application.Close(context.Background())
-		}
-	}()
-
-	// Standalone always attaches the OpenRails-owned AuthKit control plane
-	// (#284/#469), reusing an injected pool when present. Failure is fatal.
-	var injectedPool = func() *pgxpool.Pool {
-		if opts != nil {
-			return opts.PGXPool
-		}
-		return nil
-	}()
-	if cperr := embcp.Attach(context.Background(), application, cfg, optsValue(opts, func(o *Options) *hostconfig.AuthConfig { return o.Auth }), injectedPool); cperr != nil {
-		return nil, fmt.Errorf("attach control plane: %w", cperr)
-	}
-	authenticator := optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator })
-	if authenticator == nil {
-		authenticator = embcp.Get(application).UserAuthenticator()
-		if authenticator == nil {
-			return nil, fmt.Errorf("control plane verifier unavailable")
-		}
-	}
-
-	// MODE 1 (#723): the standalone server loads the merchant manifest at boot —
-	// DB rows converge as projections, secrets seed the in-memory plane. A
-	// declared-but-unloadable manifest refuses boot; an absent conventional file
-	// boots control-plane-only (merchants can be bound later; there is no
-	// implied truth to miss). MODE 2 refuses a present manifest (two truths).
-	if err := ReconcileBootMerchantManifest(context.Background(), cfg, application,
-		optsValue(opts, func(o *Options) string { return o.MerchantManifestPath }),
-		optsValue(opts, func(o *Options) string { return o.NMIProbeV5BaseURL })); err != nil {
-		return nil, err
-	}
-	// Request handlers need durable producers even when another process runs
-	// the workers. Compose after all components attach and before publishing HTTP.
-	if err := application.Runtime.InitRiver(ctx); err != nil {
-		return nil, fmt.Errorf("bind standalone job producers: %w", err)
-	}
-
-	billingServer, err := server.New(server.Dependencies{
-		Config:                 application.Config,
-		Cache:                  application.Cache,
-		Runtime:                application.Runtime,
-		Redis:                  application.RedisClient,
-		Authenticator:          authenticator,
-		DelegatedAuthenticator: optsValue(opts, func(o *Options) billingauth.DelegatedAuthenticator { return o.DelegatedAuthenticator }),
-		ControlPlane:           embcp.Get(application),
-		ConsoleAssets:          optsValue(opts, func(o *Options) fs.FS { return o.ConsoleAssets }),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create billing server: %w", err)
-	}
-
-	cleanupOnError = false
-	return &Result{App: application, Server: billingServer}, nil
-}
-
-func optsValue[T any](opts *Options, pick func(*Options) T) T {
-	var zero T
-	if opts == nil {
-		return zero
-	}
-	return pick(opts)
-}
-
 // ReconcileBootMerchantManifest implements the standalone rows of the #723
-// boot matrix, shared by NewServer and cmd/openrails runServer (#847): every
+// boot matrix, shared by cmd/openrails run-server and run-worker (#847): every
 // boot ensures missing identities and reloads host-owned snapshot credentials.
 // Existing metadata and archive decisions survive restart. The conventional
 // path is optional; an explicitly supplied path must exist.

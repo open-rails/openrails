@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/db/gen"
 
@@ -37,7 +37,7 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	groupID, err := c.merchantGroupByName(ctx, ref)
-	if errors.Is(err, policy.ErrMerchantUnresolved) {
+	if errors.Is(err, billing.ErrMerchantUnresolved) {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	if err != nil {

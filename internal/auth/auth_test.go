@@ -9,8 +9,8 @@ import (
 	"github.com/open-rails/authkit/verify"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const userID = "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"

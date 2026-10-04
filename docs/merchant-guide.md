@@ -61,7 +61,7 @@ inside the authenticated merchant and caller's authority; pruning never implicit
 includes other creator catalogs. Meter/rate-card dependency checks still apply;
 prune does not delete historical billing definitions or customer rate overrides.
 
-For bootstrap, `internal/embedoperator.Operator.ApplyCatalog` uses the same private engine
+For bootstrap, the trusted local operator path (`openrails apply-catalog`) uses the same private engine
 with trusted local authority. Runtime has no catalog business methods.
 
 ### Authoring the catalog

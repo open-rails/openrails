@@ -17,9 +17,9 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -30,7 +30,7 @@ func (rebillWatchPass) Kind() string { return "openrails.rebill_watch" }
 // watchRebills runs the missed-rebill watch once (#1112).
 func (w *world) watchRebills() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), rebillWatchPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(w.t.Context(), rebillWatchPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	w.waitJob(res.Job.ID)
 	w.settle()

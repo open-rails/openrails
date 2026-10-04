@@ -10,9 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
 )
 
 // SEC: minting money is owner authority. The machine credit deposit and the
@@ -23,23 +22,23 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 	f := newFixture(t)
 	cp := f.attachControlPlane(t, reserving())
 	ctx := t.Context()
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 
 	owner := newAccount(t, cp)
 	shop := uniqueName("credit")
-	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	mid, _, err := cp.ResolveMerchantForGroup(ctx, shop)
 	require.NoError(t, err)
-	ownerSession := authtest.SignIn(t, cp.Core(), owner).AccessToken
+	ownerSession := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
 
 	support := newAccount(t, cp)
-	role, err := cp.Core().Role("merchant:support")
+	role, err := cp.AuthKit().Role("merchant:support")
 	require.NoError(t, err)
-	_, err = cp.Core().SetGroupRole(ctx, iam.SystemActor(), iam.GroupByID(mid.String()), iam.UserSubject(support.ID), role)
+	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemActor(), iam.GroupByID(mid.String()), iam.UserSubject(support.ID), role)
 	require.NoError(t, err)
-	supportSession := authtest.SignIn(t, cp.Core(), support).AccessToken
+	supportSession := authtest.SignIn(t, cp.AuthKit(), support).AccessToken
 
 	apiKey := func(role string) string {
 		w := call(t, handler, ownerSession, http.MethodPost, "/v1/merchant/api-keys", shop, map[string]string{"name": role + " key", "role": role})

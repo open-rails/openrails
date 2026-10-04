@@ -32,11 +32,10 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const (
@@ -155,22 +154,22 @@ type world struct {
 	auth   *verifier
 	cfg    func(*config.Config)
 	// declare adjusts the merchant's provider declaration before start.
-	declare func(map[string]embed.PSPConfig)
+	declare func(map[string]openrails.PSPConfig)
 	// selfService mounts the full customer self-service API (tier changes
 	// included) instead of billing management.
 	selfService bool
 	// mount adjusts the mounted HTTP surface before start.
-	mount func(*embed.HTTPConfig)
+	mount func(*openrails.HTTPConfig)
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
-	rt     *embed.Runtime
+	rt     *openrails.Client
 	jobs   *river.Client[pgx.Tx]
 	server *httptest.Server
 	client map[topology]*openrails.Client
 	psp    map[string]string
 	// psps is the merchant's provider declaration, as its manifest states it.
-	psps map[string]embed.PSPConfig
+	psps map[string]openrails.PSPConfig
 
 	// invariants are the money invariants checked when the world ends.
 	invariants moneyInvariants
@@ -231,7 +230,7 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 		pool.Close()
 	})
 	t.Cleanup(w.checkMoneyInvariants)
-	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{Schema: w.schema, River: embed.RiverFromHost()}))
+	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: w.schema, River: openrails.RiverHostOwned}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, w.schema))
 	return w
 }
@@ -259,18 +258,20 @@ func (w *world) start() {
 	pool, dbURL := w.pool, w.dsn
 	stripe, nmi := http.RoundTripper(w.stripe), http.RoundTripper(w.nmi)
 	riverConfig := &river.Config{
-		Schema: w.schema, Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}},
+		Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}},
 		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
 	}
 	if w.replica != nil {
 		pool, dbURL, stripe, nmi = w.replica.connect(w)
 		w.replica.configureRiver(riverConfig)
 	}
-	cfg := &config.Config{
-		TestMode:            config.CredentialPostureSandbox,
-		ProviderWriteMode:   config.ProviderWriteModeFull,
+	cfg := &openrails.Config{
+		Schema:              w.schema,
+		River:               openrails.RiverHostOwned,
+		TestMode:            openrails.Sandbox,
+		ProviderWriteMode:   openrails.ProviderWritesFull,
 		AllowCatalogUpdates: true,
-		DB:                  &config.DBConfig{URL: dbURL, Schema: w.schema},
+		DB:                  &openrails.DBConfig{URL: dbURL},
 		// The test server's loopback peer is the site's reverse proxy.
 		TrustedProxies: []string{"127.0.0.1/32"},
 		ReturnOrigins:  []string{"https://e2e.test"},
@@ -278,7 +279,7 @@ func (w *world) start() {
 	if w.cfg != nil {
 		w.cfg(cfg)
 	}
-	psps := map[string]embed.PSPConfig{
+	psps := map[string]openrails.PSPConfig{
 		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}}},
 		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}},
 		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}}},
@@ -287,25 +288,19 @@ func (w *world) start() {
 		w.declare(psps)
 	}
 	w.psps = psps
-	scope := embed.CustomerBillingManagement
+	scope := openrails.CustomerBillingManagement
 	if w.selfService {
-		scope = embed.CustomerSelfService
+		scope = openrails.CustomerSelfService
 	}
-	httpConfig := &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
+	httpConfig := &openrails.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []openrails.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
 	if w.mount != nil {
 		w.mount(httpConfig)
 	}
-	rt, err := embed.New(t.Context(), embed.Options{
-		Auth:            identity,
-		HTTP:            httpConfig,
-		Merchant:        &embed.MerchantDeclaration{Slug: w.slug, Config: embed.MerchantConfig{DisplayName: w.slug, PSPs: psps}},
-		Config:          cfg,
-		PGXPool:         pool,
-		River:           embed.RiverFromHost(),
-		StripeTransport: stripe,
-		NMITransport:    nmi,
-		Clock:           w.clock,
-	})
+	cfg.HTTP = httpConfig
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps}
+	deps := hooks(identity)
+	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = pool, stripe, nmi, w.clock
+	rt, err := openrails.New(t.Context(), *cfg, deps)
 	require.NoError(t, err)
 	w.rt = rt
 	jobs, err := riverkit.New(t.Context(), pool, riverConfig, rt.RiverJobs())
@@ -315,13 +310,10 @@ func (w *world) start() {
 	}
 	require.NoError(t, jobs.Start(context.WithoutCancel(t.Context())))
 	w.jobs = jobs
-	bundle, err := openrailshttp.Routes(rt)
-	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, bundle.Mount(mux, mountPrefix))
+	require.NoError(t, openrailshttp.Mount(mux, rt, mountPrefix))
 	w.server = httptest.NewServer(mux)
-	local, err := rt.Client()
-	require.NoError(t, err)
+	local := rt
 	staff := w.auth.token(t, "staff")
 	over, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return staff, nil }))
@@ -409,7 +401,7 @@ func (w *world) kill() {
 // fleet to finish every operation it accepted.
 func (w *world) runRenewals() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), dunningPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(w.t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	w.waitJob(res.Job.ID)
 	if os.Getenv("GF_DEBUG") != "" {
@@ -570,7 +562,7 @@ func (rescuePass) Kind() string { return "openrails.job_rescue" }
 // minute's pass.)
 func (w *world) rescue() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), rescuePass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(w.t.Context(), rescuePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	w.waitJob(res.Job.ID)
 }
@@ -801,4 +793,20 @@ func (w *world) openFindings(findingType string) []string {
 	keys, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(w.t, err)
 	return keys
+}
+
+// hooks hands an authentication integration to the engine as Deps hooks.
+func hooks(identity *billingauth.Integration) openrails.Deps {
+	deps := openrails.Deps{Authenticate: func(r *http.Request) (openrails.Identity, error) {
+		return identity.Authentication.AuthenticateRequest(r.Context(), r)
+	}}
+	if identity.Authorization != nil {
+		deps.Authorize = func(r *http.Request, id openrails.Identity, required openrails.Requirement) error {
+			return identity.Authorization.Authorize(r.Context(), r, id, required)
+		}
+	}
+	if identity.RecentSignIn != nil {
+		deps.RecentSignIn = func(r *http.Request) error { return identity.RecentSignIn.CheckRecentSignIn(r.Context(), r) }
+	}
+	return deps
 }

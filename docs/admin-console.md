@@ -13,10 +13,11 @@ own permissions. Off by default.
 
 Two independent requirements, both needed (#740/#754):
 
-1. **Assets in the binary.** The engine ships no frontend bytes — `go:embed`
-   cannot cross module boundaries, so whoever builds the binary owns the embed
-   and hands the engine an `fs.FS` rooted at `index.html`. Built `dist` is
-   never committed; Node/pnpm is a build-time dependency only.
+1. **Assets in the binary.** `web/admin` go:embeds its `dist` build, which is
+   never committed: a binary built from an OpenRails checkout carries a console
+   only when `web/admin/dist` was built before `go build`; an embedding host
+   supplies its own build as `Deps.ConsoleAssets`. Node/pnpm is a build-time
+   dependency only.
 2. **Config.** `admin_console.enabled: true`.
 
 | assets | `admin_console.enabled` | result |
@@ -50,8 +51,10 @@ task build-console-binary  # admin-build + go build ./cmd/openrails
 Release archives and Docker images always carry the console (still
 config-gated at runtime): goreleaser and the Dockerfile build `web/admin` first.
 
-**Embedded hosts.** The host repo owns a tiny embed package over a
-**gitignored** dist its build pipeline produces:
+**Embedded hosts.** A module fetched into the Go module cache carries only
+`web/admin/dist/.gitkeep`, so the host builds the console and hands it over.
+The host repo owns a tiny embed package over a **gitignored** dist its build
+pipeline produces:
 
 ```go
 // internal/consoleassets/assets.go
@@ -63,35 +66,37 @@ import "embed"
 var FS embed.FS
 ```
 
-Build the dist straight from the openrails module cache (no vendoring; invoke
-via `bash` — module-cache files are not executable — and the script copies the
-read-only source to a temp dir before `pnpm install`):
+Build the dist straight from the openrails module cache (invoke via `bash`:
+module-cache files are not executable, and the script copies the read-only
+source to a temp dir before `pnpm install`):
 
 ```sh
 bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
 ```
 
-Then hand the FS to the engine:
+Then pass it as `Deps.ConsoleAssets` and mount the console at `/admin/` on the
+root router (the build's asset URLs are rooted there):
 
 ```go
-sub, _ := fs.Sub(consoleassets.FS, "dist")
-opts.ConsoleAssets = sub
-rt, err := embed.New(ctx, opts)
+assets, _ := fs.Sub(consoleassets.FS, "dist")
+cfg.AdminConsole = &openrails.AdminConsoleConfig{
+    Enabled:     true,
+    AuthBaseURL: "/api/v1",     // the host's AuthKit JSON API
+    APIBaseURL:  "/billing/v1", // the host's billing mount
+}
+client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth, ConsoleAssets: assets})
+if console := client.AdminConsole(); console != nil { // nil unless enabled
+    r.Any("/admin/*path", gin.WrapH(console))
+}
 ```
 
-`ConsoleAssets` feeds the standalone surface (`controlplane.Attach(...).Handler()`),
-which mounts `/admin/` per the table above. The embedded mount surface
-(`rt.Handler` / `rt.Client()`) does NOT serve `/admin` — hosts
-that mount billing under their own mux serve the console themselves by mounting
-`adminconsole.Handler(cfg, assets)` (package `pkg/adminconsole`), gated on
-`adminconsole.Present(assets)`, with `APIBaseURL` set to their billing mount
-(e.g. `/billing/v1`) and `AuthBaseURL` to their AuthKit JSON API (`/api/v1` by default).
+Without `Deps.ConsoleAssets` the engine uses the build embedded in the
+OpenRails module (the standalone binary's). With `Config.ControlPlane` the
+console is part of `Client.Routes` and needs no separate mount.
 
 Fail-loud behaviors, verified: enabled without assets refuses boot
-(`admin_console.enabled is set but no console assets were provided: …`);
-a host `go:embed` of a missing dist is a compile error; mounting
-`adminconsole.Handler` with no build answers every request 503 naming the
-build step. Opt-out is doing nothing.
+(standalone: `admin_console.enabled is set but web/admin holds no console build: …`;
+embedded: `Config.AdminConsole is enabled but there is no console build: …`). Opt-out is doing nothing.
 
 ### Security posture
 

@@ -13,24 +13,24 @@ Your Go binary imports the engine and runs it in-process: no second service, no
 network hop, no second credential. Concretely:
 
 - The engine owns a configurable schema, defaulting to `billing`, inside **your** Postgres database.
-- Its HTTP routes mount on **your** mux under a prefix you choose; your users call
+- Its HTTP routes mount on **your** router under a prefix you choose; your users call
   them with their normal session credential.
-- Your backend calls the engine through `rt.Client()` — the **same**
-  `*openrails.Client` a standalone consumer gets from `openrails.NewRemote`.
-  Parity is structural: one client implementation, one handler surface, joined by an
-  in-process `http.RoundTripper` instead of a socket (enforced by a dual-mode
-  conformance test).
-- A runtime constructed with `Options.Merchant` is restricted to that merchant.
-  An unrestricted multi-merchant runtime (`examples/multimerchant`) can reuse one
-  Client: `WithDefaultMerchant` supplies an immutable default, while each operation
-  can select a slug with `WithMerchant` or a stable ID with `ForMerchantID`.
-  Selection never grants authority or overrides a runtime restriction.
+- `openrails.New` returns the **same** `*openrails.Client` a standalone consumer
+  gets from `openrails.NewRemote`. Parity is structural: one client
+  implementation, one handler surface, joined by an in-process
+  `http.RoundTripper` instead of a socket. The embedded Client adds the hosting
+  operations: `Start`, `Close`, `Routes`, `RiverJobs`, `Ready` and `Probes`.
+- An engine with `Config.Merchant` serves that merchant. One without a declared
+  merchant (`examples/multimerchant`) serves many: `WithDefaultMerchant`
+  supplies an immutable default, and each operation can select a slug with
+  `WithMerchant` or a stable ID with `ForMerchantID`. Selection never grants
+  authority or overrides the declared merchant.
 
 ```mermaid
 flowchart LR
     B[Browser] -- your session credential --> S[Your Go server]
     subgraph P[Your process]
-        S -- billingauth --> OR[OpenRails engine]
+        S -- Deps.Authenticate --> OR[OpenRails engine]
         C[Your backend code] -- openrails.Client --> OR
     end
     OR --> PG[(Postgres, billing schema)]
@@ -43,289 +43,154 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
-OpenRails owns its migration source and applies it through one explicit
-initialization call. Your application supplies a pool that can create its schema
-and objects; it does not import migratekit or OpenRails' migration
-files:
+OpenRails owns its migrations and applies them through your pool; the pool's
+role owns the objects and is the role OpenRails runs as (no grants). Run it on
+every boot, before `New`:
 
 ```go
-if err := embed.ApplyMigrations(ctx, appPool, embed.MigrationOptions{}); err != nil {
+if err := openrails.Migrate(ctx, pool, cfg); err != nil {
     return fmt.Errorf("initialize OpenRails database: %w", err)
 }
 ```
 
-Initialize AuthKit separately through AuthKit's own embedded migration API.
-`embed.ApplyMigrations` applies OpenRails' billing chain and the River chain
-used by `RiverManagedByOpenRails`, in the order OpenRails requires. A
-`RiverFromHost` integration is the explicit low-level exception: the host owns
-that River client's schema and migration lifecycle. Pass the same `RiverOwnership`
-value to `MigrationOptions.River` and `Options.River`; migrations never invoke
-host client construction. Set `MigrationOptions.Schema` to match `cfg.DB.SchemaName()` when
-using a custom billing schema.
+`Migrate` reads `cfg.Schema` and `cfg.River`: with `RiverManaged` it also
+migrates River in `cfg.RiverSchema` (default `public`); with `RiverHostOwned`
+the host migrates River itself (`riverhelpers.ApplyMigrations`). With
+`cfg.ControlPlane` it also migrates the control plane's AuthKit schema. A
+host's own AuthKit migrates through AuthKit's API.
 
 Billing, AuthKit, application tables and River may share `public` or another
-namespace. Each component must use its configured qualified tables and an
-explicit ownership inventory; a schema name does not imply exclusive ownership.
-OpenRails archives contain only billing-owned tables and never include live
-River jobs, AuthKit identities or host records. The destructive embedded reset
-command still targets only the default `billing` schema and refuses it when
-foreign relations are present. It is not a shared-schema reset mechanism.
-
-The engine validates the tracking key at boot and refuses to start if any
-OpenRails migration is missing or orphaned.
-
-OpenRails does not create or grant access to AuthKit's `profiles` schema. If
-the host enables notification email or CCBill username resolution, pass its
-identity adapter explicitly through `embed.Options.UserDirectory` and
-`embed.Options.UsernameResolver`; leaving them unset disables those optional
-lookups safely.
-
-### 3. Config
-
-Embedded mode never runs `config.Load` — you build `*config.Config` programmatically.
-Start from `config.GetDefaultBillingConfig()` (seeds dev DB/Redis endpoints, logger,
-curated `RateLimits`, and `Captcha`), then set your own values. Construction refuses
-to boot unless you declare posture explicitly (#745):
-
-| Field | Required | Meaning |
-|---|---|---|
-| `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
-| `ProviderWriteMode` | yes | `full`, `limited` (no system-initiated writes: renewals and retries wait) or `readonly` (no provider writes). Unset is rejected: it would silently stop renewals. |
-| `SecretBackend` | defaults to `snapshot` | Immutable host credentials, live Vault, or encrypted database custody; independent of metadata and HTTP exposure. |
-| `PublicBillingBaseURL` | when generating callbacks or links | External billing mount base, excluding `/v1`; distinct from issuer, DPoP origin and dashboard. |
-| `AllowCatalogUpdates` | false | Enables ordinary product, price, catalog and metering writes and their routes, independently of provider credentials. Trusted local operator application remains available when false. |
-| `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
-
-#### Database ownership
-
-Use one application login and pool. That login creates and owns the library's
-objects during `ApplyMigrations`, then uses them at runtime. Ownership supplies
-access; OpenRails creates no roles and issues no grants. AuthKit and a
-host-owned River client may share that same pool.
+namespace. OpenRails archives contain only billing-owned tables and never include
+live River jobs, AuthKit identities or host records. The engine validates its
+migration ledger at boot and refuses to start if a migration is missing or
+orphaned.
 
 Merchant isolation uses verified application scope, explicit SQL predicates and
-composite relationships. PostgreSQL RLS and username flags are not part of the
-authorization boundary. Financial triggers protect ordinary DML invariants even
-for an owner; a database owner can deliberately change or drop those guards.
+composite relationships, not PostgreSQL RLS. OpenRails creates no roles and
+issues no grants.
 
-Renaming an existing PostgreSQL role preserves its identity and ownership; update
-the connection configuration as needed. Replacing it with a different role needs
-the normal PostgreSQL ownership transfer or grants performed by your operator.
-The libraries do not manage database accounts or ownership transfers.
+### 3. Config and Deps
 
-Under `TestMode = sandbox` every rail routes to its test environment and live
-credentials refuse to boot — no real money can move. NMI accounts get an arm-time
-probe: a conclusively-live gateway is refused under sandbox (a probe error only
-warns). See [operations.md](operations.md).
+`openrails.Config` is plain data; `openrails.Deps` is everything the engine
+reaches outside its process. Construction refuses to boot unless posture is
+explicit:
 
-**Rate limiting is on by default** (#742): if you leave `RateLimits`/`Captcha` nil,
-`embed.New` seeds the same curated defaults `config.Load` applies — per-IP and
-per-authenticated-user buckets, tight on checkout (10/min) to deter card-testing,
-Redis-backed when `Redis` is set, in-memory otherwise. Override `cfg.RateLimits`, or
-set `cfg.RateLimitsDisabled = true` if your own gateway fronts billing. See
+| Config field | Required | Meaning |
+|---|---|---|
+| `TestMode` | yes | `openrails.Sandbox` or `openrails.Live`. The zero value is refused; it never silently means live. |
+| `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
+| `Schema` | default `billing` | The Postgres schema of OpenRails' tables. |
+| `Merchant` | no | The merchant this engine serves (section 5). |
+| `HTTP` | no | The route groups `Client.Routes` publishes (section 6); nil publishes none. |
+| `River`, `RiverSchema` | default managed | Who runs the job fleet (section 4). |
+| `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
+| `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
+| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Catalog`, delegated credentials). The in-process Client writes its own catalog without it. |
+| `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
+
+| Deps field | Meaning |
+|---|---|
+| `Postgres` | Your pool. Nil opens one from `Config.DB`. |
+| `Redis`, `Cache` | Shared rate limits and cache; in memory without them. |
+| `Vault`, `ProviderCredentials` | A borrowed Vault client; snapshot credentials for existing PSPs. |
+| `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
+| `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
+| `ConsoleAssets` | A host-built admin console (section 6). |
+| `UserExists`, `UserEmail`, `ResolveUsername` | Optional identity lookups for billing notices and the CCBill username bridge. |
+| `EmailSender`, `SMSSender`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
+| `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
+
+Under `Sandbox` every rail routes to its test environment and live credentials
+refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
+live gateway. See [operations.md](operations.md).
+
+**Rate limiting is on by default** (#742): nil `RateLimits`/`Captcha` get the
+curated defaults the standalone loader applies (tight on checkout to deter
+card-testing; Redis-backed with `Deps.Redis`). Override them, or set
+`RateLimitsDisabled` if your own gateway fronts billing. See
 [rate-limiting.md](rate-limiting.md).
 
-### 4. Boot
+### 4. Boot, lifecycle and River
 
 ```go
-import (
-    "github.com/open-rails/openrails/config"
-    "github.com/open-rails/openrails/embed"
-)
-
-rt, err := embed.New(ctx, embed.Options{
-    Config:     cfg,
-    PGXPool:    pool, // share your app's pgx/v5 pool; nil = engine opens its own from Config.DB
-    Redis:      rdb,  // optional — Redis-backed rate limits; omit for in-memory
-    RunWorkers: false, // attach optional components before constructing the worker fleet
-})
-if err != nil { log.Fatal(err) }
-defer rt.Close(ctx)
+client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth})
+if err != nil { return err }
+defer client.Close(ctx)
 ```
 
-| Option | Type | Notes |
-|---|---|---|
-| `Config` | `*config.Config` | Required. |
-| `Merchant` | `*embed.MerchantDeclaration` | Optional single-merchant declaration: `Slug`, `Config`, and attribution-only `PSPs`. Reconciled before HTTP and worker startup. Obtain its ID from `Client().MerchantID()`. |
-| `HTTP` | `*embed.HTTPConfig` | Leave nil for headless mode; HTTP policy is declared only at construction. A non-nil policy exposes discovery and verified provider callbacks; buyer and management capabilities are opt-in. |
-| `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
-| `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
-| `Cache` | `cache.Cache` | Optional cache override. |
-| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; pass `RiverJobs()` to `riverhelpers.New` after attaching components. |
-| `RunWorkers` | `bool` | Managed-only. Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
-| `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
-| `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
-
-**Runtime surface**: `rt.Client()` provides the shared application client;
-`rt.HTTPRoutes()`, `rt.RiverJobs()`, readiness/progress checks,
-`rt.RunWorkers(ctx)` and `rt.Close(ctx)` own process infrastructure.
-
-Only Postgres can fail `embed.New` or `rt.Ready`. Vault login, PSP posture
-checks and Redis reconnect in the background (capped full-jitter backoff,
-forever); until then only their feature answers 503. Register their probes
-with the host's `github.com/open-rails/helpers/deps` supervisor:
+Only Postgres can fail `New`. Vault login, PSP posture checks and Redis
+reconnect in the background (capped full-jitter backoff, forever); until then
+only their features answer 503. `Ready` is the readiness check (Postgres, the
+merchant directory, River). Register `Probes` with the host's
+`github.com/open-rails/helpers/deps` supervisor:
 
 ```go
-for _, p := range rt.Probes() { // openrails_vault, openrails_psp_posture
-	sup.Add(p.Name, deps.Optional, p.Check, nil)
+for _, p := range client.Probes() { // openrails_vault, openrails_psp_posture, openrails_job_progress, ...
+    sup.Add(p.Name, deps.Optional, p.Check, nil)
 }
-``` Merchant
-and PSP declarations belong in `Options.Merchant`. One-off manifest and restore
-tooling belongs to `internal/embedoperator.New(rt)`; the host transaction extension is
-constructed with `embed.NewHostTransactions(rt)`. Storage remains internal.
-Hosts that use OpenRails' own AuthKit control plane (standalone-shaped or
-hosted products) attach it with `internal/embedcontrolplane`. `EmailSender` and
-`SMSSender` are AuthKit sender objects (`authkit.EmailSender`, with `Send` and
-`CheckHealth`; AuthKit's `adapters/twilio` provides both):
-
-```go
-cp, err := controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true, EmailSender: sender})
-if err != nil { return err }
-handler, err := cp.Handler() // billing + AuthKit routes + admin console
-if err != nil { return err }
-
-// Start after attachment, alongside HTTP under the application's errgroup.
-workers.Go(func() error { return rt.RunWorkers(ctx) })
 ```
 
-Keep `RunWorkers: false` through component attachment, then supervise
-`rt.RunWorkers(ctx)` alongside the HTTP server (the `workers` errgroup above).
-`RunWorkers` blocks until shutdown; propagate its error through that supervisor.
-The control plane adds AuthKit maintenance to the same River registry before
-client construction, and attaching it after River initialization is refused.
-Billing-only hosts using managed River with no optional components to attach may
-use `RunWorkers: true` directly. Host-owned River refuses constructor auto-start:
-attach the control plane or construct your AuthKit client before binding.
-
-`cp` carries the operator mechanisms (`ProvisionMerchant`, directory reads,
-provider configuration, fleet aggregates, retirement, `UserAuthenticator`,
-`RequestActor`); `cp.Core()` is its `*authkit.Client`. Its HTTP surface serves
-JWKS at the issuer plus `/.well-known/jwks.json`. Hosts that bring their own
-AuthKit never import it.
-
-**Host-owned River**: declare ownership during migrations and construction, then
-attach every component before requesting `RiverJobs()`. The neutral `helpers/river`
-composer collects billing and attached control-plane workers, queues and schedules,
-then constructs and binds one unstarted client. It rejects removed required
-entries, duplicate workers/schedules, and repeated or closed contributions.
+River is required: renewals, dunning, invoices, reconciliation and provider
+intents are River jobs. With `River: openrails.RiverManaged` (the zero value)
+OpenRails builds its own client and `Start` runs it. With
+`River: openrails.RiverHostOwned` the host runs one fleet for its own jobs,
+AuthKit's and OpenRails':
 
 ```go
-import (
-    riverhelpers "github.com/open-rails/helpers/river"
-    "github.com/riverqueue/river"
-)
-
-ownership := embed.RiverFromHost()
-// The host migrates its River schema separately.
-if err := embed.ApplyMigrations(ctx, pool, embed.MigrationOptions{River: ownership}); err != nil {
-    return err
-}
-rt, err := embed.New(ctx, embed.Options{Config: cfg, PGXPool: pool, River: ownership})
+if err := riverhelpers.ApplyMigrations(ctx, pool, ""); err != nil { return err } // the fleet is yours
+workers, err := riverhelpers.New(ctx, pool, &river.Config{
+    Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 10}},
+}, auth.RiverJobs(), client.RiverJobs())
 if err != nil { return err }
-defer rt.Close(context.WithoutCancel(ctx))
-
-// Attach a control plane here, or construct your own AuthKit client.
-// An attached control plane contributes its AuthKit maintenance automatically.
-jobs, err := riverhelpers.New(ctx, pool, &river.Config{
-    Schema: "host_jobs", // host-migrated; sharing public with billing is supported
-    Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 10}},
-}, rt.RiverJobs())
-// If using your own AuthKit instead of an attached control plane, include
-// auth.RiverJobs() as another contribution to this same call.
-if err != nil { return err }
-defer jobs.StopAndCancel(context.WithoutCancel(ctx))
-// With host-owned AuthKit, check auth.Start(ctx) now.
-// Finish product bootstrap before starting consumers.
-if err := jobs.Start(ctx); err != nil { return err }
-
-loopsCtx, cancelLoops := context.WithCancel(ctx)
-loopsDone := make(chan error, 1)
-go func() { loopsDone <- rt.RunWorkers(loopsCtx) }()
-// Supervise this result alongside HTTP. On shutdown:
-cancelLoops()
-if err := <-loopsDone; err != nil && !errors.Is(err, context.Canceled) { return err }
-// Deferred cleanup stops the host client before closing the billing runtime.
-// Close host AuthKit and the pool only after these consumers have joined.
+if err := workers.Start(ctx); err != nil { return err }
+defer workers.StopAndCancel(context.WithoutCancel(ctx))
+if err := client.Start(ctx); err != nil { return err } // loops outside River, e.g. the Solana Pay poller
 ```
 
-`RunWorkers` runs core non-River loops, including the Solana Pay poller, and
-blocks until cancellation; it never starts or stops the host's River client.
-Always cancel and join it before stopping River and closing dependent runtimes,
-identity clients and pools. `rt.CheckJobProgress(ctx)` gives the live fleet
-verdict. Before binding, readiness and worker startup refuse explicitly.
+A host-owned fleet migrates River itself, once per boot before composing it:
+`riverhelpers.ApplyMigrations(ctx, pool, "")` (`""` is River's default schema,
+`public`; `openrails.Migrate` leaves River alone). Without it `riverhelpers.New`
+fails naming that call, and `Start` refuses a fleet that has not composed
+`RiverJobs`. `Close` stops what `Start` started; close the client before the pool. OpenRails also
+watches the fleet from outside River: `openrails_job_progress` fails while it is
+stalled.
 
-Binding is one startup attempt. Double binding, late component attachment,
-and closed runtimes refuse. Hosts cannot substitute an unrelated or already-started
-client: construction happens after configuration validation. After a failed
-binding, close and recreate the runtime. Managed River's `New → Attach → RunWorkers` order is
-unchanged.
+**Inserting an engine job.** The one job a host inserts itself is the invoice
+sweep: `workers.Insert(ctx, openrails.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
+finalizes every payer's previous period now; `Collect: true` runs the
+collection pass. Runs are idempotent.
 
-**Inserting an engine job.** OpenRails registers its own periodic jobs on the
-client you return. The one job a host inserts itself is the invoice sweep:
-`jobs.Insert(ctx, embed.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
-runs the daily period finalize now (rates reported usage and issues every
-payer's previous-period invoice); `Collect: true` runs the collection pass. Runs
-are idempotent. Every other job kind is an engine-internal schedule and stays
-private.
-
-**No job clock.** Your `river.Config.JobTimeout` (River's default is one minute)
-does not apply to OpenRails' workers: each declares `Timeout() = -1` and ends
-on observed lack of progress instead — a job that reports no progress past
-3× its declared cadence (floored at 30 min) is cancelled with the reason on the
-job row. While a job runs it also beats `river_job.attempted_at`, so your
-`RescueStuckJobsAfter` measures silence from a dead process, never the age of
-a live job (a dunning pass over many merchants may legitimately outlive it).
-Both need the pool you gave OpenRails to be able to write River's tables (it is
-the pool River itself writes through).
+**No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'
+workers: each declares `Timeout() = -1` and ends on observed lack of progress
+(3x its cadence, floored at 30 min). A running job beats
+`river_job.attempted_at`, so `RescueStuckJobsAfter` measures silence from a dead
+process, never the age of a live job.
 
 ### 5. Declaring the merchant
 
-Declare the merchant at construction: create-if-missing, reconcile-if-present on
-every boot. One runtime serves one declared merchant; a client cannot override its
-binding. Reconstruct the runtime to change host-owned configuration.
-Real fields (`embed.MerchantConfig` aliases `internal/bootstrap.MerchantConfig`;
-same shape as `config/merchants_config.example.yaml`):
+`Config.Merchant` is create-if-missing, reconcile-if-present on every boot,
+before routes or workers can observe it. The fields are the merchant manifest's
+(same shape as `config/merchants_config.example.yaml`):
 
 ```go
-merchantConfig := embed.MerchantConfig{
+cfg.Merchant = openrails.MerchantDeclaration{
+    Slug:        "myapp",
     DisplayName: "My App",
-    Profile: embed.MerchantProfileConfig{
-        DisplayName: "My App Billing",
-        FromEmail:   "billing@myapp.example",
-        SupportURL:  "https://myapp.example/support",
-    },
-    Invoice: &embed.InvoiceConfig{ // optional; amounts in micros
-        BillingPeriodBoundary: "calendar_month",
-    },
-    PSPs: map[string]embed.PSPConfig{ // PSP key -> rail -> account
-        "my-nmi-sandbox": {
-            "nmi": embed.ProviderRailAccountConfig{
-                Environment: "test", // assertion, cross-checked against TestMode
-                AccountID:   "000000", // NMI dashboard "Gateway ID"
-                Settings: map[string]any{ // non-secret knobs
-                    "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js",
-                    "tokenization_key": "placeholder-tokenization-key",
-                },
-                Secrets: map[string]string{
-                    "security_key":           "placeholder-security-key",
-                    "webhook_signing_secret": "placeholder-webhook-secret",
-                },
-            },
-        },
+    Profile: openrails.MerchantProfileConfig{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
+    Invoice: &openrails.InvoiceConfig{BillingPeriodBoundary: "calendar_month"}, // amounts in micros
+    PSPs: map[string]openrails.PSPConfig{ // PSP key -> rail -> account
+        "my-nmi-sandbox": {"nmi": {
+            AccountID: "000000", // NMI dashboard "Gateway ID"
+            Settings:  map[string]any{"tokenization_key": "placeholder-tokenization-key"},
+            Secrets:   map[string]string{"security_key": "placeholder-security-key", "webhook_signing_secret": "placeholder-webhook-secret"},
+        }},
     },
 }
-rt, err := embed.New(ctx, embed.Options{
-    Config: cfg,
-    Merchant: &embed.MerchantDeclaration{Slug: "myapp", Config: merchantConfig},
-})
-if err != nil { return err }
-client, err := rt.Client()
-if err != nil { return err }
-mid := client.MerchantID()
 ```
 
-To make enabling a provider pure configuration, build each declaration with
-`embed.PSPFromEnv(key, os.LookupEnv)`. With `P = upper(key) + "_"` it reads
+`client.MerchantID()` is the declared merchant's ID. To make enabling a
+provider configuration only, build each PSP with
+`openrails.PSPFromEnv(key, os.LookupEnv)`. With `P = upper(key) + "_"` it reads
 `P+"RAIL"` (default: the key), `P+"ACCOUNT_ID"`, and `P+upper(name)` for each of
 the rail's credential slots and settings, refusing a missing required secret:
 
@@ -335,76 +200,38 @@ the rail's credential slots and settings, refusing a missing required secret:
 | `nmi` | `SECURITY_KEY`, `WEBHOOK_SIGNING_SECRET` | `TOKENIZATION_KEY`, `TOKENIZATION_URL`, `ENDPOINT_DEPLOYMENT` |
 | `ccbill` | `SALT`, `DATALINK_USERNAME`, `DATALINK_PASSWORD` | |
 
-```go
-psps := map[string]embed.PSPConfig{}
-for _, key := range strings.Split(os.Getenv("BILLING_PSPS"), ",") {
-    psp, err := embed.PSPFromEnv(key, os.LookupEnv)
-    if err != nil { return err }
-    psps[key] = psp
-}
-```
+YAML-first hosts keep the merchant in a file: `openrails.ParseMerchantDeclaration`
+parses one merchant strictly (unknown fields refused); set its `Slug`.
 
 The database owns merchant metadata. Startup initializes missing metadata and
-reloads host snapshot credentials without overwriting later API edits or reviving
+reloads snapshot credentials without overwriting later API edits or reviving
 archived accounts. Deliberate metadata changes use
 `Client.MerchantConfiguration.Apply` with a stable application ID and reviewed
-revision, optionally supplied as `MerchantDeclaration.MetadataApplication`.
+revision. Imported billing facts attributed to a PSP without credentials need
+its identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
+during setup.
 
 `SecretBackend` selects only credential custody. Snapshot values stay in memory;
 managed provider credentials are published through `Client.PaymentProviders` with
-an operation ID and expected account revision. A local Client works without HTTP
-publication. `HTTP.MerchantConfig` opts into the shared settings/provider route
-family, with normal authentication and authorization; read-only custody still
-rejects credential changes. Standalone uses `merchant_config_http` for this flag.
+an operation ID and expected account revision. `HTTP.MerchantConfig` opts into
+the settings/provider route family, with normal authentication and authorization.
 
-YAML-first hosts can keep the merchant in a file: `embed.ParseMerchantConfig` (one
-merchant, strict — unknown fields rejected) or
-`embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)` (multi-merchant
-manifest plus the host's mounted YAML secret overlays, so committed files hold
-placeholders and the host supplies real secrets from its own config tree).
-
-**Catalog authoring**: storage is always the database. `AllowCatalogUpdates`
-defaults false and controls ordinary Client mutations and their route inclusion.
-When enabled, use the Client (`Products.Create`, `Prices.Create`, `Prices.SetKey`,
-and merchant batch application). Trusted local operator application remains
-available when ordinary updates are disabled.
-
-For dynamic products with host-owned Stripe credentials, construct the runtime
-with `SecretBackend: config.SecretBackendSnapshot` and
-`AllowCatalogUpdates: true`, then pass the host's account and secrets
-in `Options.Merchant.Config` as above. OpenRails keeps provider credentials in
-memory and refuses credential publication into the read-only snapshot. Metadata
-and account archival remain independent authorized operations. The host rotates credentials
-by updating its configuration and constructing a new runtime. Existing API catalog
-rows survive restart. Provider PUT does not change backend selection: it publishes
-only through the runtime's already configured writable backend.
-
-Host-supplied provider credentials alone need no encryption master key. Optional
-DB-backed alert-webhook URLs and HyperSwitch SDK capture authorization still
-require encrypted persistence. Managed provider credentials use the explicitly
-selected DB or Vault backend; they never fall back to host credentials on a miss.
-`ProviderWriteMode` remains independent: readonly limits provider network writes,
-and enabled ordinary catalog writes can still update local definitions.
-
-Catalog application is an ordinary merchant-scoped Client batch operation. YAML
-is decoded into the same typed request as JSON; it is never a second read source.
-Use `AllowCatalogUpdates: true` to expose ordinary catalog writes. A separate
-trusted local operator wrapper can apply bootstrap artifacts while the flag is
-false; Runtime does not expose catalog business operations.
-
-Each application has a durable application ID and expected merchant catalog
-revision. Keep both pinned across restarts. Reusing a successfully applied ID and
-payload returns its original receipt without overwriting subsequent API edits.
-Use a new ID and current expected revision for an intentional reapplication.
+**Catalog authoring**: storage is always the database. The in-process Client
+is the process owner and writes its catalog directly (`Catalog.Apply` for a
+declarative catalog, or `Products.Create`, `Prices.Create`, `Prices.SetKey`);
+`AllowCatalogUpdates` only publishes catalog mutations to HTTP callers. YAML is
+decoded into the same typed request as JSON (`billing.ParseCatalogApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
-record, and `prune: true` archives omitted products/prices only in the authorized
-target catalog. Price keys name immutable financial-version history; changing a
-price never silently reprices existing subscriptions.
+record, and `prune: true` archives omitted products and prices. Price keys name
+immutable financial versions; changing a price never silently reprices existing
+subscriptions. For dynamic products with host-owned Stripe credentials use
+`SecretBackend: openrails.SecretBackendSnapshot` with the account in
+`Config.Merchant`; rotate by updating configuration and constructing a new engine.
 
 ### Creator-owned catalogs
 
 One merchant may have a default catalog and catalogs owned by opaque host
-subjects. Ordinary `rt.Client()` calls continue to create products in the default
+subjects. Ordinary Client calls continue to create products in the default
 catalog unless an authorized administrator supplies `ProductCreateParams.CatalogID`.
 Product and price keys remain unique within the merchant.
 
@@ -450,187 +277,86 @@ CatalogClient from an owner read out of a product or content row. The optional
 OpenRails control-plane adapter includes a `creator` role with only the two owner
 grants; it is not assigned automatically.
 
-### 6. Mounting HTTP
+### 6. Authentication and HTTP
 
-Supply `Options.Auth` with a provider-neutral `billingauth.Integration` at
-construction. It is independent of HTTP publication: the same integration protects
-explicit credentials on headless Client calls and published routes.
+OpenRails has no logins of its own: it asks your auth who is calling. The same
+authentication protects explicit credentials on headless Client calls and
+published routes.
 
-- `Authentication.AuthenticateRequest` verifies the credential and returns typed
-  `Identity` provenance. Native users require their original `Issuer` and
-  `SubjectID`; personal customer, checkout and own-catalog operations also require
-  an explicitly mapped canonical UUID `CustomerID`. Map external identities by
-  issuer and subject; OpenRails never guesses or hashes that mapping. Ordinary
-  merchant staff do not need a payable customer identity.
-- `Authorization.Authorize` checks the exact operation and resolved target live.
-  Merchant selection and personal ownership do not grant merchant administration,
-  refunds, or access to another catalog owner. Native JWT roles never provide a
-  permission fallback. Machine and delegated credentials retain their ceilings
-  and cannot become native personal sessions.
-- `RecentSignIn` answers whether a native user signed in recently. Every
-  operation that moves money, grants access or mints credentials needs it
-  (`permissions.RequiresRecentSignIn`: each `merchant:` permission except reads,
-  the dashboard layout and host-event acknowledgement), on every route that
-  serves the operation, and so does a native user moving another payer's money
-  on the treasury. A stale sign-in is 403 `step_up_required` with the provider's
-  challenge in `metadata`. `NewIntegration` takes it from the principal's
-  helpers/auth `RecentSignInChecker` (AuthKit: `Sensitive`'s check); without one,
-  native users are refused those operations. Machine and delegated credentials
-  carry no sign-in of their own and are exempt. Hosts add no step-up gate.
+**With AuthKit**, pass your client: `openrails.Deps{Postgres: pool, AuthKit: auth}`.
+OpenRails derives everything from it and the host writes no mapping:
 
-The optional AuthKit adapter is `orauthkit.New(orauthkit.Config{...})`. Supply the
-host's existing, initialized `VerifyRequest` verifier; an AuthKit Runtime's local
-verifier exists after its HTTP configuration has been constructed. Personal
-native routes need only that verifier. Privileged operations also need the live
-AuthKit `Client` and an explicit `Authority` mapping to a group and permission.
-Use `PlatformAuthority` for an intentional operation-specific platform counterpart;
-there is no role-name or universal administrator bypass. `AuthorityIssuer` fences
-machine credentials to the receiving permission authority. Verification is
-memoized only within one unchanged request, including sender proofs; permission
-decisions remain live per operation.
+- Authentication is AuthKit's verification of the request. A user pays for
+  themselves: the customer is the AuthKit user ID. `Deps.CustomerFor` overrides
+  who pays (for example the user's organization); it returns a canonical UUID.
+- Authorization is checked live through AuthKit, per operation.
+  `Deps.AuthorityFor` names the AuthKit group and permission that authorize a
+  staff operation; only the host knows which group holds its billing staff, so
+  the staff and machine route groups require it. Native JWT roles never confer
+  privileges.
+- The recent sign-in check (operations that move money, grant access or mint
+  credentials; `permissions.RequiresRecentSignIn`) is AuthKit's: a stale
+  sign-in is 403 `step_up_required` with AuthKit's challenge.
 
-`Config.Admission` is an explicit opt-in liveness veto. The default native JWT
-path retains login/refresh/expiry ban timing rather than adding a ban lookup to
-every request. Applications that already require live admission must retain it.
+**With other auth**, supply the same three as hooks (not together with `AuthKit`):
 
-`CustomerRoutes` defaults to `/v1/me` and resolves its configured merchant slug
-when routes are materialized. `Treasury: true` additionally enables the canonical
-`/v1/customers` group. A native user can access its canonical personal payer
-without a role lookup; selecting the fixed merchant as payer requires live
-`CustomerScope` authorization for the exact customer operation and immutable
-merchant/payer IDs. Sibling customer IDs remain denied.
+- `Deps.Authenticate(r)` returns the caller's `openrails.Identity`: `Kind`
+  (`openrails.User`, `Machine` or `Delegated`), the original `Issuer` and
+  `SubjectID`, and for personal customer, checkout and own-catalog operations
+  the explicitly mapped canonical UUID `CustomerID` (who pays). Return
+  `openrails.ErrUnauthenticated` for a request without a valid credential.
+  OpenRails never guesses or hashes the customer mapping.
+- `Deps.Authorize(r, identity, requirement)` checks live that the identity
+  holds `requirement.Permission` on `requirement.Target`. Return
+  `openrails.ErrForbidden` to refuse. Required for the staff and machine route
+  groups.
+- `Deps.RecentSignIn(r)` answers whether a native user signed in recently;
+  without it native users are refused the operations that need it.
 
-Advanced, genuinely delegated audiences can instead supply their own
-`CustomerRoutesConfig.DelegatedAuthenticator`. It must confer no permissions by
-default, never infer authority from token roles, and preserve verified
-merchant/payer binding, issuer, credential class and invoker restrictions.
-An invoker-scoped principal may read its own `/v1/me/spend-limits`; the other
-personal and treasury operations continue to refuse it.
-
-Configure HTTP once when constructing the runtime, then mount its configured
-routes once on your framework. Enable only the capabilities the application
-actually exposes; in-process `Client` and `CatalogClient` access never enables
-HTTP management endpoints.
+`Config.HTTP` selects the routes `client.Routes()` returns; mount them once with
+the adapter for your router:
 
 ```go
-auth, err := orauthkit.New(orauthkit.Config{Verifier: authRuntime.Verifier()})
-if err != nil { return err }
-rt, err := embed.New(ctx, embed.Options{
-    Config: cfg,
-    Merchant: &embed.MerchantDeclaration{Slug: "my-store"},
-    Auth: auth,
-    HTTP: &embed.HTTPConfig{
-        CustomerRoutes: []embed.CustomerRoutesConfig{{
-            Merchant: "my-store",
-            Scope: embed.CustomerBillingManagement,
-        }},
-    },
-})
-if err != nil { return err }
-// Supply the host database and River options, then compose River before serving.
-```
-
-`Options.Auth` supplies provider-neutral authentication and live operation
- authorization independently of HTTP. AuthKit is an optional adapter; native
-JWT roles never confer privileges. Checkout needs authentication; management
-capabilities also require live authorization through the host's Client and an
-explicit operation-to-group permission mapping.
-
-HTTP policy is copied at construction. There is no late HTTP setter. Route
-materialization resolves each configured merchant slug to its immutable ID after
-explicit bootstrap and refuses missing or conflicting bindings. Native identity
-contains issuer/subject; customer operations also require an explicitly mapped canonical customer UUID;
-AuthKit maps its verified local user UUID. Other providers must supply their own
-issuer-aware mapping. OpenRails does not hash or guess external subjects.
-
-Ordinary customer routes default to `/v1/me`; a host supplies only the outer mount.
-`CustomerBillingManagement` includes existing billing management and recovery,
-without generic checkout, plan purchases, or Stripe portal. Advanced audience
-mounts can use an explicit `CustomerRoutesConfig.DelegatedAuthenticator` for
-co-managed payers, preserving live admission and credential ceilings.
-
-Use the adapter for your host. The Gin and Fiber adapters are separate Go modules;
-net/http and Chi use the core module's `adapters/http` package.
-
-```go
-// net/http: github.com/open-rails/openrails/adapters/http
-routes, err := openrailshttp.Routes(rt)
-if err != nil { return err }
-if err := routes.Mount(mux, "/billing"); err != nil { return err }
-
-// Chi: inside router.Route("/billing", func(group chi.Router) { ... })
-// routes.Mount(group)
-
+// net/http or Chi: github.com/open-rails/openrails/adapters/http
+if err := openrailshttp.Mount(mux, client, "/billing"); err != nil { return err }
 // Gin: github.com/open-rails/openrails/adapters/gin
-routes, err := openrailsgin.Routes(rt)
-if err != nil { return err }
-if err := routes.Mount(engine.Group("/billing")); err != nil { return err }
-
+if err := openrailsgin.Mount(r.Group("/billing"), client); err != nil { return err }
 // Fiber v3: github.com/open-rails/openrails/adapters/fiber
-routes, err := openrailsfiber.Routes(rt)
-if err != nil { return err }
-if err := routes.Mount(app.Group("/billing")); err != nil { return err }
+if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { return err }
 ```
 
-All adapters ship in the root `github.com/open-rails/openrails` module and use
-its release version. Import paths stay the same. When upgrading from independently
-versioned Gin/Fiber modules, remove their old requirements before updating the
-root dependency; retaining those requirements creates ambiguous imports:
-
-```sh
-go mod edit -droprequire=github.com/open-rails/openrails/adapters/gin
-go mod edit -droprequire=github.com/open-rails/openrails/adapters/fiber
-# Select a published root release containing the adapters, then tidy.
-go get github.com/open-rails/openrails@<published-root-version>
-go mod tidy
-```
-
-Each adapter registers ordinary method/path routes. Route inspection sees the
-actual endpoints, and unrelated host paths retain the host's normal 404/405
-behavior. The host owns prefix, middleware and server lifecycle. Original request
-URLs and body bytes reach authentication and webhook verification unchanged.
-ServeMux handles implicit HEAD itself; other adapters register HEAD for GET and
-browser routes include CORS OPTIONS. Framework case, slash and redirect settings
-remain host-owned (Fiber defaults are case-insensitive and non-strict).
-
-| HTTP capability | Exposed surface |
+| `HTTPConfig` | Exposed surface |
 |---|---|
-| non-nil `HTTP` | Capability discovery and generic merchant-scoped verified provider callbacks |
-| `Checkout` | Buyer products, prices, checkout/config; requires `Options.Auth.Authentication` |
-| `CustomerRoutes` | Defaults to `/v1/me/*`; native entries use `Auth` plus `Merchant`; advanced delegated entries supply their own verifier |
-| `MerchantAdmin` | Customer/support management; requires `Options.Auth.Authorization` |
-| `Catalog` | Merchant and creator catalog HTTP; requires `Options.Auth.Authorization` |
-| `PaymentProviders` | Provider configuration reads and supported writes; requires `Options.Auth.Authorization` |
-| `MerchantAPI` | Service/API-key routes; requires `Options.Auth.Authorization` (most embedded hosts use `Client` instead) |
+| (always) | Capability discovery and signature-checked provider callbacks |
+| `Checkout` | Products, prices, checkout and checkout config; requires `Authenticate` |
+| `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`); `Treasury` adds `/v1/customers` |
+| `MerchantAdmin` | Customer and support management; requires `Authorize` |
+| `Catalog` | Merchant and creator catalog HTTP; requires `Authorize` |
+| `MerchantConfig` | Settings and provider configuration; requires `Authorize` |
+| `MerchantAPI` | Service and API-key routes; requires `Authorize` |
 
-Host-owned credentials omit mutation routes regardless of catalog ownership.
-Callbacks are registered generically so adding an API-managed provider account
-after startup does not require mounting another route. Each request still checks
-the configured provider account and signature. API-managed buyer surfaces likewise
-retain optional provider paths; account readiness remains a request-time guard.
-Manifest-owned buyer surfaces must be materialized after merchant/provider
-configuration; provider discovery errors are returned rather than hiding routes.
-An unconfigured runtime refuses `Routes` with an explicit disabled error.
-Declare HTTP at construction and provision configured merchants before requesting routes. The runtime materializes the inventory once, so remounting cannot reset its
-rate limits. Invalid constructor HTTP configuration fails before opening resources.
+A native customer profile serves `Config.Merchant` (or its own `Merchant`
+slug). An advanced, delegated audience can mount a profile under its own
+`Prefix` with its own `Authenticate` returning an explicit merchant and paying
+subject; it confers no permissions by default and keeps verified credential
+class and invoker restrictions. An invoker-scoped principal may read only its
+own `/v1/me/spend-limits`.
 
-Migration is a pre-v1 API change: `Runtime.Handler(MountOptions)`, `SelfHandler`,
-`RouteSet` selections and mutable `ActiveRouteSets` are removed. Move exposure and
-auth into `embed.Options`, obtain the adapter bundle, and mount it once. Remove
-catch-all `gin.WrapH`/Fiber fallback glue and separately mounted webhook paths.
+Each adapter registers ordinary method and path routes, so route inspection
+sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
+Original request URLs and bodies reach authentication and webhook verification
+unchanged. Routes are materialized once, so remounting never resets rate limits.
 
-**Admin console** (optional, #754): the engine ships zero frontend bytes. The host
-builds the SPA (`scripts/build-admin-console.sh` from the module cache into a
-gitignored `dist`, wrapped in a 3-line `//go:embed all:dist` package) and passes it
-via `embed.Options.ConsoleAssets`; gate mounting on `admin_console.enabled`. See
-[admin-console.md](admin-console.md).
+**Admin console** (optional, #754): with `Config.AdminConsole.Enabled`,
+`client.AdminConsole()` is the console's handler for the host to mount at
+`/admin/` on its root router. The console is `Deps.ConsoleAssets` when the host
+supplies its own build, else the build embedded in the OpenRails module when
+the binary was built with one. See [admin-console.md](admin-console.md).
 
 ### 7. Calling the engine
 
 ```go
-client, err := rt.Client() // bound to the constructor-declared merchant
-if err != nil { log.Fatal(err) }
-if err := client.Verify(ctx); err != nil { log.Fatal(err) } // fail fast at boot
+if err := client.Verify(ctx); err != nil { return err } // fail fast at boot
 ```
 
 The shared concrete `*openrails.Client`, grouped by job:
@@ -676,26 +402,47 @@ Checkout creation/read/confirmation, checkout provider options and effective-tie
 resolution use the shared client too. See [the commerce client](api/commerce.md).
 
 A host that must commit its own provider obligation atomically with the OpenRails
-authorization, release or settlement uses `embed.NewHostTransactions(rt)` with a transaction
-from its pool. See [provider obligations](architecture/provider-obligation-contract.md).
+authorization, release or settlement uses the embedded Client's `Tx` operations
+(`OpenOperationAuthorizationTx` and siblings) with a transaction from its pool.
+See [provider obligations](architecture/provider-obligation-contract.md).
 
 The in-process transport resolves and pins the selected immutable merchant for
-each operation, so application code never scopes connections itself. An
-unrestricted multi-merchant runtime can reuse one Client:
+each operation. An engine without a declared merchant serves many through one
+Client:
 
 ```go
-client, err := multiMerchantRuntime.Client(openrails.WithDefaultMerchant("store-a"))
+client, err := openrails.New(ctx, cfg, deps, openrails.WithDefaultMerchant("store-a"))
 if err != nil { return err }
 products, err := client.Products.List(ctx, nil, openrails.WithMerchant("store-b"))
 // For stored UUIDs use openrails.ForMerchantID(id) instead of a slug selector.
 ```
 
-The default does not restrict an otherwise unrestricted runtime, and the
-per-operation option does not mutate it. A runtime restricted by its merchant
-declaration still refuses a different merchant. Both selectors require the same
-operation permission; neither acts as authorization.
+The default does not restrict an engine, and the per-operation option does not
+mutate it. An engine with a declared merchant refuses a different one. Both
+selectors require the same operation permission; neither acts as authorization.
 
-### 8. Acting on delinquency
+### 8. The control plane (hosted products)
+
+A hosted product runs OpenRails' own AuthKit control plane instead of bringing
+its own auth: `Config.ControlPlane` (issuer and keys in `Auth`, `HostedPosture`,
+`MerchantCreation`) with `Deps.EmailSender`/`SMSSender` (AuthKit's
+`adapters/twilio` provides both). `Routes` is then the standalone surface
+(billing, AuthKit and the admin console), mounted at the router's root
+(`RoutesRequireRoot`); `HTTP.CustomerRoutes` may add delegated customer
+profiles. Its workers join the same fleet through `RiverJobs`.
+
+The control plane's operations are Client methods: `ProvisionMerchant`,
+`RenameMerchant`, `SetMerchantDisplayName`, `Set`/`GetMerchantAPIHost`,
+`ListUserMerchants`, `ListMerchantsForSubject`, `ListActiveMerchantIDs`,
+`ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`,
+`EnsureCustomerPermissionGroup`, `FleetAnalytics`, `FleetTimeseries`,
+`ListMerchantRetirementCandidates`, `RetireUnusedMerchant`,
+`CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod`,
+`AuthenticateUser`, and `AuthKit()` for the control plane's AuthKit client.
+`MerchantCreation.FreeAllowance` gates merchant creation beyond the allowance on
+`Deps.HasVaultedPaymentMethod`.
+
+### 9. Acting on delinquency
 
 For arrears billing, OpenRails decides when a payer's unpaid debt has outlived
 the merchant's grace window and refuses their new spend at admission — but only
@@ -703,8 +450,7 @@ your app can shut off what your app runs. Transitions land on a durable,
 acknowledged feed you drain:
 
 ```go
-// client is returned by runtime.Client(openrails.WithDefaultMerchant("my-store"))
-// or openrails.NewRemote(...); both use the same operations.
+// client is openrails.New(...) or openrails.NewRemote(...); both use the same operations.
 for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyGrace,
     billing.HostEventDelinquencyEntered,
@@ -725,7 +471,7 @@ Ack after your action is durable — an unacked event is redelivered. OpenRails
 never revokes an entitlement for an unpaid arrears bill. Full boundary and policy:
 [arrears-delinquency.md](arrears-delinquency.md).
 
-### 9. Webhooks and ops
+### 10. Webhooks and ops
 
 Point each rail's webhook at the webhook routes on **your** server, under your mount
 prefix (paths in [api/endpoints.md](api/endpoints.md)). OpenRails verifies rail

@@ -1,0 +1,127 @@
+package config
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// TestNoLibraryEnvReads enforces the #712 doctrine: env is read exactly once,
+// at the binary boundary, by the config-loading pipeline. Importable packages
+// must NOT call os.Getenv / os.LookupEnv / os.Environ / syscall.Getenv behind
+// the host application's back — in embedded mode the HOST owns the process env.
+// Every value a library needs arrives as explicit config.
+func TestNoLibraryEnvReads(t *testing.T) {
+	readNeedles := []string{"os.Getenv(", "os.LookupEnv(", "os.Environ(", "syscall.Getenv("}
+
+	// or#915: env WRITES and dotenv loads are held to a stricter bar than
+	// reads. os.Setenv/os.Unsetenv are banned in ALL non-test code — cmd/
+	// included: --provider-write-mode/--test-mode used to reach the loader by
+	// writing into the process env before config.Load (a back-door that made
+	// env order-dependent and unauditable); flags ride a confmap overlay now.
+	// godotenv.Load has exactly ONE consumption point, logged at boot.
+	writeNeedles := []string{"os.Setenv(", "os.Unsetenv(", "godotenv.Load("}
+	writeAllowedFiles := map[string]string{
+		"internal/hostconfig/load.go": "the ONE standalone godotenv.Load consumption point (logged at boot); no Setenv",
+	}
+
+	// Allowlisted path prefixes (relative to the module root). One-line
+	// justification per entry — anything else that reads env FAILS.
+	allowedPrefixes := map[string]string{
+		"cmd/":                 "binary boundary: the process entrypoint owns flags and env",
+		"examples/":            "standalone example apps: each is its own main(), a binary boundary like cmd/",
+		"internal/config/":     "mounted secret-file access for explicit host loading",
+		"internal/hostconfig/": "standalone configuration-loading boundary",
+		"tests/":               "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
+		"scripts/":             "operational tooling run as its own process, not importable library code",
+		"internal/dbtest/":     "test-support package: container/DSN discovery for test binaries",
+	}
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("expected module root at %s: %v", root, err)
+	}
+
+	var violations []string
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// Dot-dirs cover .git plus agent worktrees under .claude/worktrees
+			// (copies of the whole repo that made this test flag itself).
+			if name := d.Name(); strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
+				return filepath.SkipDir
+			}
+			// Nested modules (sdk/*/e2e/server) are their own binaries.
+			if path != root {
+				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
+			return nil // test files own their env
+		}
+		readAllowed := false
+		for prefix := range allowedPrefixes {
+			if strings.HasPrefix(rel, prefix) {
+				readAllowed = true
+				break
+			}
+		}
+		_, writeAllowed := writeAllowedFiles[rel]
+		if readAllowed && writeAllowed {
+			return nil
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+		lineNo := 0
+		for scanner.Scan() {
+			lineNo++
+			line := scanner.Text()
+			if !readAllowed {
+				for _, needle := range readNeedles {
+					if strings.Contains(line, needle) {
+						violations = append(violations, fmt.Sprintf("%s:%d: %s", rel, lineNo, strings.TrimSpace(line)))
+					}
+				}
+			}
+			if !writeAllowed {
+				for _, needle := range writeNeedles {
+					if strings.Contains(line, needle) {
+						violations = append(violations, fmt.Sprintf("%s:%d: %s (env writes/dotenv loads are banned outside config.Load — or#915)", rel, lineNo, strings.TrimSpace(line)))
+					}
+				}
+			}
+		}
+		return scanner.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(violations) > 0 {
+		t.Errorf("library env reads found (#712: env is read once at the binary boundary; "+
+			"move the knob into config and thread it as an explicit field):\n  %s",
+			strings.Join(violations, "\n  "))
+	}
+}

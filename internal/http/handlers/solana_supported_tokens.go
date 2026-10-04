@@ -12,7 +12,7 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"

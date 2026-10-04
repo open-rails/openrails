@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const adminUser = "11111111-1111-1111-1111-111111111111"

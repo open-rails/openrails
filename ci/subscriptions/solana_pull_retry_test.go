@@ -12,8 +12,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/failpoint"
 )
 
@@ -49,7 +49,7 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	defer remove()
 
 	crank := func() {
-		res, err := w.jobs.Insert(t.Context(), solanaCrankPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+		res, err := w.jobs.Insert(t.Context(), solanaCrankPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		w.waitJob(res.Job.ID)
 		w.wake()

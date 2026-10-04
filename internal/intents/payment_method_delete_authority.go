@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func paymentMethodDeleteAuthority(ctx context.Context, payer uuid.UUID) (Origin, string) {

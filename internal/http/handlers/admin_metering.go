@@ -276,7 +276,7 @@ func adminUsageMeterPageDTO(
 }
 
 func adminCatalogOwnership(r *httprequest.Request) (string, bool) {
-	return "database", r.State != nil && catalogpolicy.Enabled(r.State.Config)
+	return "database", r.State != nil && catalogpolicy.Check(r.Request.Context(), r.State.Config) == nil
 }
 
 func writeMeteringValidationError(r *httprequest.Request, code string, err error) {

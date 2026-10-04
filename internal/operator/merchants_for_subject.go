@@ -4,19 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-// MerchantRef is a merchant's directory identity as a host sees it: the slug it
-// scopes billing to, plus an optional human-facing display name. It answers
-// "which merchants does this customer transact with" (ListMerchantsForSubject,
-// openrails-saas #18).
-type MerchantRef struct {
-	ID          merchant.ID `json:"id"`
-	Slug        string      `json:"slug"`
-	DisplayName string      `json:"display_name,omitempty"`
-}
 
 // ListMerchantsForSubject returns the active merchants where the AuthKit subject
 // holds a customer record (openrails-saas #18) — the "which merchants do I buy
@@ -26,7 +16,7 @@ type MerchantRef struct {
 // added by migration 0016 (#824).
 // Calling it without an attached control plane is a wiring error (call
 // Attach/AttachWithOptions first).
-func ListMerchantsForSubject(ctx context.Context, a *app.App, subject string) ([]MerchantRef, error) {
+func ListMerchantsForSubject(ctx context.Context, a *app.App, subject string) ([]billing.MerchantRef, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")
@@ -35,9 +25,9 @@ func ListMerchantsForSubject(ctx context.Context, a *app.App, subject string) ([
 	if err != nil {
 		return nil, err
 	}
-	out := make([]MerchantRef, 0, len(rows))
+	out := make([]billing.MerchantRef, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, MerchantRef{ID: r.ID, Slug: r.Slug, DisplayName: r.DisplayName})
+		out = append(out, billing.MerchantRef{ID: r.ID, Slug: r.Slug, DisplayName: r.DisplayName})
 	}
 	return out, nil
 }

@@ -9,11 +9,11 @@ unresolved work. The existing invoice/subscription read exposes `recovery` and
 any unresolved operation, without a second operation API.
 
 The shared Go Client runs identically over HTTP or in process. Embedded hosts
-configure `embed.Options.DelegatedAuthenticator` once (the ordinary Handler
-inherits it) and construct a customer Client with explicit credentials:
+verify customer credentials with `Deps.Authenticate` and derive a customer
+Client with explicit credentials:
 
 ```go
-customer, err := runtime.Client(openrails.WithTokenProvider(func(ctx context.Context) (string, error) {
+customer, err := client.With(openrails.WithTokenProvider(func(ctx context.Context) (string, error) {
     return verifiedCustomerToken, nil
 }))
 result, err := customer.PayInvoiceNow(ctx, billing.PayInvoiceNowRequest{
@@ -25,7 +25,7 @@ result, err := customer.PayInvoiceNow(ctx, billing.PayInvoiceNowRequest{
 
 The authenticator must verify a customer's credential before mapping it to the
 payer and set `CredentialClassUserSession`. The host explicitly maps a verified
-neutral principal with billingauth.NewIntegration; device-key credentials are
+credential in `Deps.Authenticate`; device-key credentials are
 automation authority and do not establish customer interaction. It is never accepted from a request header/body. Unknown or
 automation classes retain their existing self reads but cannot initiate CIT. The host verifier owns verification and any explicit live admission policy. A merchant API key or service credential cannot
 become customer-present by supplying a payment method. Ambient host request
@@ -46,12 +46,12 @@ DelegatedAuthorization: func(ctx context.Context, request authkit.DelegationRequ
     if !ok || claims.UserID == "" || claims.UserID != request.UserID {
         return authkit.DelegationGrant{}, authkit.ErrDelegationRefused
     }
-    class := billingauth.CredentialClassUserSession
+    class := openrails.CredentialUserSession
     if claims.DeviceKeyID != "" || claims.TokenType != "" {
-        class = billingauth.CredentialClassAutomation
+        class = openrails.CredentialAutomation
     }
     return authkit.DelegationGrant{Attributes: map[string]any{
-        billingauth.DelegatedCredentialClassAttribute: class,
+        "openrails_credential_class": class,
     }}, nil
 }
 ```

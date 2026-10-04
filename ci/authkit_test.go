@@ -27,13 +27,14 @@ import (
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/keys"
+	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hostauth"
+	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/permissions"
 )
 
@@ -46,13 +47,13 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	f := newFixture(t)
 	cp := f.attachControlPlane(t, reserving())
 	ctx := t.Context()
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
 	shop := uniqueName("staff")
-	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
-	session := authtest.SignIn(t, cp.Core(), owner).AccessToken
+	session := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
 
 	w := call(t, handler, session, http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -82,7 +83,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	w = call(t, handler, session, http.MethodPost, "/v1/merchant/team/invites", shop, map[string]string{"email": uniqueName("nobody") + "@e2e.test", "role": "viewer"})
 	require.Equal(t, http.StatusConflict, w.Code, "self-hosted registration is closed: %s", w.Body.String())
 
-	_, err = cp.Core().RevokeAccountSessions(ctx, iam.UserActor(owner.ID), owner.ID)
+	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserActor(owner.ID), owner.ID)
 	require.NoError(t, err)
 	w = call(t, handler, session, http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
@@ -92,11 +93,11 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 
 // newAccount creates an account with a verified email and a password, which
 // authtest.SignIn signs in. Names are unique: tests share AuthKit's schema.
-func newAccount(t *testing.T, cp *embedcontrolplane.ControlPlane) authtest.User {
+func newAccount(t *testing.T, cp *openrails.Client) authtest.User {
 	t.Helper()
 	name := "a" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	email := name + "@e2e.test"
-	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: email, Username: name, Password: authtest.Password, EmailVerified: true})
+	u, err := cp.AuthKit().CreateUser(t.Context(), iam.NewUser{Email: email, Username: name, Password: authtest.Password, EmailVerified: true})
 	require.NoError(t, err)
 	return authtest.User{User: u, Email: email, Password: authtest.Password}
 }
@@ -118,8 +119,7 @@ func TestMerchantIssuerIsTrustedWithinItsGroup(t *testing.T) {
 			d.KeySource = keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}
 		}))
 
-	var rt *embed.Runtime
-	cp := f.attachControlPlane(t, func(r *embed.Runtime) embedcontrolplane.Options { rt = r; return embedcontrolplane.Options{} })
+	cp := f.attachControlPlane(t, nil)
 	jwk := keys.PublicJWK(signer.Public(), signer.KID(), "")
 	shop := uniqueName("federated")
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
@@ -133,11 +133,11 @@ merchants:
         keys:
           - {kty: "%s", kid: "%s", n: "%s", e: "%s"}
 `, shop, issuer, jwk.Kty, jwk.Kid, jwk.N, jwk.E)), 0o600))
-	graph := app.HostGraph(rt)
+	graph := engine.Graph(cp)
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, ""))
 	mid, _, err := cp.ResolveMerchantForGroup(t.Context(), shop)
 	require.NoError(t, err)
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 
 	// A browser's DPoP key; the receiver's proof target is the issuer's origin.
@@ -208,12 +208,12 @@ merchants:
 	// Disabling the application out of band applies without OpenRails
 	// reloading anything. A merchant keeps an owner: a person takes over
 	// before its only owner, the application, is disabled.
-	app, err := cp.Core().RemoteApplication(t.Context(), iam.AppByIssuer(issuer))
+	app, err := cp.AuthKit().RemoteApplication(t.Context(), iam.AppByIssuer(issuer))
 	require.NoError(t, err)
-	_, err = cp.Core().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), iam.UserSubject(newAccount(t, cp).ID), embedcontrolplane.MerchantType.OwnerRole())
+	_, err = cp.AuthKit().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), iam.UserSubject(newAccount(t, cp).ID), operator.MerchantType.OwnerRole())
 	require.NoError(t, err)
 	app.Enabled = false
-	_, err = cp.Core().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), app)
+	_, err = cp.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), app)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return send(service(permissions.MerchantRepairAlertsRead), "").Code != http.StatusOK }, 20*time.Second, 200*time.Millisecond)
 }
@@ -224,27 +224,26 @@ merchants:
 // authority manifest parses against OpenRails' roles.
 func TestControlPlaneOperatorPaths(t *testing.T) {
 	f := newFixture(t)
-	var rt *embed.Runtime
-	cp := f.attachControlPlane(t, func(r *embed.Runtime) embedcontrolplane.Options { rt = r; return embedcontrolplane.Options{} })
+	cp := f.attachControlPlane(t, nil)
 	ctx := t.Context()
-	require.NoError(t, app.HostGraph(rt).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
+	require.NoError(t, engine.Graph(cp).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 	admin := newAccount(t, cp)
 
 	slug := uniqueName("unbound")
 	var mid string
 	require.NoError(t, f.pool.QueryRow(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1) RETURNING id::text", slug).Scan(&mid))
-	res, err := cp.RunBootstrap(ctx, embedcontrolplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
+	res, err := operator.RunBootstrap(ctx, engine.Graph(cp), operator.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.True(t, res.MerchantGroupCreated)
 	require.Equal(t, mid, res.BootstrapMerchantGroupID, "the group is keyed by the merchant")
 	require.True(t, res.APIKeyMinted)
-	again, err := cp.RunBootstrap(ctx, embedcontrolplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
+	again, err := operator.RunBootstrap(ctx, engine.Graph(cp), operator.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.False(t, again.MerchantGroupCreated || again.APIKeyMinted, "a rerun changes nothing")
-	roles, err := cp.Core().GroupRoles(ctx, iam.GroupByID(mid), []iam.Subject{iam.UserSubject(admin.ID)})
+	roles, err := cp.AuthKit().GroupRoles(ctx, iam.GroupByID(mid), []iam.Subject{iam.UserSubject(admin.ID)})
 	require.NoError(t, err)
 	require.Equal(t, "owner", roles[iam.UserSubject(admin.ID)].Name())
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, call(t, handler, res.APIKeySecret, http.MethodGet, "/v1/merchant/findings", "", nil).Code, "the deployment key acts for its merchant")
 
@@ -254,23 +253,23 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, customer.ID, group)
 	}
-	roles, err = cp.Core().GroupRoles(ctx, embedcontrolplane.CustomerGroup(customer.ID), []iam.Subject{iam.UserSubject(customer.ID)})
+	roles, err = cp.AuthKit().GroupRoles(ctx, operator.CustomerGroup(customer.ID), []iam.Subject{iam.UserSubject(customer.ID)})
 	require.NoError(t, err)
 	require.Equal(t, "owner", roles[iam.UserSubject(customer.ID)].Name())
 
-	directory := hostauth.NewDirectory(cp.Core())
+	directory := hostauth.NewDirectory(cp.AuthKit())
 	payer := newAccount(t, cp)
 	username, email, ok, err := directory.EmailIdentity(ctx, payer.ID)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, []string{payer.Username, payer.Email}, []string{username, email})
 	renamed := "r" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	_, err = cp.Core().UpdateUser(ctx, iam.UserActor(payer.ID), payer.ID, iam.UserUpdate{Username: &renamed})
+	_, err = cp.AuthKit().UpdateUser(ctx, iam.UserActor(payer.ID), payer.ID, iam.UserUpdate{Username: &renamed})
 	require.NoError(t, err)
 	id, err := directory.GetUserIDByUsername(ctx, payer.Username)
 	require.NoError(t, err)
 	require.Equal(t, payer.ID, id, "a former username still resolves")
-	results, err := cp.Core().DeleteUsers(ctx, iam.UserActor(payer.ID), []string{payer.ID})
+	results, err := cp.AuthKit().DeleteUsers(ctx, iam.UserActor(payer.ID), []string{payer.ID})
 	require.NoError(t, err)
 	require.NoError(t, results[0].Err)
 	_, _, ok, err = directory.EmailIdentity(ctx, payer.ID)
@@ -281,6 +280,6 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.NoError(t, err)
 	manifest, err := authkit.ParseBootstrapManifestYAML(raw)
 	require.NoError(t, err)
-	_, err = cp.Core().ApplyBootstrapManifest(ctx, manifest, iam.BootstrapOptions{DryRun: true})
+	_, err = cp.AuthKit().ApplyBootstrapManifest(ctx, manifest, iam.BootstrapOptions{DryRun: true})
 	require.NoError(t, err)
 }

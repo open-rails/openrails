@@ -42,21 +42,22 @@ Do not guess these; ask:
 Follow [embedded-integration.md](embedded-integration.md) section by section. The
 milestone order, each verifiable before the next:
 
-1. **Migrations.** Call `embed.ApplyMigrations` with the pool the runtime will use.
-   OpenRails owns and applies its embedded billing and managed River schemas.
+1. **Migrations.** Call `openrails.Migrate` with the pool the engine will use.
+   OpenRails owns and applies its billing and managed River schemas.
    Verify: the `billing` schema (or the configured one) exists.
-2. **Boot.** Programmatic `config.Config` (explicit `TestMode`,
-   `ProviderWriteMode`), `embed.New` with the host's pgx pool. Verify: boot succeeds;
+2. **Boot.** `openrails.Config` (explicit `TestMode`,
+   `ProviderWriteMode`), `openrails.New` with the host's pgx pool in `Deps`. Verify: boot succeeds;
    a missing posture field refuses to boot (that is correct behavior, not a bug).
-3. **Merchant + rails.** set `Options.Merchant.Config` before `embed.New` with the user's sandbox PSP entries
+3. **Merchant + rails.** Set `Config.Merchant` with the user's sandbox PSP entries
    (per-rail setup: [rails/](rails/)). Verify: boot logs show the rail armed; for NMI
    the sandbox probe passes.
 4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
-5. **Mount routes.** Implement `billingauth` authenticators mapping the host's existing
-   auth in `embed.Options.HTTP`; obtain `openrailshttp.Routes(rt)` (or the Gin/Fiber adapter) and mount the bundle under a prefix. Verify: an authenticated request to
+5. **Mount routes.** Implement `Deps.Authenticate` (and `Authorize` for staff routes)
+   over the host's existing auth, select route groups in `Config.HTTP`, and mount with
+   `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify: an authenticated request to
    `GET <prefix>/v1/me/status` returns the caller's own subject.
-6. **Backend calls.** Wire `rt.Client()` where the host needs admission/holds, usage,
+6. **Backend calls.** Use the Client where the host needs admission/holds, usage,
    or entitlement reads. Verify: `AdmitBatch` + `Capture` round-trip in a test.
 7. **Checkout end-to-end.** Frontend work per
    [frontend-integration.md](frontend-integration.md). Verify: sandbox checkout →

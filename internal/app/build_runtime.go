@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"net"
 	"net/http"
 
@@ -22,8 +23,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
@@ -415,6 +416,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		} else {
 			if err := runtime.DB.ValidateRiverJobBinding(ctx, pool, producer.Schema()); err != nil {
 				pool.Close() // This producer pool was created internally above.
+				if errors.Is(err, db.ErrRiverTablesMissing) {
+					return nil, fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) before openrails.New", err)
+				}
 				return nil, fmt.Errorf("init River producer binding: %w", err)
 			}
 			runtime.RiverProducer = producer
@@ -535,7 +539,7 @@ func buildRiverProducer(ctx context.Context, cfg *config.Config, schema string) 
 }
 
 func createDatabase(ctx context.Context, cfg *config.Config) (*db.DB, error) {
-	database, err := db.NewDB(ctx, cfg.DB)
+	database, err := db.NewDB(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -567,11 +571,11 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	// filters the ledger by schema, so a schema-less source stops matching rows
 	// applied via WithSchema.
 	//
-	// Never Fatal here: this runs inside embed.New, so os.Exit would take the
+	// Never Fatal here: this runs inside openrails.New, so os.Exit would take the
 	// HOST process down on a library precondition. Return the error and let the
 	// host refuse to boot with it.
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
-		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: cfg.DB.SchemaName()},
+		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: cfg.SchemaName()},
 	); err != nil {
 		log.WithError(err).Error("Postgres migrations validation failed")
 		return err

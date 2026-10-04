@@ -42,9 +42,9 @@ What import does **not** do:
 ### The import surface
 
 **Client**: `client.ImportBilling(ctx, billing.DeclaredBilling{...})` on the
-merchant-bound Client, in every deployment (`rt.Client()` in process, or
-`openrails.NewRemote`). Resolve public names once with `rt.ResolveMerchant`
-and bind the Client to the captured UUID. **HTTP**: `POST /v1/import/billing`
+merchant-bound Client, in every deployment (`openrails.New` in process, or
+`openrails.NewRemote`). Resolve a public name once and bind the Client to
+the captured UUID. **HTTP**: `POST /v1/import/billing`
 with the identical JSON body — merchant from the authenticated credential,
 gated on the owner-level `merchant:billing:import` permission. The HTTP body
 cap (1 MiB) forces large books to batch.
@@ -126,12 +126,12 @@ derives the windows. `Client.ImportBilling` posts the same book over
 The ordered phases, from a production host that migrated many years of legacy
 billing data over this seam:
 
-1. **Apply migrations.** Call `embed.ApplyMigrations` with the pool the runtime will use;
+1. **Apply migrations.** Call `openrails.Migrate` with the pool the engine will use;
    OpenRails owns and applies its billing baseline and managed River tables.
    Apply your application schemas separately, then validate the target shape
    before writing anything.
 2. **Declare the merchant, PSPs, and catalog.** Upsert the merchant + its
-   operator-declared PSP rows through `embed.Options.Merchant`
+   operator-declared PSP rows through `Config.Merchant` (or `Client.DeclarePSP`)
    (or manifest boot), then push the catalog — including *retired* historical
    price points, so every legacy subscription resolves a price. Resolve the
    `psps` row ids to stamp on imported rows. A PSP declared without

@@ -4,56 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-// FleetMerchantFunnel counts merchants by lifecycle stage (openrails-saas #28):
-// provisioned → armed (live PSP declared) → first-revenue → active-in-window.
-type FleetMerchantFunnel struct {
-	Total         int64 `json:"total"`
-	Armed         int64 `json:"armed"`
-	FirstRevenue  int64 `json:"first_revenue"`
-	ActiveRevenue int64 `json:"active_revenue"`
-}
-
-// FleetCurrencyRevenue is one currency's settled window volume. SettledAmount
-// is in the currency's native units (docs/money-wire.md) and travels as an
-// exact decimal string.
-type FleetCurrencyRevenue struct {
-	Currency      string `json:"currency"`
-	Payments      int64  `json:"payments"`
-	SettledAmount int64  `json:"settled_amount,string"`
-}
-
-// FleetRailHealth is one rail's approved/declined charge attempts and
-// chargebacks across the fleet window. Chargebacks counts #733 reversal
-// mirror rows recorded in the window: the dispute signal VAMP-style
-// monitoring watches.
-type FleetRailHealth struct {
-	Rail        string `json:"rail"`
-	Succeeded   int64  `json:"succeeded"`
-	Failed      int64  `json:"failed"`
-	Chargebacks int64  `json:"chargebacks"`
-}
-
-// FleetMRR is one currency's monthly-normalized recurring run-rate.
-// MonthlyAmount is in the currency's native units and travels as an exact
-// decimal string.
-type FleetMRR struct {
-	Currency      string `json:"currency"`
-	Subscriptions int64  `json:"subscriptions"`
-	MonthlyAmount int64  `json:"monthly_amount,string"`
-}
-
-// FleetSnapshot is one operator snapshot of the hosted fleet.
-type FleetSnapshot struct {
-	WindowDays int                    `json:"window_days"`
-	Merchants  FleetMerchantFunnel    `json:"merchants"`
-	Revenue    []FleetCurrencyRevenue `json:"revenue"`
-	Rails      []FleetRailHealth      `json:"rails"`
-	MRR        []FleetMRR             `json:"mrr"`
-}
 
 // FleetAnalytics returns cross-merchant operator aggregates (openrails-saas
 // #28) — the fleet view no per-merchant scope can compute. It reaches
@@ -65,7 +19,7 @@ type FleetSnapshot struct {
 // its own platform merchant); zero excludes nothing. windowDays outside 1..365
 // falls back to 30. Calling without an attached control plane is a wiring error
 // (call Attach/AttachWithOptions first).
-func FleetAnalytics(ctx context.Context, a *app.App, exclude merchant.ID, windowDays int) (*FleetSnapshot, error) {
+func FleetAnalytics(ctx context.Context, a *app.App, exclude merchant.ID, windowDays int) (*billing.FleetSnapshot, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")
@@ -74,26 +28,26 @@ func FleetAnalytics(ctx context.Context, a *app.App, exclude merchant.ID, window
 	if err != nil {
 		return nil, err
 	}
-	out := &FleetSnapshot{
+	out := &billing.FleetSnapshot{
 		WindowDays: snapshot.WindowDays,
-		Merchants: FleetMerchantFunnel{
+		Merchants: billing.FleetMerchantFunnel{
 			Total:         snapshot.Merchants.Total,
 			Armed:         snapshot.Merchants.Armed,
 			FirstRevenue:  snapshot.Merchants.FirstRevenue,
 			ActiveRevenue: snapshot.Merchants.ActiveRevenue,
 		},
-		Revenue: make([]FleetCurrencyRevenue, 0, len(snapshot.Revenue)),
-		Rails:   make([]FleetRailHealth, 0, len(snapshot.Rails)),
-		MRR:     make([]FleetMRR, 0, len(snapshot.MRR)),
+		Revenue: make([]billing.FleetCurrencyRevenue, 0, len(snapshot.Revenue)),
+		Rails:   make([]billing.FleetRailHealth, 0, len(snapshot.Rails)),
+		MRR:     make([]billing.FleetMRR, 0, len(snapshot.MRR)),
 	}
 	for _, r := range snapshot.Revenue {
-		out.Revenue = append(out.Revenue, FleetCurrencyRevenue{Currency: r.Currency, Payments: r.Payments, SettledAmount: r.SettledAmount})
+		out.Revenue = append(out.Revenue, billing.FleetCurrencyRevenue{Currency: r.Currency, Payments: r.Payments, SettledAmount: r.SettledAmount})
 	}
 	for _, r := range snapshot.Rails {
-		out.Rails = append(out.Rails, FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
+		out.Rails = append(out.Rails, billing.FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
 	}
 	for _, r := range snapshot.MRR {
-		out.MRR = append(out.MRR, FleetMRR{Currency: r.Currency, Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})
+		out.MRR = append(out.MRR, billing.FleetMRR{Currency: r.Currency, Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})
 	}
 	return out, nil
 }

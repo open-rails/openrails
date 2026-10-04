@@ -22,12 +22,12 @@ import (
 	"github.com/open-rails/authkit/verify"
 	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -115,7 +115,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 			w.WriteHeader(401)
 			return
 		}
-		require.Equal(t, billingauth.DelegatedUser, identity.Kind)
+		require.Equal(t, billingauth.Delegated, identity.Kind)
 		require.Contains(t, r.RequestURI, "/v2/merchant/")
 		principal, err := gate.Authorize(r.Context(), r, permissions.MerchantCatalogRead)
 		if err != nil {

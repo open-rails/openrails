@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -39,17 +40,9 @@ func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id merchant.I
 	return directory.SetDisplayName(ctx, id, displayName)
 }
 
-// UserMerchant is a live merchant a user holds a role in.
-type UserMerchant struct {
-	ID          merchant.ID `json:"id"`
-	Slug        string      `json:"slug"`
-	DisplayName string      `json:"display_name,omitempty"`
-	Role        string      `json:"role"`
-}
-
 // ListUserMerchants returns the live merchants userID holds a role in, ordered
 // by name, with the user's role in each.
-func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]UserMerchant, error) {
+func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
@@ -74,9 +67,9 @@ func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	out := make([]UserMerchant, 0, len(refs))
+	out := make([]billing.UserMerchant, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: roles[ref.GroupID]})
+		out = append(out, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: roles[ref.GroupID]})
 	}
 	return out, nil
 }

@@ -11,8 +11,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -117,7 +117,7 @@ func TestNMIPullIgnoresRowsCreatedDuringTheFetch(t *testing.T) {
 		return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v5/subscriptions")
 	}, true))
 	g.served = true
-	res, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	select {
 	case <-g.arrived:

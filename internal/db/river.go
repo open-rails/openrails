@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -23,6 +24,9 @@ type riverBinding struct {
 	mu       sync.RWMutex
 	inserter RiverJobInserter
 }
+
+// ErrRiverTablesMissing reports a River schema that was never migrated.
+var ErrRiverTablesMissing = errors.New("River's tables are missing")
 
 // ValidateRiverJobBinding must succeed before the runtime enables a producer.
 // Validate during composition, before requests hold any transaction or pool pin.
@@ -47,7 +51,7 @@ func (d *DB) ValidateRiverJobBinding(ctx context.Context, pool *pgxpool.Pool, sc
 		return fmt.Errorf("River queue table: %w", err)
 	}
 	if exists == nil || !*exists {
-		return fmt.Errorf("River queue table is missing from schema %q", schema)
+		return fmt.Errorf("%w from schema %q", ErrRiverTablesMissing, schema)
 	}
 	return nil
 }

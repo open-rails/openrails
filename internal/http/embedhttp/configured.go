@@ -7,28 +7,15 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
-// HTTPConfig declares externally accessible HTTP capabilities. Nil Options.HTTP
-// disables HTTP entirely. A non-nil configuration includes capability discovery
-// and provider callbacks; accepting a callback still requires an armed account
-// and valid provider verification. Management and buyer surfaces are opt-in and
-// independent of in-process Client access and its catalog-scoped views.
-type HTTPConfig struct {
-	CustomerRoutes []CustomerRoutesConfig
-
-	Checkout       bool
-	MerchantAdmin  bool
-	Catalog        bool
-	MerchantConfig bool
-	MerchantAPI    bool
-}
-
-func ValidateHTTPConfig(cfg *HTTPConfig, auth *billingauth.Integration) error {
+// ValidateHTTPConfig checks that every published group has the authority it needs.
+func ValidateHTTPConfig(cfg *config.HTTPConfig, auth *billingauth.Integration) error {
 	if cfg == nil {
 		return nil
 	}
@@ -36,15 +23,15 @@ func ValidateHTTPConfig(cfg *HTTPConfig, auth *billingauth.Integration) error {
 		return err
 	}
 	if cfg.Checkout && (auth == nil || auth.Authentication == nil) {
-		return fmt.Errorf("openrails HTTP: Checkout requires Options.Auth.Authentication")
+		return fmt.Errorf("openrails HTTP: Checkout requires Deps.AuthKit or Deps.Authenticate")
 	}
 	if (cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
-		return fmt.Errorf("openrails HTTP: management surfaces require Options.Auth authentication and authorization")
+		return fmt.Errorf("openrails HTTP: management surfaces require Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
 	}
 	return nil
 }
 
-func (cfg HTTPConfig) routeSets() []RouteSet {
+func routeSets(cfg config.HTTPConfig) []RouteSet {
 	sets := []RouteSet{RouteSetWebhooks}
 	for _, v := range []struct {
 		enabled bool
@@ -62,7 +49,7 @@ func (cfg HTTPConfig) routeSets() []RouteSet {
 }
 
 // ConfiguredRoutes is the shared configured HTTP assembly used by native adapters.
-func ConfiguredRoutes(a *app.App, policy *HTTPConfig) (*router.Table, error) {
+func ConfiguredRoutes(a *app.App, policy *config.HTTPConfig) (*router.Table, error) {
 	if a == nil || a.Runtime == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
@@ -81,8 +68,8 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig) (*router.Table, error) {
 	return buildConfiguredRoutes(a, cfg, asm)
 }
 
-func buildConfiguredRoutes(a *app.App, cfg HTTPConfig, asm *Assembler) (*router.Table, error) {
-	active := cfg.routeSets()
+func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*router.Table, error) {
+	active := routeSets(cfg)
 	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || len(cfg.CustomerRoutes) > 0)
 	if err != nil {
 		return nil, err
@@ -106,12 +93,12 @@ func buildConfiguredRoutes(a *app.App, cfg HTTPConfig, asm *Assembler) (*router.
 	return table, nil
 }
 
-func configuredCapabilities(cfg HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
-	active := cfg.routeSets()
+func configuredCapabilities(cfg config.HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
+	active := routeSets(cfg)
 	fullCustomer, solanaManagement := false, false
 	for _, exposure := range cfg.CustomerRoutes {
-		fullCustomer = fullCustomer || exposure.Scope == CustomerSelfService
-		solanaManagement = solanaManagement || exposure.Scope == CustomerSelfService || exposure.Scope == CustomerBillingManagement
+		fullCustomer = fullCustomer || exposure.Scope == config.CustomerSelfService
+		solanaManagement = solanaManagement || exposure.Scope == config.CustomerSelfService || exposure.Scope == config.CustomerBillingManagement
 	}
 	if len(cfg.CustomerRoutes) > 0 {
 		active = append(active, RouteSetCustomer)
