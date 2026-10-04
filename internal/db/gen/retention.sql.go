@@ -31,54 +31,103 @@ func (q *Queries) GetSweepCursor(ctx context.Context, workerKind string) (GetSwe
 
 const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 
-SELECT merchant_id FROM billing.retention_work_merchant_ids(
-    $1::timestamptz,
-    $2::timestamptz,
-    $3::timestamptz,
-    $4::timestamptz,
-    $5::timestamptz,
-    $6::timestamptz,
-    $7::timestamptz,
-    $8::uuid,
-    $9::int)
+SELECT q.mid AS merchant_id
+FROM (
+    (SELECT DISTINCT cs.merchant_id AS mid
+       FROM billing.checkout_sessions cs
+      WHERE ($1::uuid IS NULL OR cs.merchant_id > $1::uuid)
+        AND cs.expires_at IS NOT NULL AND cs.expires_at < $2::timestamptz
+        AND cs.deleted_at IS NULL
+        AND cs.status IN ('created', 'requires_action')
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT nq.merchant_id AS mid
+       FROM billing.notifications nq
+      WHERE ($1::uuid IS NULL OR nq.merchant_id > $1::uuid)
+        -- The GREATEST bound is implied by both arms and lets created_at drive the index.
+        AND nq.created_at < GREATEST($4::timestamptz, $5::timestamptz)
+        AND (nq.created_at < $4::timestamptz
+             OR (nq.read_at IS NOT NULL AND nq.created_at < $5::timestamptz))
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT we.merchant_id AS mid
+       FROM billing.webhook_events we
+      WHERE ($1::uuid IS NULL OR we.merchant_id > $1::uuid)
+        AND we.completed_at < $6::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT pse.merchant_id AS mid
+       FROM billing.host_outbox pse
+      WHERE ($1::uuid IS NULL OR pse.merchant_id > $1::uuid)
+        AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
+        AND pse.delivered_at < $7::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT hle.merchant_id AS mid
+       FROM billing.host_outbox hle
+      WHERE ($1::uuid IS NULL OR hle.merchant_id > $1::uuid)
+        AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
+        AND hle.delivered_at < $8::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT pa.merchant_id AS mid
+       FROM billing.payment_attempts pa
+      WHERE ($1::uuid IS NULL OR pa.merchant_id > $1::uuid)
+        AND pa.attempted_at < $9::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT rc.merchant_id AS mid
+       FROM billing.rebill_cycles rc
+      WHERE ($1::uuid IS NULL OR rc.merchant_id > $1::uuid)
+        AND rc.due_at < $9::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT nh.merchant_id AS mid
+       FROM billing.nmi_history_months nh
+      WHERE ($1::uuid IS NULL OR nh.merchant_id > $1::uuid)
+        AND nh.month < $9::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+) q
+ORDER BY q.mid
+LIMIT $3::int
 `
 
 type ListRetentionWorkMerchantsParams struct {
+	After                  *uuid.UUID
 	Now                    time.Time
+	MerchantLimit          int32
 	NotificationCutoff     time.Time
 	NotificationSeenCutoff time.Time
 	WebhookCutoff          time.Time
 	SettlementCutoff       time.Time
 	LifecycleCutoff        time.Time
 	AttemptCutoff          time.Time
-	After                  *uuid.UUID
-	MerchantLimit          int32
 }
 
 // or#837 retention sweep: due-work discovery + the durable resume cursor.
-// CROSS-MERCHANT: merchants holding at least one row past a retention cutoff,
-// through migration 0056's SECURITY DEFINER work queue. Ids only — every delete
-// runs per-merchant under RunInMerchantScope. Capped and cursored: one pass is
-// bounded work and the next resumes at the merchant after the last one handled.
-func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetentionWorkMerchantsParams) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants holding at least one row past a retention cutoff.
+// Ids only; every delete runs per merchant in bounded batches. Capped and
+// cursored: one pass is bounded work and the next resumes after the last
+// merchant handled.
+func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetentionWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listRetentionWorkMerchants,
+		arg.After,
 		arg.Now,
+		arg.MerchantLimit,
 		arg.NotificationCutoff,
 		arg.NotificationSeenCutoff,
 		arg.WebhookCutoff,
 		arg.SettlementCutoff,
 		arg.LifecycleCutoff,
 		arg.AttemptCutoff,
-		arg.After,
-		arg.MerchantLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

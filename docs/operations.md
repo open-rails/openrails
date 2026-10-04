@@ -267,8 +267,8 @@ custodian account, declare a NEW one and archive the old one for drain — an
 instrument the old custodian holds is never re-vaulted or destroyed
 (or#870/or#655).
 
-Inbound custodian webhooks route by `(kind, environment, account_id)` through
-the `custodian_owner_by_identity` directory function. They resolve the
+Inbound custodian webhooks route by the global `(kind, environment,
+account_id)` key (`ResolveCustodianOwnerByIdentity`). They resolve the
 CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
 which of several referencing PSPs it belongs to has no answer.
 

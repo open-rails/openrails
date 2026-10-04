@@ -32,10 +32,6 @@ unindexed-filter ListRailIntents                 # optional admin filter, paged
 unindexed-filter CountRailIntents                # optional admin filter, paged
 unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
 
-# merchant_id IS the primary key: the scan is one row and the residual filter
-# is the compare-and-delete guard, not a lookup.
-unindexed-filter DeleteProvenMerchantAPIHostClaim # merchant_api_host_claims: one claim per merchant
-
 # Transaction-level concurrency fences are executable SQL but cannot be
 # wrapped in EXPLAIN by the query auditor.
 unplannable LockUsageEventsForMeterCorrection # LOCK TABLE closes the meter-correction/report race
@@ -44,6 +40,20 @@ unplannable LockUsageEventsForMeterCorrection # LOCK TABLE closes the meter-corr
 # let a partial result be mistaken for a healthy ledger.
 unbounded-many ListLedgerConservationBreaches # operator audit: every breached ledger
 unbounded-many ListLedgerCounterDrifts         # operator audit: every drifted account
+
+# Aggregates grouped by a closed vocabulary or a time bucket: one row per
+# currency, rail, drift kind or week, never one per record.
+unbounded-many CountOpenCatalogDriftByKind      # GROUP BY rail, finding_type: one row per drift kind
+unbounded-many FleetMRRByCurrency               # operator fleet dashboard: one row per currency
+unbounded-many FleetRailHealth                  # operator fleet dashboard: one row per rail
+unbounded-many FleetRevenueByCurrency           # operator fleet dashboard: one row per currency
+unbounded-many FleetWeeklyActiveMerchants       # operator fleet dashboard: one row per week
+unbounded-many FleetWeeklyCancelledSubscriptions # operator fleet dashboard: one row per week
+unbounded-many FleetWeeklyVolume                # operator fleet dashboard: one row per (week, currency)
+
+# The drift pass diffs every open catalog finding against what it observed;
+# the set is bounded by the merchant's catalog and PSPs.
+unbounded-many ListOpenCatalogDriftEvents       # open catalog.* findings: catalog x PSP bounded
 
 ## DEBT
 

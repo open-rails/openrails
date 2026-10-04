@@ -165,7 +165,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 INSERT INTO billing.checkout_sessions
 (id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
 VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'payment_method','nmi','created',sqlc.arg(expires_at),sqlc.arg(rail_state),sqlc.arg(metadata),sqlc.arg(now),sqlc.arg(now))
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (merchant_id, id) DO NOTHING;
 
 -- Only one prepared vendor session is accepted and exposed to the browser.
 -- Concurrent losers reload that same action; no accepted session is retargeted.

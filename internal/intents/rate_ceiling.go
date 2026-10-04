@@ -197,10 +197,8 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 
 	since := now.Add(-RateCeilingWindow).UTC()
 	types := DestructiveIntentTypes()
-	// Both counts call SECURITY DEFINER readers (migrations 0021/0028) that take
-	// their scope (merchant or actor) as an argument, so this ROOT pool needs no
-	// app.merchant_id. GenDirectory is the right accessor. (or#860: a base-pool
-	// count read 0 under the since-removed RLS, so this ceiling never tripped.)
+	// Both counts take their scope (merchant or actor) as an argument, so this
+	// root pool needs no app.merchant_id; GenDirectory is the right accessor.
 	q := c.db.GenDirectory()
 
 	merchantCount, err := q.CountDestructiveIntentsForMerchantSince(ctx, gen.CountDestructiveIntentsForMerchantSinceParams{

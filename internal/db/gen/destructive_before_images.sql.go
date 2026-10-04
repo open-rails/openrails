@@ -307,7 +307,7 @@ const restoreSubscriptionsFromBeforeImages = `-- name: RestoreSubscriptionsFromB
 
 UPDATE billing.subscriptions s
 SET lifecycle_rev            = s.lifecycle_rev + 1,
-    status                   = (b.before->>'status')::billing.subscription_status,
+    status                   = (b.before->>'status'),
     current_period_starts_at = (b.before->>'current_period_starts_at')::timestamptz,
     current_period_ends_at   = (b.before->>'current_period_ends_at')::timestamptz,
     ended_at                 = (b.before->>'ended_at')::timestamptz,

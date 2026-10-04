@@ -36,7 +36,7 @@ func (LedgerIntegrityArgs) Kind() string { return KindLedgerIntegrity }
 // Why a periodic FULL check, when the standing rule is "work scales with
 // activity, not records": for this failure mode there IS no activity signal.
 // `ledger_accounts.{credits,debits}_posted` is a MAINTAINED PROJECTION written
-// by a SECURITY DEFINER insert trigger. The only way it can diverge from
+// by the transfer insert trigger. The only way it can diverge from
 // `ledger_transfers` is a write that BYPASSED that trigger — a superuser
 // session, a COPY, a restore, a migration that disabled triggers. Those emit no
 // event, touch no watermark and raise no error; every balance read is simply

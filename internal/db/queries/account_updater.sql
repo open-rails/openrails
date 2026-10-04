@@ -1,25 +1,57 @@
--- or#795 batch Account Updater: due-work discovery, the durable batch (job
--- ref), and the per-instrument watermark. Migration 0076.
---
--- The two CROSS-MERCHANT readers are migration 0076's SECURITY DEFINER work
--- queues (the or#837 shape). They return ids only; the instrument reads, the
--- provider calls and every write run per-merchant under RunInMerchantScope.
+-- Batch account updater: due-work discovery, the durable batch (job ref) and
+-- the per-instrument watermark. The two cross-merchant readers return ids only;
+-- instrument reads, provider calls and writes run per merchant.
 
--- CROSS-MERCHANT: merchants whose ARMED custodian holds an instrument due for
--- a refresh ahead of its renewal. Capped and cursored.
+-- CROSS-MERCHANT: merchants whose armed custodian holds an instrument backing a
+-- subscription that renews inside the custodian's lookahead and was not
+-- refreshed since. Starts at the custodian registry, so a merchant without the
+-- add-on costs one index probe. Capped and cursored.
 -- name: ListAccountUpdaterWorkMerchants :many
-SELECT merchant_id FROM billing.account_updater_work_merchant_ids(
-    sqlc.arg(custodian)::text,
-    sqlc.arg(environment)::text,
-    sqlc.arg(now)::timestamptz,
-    sqlc.arg(default_lookahead_days)::int,
-    sqlc.narg(after)::uuid,
-    sqlc.arg(merchant_limit)::int);
+SELECT c.merchant_id
+FROM billing.custodians c
+CROSS JOIN LATERAL (
+    -- The custodian's own declared lookahead, else the caller's default.
+    SELECT make_interval(days => COALESCE(
+        CASE WHEN c.settings ->> 'account_updater_lookahead_days' ~ '^[0-9]+$'
+             THEN (c.settings ->> 'account_updater_lookahead_days')::int END,
+        sqlc.arg(default_lookahead_days)::int)) AS lookahead
+) w
+WHERE c.kind = lower(sqlc.arg(custodian)::text)
+  AND c.environment = sqlc.arg(environment)::text
+  AND NOT c.archived
+  AND COALESCE(c.settings ->> 'account_updater', 'false') IN ('true', 't', '1')
+  AND (sqlc.narg(after)::uuid IS NULL OR c.merchant_id > sqlc.narg(after)::uuid)
+  -- One open batch per custodian: a waiting merchant has results to ingest, not new work.
+  AND NOT EXISTS (
+        SELECT 1 FROM billing.account_updater_batches b
+         WHERE b.merchant_id = c.merchant_id AND b.custodian_id = c.id
+           AND b.status IN ('pending', 'submitted'))
+  AND EXISTS (
+        SELECT 1 FROM billing.payment_methods pm
+         WHERE pm.merchant_id = c.merchant_id
+           AND pm.custodian = c.kind AND pm.custodian_id = c.id
+           AND pm.rail_method_ref <> ''
+           AND (pm.account_updater_checked_at IS NULL
+                OR pm.account_updater_checked_at < sqlc.arg(now)::timestamptz - w.lookahead)
+           AND EXISTS (
+                 SELECT 1 FROM billing.subscriptions s
+                  WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
+                    AND s.deleted_at IS NULL
+                    AND s.status IN ('active', 'past_due')
+                    AND s.current_period_ends_at IS NOT NULL
+                    AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz + w.lookahead))
+ORDER BY c.merchant_id
+LIMIT sqlc.arg(merchant_limit)::int;
 
--- CROSS-MERCHANT: merchants with a batch the custodian still owes results for.
+-- CROSS-MERCHANT: merchants with a batch the custodian still owes results for,
+-- oldest open batch first so the longest-waiting merchant is served at the cap.
 -- name: ListAccountUpdaterOpenBatchMerchants :many
-SELECT merchant_id FROM billing.account_updater_open_batch_merchant_ids(
-    sqlc.arg(merchant_limit)::int);
+SELECT b.merchant_id
+FROM billing.account_updater_batches b
+WHERE b.status IN ('pending', 'submitted')
+GROUP BY b.merchant_id
+ORDER BY MIN(b.created_at)
+LIMIT sqlc.arg(merchant_limit)::int;
 
 -- The batch membership for ONE merchant: custodian-held instruments backing a
 -- subscription that renews inside the lookahead window and whose watermark is

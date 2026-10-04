@@ -473,7 +473,7 @@ func materializeDeclaredUnknown(
 	rows, err := q.ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
 		CollectionPolicy:   string(f.CollectionPolicy),
 		MerchantID:         merchantID,
-		Status:             gen.BillingSubscriptionStatus(models.StatusUnverified),
+		Status:             string(models.StatusUnverified),
 		Rail:               f.Rail,
 		RailSubscriptionID: f.RailSubscriptionID,
 		UserEmail:          f.UserEmail,

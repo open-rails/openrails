@@ -687,9 +687,15 @@ func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListIniti
 }
 
 const listLapsedCreditLotMerchants = `-- name: ListLapsedCreditLotMerchants :many
-SELECT merchant_id FROM billing.lapsed_credit_lot_merchant_ids(
-    $1::timestamptz,
-    $2::int)
+SELECT DISTINCT g.merchant_id
+FROM billing.grants g
+WHERE g.kind = 'credit' AND g.event = 'grant'
+  AND g.ends_at IS NOT NULL AND g.ends_at <= $1::timestamptz
+  AND NOT EXISTS (
+        SELECT 1 FROM billing.grants tt
+         WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id
+           AND tt.event IN ('revoke', 'supersede'))
+LIMIT $2::int
 `
 
 type ListLapsedCreditLotMerchantsParams struct {
@@ -697,21 +703,18 @@ type ListLapsedCreditLotMerchantsParams struct {
 	MerchantLimit int32
 }
 
-// CROSS-MERCHANT: merchants holding a lapsed credit lot, through migration
-// 0022's SECURITY DEFINER reader (or#868 B1). The credit-expiry worker used to
-// run ListCustomersWithLapsedCreditLots inside a bare RunInTx on the base pool;
-// under the since-removed RLS it enumerated nothing and NO credit lot had ever
-// been clawed back. Ids only — the per-customer work list and the ledger
-// transfers run per-merchant under RunInMerchantConn.
-func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLapsedCreditLotMerchantsParams) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants holding a past-expiry credit lot that was not
+// revoked or superseded. Ids only; the per-customer work list and the ledger
+// transfers run per merchant.
+func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLapsedCreditLotMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listLapsedCreditLotMerchants, arg.AsOf, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
@@ -1339,7 +1342,7 @@ type ListUngrantedSubscriptionsRow struct {
 	ID                    uuid.UUID
 	CustomerID            uuid.UUID
 	ProductID             uuid.UUID
-	Status                BillingSubscriptionStatus
+	Status                string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	StartedAt             time.Time
@@ -1585,7 +1588,7 @@ WHERE g.merchant_id = $3::uuid
   AND g.id = $4::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `
@@ -1627,7 +1630,7 @@ WHERE g.merchant_id = $3::uuid
   AND g.payment_id = $4::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `

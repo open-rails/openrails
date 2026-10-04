@@ -79,9 +79,9 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 	// worker returned success having listed, created, patched and retired
 	// nothing — the ONE worker whose entire purpose is that Stripe can always
 	// reach us never registered an endpoint, and #856's zero-gap rollover was
-	// unreachable from the scheduled path. Merchant ids now come from migration
-	// 0023's SECURITY DEFINER work queue and each merchant's PSP rows are read
-	// (and reconciled) inside that merchant's own scope.
+	// unreachable from the scheduled path. Merchant ids now come from the
+	// armed-merchant work queue and each merchant's PSP rows are read (and
+	// reconciled) inside that merchant's own scope.
 
 	// #836/#856: the operator kill switch. Registering and patching an endpoint
 	// is ADDITIVE and must run regardless — the whole point of this worker is
@@ -105,11 +105,8 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 			return preferSweepError(sweepErr, fmt.Errorf("stripe webhook reconcile: list armed merchants: %w", err))
 		}
 		for _, mid := range merchantIDs {
-			if mid == nil {
-				continue
-			}
-			after = mid
-			merchantID := billing.MerchantID(*mid)
+			after = &mid
+			merchantID := billing.MerchantID(mid)
 			progress.Mark(ctx, "stripe webhook reconcile merchant "+merchantID.String())
 			// The directory carries the slug (billing.merchants is global);
 			// the PSP rows are the merchant's own and are read in its scope.

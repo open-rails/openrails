@@ -418,7 +418,7 @@ var (
 	// type counts: derive.subscription.missing and derive.wallet.missing are
 	// AUTO-repaired in the same sweep and never sit open (same rationale that
 	// keeps the dead-subs AUTO check out of freeloaders) — they are episode
-	// material (billing.orphaned_episodes), not standing errors.
+	// material (orphaned episodes, CountErrorEpisodeTotals), not standing errors.
 	// derive.grant.missing is ADMIN surface-only and DOES sit open.
 	OrphanedFindingTypes = []string{
 		"derive.grant.missing",

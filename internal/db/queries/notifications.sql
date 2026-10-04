@@ -15,7 +15,7 @@ INSERT INTO billing.notifications (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(event_type)::text, COALESCE(sqlc.narg(data), '{}'::jsonb), CASE WHEN sqlc.arg(seen)::boolean THEN now() END,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (merchant_id, id) DO NOTHING;
 
 -- name: GetNotificationByID :one
 SELECT * FROM billing.notifications WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1;

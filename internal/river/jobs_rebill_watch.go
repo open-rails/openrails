@@ -86,10 +86,7 @@ func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchAr
 	}
 	var workErr error
 	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(*mid), "rebill watch", func(ctx context.Context) error {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "rebill watch", func(ctx context.Context) error {
 			subs, err := subscriptions.NewSubscriptionRepo(w.DB).ListOverdueRebills(ctx, engineCutoff, nmiCutoff)
 			if err != nil {
 				return err
@@ -102,7 +99,7 @@ func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchAr
 			return nil
 		})
 		if err != nil {
-			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", *mid, err))
+			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
 		}
 	}
 	return workErr

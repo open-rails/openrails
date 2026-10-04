@@ -1,9 +1,11 @@
 -- Operational job state: catalog drift events (reconciliation). Manual rebill
 -- attempts were folded into billing.rail_intents (#358 phase C).
 
+-- Catalog drift events are the catalog.* reconciliation findings; kind is the
+-- finding type without its "catalog." prefix.
 -- name: ListOpenCatalogDriftEvents :many
-SELECT * FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL;
+SELECT * FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL;
 
 -- name: UpsertCatalogDriftFinding :one
 -- One standing finding per (PSP account, resource, external id, field). An
@@ -49,19 +51,19 @@ WHERE merchant_id = billing.current_merchant_id() AND finding_type LIKE 'catalog
   AND last_seen_at <= sqlc.arg(resolved_at)::timestamptz;
 
 -- name: CountOpenCatalogDriftFiltered :one
-SELECT count(*) FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
+SELECT count(*) FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
-  AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
+  AND (sqlc.narg(kind)::text IS NULL OR finding_type = 'catalog.' || sqlc.narg(kind)::text)
   AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text);
 
 -- name: ListOpenCatalogDriftFiltered :many
-SELECT * FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
+SELECT * FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
-  AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
+  AND (sqlc.narg(kind)::text IS NULL OR finding_type = 'catalog.' || sqlc.narg(kind)::text)
   AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text)
-ORDER BY detected_at DESC
+ORDER BY created_at DESC
 LIMIT $1::int OFFSET $2::int;
 
 -- name: ResolveCatalogDriftForResource :execrows
@@ -76,7 +78,7 @@ WHERE finding_type LIKE 'catalog.%' AND merchant_id = billing.current_merchant_i
   AND last_seen_at <= sqlc.arg(resolved_at)::timestamptz;
 
 -- name: CountOpenCatalogDriftByKind :many
-SELECT rail, kind, count(*)::bigint AS n
-FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
-GROUP BY rail, kind;
+SELECT rail, substr(finding_type, 9)::text AS kind, count(*)::bigint AS n
+FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+GROUP BY rail, finding_type;

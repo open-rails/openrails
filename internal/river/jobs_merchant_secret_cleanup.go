@@ -39,12 +39,9 @@ func (w MerchantSecretCleanupWorker) Work(ctx context.Context, _ *river.Job[Merc
 			return fmt.Errorf("list pending merchant secret cleanup: %w", err)
 		}
 		for _, row := range rows {
-			if row.RunID == nil || row.MerchantID == nil {
-				return fmt.Errorf("merchant secret cleanup work list contains an invalid identity")
-			}
-			after = row.RunID
+			after = &row.RunID
 			progress.Mark(ctx, "merchant secret cleanup "+row.RunID.String())
-			if err := w.Merchants.RetrySecretCleanup(ctx, billing.MerchantID(*row.MerchantID), *row.RunID); err != nil && firstErr == nil {
+			if err := w.Merchants.RetrySecretCleanup(ctx, billing.MerchantID(row.MerchantID), row.RunID); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}

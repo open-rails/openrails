@@ -134,7 +134,7 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 				return err
 			}
 			var expected int64
-			if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing."+p.Name+" t WHERE "+exportWhere(p.Name), id.UUID()).Scan(&expected); err != nil {
+			if err := tx.QueryRow(ctx, countQuery(p), id.UUID()).Scan(&expected); err != nil {
 				return err
 			}
 			if count != expected {
@@ -258,6 +258,10 @@ func insertQuery(p contract.Profile) string {
 		params[i] = fmt.Sprintf("$%d::text::%s", i+1, c.Type)
 	}
 	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(params, ",") + ")"
+}
+
+func countQuery(p contract.Profile) string {
+	return "SELECT count(*) FROM billing." + p.Name + " t WHERE " + exportWhere(p.Name)
 }
 
 func exportQuery(p contract.Profile) string {

@@ -72,15 +72,12 @@ SELECT COALESCE((
   LIMIT 1
 ), '')::text AS email;
 
--- #824: the hosted portal's "which merchants am I a customer of" directory
--- (openrails-saas #18). billing.merchants is global, so only the
--- customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+-- The hosted portal's "which merchants am I a customer of" directory, read
+-- before any merchant is chosen.
 -- name: ListMerchantsForCustomerSubject :many
 SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
 FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
-  AND m.id IN (
-      SELECT merchant_id FROM billing.customer_merchant_ids_for_subject(sqlc.arg(subject)::uuid)
-  )
+  AND m.id IN (SELECT c.merchant_id FROM billing.customers c WHERE c.id = sqlc.arg(subject)::uuid)
 ORDER BY m.slug;

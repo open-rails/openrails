@@ -181,8 +181,14 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 }
 
 const getFinancialHeldAmount = `-- name: GetFinancialHeldAmount :one
-SELECT billing.financial_held_amount($1::uuid, $2::uuid,
-    $3::text, $4::timestamptz)::bigint AS held
+SELECT (COALESCE((SELECT SUM(oa.authorized_usd_micros)
+              FROM billing.operation_authorizations oa
+              JOIN billing.ledger_accounts la ON la.merchant_id = oa.merchant_id AND la.id = oa.ledger_account_id
+             WHERE oa.merchant_id = $1::uuid AND la.customer_id = $2::uuid AND la.currency = $3::text AND oa.state = 'open'), 0)
+     + COALESCE((SELECT SUM(ao.estimated_amount)
+              FROM billing.admission_operations ao
+             WHERE ao.merchant_id = $1::uuid AND ao.payer_id = $2::uuid AND ao.currency = $3::text AND ao.state = 'open'
+               AND (ao.expires_at IS NULL OR ao.expires_at > $4::timestamptz)), 0))::bigint AS held
 `
 
 type GetFinancialHeldAmountParams struct {
@@ -192,6 +198,8 @@ type GetFinancialHeldAmountParams struct {
 	AsOf       time.Time
 }
 
+// The one financial hold total: open operation authorizations plus open,
+// unexpired admission reservations. GetAdmissionCapacity computes the same sum.
 func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHeldAmountParams) (int64, error) {
 	row := q.db.QueryRow(ctx, getFinancialHeldAmount,
 		arg.MerchantID,

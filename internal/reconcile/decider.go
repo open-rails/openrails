@@ -72,7 +72,7 @@ const DefaultDunningWindow = 14 * 24 * time.Hour
 // SubscriptionState is the decider's view of the local row.
 type SubscriptionState struct {
 	CollectionPolicy   models.CollectionPolicy
-	Status             string // billing.subscription_status
+	Status             string // subscriptions.status
 	Rail               string
 	RailSubscriptionID string
 	PeriodStart        *time.Time // current_period_starts_at: bounds the period's cadence

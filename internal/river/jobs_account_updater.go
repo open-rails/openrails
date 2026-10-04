@@ -168,11 +168,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 	if err != nil {
 		return result, fmt.Errorf("account updater: list merchants with open batches: %w", err)
 	}
-	for _, mid := range openMerchants {
-		if mid == nil {
-			continue
-		}
-		merchantID := *mid
+	for _, merchantID := range openMerchants {
 		result.IngestMerchants = append(result.IngestMerchants, merchantID)
 		progress.Mark(ctx, "account updater ingest merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "account updater ingest", func(mctx context.Context) error {
@@ -191,7 +187,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 	}
 	cursor := cursorRow.CursorMerchantID
 	batch := w.merchantBatch()
-	dueWork := func(after *uuid.UUID, limit int32) ([]*uuid.UUID, error) {
+	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListAccountUpdaterWorkMerchants(ctx, gen.ListAccountUpdaterWorkMerchantsParams{
 			Custodian:            models.CustodianBasisTheory,
 			Environment:          w.environment(),
@@ -214,21 +210,18 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 			return result, fmt.Errorf("account updater: list merchants with due instruments (ring wrap): %w", herr)
 		}
 		for _, mid := range head {
-			if mid != nil && bytes.Compare(mid[:], cursor[:]) <= 0 {
+			if bytes.Compare(mid[:], cursor[:]) <= 0 {
 				merchantIDs = append(merchantIDs, mid)
 			}
 		}
 	}
 	var nextCursor *uuid.UUID
 	if len(merchantIDs) == batch {
-		nextCursor = merchantIDs[len(merchantIDs)-1]
+		last := merchantIDs[len(merchantIDs)-1]
+		nextCursor = &last
 	}
 
-	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		merchantID := *mid
+	for _, merchantID := range merchantIDs {
 		result.SubmitMerchants = append(result.SubmitMerchants, merchantID)
 		progress.Mark(ctx, "account updater submit merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "account updater submit", func(mctx context.Context) error {

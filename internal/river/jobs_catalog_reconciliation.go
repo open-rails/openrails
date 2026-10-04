@@ -89,11 +89,8 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 			return preferSweepError(sweepErr, fmt.Errorf("catalog reconciliation: list armed merchants: %w", err))
 		}
 		for _, mid := range merchantIDs {
-			if mid == nil {
-				continue
-			}
-			after = mid
-			merchantID := billing.MerchantID(*mid)
+			after = &mid
+			merchantID := billing.MerchantID(mid)
 			progress.Mark(ctx, "catalog reconciliation merchant "+merchantID.String())
 			if err := w.DB.RunInMerchantScope(ctx, merchantID, "catalog reconciliation", func(mctx context.Context) error { return w.reconcileMerchant(mctx) }); err != nil {
 				sweepErr = preferSweepError(sweepErr, fmt.Errorf("catalog reconciliation merchant %s: %w", merchantID, err))

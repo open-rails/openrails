@@ -60,6 +60,25 @@ list. Enable locally with `apk add postgresql-hypopg` in the vet container plus
 index_advisor's SQL. (It calls `DEALLOCATE` internally, which poisons pgx's
 statement cache, so its connection uses `QueryExecModeExec`.)
 
+### What it plans
+
+Every sqlc query, and the SQL outside sqlc that runs against the same tables:
+
+- **Stored function and trigger bodies.** `LoadFunctionQueries` reads every
+  `billing` function from the catalog and extracts each statement that touches
+  a billing table. NEW/OLD fields, variables, arguments and trigger context
+  become typed parameters; a trigger function is planned once per table it is
+  attached to. Named `function.<fn>.<n>` or `trigger.<fn>.<table>.<n>`.
+  Dynamic `EXECUTE` text is not planned; nothing touching a billing table may
+  fail to bind silently.
+- **Metrics.** `metrics.AuditStatements` compiles every family bucketed by day
+  with all its dimensions, and as one total (`metrics.<family>.<shape>`).
+- **Archive.** `merchantarchive.AuditStatements` lists each table's export and
+  count and every preflight and reference refusal (`archive.<kind>.<table>`).
+
+`unbounded-many` applies to sqlc `:many` queries only; the plan rules apply to
+everything.
+
 ### Rules
 
 Rule names are shared with host-four's equivalent gate so allowlists stay
@@ -89,9 +108,9 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 `merchant_secrets`. Row counts follow the merchant's own configuration, not
 customer activity, so listing them whole does not scale with records on file.
 
-**PERMANENT — one row per merchant.** `merchant_api_host_claims` is keyed by
-`merchant_id` alone, so `DeleteProvenMerchantAPIHostClaim`'s residual
-`api_host`/`token` filter is a compare-and-delete guard on a single row.
+A residual filter on a scan whose index condition and filter together pin
+every primary-key column (`merchant_id` and `id` on tenant tables) is a
+compare-and-swap guard on one row, never a lookup, and is not flagged.
 
 **PERMANENT — capped by a caller-supplied list.**
 `SnapshotPaymentCards` is capped
@@ -108,22 +127,24 @@ table-level transaction lock so an event insert cannot race a meter's semantic
 correction. PostgreSQL does not permit `EXPLAIN LOCK TABLE`; execution and the
 surrounding concurrency test are the applicable proofs.
 
-**DEBT (or#837).** Everything else. These are real:
+**PERMANENT — aggregates over a closed vocabulary or time bucket.** The fleet
+dashboard reads (`Fleet*`) and `CountOpenCatalogDriftByKind` group by currency,
+rail, drift kind or week: the result has one row per bucket, never one per
+record. The fleet reads are on-demand operator analytics, never a merchant list.
 
-- *Deployment-wide sweeps with no LIMIT* — `ListDueDunningSubscriptions` (the
-  or#837 flagship: runs every 4h across the deployment), the converge scans, and
-  the reconciliation/drift/intent scans.
-- *Unbatched retention and expiry writes* — `DeleteCompletedWebhookEventsBefore`,
-  `DeleteNotificationsBefore`, `DeleteSeenNotificationsBefore`,
-  `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`. A large
-  backlog makes each one a single long transaction.
-- *Missing indexes* — `solana_subscriptions.merchant_id` (its merchant predicate is
-  not index-backed; the only true `Seq Scan` in the codebase),
-  `grants.payment_id`,
-  `checkout_sessions.payment_id`, `checkout_sessions.subscription_id`,
-  `reprice_batches.price_key`.
-- *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`.
-  The caller's list is bounded but each element's row set is not.
+**PERMANENT — catalog-bounded diff.** `ListOpenCatalogDriftEvents` returns every
+open `catalog.*` finding so the drift pass can resolve what it no longer
+observes; the set is bounded by the merchant's catalog and PSPs.
+
+**DEBT (or#837).** Everything else in the DEBT section. These are real:
+
+- *Deployment-wide or merchant-wide scans with no LIMIT* — the Solana converge
+  scans, the reconciliation findings scans, `ListStuckRailIntents`,
+  `ListWebhookExpectedRails`, `ListInvoicePayers` and
+  `ListChargeableOpenInvoices`.
+- *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`,
+  `ListPaymentMethodsByRails` and `ListRecordedSubscriptionCharges`. The
+  caller's list is bounded but each element's row set is not.
 
 ## Inline SQL (`TestNoInlineSQL`)
 

@@ -71,16 +71,13 @@ func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs
 			return errors.Join(workErr, fmt.Errorf("nmi history: list merchants: %w", err))
 		}
 		for _, mid := range merchantIDs {
-			if mid == nil {
-				continue
-			}
-			after = mid
+			after = &mid
 			progress.Mark(ctx, "nmi history merchant "+mid.String())
-			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(*mid), "nmi history", func(ctx context.Context) error {
-				return w.readMerchant(ctx, *mid, now)
+			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "nmi history", func(ctx context.Context) error {
+				return w.readMerchant(ctx, mid, now)
 			})
 			if err != nil {
-				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", *mid, err))
+				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
 			}
 		}
 		if len(merchantIDs) < nmiHistoryMerchantBatch {

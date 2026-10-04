@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,8 +21,8 @@ const (
 	CatalogDriftProviderSolana CatalogDriftProvider = "solana"
 )
 
-// CatalogDriftKind classifies a row in billing.catalog_drift_events. The
-// orphan/missing kinds are provider-scoped; field_drift is shared and
+// CatalogDriftKind classifies a catalog drift event: a catalog.<kind>
+// reconciliation finding. The orphan/missing kinds are provider-scoped; field_drift is shared and
 // disambiguated by the Provider column.
 //
 //   - CatalogDriftOrphanInStripe / CatalogDriftOrphanInNMI: an upstream
@@ -49,6 +50,14 @@ const (
 	CatalogDriftMissingInSolana CatalogDriftKind = "missing_in_solana"
 	CatalogDriftFieldDrift      CatalogDriftKind = "field_drift"
 )
+
+// CatalogDriftFindingPrefix prefixes the finding type of every catalog drift event.
+const CatalogDriftFindingPrefix = "catalog."
+
+// CatalogDriftKindOf is the drift kind of a catalog.* finding type.
+func CatalogDriftKindOf(findingType string) CatalogDriftKind {
+	return CatalogDriftKind(strings.TrimPrefix(findingType, CatalogDriftFindingPrefix))
+}
 
 // CatalogDriftResourceType identifies which catalog object a drift event concerns.
 type CatalogDriftResourceType string

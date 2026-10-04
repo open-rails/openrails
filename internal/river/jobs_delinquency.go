@@ -64,8 +64,8 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 	}
 	now := w.now()
 
-	// GenDirectory: the SECURITY DEFINER work queue is the ONE sanctioned
-	// cross-merchant read here, and it returns ids only (FC-16 R2).
+	// GenDirectory: the work queue is the one cross-merchant read here, and it
+	// returns ids only.
 	merchantIDs, err := w.DB.GenDirectory().ListDelinquencyWorkMerchants(ctx, gen.ListDelinquencyWorkMerchantsParams{
 		Now: now, MerchantLimit: delinquencyMerchantBatch,
 	})
@@ -80,10 +80,7 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 	svc := delinquency.NewService(w.DB, w.Clock)
 	evaluated, transitions := 0, 0
 	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		merchantID := billing.MerchantID(*mid)
+		merchantID := billing.MerchantID(mid)
 		progress.Mark(ctx, "delinquency merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "delinquency evaluation", func(mctx context.Context) error {
 			res, err := svc.Evaluate(mctx, now)

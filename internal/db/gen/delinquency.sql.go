@@ -138,9 +138,20 @@ func (q *Queries) ListCustomerDelinquency(ctx context.Context, arg ListCustomerD
 
 const listDelinquencyWorkMerchants = `-- name: ListDelinquencyWorkMerchants :many
 
-SELECT merchant_id FROM billing.delinquency_work_merchant_ids(
-    $1::timestamptz,
-    $2::int)
+SELECT q.merchant_id
+FROM (
+    SELECT i.merchant_id
+      FROM billing.invoices i
+     WHERE i.status IN ('open', 'past_due')
+       AND i.amount_due > 0
+       AND i.due_at IS NOT NULL
+       AND i.due_at < $1::timestamptz
+    UNION
+    SELECT d.merchant_id
+      FROM billing.customer_delinquency d
+     WHERE d.state <> 'current'
+) q
+LIMIT $2::int
 `
 
 type ListDelinquencyWorkMerchantsParams struct {
@@ -150,20 +161,19 @@ type ListDelinquencyWorkMerchantsParams struct {
 
 // or#878 arrears delinquency: the state projection, its due-work scans, and the
 // durable host-lifecycle signal feed.
-// CROSS-MERCHANT: merchants with delinquency work, through migration 0037's
-// SECURITY DEFINER work queue. Ids only — states and signals are computed
-// per-merchant under RunInMerchantScope. Both legs of the union are indexed on
-// the work itself (overdue receivables / already-non-current payers), so a pass
-// costs activity, never the size of the customer table.
-func (q *Queries) ListDelinquencyWorkMerchants(ctx context.Context, arg ListDelinquencyWorkMerchantsParams) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants with delinquency work, an overdue open receivable
+// (the enter leg) or a payer already non-current (the exit leg). Ids only;
+// states and signals are computed per merchant. Both legs are indexed on the
+// work itself, so a pass costs activity, never the size of the customer table.
+func (q *Queries) ListDelinquencyWorkMerchants(ctx context.Context, arg ListDelinquencyWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listDelinquencyWorkMerchants, arg.Now, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

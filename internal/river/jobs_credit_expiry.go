@@ -60,12 +60,9 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 
 	// or#868 B1: this used to enumerate customers with a bare `RunInTx` on the
 	// base pool, under a comment calling it a "privileged (no-GUC)
-	// cross-merchant sweep". Under the since-removed RLS that enumeration
-	// returned nothing, every run. This worker had NEVER expired a credit lot:
-	// lots lapsed and customers kept spending them. Enumerate the merchants
-	// through 0022's SECURITY DEFINER work queue (ids only), then do the real
-	// work — the per-customer list AND the ledger claw-back — inside each
-	// merchant's own scope.
+	// cross-merchant sweep". Enumerate the merchants through the lapsed-lot work
+	// queue (ids only), then do the real work — the per-customer list AND the
+	// ledger claw-back — inside each merchant's own scope.
 	merchantIDs, err := w.DB.GenDirectory().ListLapsedCreditLotMerchants(ctx, gen.ListLapsedCreditLotMerchantsParams{
 		AsOf: now, MerchantLimit: batchSize32,
 	})
@@ -75,11 +72,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 
 	var totalExpired int64
 	var customers int
-	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		merchantID := *mid
+	for _, merchantID := range merchantIDs {
 		progress.Mark(ctx, "credit expiry merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "credit expiry sweep", func(ctx context.Context) error {
 			scopeMerchantID, scopeErr := merchant.Require(ctx)

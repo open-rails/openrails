@@ -18,9 +18,9 @@ func testCatalog() *Catalog {
 			"subscriptions.customer_id": true, "subscriptions.rail": true,
 			"products.id": true, "products.merchant_id": true,
 		},
-		PrimaryKeys: map[string][]string{"subscriptions": {"id"}, "products": {"id"}},
+		PrimaryKeys: map[string][]string{"subscriptions": {"merchant_id", "id"}, "products": {"merchant_id", "id"}},
 		UniqueKeys: map[string][][]string{
-			"subscriptions": {{"id"}, {"rail", "rail_subscription_id"}},
+			"subscriptions": {{"merchant_id", "id"}, {"rail", "rail_subscription_id"}},
 		},
 		Columns: map[string][]string{
 			"subscriptions": {"id", "merchant_id", "customer_id", "rail", "cancel_feedback", "status"},
@@ -196,10 +196,16 @@ func TestUnindexedFilterAllowsOnlyGuaranteedPrimaryKeyPoints(t *testing.T) {
 func TestPrimaryKeyFilterDoesNotExcuseCompositeFragmentsOrSeqScans(t *testing.T) {
 	cat := testCatalog()
 	scan := planNode{NodeType: "Index Scan", RelationName: "subscriptions", IndexCond: "merchant_id = $1", Filter: "id = $2 AND cancel_feedback = $3"}
-	cat.PrimaryKeys["subscriptions"] = []string{"id", "rail"}
+	cat.PrimaryKeys["subscriptions"] = []string{"merchant_id", "id", "rail"}
 	if filterPinsPrimaryKey(scan, cat) {
 		t.Fatal("part of a composite primary key must not count as a point lookup")
 	}
+	cat = testCatalog()
+	scan.IndexCond = "customer_id = $1"
+	if filterPinsPrimaryKey(scan, cat) {
+		t.Fatal("the id alone, without merchant_id, is not the primary key")
+	}
+	scan.IndexCond = "merchant_id = $1"
 	cat = testCatalog()
 	scan.NodeType = "Seq Scan"
 	query := Query{Name: "point-with-seq-scan", Kind: "many", SQL: "SELECT * FROM subscriptions WHERE " + scan.Filter}

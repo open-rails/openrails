@@ -12,8 +12,7 @@ import (
 // holds a customer record (openrails-saas #18) — the "which merchants do I buy
 // from" enumeration a hosted customer portal needs, and which no per-merchant
 // surface can answer. Delegates to the control plane's cross-merchant
-// directory read, which goes through the SECURITY DEFINER directory function
-// added by migration 0016 (#824).
+// directory read.
 // Calling it without an attached control plane is a wiring error (call
 // Attach/AttachWithOptions first).
 func ListMerchantsForSubject(ctx context.Context, a *app.App, subject string) ([]billing.MerchantRef, error) {

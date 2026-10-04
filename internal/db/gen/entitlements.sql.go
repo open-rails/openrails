@@ -252,7 +252,7 @@ func (q *Queries) EntitlementHasActiveIndefinite(ctx context.Context, arg Entitl
 }
 
 const getEntitlementByGrant = `-- name: GetEntitlementByGrant :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
 WHERE merchant_id = $1::uuid
   AND grant_id = $2::uuid
   AND entitlement = $3::text
@@ -284,7 +284,6 @@ func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementB
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.Period,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.GrantID,
@@ -295,7 +294,7 @@ func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementB
 }
 
 const getEntitlementByID = `-- name: GetEntitlementByID :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1
@@ -321,7 +320,6 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByID
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.Period,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.GrantID,
@@ -332,7 +330,7 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByID
 }
 
 const getEntitlementByIDForUpdate = `-- name: GetEntitlementByIDForUpdate :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id=$1::uuid AND ent.id=$2::uuid
   AND ent.deleted_at IS NULL
 FOR UPDATE
@@ -359,7 +357,6 @@ func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitl
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.Period,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.GrantID,
@@ -370,7 +367,7 @@ func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitl
 }
 
 const getLatestEntitlementBySource = `-- name: GetLatestEntitlementBySource :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND entitlement = $3::text
@@ -409,7 +406,6 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.Period,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.GrantID,
@@ -420,7 +416,7 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 }
 
 const getTimelineCoveringWindow = `-- name: GetTimelineCoveringWindow :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -459,7 +455,6 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.Period,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.GrantID,
@@ -470,7 +465,7 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 }
 
 const getTimelineIndefinite = `-- name: GetTimelineIndefinite :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -501,7 +496,6 @@ func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineInde
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.Period,
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.GrantID,
@@ -609,7 +603,7 @@ func (q *Queries) ListActiveEntitlementNamesMerchant(ctx context.Context, arg Li
 }
 
 const listActiveEntitlementRecordsByCustomerIDs = `-- name: ListActiveEntitlementRecordsByCustomerIDs :many
-SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id, ent.destructive_run_class FROM billing.entitlements ent
+SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id, ent.destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = ANY($2::uuid[])
   AND ent.revoked_at IS NULL
@@ -651,7 +645,6 @@ func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.Period,
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.GrantID,
@@ -669,7 +662,7 @@ func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context,
 }
 
 const listActiveEntitlementRecordsMerchant = `-- name: ListActiveEntitlementRecordsMerchant :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.revoked_at IS NULL
@@ -706,7 +699,6 @@ func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.Period,
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.GrantID,
@@ -808,7 +800,7 @@ func (q *Queries) ListDistinctEntitlementNamesBySource(ctx context.Context, arg 
 }
 
 const listEntitlementsByCustomer = `-- name: ListEntitlementsByCustomer :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC
@@ -840,7 +832,6 @@ func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitl
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.Period,
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.GrantID,
@@ -858,7 +849,7 @@ func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitl
 }
 
 const listExtendableSubscriptionEntitlements = `-- name: ListExtendableSubscriptionEntitlements :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -893,7 +884,6 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.Period,
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.GrantID,
@@ -1202,7 +1192,7 @@ FROM billing.grants g
 WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `
@@ -1270,7 +1260,7 @@ FROM billing.grants g
 WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `
@@ -1316,7 +1306,7 @@ FROM billing.grants g
 WHERE g.merchant_id = $4::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `

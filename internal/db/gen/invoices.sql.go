@@ -1314,7 +1314,7 @@ WITH overdue AS (
                               'amount_due', amount_due::text, 'currency', currency, 'due_at', due_at),
            NULL, $1::timestamptz
     FROM candidates
-    ON CONFLICT (id) DO NOTHING
+    ON CONFLICT (merchant_id, id) DO NOTHING
 )
 SELECT count(*) FROM overdue
 `

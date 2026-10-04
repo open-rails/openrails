@@ -122,9 +122,7 @@ SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
 FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
-  AND m.id IN (
-      SELECT merchant_id FROM billing.customer_merchant_ids_for_subject($1::uuid)
-  )
+  AND m.id IN (SELECT c.merchant_id FROM billing.customers c WHERE c.id = $1::uuid)
 ORDER BY m.slug
 `
 
@@ -134,9 +132,8 @@ type ListMerchantsForCustomerSubjectRow struct {
 	DisplayName string
 }
 
-// #824: the hosted portal's "which merchants am I a customer of" directory
-// (openrails-saas #18). billing.merchants is global, so only the
-// customers half needs the SECURITY DEFINER cross-merchant reader (0016).
+// The hosted portal's "which merchants am I a customer of" directory, read
+// before any merchant is chosen.
 func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject uuid.UUID) ([]ListMerchantsForCustomerSubjectRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
 	if err != nil {

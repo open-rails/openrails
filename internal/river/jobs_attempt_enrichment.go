@@ -69,14 +69,11 @@ func (w *AttemptEnrichmentWorker) Work(ctx context.Context, _ *river.Job[Attempt
 	}
 	var workErr error
 	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(*mid), "attempt enrichment", func(ctx context.Context) error {
-			return w.enrich(ctx, *mid, since, before, now)
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "attempt enrichment", func(ctx context.Context) error {
+			return w.enrich(ctx, mid, since, before, now)
 		})
 		if err != nil {
-			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", *mid, err))
+			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
 		}
 	}
 	return workErr

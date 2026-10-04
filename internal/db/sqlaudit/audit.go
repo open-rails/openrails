@@ -56,6 +56,10 @@ func (r Report) OK() bool { return len(r.Failed) == 0 && len(r.Stale) == 0 }
 func Run(ctx context.Context, conn *pgx.Conn, advisor *pgx.Conn, queries []Query, cat *Catalog, allow *Allowlist) (Report, error) {
 	rep := Report{Total: len(queries), AdvisorActive: advisor != nil}
 	for _, q := range queries {
+		if q.bindErr != nil {
+			rep.unplannable(q, "bind: "+q.bindErr.Error(), allow)
+			continue
+		}
 		st, err := q.Parse()
 		if err != nil {
 			rep.unplannable(q, "parse: "+err.Error(), allow)

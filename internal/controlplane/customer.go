@@ -77,11 +77,8 @@ type MerchantForSubject struct {
 // yields no rows rather than an error.
 //
 // #824: this is a deliberately cross-merchant read — the hosted portal asks it
-// BEFORE a merchant is chosen. As a plain pool query under the since-removed
-// RLS, the customers half of the join matched nothing and the portal's
-// merchant list was always EMPTY. The customers lookup now goes through the
-// SECURITY DEFINER directory function (migration 0016); billing.merchants is
-// a global table, so the rest is an ordinary query.
+// BEFORE a merchant is chosen: a cross-merchant read of the subject's customer
+// rows, joined to the global merchant directory.
 func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject string) ([]MerchantForSubject, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {

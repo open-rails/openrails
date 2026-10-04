@@ -123,7 +123,7 @@ func ListRebillCycles(r *httprequest.Request) {
 	}
 	out := billing.Page[billing.RebillCycle]{Object: "list", Data: make([]billing.RebillCycle, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
 	for _, row := range rows {
-		out.Data = append(out.Data, rebillCycleToAPI(row.BillingRebillCycleFact, now))
+		out.Data = append(out.Data, rebillCycleToAPI(row, now))
 		out.Total = row.Total
 	}
 	out.HasMore = int64(out.Offset+len(out.Data)) < out.Total
@@ -145,13 +145,15 @@ func GetRebillCycle(r *httprequest.Request) {
 	}
 	ctx := r.Request.Context()
 	q := r.State.DB.Gen(ctx)
-	row, err := q.GetRebillCycle(ctx, gen.GetRebillCycleParams{MerchantID: mid, ID: id.UUID()})
-	if errors.Is(err, pgx.ErrNoRows) {
-		r.ErrorJSON(http.StatusNotFound, "rebill cycle not found")
-		return
-	}
+	now := r.Clock.Now()
+	cycleID := id.UUID()
+	rows, err := q.ListRebillCycles(ctx, gen.ListRebillCyclesParams{MerchantID: mid, ID: &cycleID, Now: now, PageLimit: 1})
 	if err != nil {
 		r.InternalError("rebill cycle could not be read", err)
+		return
+	}
+	if len(rows) == 0 {
+		r.ErrorJSON(http.StatusNotFound, "rebill cycle not found")
 		return
 	}
 	attempts, err := q.ListCycleAttempts(ctx, gen.ListCycleAttemptsParams{MerchantID: mid, CycleID: id.UUID()})
@@ -159,7 +161,7 @@ func GetRebillCycle(r *httprequest.Request) {
 		r.InternalError("rebill cycle attempts could not be read", err)
 		return
 	}
-	out := rebillCycleToAPI(row, r.Clock.Now())
+	out := rebillCycleToAPI(rows[0], now)
 	for _, a := range attempts {
 		out.Attempts = append(out.Attempts, paymentAttemptToAPI(a))
 	}
@@ -212,7 +214,7 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 	return out
 }
 
-func rebillCycleToAPI(c gen.BillingRebillCycleFact, now time.Time) billing.RebillCycle {
+func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.RebillCycle {
 	out := billing.RebillCycle{
 		ID: billing.RebillCycleID(c.ID), Object: "rebill_cycle", SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
 		CustomerID: c.CustomerID.String(), PSPID: c.PspID.String(), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,

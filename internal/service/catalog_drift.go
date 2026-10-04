@@ -119,12 +119,12 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 	}, nil
 }
 
-func driftEventFromGen(r gen.BillingCatalogDriftEvent) CatalogDriftEventView {
+func driftEventFromGen(r gen.BillingReconciliationFinding) CatalogDriftEventView {
 	view := CatalogDriftEventView{
-		ID: r.ID, Provider: r.Rail, Kind: r.Kind, OpenRailsResourceType: r.OpenrailsResourceType,
+		ID: r.ID, Provider: r.Rail, Kind: string(models.CatalogDriftKindOf(r.FindingType)), OpenRailsResourceType: r.OpenrailsResourceType,
 		OpenRailsResourceID: derefText(r.OpenrailsResourceID), ExternalResourceID: derefText(r.ExternalResourceID),
 		Field: derefText(r.Field), OpenRailsValue: derefText(r.OpenrailsValue), ExternalValue: derefText(r.ExternalValue),
-		DetectedAt: r.DetectedAt, ResolvedAt: r.ResolvedAt,
+		DetectedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,
 	}
 	if r.PspID != nil {
 		view.PSPID = *r.PspID

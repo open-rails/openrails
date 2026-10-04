@@ -98,7 +98,7 @@ INSERT INTO billing.notifications (
     $1::uuid, $2::uuid, $3::uuid, $4::text, COALESCE($5, '{}'::jsonb), CASE WHEN $6::boolean THEN now() END,
     COALESCE(NULLIF($7::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT (merchant_id, id) DO NOTHING
 `
 
 type CreateNotificationIfAbsentParams struct {

@@ -765,33 +765,35 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, arg ListPSPsForMercha
 }
 
 const listRailArmedMerchants = `-- name: ListRailArmedMerchants :many
-SELECT merchant_id FROM billing.psp_rail_merchant_ids(
-    $1::text[],
-    $2::int,
-    $3::uuid)
+SELECT DISTINCT p.merchant_id
+FROM billing.psps p
+JOIN billing.merchants m ON m.id = p.merchant_id
+WHERE p.rail = ANY($1::text[])
+  AND p.archived = false
+  AND m.deleted_at IS NULL
+  AND ($2::uuid IS NULL OR p.merchant_id > $2::uuid)
+ORDER BY p.merchant_id
+LIMIT $3::int
 `
 
 type ListRailArmedMerchantsParams struct {
 	Rails           []string
-	MerchantLimit   int32
 	AfterMerchantID *uuid.UUID
+	MerchantLimit   int32
 }
 
-// CROSS-MERCHANT: merchants armed on one of the named rails, through migration
-// 0023's SECURITY DEFINER work queue (or#877 B6). The Stripe webhook reconciler
-// used to JOIN merchants to psps on the base pool; under the since-removed RLS
-// the join yielded nothing and the managed endpoint was never registered or
-// version-bumped. Ids only — each merchant's PSP rows are read inside its own
-// scope.
-func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedMerchantsParams) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listRailArmedMerchants, arg.Rails, arg.MerchantLimit, arg.AfterMerchantID)
+// CROSS-MERCHANT: an ordered page of merchants after the cursor, armed on at
+// least one of the named rails (live PSP, undeleted merchant). Ids only; each
+// merchant's PSP rows are read inside its own scope.
+func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedMerchantsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listRailArmedMerchants, arg.Rails, arg.AfterMerchantID, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
@@ -867,11 +869,10 @@ func (q *Queries) MerchantHasPSPs(ctx context.Context, merchantID uuid.UUID) (bo
 
 const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id
-FROM billing.psp_owner_by_identity(
-    lower($1::text),
-    COALESCE($2::text, 'live'),
-    $3::text
-)
+FROM billing.psps
+WHERE rail = lower($1::text)
+  AND environment = COALESCE($2::text, 'live')
+  AND account_id = $3::text
 `
 
 type ResolvePSPOwnerByRailIdentityParams struct {
@@ -881,18 +882,16 @@ type ResolvePSPOwnerByRailIdentityParams struct {
 }
 
 type ResolvePSPOwnerByRailIdentityRow struct {
-	ID          *uuid.UUID
-	MerchantID  *uuid.UUID
-	Rail        *string
-	Environment *string
-	AccountID   *string
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Rail        string
+	Environment string
+	AccountID   string
 }
 
-// #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
-// account_id) natural key, for webhook routing and the uniqueness preflight —
-// both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
-// above needs the merchant; the SECURITY DEFINER directory function
-// (migration 0016) is the sanctioned way to make that read.
+// CROSS-MERCHANT: PSP ownership by the global (rail, environment, account_id)
+// natural key, for webhook routing and the uniqueness preflight, both of which
+// run before any merchant context exists.
 func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg ResolvePSPOwnerByRailIdentityParams) (ResolvePSPOwnerByRailIdentityRow, error) {
 	row := q.db.QueryRow(ctx, resolvePSPOwnerByRailIdentity, arg.Rail, arg.Environment, arg.AccountID)
 	var i ResolvePSPOwnerByRailIdentityRow
