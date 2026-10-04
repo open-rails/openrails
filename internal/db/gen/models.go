@@ -57,7 +57,7 @@ func (ns NullBillingPaymentStatus) Value() (driver.Value, error) {
 	return string(ns.BillingPaymentStatus), nil
 }
 
-// or#893: the canonical LOCAL subscription lifecycle. One question: will we attempt to rebill? pending = not started; active/past_due = yes; unknown = provider must tell us (#632); cancelled = never again, with cancel_type carrying why (user|merchant|expired|chargeback). Provider vocabulary is mapped onto this set at the boundary — a remote "expired" becomes cancelled/cancel_type=expired, never a local status.
+// The canonical LOCAL subscription lifecycle. One question: will we attempt to rebill? pending = not started; active/past_due = yes; unknown = provider must tell us; cancelled = never again, with cancel_type carrying why (user|merchant|expired|chargeback). Provider vocabulary is mapped onto this set at the boundary — a remote "expired" becomes cancelled/cancel_type=expired, never a local status.
 type BillingSubscriptionStatus string
 
 const (
@@ -104,7 +104,7 @@ func (ns NullBillingSubscriptionStatus) Value() (driver.Value, error) {
 	return string(ns.BillingSubscriptionStatus), nil
 }
 
-// or#795: one batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
+// One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
 type BillingAccountUpdaterBatch struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -123,7 +123,7 @@ type BillingAccountUpdaterBatch struct {
 	UpdatedAt     time.Time
 }
 
-// #733 hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.
+// Hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.
 type BillingAdmissionDenialsHourly struct {
 	MerchantID   uuid.UUID
 	CustomerID   uuid.UUID
@@ -133,6 +133,7 @@ type BillingAdmissionDenialsHourly struct {
 	UpdatedAt    time.Time
 }
 
+// One row per admitted spend request: its estimated hold until the request is captured or released.
 type BillingAdmissionOperation struct {
 	MerchantID         uuid.UUID
 	RequestID          string
@@ -152,30 +153,30 @@ type BillingAdmissionOperation struct {
 	ReleasedAt         *time.Time
 }
 
-// or#897: the merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
+// The merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
 type BillingBillingPolicy struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Name       string
-	// JSONB policy body: kind, the kind's limit (outstanding_cap_amount micros / spend_windows), bad_spend_windows (#497 wasted-spend grace) and policy_currency. Validated by ONE normalizer shared by the manifest loader and the config API.
+	// JSONB policy body: kind, the kind's limit (outstanding_cap_amount micros / spend_windows), bad_spend_windows and policy_currency. Validated by ONE normalizer shared by the manifest loader and the config API.
 	Policy    []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-// or#897: which named policy applies to whom. Three rungs, most specific wins: per-customer (customer_id set) > per-tier (tier set) > merchant default (both NULL). The binding is JUST a name reference — rebinding is the merchant's runtime lever and moves no money.
+// Which named policy applies to whom. Three rungs, most specific wins: per-customer (customer_id set) > per-tier (tier set) > merchant default (both NULL). The binding is JUST a name reference — rebinding is the merchant's runtime lever and moves no money.
 type BillingBillingPolicyBinding struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
-	// Trust tier this binding applies to (the surviving rung of the retired payer_spend_limits.tier). NULL on the customer and default rungs.
+	// Trust tier this binding applies to. NULL on the customer and default rungs.
 	Tier       *string
 	PolicyName string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
 
-// SEC-30 card-testing failure counts per merchant, subject and five-minute bucket.
+// Card-testing failure counts per merchant, subject and five-minute bucket.
 type BillingCardAttemptFailure struct {
 	MerchantID uuid.UUID
 	Subject    string
@@ -221,24 +222,24 @@ type BillingCatalogDriftEvent struct {
 	MerchantID            uuid.UUID
 }
 
-// #599 billing meter registry. Meters are billed-later usage streams, distinct from #594 usage limits.
+// Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
 type BillingCatalogMeter struct {
 	MerchantID uuid.UUID
 	Key        string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-	// #638 usage event type for rate-card meters; defaults to key when omitted.
+	// Usage event type for rate-card meters; defaults to key when omitted.
 	EventType *string
-	// #638 JSON/dimension property carrying the numeric quantity to aggregate.
+	// JSON/dimension property carrying the numeric quantity to aggregate.
 	ValueProperty *string
-	// #638 aggregation mode for rate-card meters.
+	// Aggregation mode for rate-card meters.
 	Aggregation *string
 	Unit        *string
-	// #638 dimension name -> event metadata/dimension property mapping for matrix pricing.
+	// Dimension name -> event metadata/dimension property mapping for matrix pricing.
 	GroupBy []byte
 }
 
-// #638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON. The ONLY metered-pricing engine (#707): legacy manifest metered: price declarations are translated into rate-card rows at push time (catalog_price_metered is gone).
+// Rate cards: product usage and flat prices expressed as charge-model JSON. The only metered-pricing engine.
 type BillingCatalogRateCard struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -251,10 +252,11 @@ type BillingCatalogRateCard struct {
 	Price       []byte
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	// #798 negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.
+	// Negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.
 	CustomerID *uuid.UUID
 }
 
+// One provider checkout attempt: the PSP, mode and terms a checkout created at the provider.
 type BillingCheckoutSession struct {
 	ID             uuid.UUID
 	PriceID        *uuid.UUID
@@ -275,16 +277,17 @@ type BillingCheckoutSession struct {
 	UpdatedAt      time.Time
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
-	// PSP selected for this provider checkout/session. Required (or#893).
+	// PSP selected for this provider checkout/session. Required.
 	PspID uuid.UUID
-	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-	// or#288 processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
+	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
 	RoutingReason []byte
 }
 
+// Credential publication receipts. Identities and exact secret references only, never secret values.
 type BillingCredentialPublication struct {
 	MerchantID       uuid.UUID
 	OperationID      uuid.UUID
@@ -299,7 +302,7 @@ type BillingCredentialPublication struct {
 	PublishedAt      *time.Time
 }
 
-// or#880: merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says WHO HOLDS the card, openrails.psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.
+// Merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says who holds the card, psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.
 type BillingCustodian struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -308,11 +311,11 @@ type BillingCustodian struct {
 	// The custodian VENDOR: basis_theory or hyperswitch. Same vocabulary as payment_methods.custodian, minus 'psp' (which is the absence of a third-party custodian, not an account).
 	Kind        string
 	Environment string
-	// The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami (#592).
+	// The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami.
 	AccountID string
 	// Declared NON-secret knobs, validated against the kind's registry (internal/custodians): public_api_key, network_tokens. Credentials are merchant secrets under custodians/<kind>/<environment>/<account_id>/<key>.
 	Settings []byte
-	// or#812 rotation watermarks, per credential key: the Secret.Version each credential reached at its last rotation. A reader holding an older cached version must go back to the backend, so a rotation on one node is effective on every node the instant it commits. Absent/zero = no floor.
+	// Rotation watermarks, per credential key: the Secret.Version each credential reached at its last rotation. A reader holding an older cached version must go back to the backend, so a rotation on one node is effective on every node the instant it commits. Absent/zero = no floor.
 	CredentialVersions []byte
 	// Drain-only lifecycle flag, matching psps.archived: true keeps the custodian addressable for instruments it already holds but excludes it from new arrangements.
 	Archived  bool
@@ -320,7 +323,7 @@ type BillingCustodian struct {
 	UpdatedAt time.Time
 }
 
-// or#297 Phase C: one row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row.
+// One row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row.
 type BillingCustodyMigration struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -332,7 +335,7 @@ type BillingCustodyMigration struct {
 	FromCustodianID *uuid.UUID
 	// The PSP-scope vault handle the instrument had BEFORE the flip (NMI customer_vault_id). Retained on the payment_methods row too — this is the copy that survives a later re-remap.
 	FromRailCustomerRef string
-	// The instrument-scope handle before the flip (NMI billing_id; empty for the one-vault-per-card default, #682).
+	// The instrument-scope handle before the flip (NMI billing_id; empty for the one-vault-per-card default).
 	FromRailMethodRef string
 	FromPspID         *uuid.UUID
 	ToCustodian       string
@@ -358,7 +361,7 @@ type BillingCustomer struct {
 	LastSeenAt time.Time
 }
 
-// or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
+// Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
 type BillingCustomerDelinquency struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -376,7 +379,7 @@ type BillingCustomerDelinquency struct {
 	UpdatedAt     time.Time
 }
 
-// #798 per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
+// Per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
 type BillingCustomerInvoiceProfile struct {
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
@@ -390,16 +393,16 @@ type BillingCustomerInvoiceProfile struct {
 	UpdatedAt        time.Time
 }
 
-// #741 per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query(#733 body), grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
+// Per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query, grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
 	Layout     []byte
 	UpdatedAt  time.Time
-	// acting principal (user id) of the last PUT; informational.
+	// Acting principal (user id) of the last PUT; informational.
 	UpdatedBy *string
 }
 
-// Global by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
+// Global by design: instance-level operator kill switch for destructive convergence, not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
 type BillingDestructiveActionSwitch struct {
 	ID        uuid.UUID
 	Singleton bool
@@ -409,7 +412,7 @@ type BillingDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
-// or#859 tier 1: the row as it stood immediately before a destructive run overwrote it. or#858's soft-delete stamp reverses DELETEs; this reverses UPDATEs — which is the damage the empty-roster mass-cancellation actually did. One image per (run, table, row); FK-pinned to exactly one run.
+// The row as it stood immediately before a destructive run updated it, so the run can be reversed. A soft-delete stamp reverses deletes; this reverses updates. One image per (run, table, row), pinned to exactly one run.
 type BillingDestructiveRunBeforeImage struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
@@ -419,11 +422,12 @@ type BillingDestructiveRunBeforeImage struct {
 	// to_jsonb(row) verbatim, captured server-side inside the run. Complete evidence; the restore reads an explicit typed column projection out of it rather than rewriting the whole row.
 	Before     []byte
 	CapturedAt time.Time
-	// When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored (or#859 §3.3 / Class D). Restoring one directly could make it disagree with its grant, which recomputation cannot.
+	// When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored. Restoring one directly could make it disagree with its grant, which recomputation cannot.
 	RestoredAt          *time.Time
 	DestructiveRunClass string
 }
 
+// Entitlement windows projected from grants and their sources. Windows may overlap; reads take their union.
 type BillingEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
@@ -438,14 +442,14 @@ type BillingEntitlement struct {
 	DeletedAt    *time.Time
 	Period       pgtype.Range[pgtype.Timestamptz]
 	MerchantID   uuid.UUID
-	// OpenRails payable tenant subject for this entitlement window.
+	// The customer this entitlement window belongs to.
 	CustomerID          uuid.UUID
 	GrantID             *uuid.UUID
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
 }
 
-// #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
+// Episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
 type BillingFreeloaderEpisode struct {
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
@@ -460,7 +464,7 @@ type BillingFreeloaderEpisode struct {
 	Days          float64
 }
 
-// #514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.
+// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.
 type BillingGrant struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -470,7 +474,7 @@ type BillingGrant struct {
 	SourceType string
 	SourceID   string
 	PaymentID  *uuid.UUID
-	// grant roots a grant; revoke/expire/supersede/adjust are new rows referencing it via supersedes_id. The grant row is never updated.
+	// Grant roots a grant; revoke/expire/supersede/adjust are new rows referencing it via supersedes_id. The grant row is never updated.
 	Event        string
 	SupersedesID *uuid.UUID
 	// Product entitlements/credits spec captured at issuance so derive-2 (grant->projection) is a pure function and replay is exact + historical.
@@ -492,7 +496,7 @@ type BillingHostOutbox struct {
 	PaymentID   *uuid.UUID
 	Amount      *int64
 	SubjectID   uuid.UUID
-	// The transition's currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.
+	// The transition's currency. NOT NULL: every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.
 	Currency    string
 	OccurredAt  time.Time
 	Data        []byte
@@ -501,7 +505,7 @@ type BillingHostOutbox struct {
 	DedupeKey string
 }
 
-// #1124: one hosted checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt is the current payment attempt and engine_session_id the checkout session it created; attempt advances only after that session failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then openrails.cleanup_expired_data deletes it.
+// One hosted checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt is the current payment attempt and engine_session_id the checkout session it created; attempt advances only after that session failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it.
 type BillingHostedCheckoutSession struct {
 	MerchantID      uuid.UUID
 	IDHash          []byte
@@ -517,7 +521,7 @@ type BillingHostedCheckoutSession struct {
 	CreatedAt       time.Time
 }
 
-// #1099: one claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by openrails.idempotency_gc.
+// One claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by retention.
 type BillingIdempotencyKey struct {
 	MerchantID     uuid.UUID
 	Operation      string
@@ -552,7 +556,7 @@ type BillingInvoice struct {
 	AmountPaid     int64
 	// Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.
 	AmountDue int64
-	// Immutable as-billed statement itemization frozen at close (#726): per-event_type usage rollups. The only reader-facing line-item representation.
+	// Immutable as-billed statement itemization frozen at close: per-event_type usage rollups. The only reader-facing line-item representation.
 	LineItems         []byte
 	MoneyMovements    []byte
 	Status            string
@@ -566,11 +570,11 @@ type BillingInvoice struct {
 	ExternalInvoiceID *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
-	// #798 purchase-order reference snapshotted from the payer invoice profile at finalize.
+	// Purchase-order reference snapshotted from the payer invoice profile at finalize.
 	PoNumber *string
-	// #798 tax document fields (tax id, jurisdiction, rates) snapshotted from the payer invoice profile at finalize. Host-defined shape.
+	// Tax document fields (tax id, jurisdiction, rates) snapshotted from the payer invoice profile at finalize. Host-defined shape.
 	Tax []byte
-	// #798 billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.
+	// Billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.
 	BillingContacts              []byte
 	Memo                         *string
 	CollectionFailureCount       int32
@@ -582,7 +586,7 @@ type BillingInvoice struct {
 	CollectionIntentID *uuid.UUID
 }
 
-// Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
+// Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
 type BillingInvoiceItem struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -617,14 +621,14 @@ type BillingInvoicePayment struct {
 	SettledAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement — or#893.
+	// PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement.
 	PspID           *uuid.UUID
 	FailureReason   *string
 	PaymentMethodID *uuid.UUID
 	IdempotencyKey  *string
 }
 
-// Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
+// Per-invoker spend limits: the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
 type BillingInvokerSpendLimit struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -635,30 +639,30 @@ type BillingInvokerSpendLimit struct {
 	Windows   []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	// Opaque caller-supplied provenance reference (or#911), e.g. a signed-document digest. Stored verbatim, returned on reads; never interpreted.
+	// Opaque caller-supplied provenance reference, e.g. a signed-document digest. Stored verbatim, returned on reads; never interpreted.
 	Provenance string
 }
 
-// #512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
+// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.
 	CustomerID *uuid.UUID
-	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER (or#897): its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits / fx_liquidity / world are merchant-wide system accounts.
+	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits / fx_liquidity / world are merchant-wide system accounts.
 	AccountType string
 	Currency    string
 	// TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
-	// Phase H maintained counter: posted credits for O(1) balance reads.
+	// Maintained counter: posted credits, for O(1) balance reads.
 	CreditsPosted int64
-	// Phase H maintained counter: posted debits for O(1) balance reads.
+	// Maintained counter: posted debits, for O(1) balance reads.
 	DebitsPosted int64
 	CreatedAt    time.Time
 }
 
-// #512 immutable double-entry transfers. Append-only (role granted SELECT,INSERT only). A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.
+// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.
 type BillingLedgerTransfer struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -672,14 +676,14 @@ type BillingLedgerTransfer struct {
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
 	Source   string
 	SourceID string
-	// Credit-lot attribution. grant_id/invoice_id/customer_id deliberately carry NO FKs (ledger purity, #709): the append-only ledger never blocks or cascades on control-plane rows.
+	// Credit-lot attribution. grant_id/invoice_id/customer_id deliberately carry no FKs (ledger purity): the append-only ledger never blocks or cascades on control-plane rows.
 	GrantID    *uuid.UUID
 	CustomerID *uuid.UUID
 	InvokerID  *string
 	Resource   *string
 	InvoiceID  *uuid.UUID
 	CreatedAt  time.Time
-	// or#894 engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
+	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
 }
 
@@ -715,29 +719,29 @@ type BillingMaintenanceRun struct {
 	RunClass string
 }
 
-// Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. Global by design: it IS the tenant directory — the scope, not a scoped row.
+// Merchant directory: whose books a row goes on. Global by design; every other table is scoped by merchant_id. Carries billing state only, no authorization. Merchants are registered explicitly; there is no default merchant.
 type BillingMerchant struct {
 	ID uuid.UUID
-	// The merchant's public name (#1106): unique among live rows and never equal to another merchant's unexpired former name (openrails.merchant_slug_aliases). OpenRails owns it; AuthKit groups carry no name.
+	// The merchant's public name: unique among live rows and never equal to another merchant's unexpired former name (merchant_slug_aliases). OpenRails owns it; AuthKit groups carry no name.
 	Slug   string
 	Status string
-	// The merchant's own AuthKit permission-group id (#567): a merchant IS a top-level `merchant` group, child of `root`. Bare `text`, NO FK into the auth schema (#544 portability guard). NULL for a host-owned merchant without a control plane.
+	// The merchant's own AuthKit permission-group id: a merchant IS a top-level `merchant` group, child of `root`. Bare `text`, NO FK into the auth schema. NULL for a host-owned merchant without a control plane.
 	PermissionGroupID *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
-	// human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
+	// Human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
 	DisplayName *string
-	// Canonical Host-header value this merchant resolves from (#734), e.g. "api.acme.example". NULL = no Host resolution for this merchant. Lowercase, no scheme/port.
+	// Canonical Host-header value this merchant resolves from, e.g. "api.acme.example". NULL = no Host resolution for this merchant. Lowercase, no scheme/port.
 	ApiHost                 *string
 	RetiredAt               *time.Time
 	GroupReleaseCompletedAt *time.Time
 	CatalogRevision         int64
-	// When the merchant was last renamed (#1106); NULL if never. The rename interval counts from here.
+	// When the merchant was last renamed; NULL if never. The rename interval counts from here.
 	SlugChangedAt *time.Time
 }
 
-// #1107: a merchant's unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.
+// A merchant's unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.
 type BillingMerchantApiHostClaim struct {
 	MerchantID uuid.UUID
 	ApiHost    string
@@ -754,6 +758,7 @@ type BillingMerchantConfiguration struct {
 	UpdatedAt time.Time
 }
 
+// Immutable replay receipts for merchant configuration applications.
 type BillingMerchantConfigurationApplication struct {
 	MerchantID    uuid.UUID
 	ApplicationID string
@@ -762,7 +767,7 @@ type BillingMerchantConfigurationApplication struct {
 	AppliedAt     time.Time
 }
 
-// Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.
+// Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest. wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.
 type BillingMerchantDek struct {
 	MerchantID uuid.UUID
 	// AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).
@@ -771,12 +776,12 @@ type BillingMerchantDek struct {
 	UpdatedAt  time.Time
 }
 
-// #836/#835 per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
+// Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
 type BillingMerchantDestructivePolicy struct {
 	ID                        uuid.UUID
 	MerchantID                uuid.UUID
 	DestructiveActionsEnabled bool
-	// #835: NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.
+	// NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.
 	EnforceArmedAt       *time.Time
 	FirstPullCompletedAt *time.Time
 	UpdatedBy            *string
@@ -784,7 +789,7 @@ type BillingMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.
+// DB-backed per-merchant secret store. Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.
 type BillingMerchantSecret struct {
 	MerchantID uuid.UUID
 	Name       string
@@ -794,7 +799,7 @@ type BillingMerchantSecret struct {
 	UpdatedAt  time.Time
 }
 
-// #1106: former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.
+// Former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.
 type BillingMerchantSlugAlias struct {
 	Slug       string
 	MerchantID uuid.UUID
@@ -802,7 +807,7 @@ type BillingMerchantSlugAlias struct {
 	CreatedAt  time.Time
 }
 
-// #736 operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.
+// Operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.
 type BillingMerchantWebhook struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -815,7 +820,7 @@ type BillingMerchantWebhook struct {
 	UpdatedAt       time.Time
 }
 
-// #672 per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.
+// Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.
 type BillingMeteredRatingWatermark struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -830,7 +835,7 @@ type BillingMeteredRatingWatermark struct {
 	UpdatedAt     time.Time
 }
 
-// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in payer/invoker_spend_limits; arrears owed exposure is derived from open invoices.
+// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in invoker_spend_limits; arrears owed exposure is derived from open invoices.
 type BillingMoneySetting struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
@@ -845,7 +850,7 @@ type BillingMoneySetting struct {
 	CollectionPaymentMethodID *uuid.UUID
 }
 
-// #1094: the in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
+// The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
 type BillingNmiBulkCheckpoint struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
@@ -855,7 +860,7 @@ type BillingNmiBulkCheckpoint struct {
 	StartedAt  time.Time
 }
 
-// #1120 authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers.
+// Authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers.
 type BillingNmiHistoryMonth struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
@@ -866,7 +871,7 @@ type BillingNmiHistoryMonth struct {
 	Authorizations int64
 }
 
-// #1120 when each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
+// When each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
 type BillingNmiHistoryRead struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
@@ -887,11 +892,11 @@ type BillingNotification struct {
 	CreatedAt     time.Time
 	MerchantID    uuid.UUID
 	CustomerID    *uuid.UUID
-	// #789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
+	// When the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
 	EmailedAt *time.Time
 }
 
-// Merchant-scoped durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
+// Merchant-scoped durable financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
 type BillingOperationAuthorization struct {
 	OperationID         string
 	MerchantID          uuid.UUID
@@ -919,7 +924,7 @@ type BillingOperationAuthorization struct {
 	SettlementBodyDigest []byte
 }
 
-// #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
+// Episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
 type BillingOrphanedEpisode struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -956,27 +961,27 @@ type BillingPayment struct {
 	CardLast4                *string
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
-	// PSP that took this charge. Required on every real rail (payments_psp_required_on_rail); NULL only for off-rail channels (manual/admin), which have no provider — or#893.
+	// PSP that took this charge. Required on every real rail (payments_psp_required_on_rail); NULL only for off-rail channels (manual/admin), which have no provider.
 	PspID *uuid.UUID
-	// #733 initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
+	// initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
 	AttemptKind *string
-	// #733 raw rail decline code, recorded verbatim (no fabrication).
+	// Raw rail decline code, recorded verbatim (no fabrication).
 	FailureCode *string
-	// #733 normalized decline category, derived deterministically from failure_code per rail.
+	// Normalized decline category, derived deterministically from failure_code per rail.
 	FailureReason *string
-	// #733 discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
+	// Discriminates mirror rows: refund | chargeback | dispute_reversal (dispute won). NULL on sale rows.
 	ReversalKind *string
-	// #796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
+	// Credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
-	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-	// or#827 rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
+	// rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
 	MoneyMovement string
 }
 
-// #1110 one row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved.
+// One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved.
 type BillingPaymentAttempt struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -1012,10 +1017,10 @@ type BillingPaymentAttempt struct {
 	CreatedAt       time.Time
 	CycleID         *uuid.UUID
 	CardBin         *string
-	// #1114 the issuer's raw answer (NMI processor_response_code); response_code is the gateway's.
+	// The issuer's raw answer (NMI processor_response_code); response_code is the gateway's.
 	IssuerCode *string
 	IssuerText *string
-	// #1114 when the row was filled from the PSP's transaction read; NULL rows are read by the enrichment pass.
+	// When the row was filled from the PSP's transaction read; NULL rows are read by the enrichment pass.
 	EnrichedAt *time.Time
 }
 
@@ -1033,9 +1038,9 @@ type BillingPaymentMethod struct {
 	UpdatedAt            time.Time
 	MerchantID           uuid.UUID
 	CustomerID           uuid.UUID
-	// PSP that vaulted this payment method. Required (or#893).
+	// PSP that vaulted this payment method. Required.
 	PspID uuid.UUID
-	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customers (Stripe).
+	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customer_accounts (Stripe).
 	RailCustomerRef string
 	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
 	RailMethodRef string
@@ -1043,30 +1048,30 @@ type BillingPaymentMethod struct {
 	StoredCredentialRecurringRef string
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
 	StoredCredentialUnscheduledRef string
-	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
+	// Who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
 	Custodian   string
 	CustodianID *uuid.UUID
 	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.
 	Fingerprint string
-	// #795 BT network-token uuid; '' = not provisioned.
+	// BT network-token uuid; '' = not provisioned.
 	NetworkTokenID string
-	// #795 NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
+	// NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
 	NetworkTokenStatus string
-	// #795 payment account reference from NT provisioning.
+	// Payment account reference from NT provisioning.
 	NetworkTokenPar string
-	// #795 per-instrument charge routing: pan_proxy (detokenized FPAN through the vault proxy) | network_token (DPAN; gated off on NMI gateways).
+	// Per-instrument charge routing: pan_proxy (detokenized FPAN through the vault proxy) | network_token (DPAN; gated off on NMI gateways).
 	ChargeVia string
-	// #795 instrument park marker (cancellation-last-resort): non-empty = vault-side problem (token deleted/expired, closed account); charges fail loudly, operator notified, subscriptions NEVER terminally cancelled by this.
+	// Instrument park marker (cancellation-last-resort): non-empty = vault-side problem (token deleted/expired, closed account); charges fail loudly, operator notified, subscriptions NEVER terminally cancelled by this.
 	ParkReason string
-	// #795 when the instrument was parked; NULL = not parked.
+	// When the instrument was parked; NULL = not parked.
 	ParkedAt *time.Time
-	// or#795: when this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.
+	// When this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.
 	AccountUpdaterCheckedAt *time.Time
-	// The customer's default payment method: exactly one per (merchant, customer) with a usable method (#1084).
+	// The customer's default payment method: exactly one per (merchant, customer) with a usable method.
 	IsDefault bool
 }
 
-// #1115 changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op.
+// Changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op.
 type BillingPaymentMethodUpdate struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -1091,19 +1096,19 @@ type BillingPrice struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-	// access window in HOURS a purchase grants; NULL = indefinite/durable. For auto_renew, hours/24 is the provider billing cadence in days.
+	// Access window in HOURS a purchase grants; NULL = indefinite/durable. For auto_renew, hours/24 is the provider billing cadence in days.
 	AccessDurationHours *int32
-	// #622 whether the price recharges and extends the window after access_duration_hours (recurring).
+	// Whether the price recharges and extends the window after access_duration_hours (recurring).
 	AutoRenew bool
-	// #622 optional first-phase price (micros); 0 = free trial; NULL = no trial.
+	// Optional first-phase price (micros); 0 = free trial; NULL = no trial.
 	TrialUnitAmount *int64
-	// optional trial first-phase length in HOURS; NULL = no trial.
+	// Optional trial first-phase length in HOURS; NULL = no trial.
 	TrialDurationHours *int32
-	// #774: durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the #662 substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see uq_prices_merchant_key_current. Archived rows keep their key as a back-reference to the chain.
+	// Durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see uq_prices_merchant_key_current. Archived rows keep their key as a back-reference to the chain.
 	Key string
 }
 
-// #774: append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).
+// Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).
 type BillingPriceKeyMovement struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1114,6 +1119,7 @@ type BillingPriceKeyMovement struct {
 	Archived    bool
 }
 
+// A price's provider objects on one PSP. Each rail uses its own reference column.
 type BillingPricePspBinding struct {
 	MerchantID               uuid.UUID
 	PriceID                  uuid.UUID
@@ -1144,7 +1150,7 @@ type BillingProduct struct {
 	CatalogID  uuid.UUID
 }
 
-// #1058: immutable product archive receipts; the resolved purchase window and action are fixed at acceptance.
+// Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance.
 type BillingProductArchiveOperation struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -1178,7 +1184,7 @@ type BillingProviderBillingObservation struct {
 	ObservedAt              time.Time
 }
 
-// OpenRails-owned th-045 post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
+// OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
 type BillingProviderBillingQualification struct {
 	MerchantID                     uuid.UUID
 	OperationID                    string
@@ -1224,12 +1230,12 @@ type BillingPsp struct {
 	UpdatedAt      time.Time
 	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
 	Archived bool
-	// or#880: the custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant's custodian.
+	// The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant's custodian.
 	CustodianID            *uuid.UUID
 	PendingSignerPublicKey *string
 }
 
-// customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings (or#893 supersedes #704, which dropped psp_id when no writer set it).
+// Customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings.
 type BillingRailCustomerAccount struct {
 	ID         uuid.UUID
 	Rail       string
@@ -1238,23 +1244,23 @@ type BillingRailCustomerAccount struct {
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// PSP whose remote customer object this row maps. Required (or#893).
+	// PSP whose remote customer object this row maps. Required.
 	PspID uuid.UUID
 }
 
-// Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
+// Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
 type BillingRailIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Rail the mutation targets (e.g. 'nmi', 'stripe').
 	Rail string
-	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff): nmi_delete_subscription, and in later phases manual_rebill, refund, plan_archive, ...
+	// Registry key selecting the per-type semantics (executor, verifier, relevance, backoff), for example nmi_delete_subscription or manual_rebill.
 	IntentType     string
 	SubscriptionID *uuid.UUID
 	PaymentID      *uuid.UUID
 	PriceID        *uuid.UUID
 	Payload        []byte
-	// Deterministic identity of the logical intent within the tenant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.
+	// Deterministic identity of the logical intent within the merchant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.
 	IdempotencyKey string
 	Status         string
 	Attempts       int32
@@ -1264,7 +1270,7 @@ type BillingRailIntent struct {
 	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
 	Origin       string
 	OriginReason *string
-	// Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the #732 anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).
+	// Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).
 	Actor *string
 	// Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.
 	LastFailureReason *string
@@ -1275,21 +1281,21 @@ type BillingRailIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (rail_intents_addressed) — or#893/or#795.
+	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (rail_intents_addressed).
 	PspID *uuid.UUID
-	// or#859: the destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
+	// The destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-	// or#893/or#795: the custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant's custodian.
+	// The custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant's custodian.
 	CustodianID *uuid.UUID
 }
 
-// Append-only operator history for external provider mutations executed from provider intents/convergence (#533). or#859 Class A: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
+// Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
 type BillingRailMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (rail_mutation_logs_addressed) — or#893/or#795.
+	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (rail_mutation_logs_addressed).
 	PspID          *uuid.UUID
 	RailIntentID   *uuid.UUID
 	IntentType     *string
@@ -1301,7 +1307,7 @@ type BillingRailMutationLog struct {
 	// Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.
 	Evidence  []byte
 	CreatedAt time.Time
-	// or#893/or#795: the custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
+	// The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
 	CustodianID *uuid.UUID
 }
 
@@ -1310,7 +1316,7 @@ type BillingRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// The PSP whose event stream this cursor bounds. Required (or#893): a pull arms from exactly one PSP, and a watermark shared across PSPs skips the events of every PSP but the one that advanced it.
+	// The PSP whose event stream this cursor bounds. Required: a pull arms from exactly one PSP, and a watermark shared across PSPs skips the events of every PSP but the one that advanced it.
 	PspID uuid.UUID
 	// Refresh domain. events currently covers provider transaction/subscription event windows.
 	EventDomain string
@@ -1320,7 +1326,7 @@ type BillingRailRefreshWatermark struct {
 	UpdatedAt   time.Time
 }
 
-// #1111 one expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id.
+// One expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id.
 type BillingRebillCycle struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1333,12 +1339,12 @@ type BillingRebillCycle struct {
 	Amount         int64
 	Currency       string
 	CreatedAt      time.Time
-	// #1112 when the cycle passed its owner's deadline with no attempt; a later attempt still attaches to the cycle.
+	// When the cycle passed its owner's deadline with no attempt; a later attempt still attaches to the cycle.
 	MissedAt   *time.Time
 	MissReason *string
 }
 
-// #1116 each rebill cycle with its first attempt, the attempt that collected it and when it closes (collected, cancelled, or 15 days past due). A cycle is open until closed_at, lost when closed uncollected.
+// Each rebill cycle with its first attempt, the attempt that collected it and when it closes (collected, cancelled, or 15 days past due). A cycle is open until closed_at, lost when closed uncollected.
 type BillingRebillCycleFact struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -1367,7 +1373,7 @@ type BillingRebillCycleFact struct {
 	RecoveredBy    string
 }
 
-// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
+// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.
 type BillingReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1381,7 +1387,7 @@ type BillingReconciliationFinding struct {
 	Field                 *string
 	OpenrailsValue        *string
 	ExternalValue         *string
-	// Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
+	// Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or customer uuid depending on the check.
 	SubjectKey        string
 	Severity          string
 	Status            string
@@ -1398,16 +1404,16 @@ type BillingReconciliationFinding struct {
 	UpdatedAt     time.Time
 	// Machine-readable finding evidence. Optional nested keys: provider, local, remote, intent, resolution.
 	Evidence []byte
-	// Authenticated admin identity stamped on manual resolution (approve/ignore via the findings queue, #692); NULL for automatic resolutions.
+	// Authenticated admin identity stamped on manual resolution (approve/ignore via the findings queue); NULL for automatic resolutions.
 	ResolvedBy *string
-	// #787: last time this OPEN finding pushed an operator notification; NULL = not yet notified this open episode. Cleared to NULL on every resolution so a reopened finding notifies again.
+	// Last time this OPEN finding pushed an operator notification; NULL = not yet notified this open episode. Cleared to NULL on every resolution so a reopened finding notifies again.
 	NotifiedAt *time.Time
-	// #787: severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.
+	// Severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.
 	NotifiedSeverity *string
 	SeenRunClass     *string
 }
 
-// #511 per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
+// Per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
 type BillingReconciliationState struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -1416,7 +1422,7 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
-// #773: header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.
+// Header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.
 type BillingRepriceBatch struct {
 	ID                     uuid.UUID
 	MerchantID             uuid.UUID
@@ -1428,14 +1434,14 @@ type BillingRepriceBatch struct {
 	SubscriptionsSkipped   int32
 	CreatedAt              time.Time
 	Kind                   string
-	// #813: the retired plan's price for a plan_change batch (the cohort selector); NULL for #773 price-key batches.
+	// The retired plan's price for a plan_change batch (the cohort selector); NULL for price-key batches.
 	SourcePriceID *uuid.UUID
-	// #813: operator's choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.
+	// Operator's choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.
 	FallbackPolicy       string
 	SubscriptionsBlocked int32
 }
 
-// #1086: every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive.
+// Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive.
 type BillingSolanaPayReceipt struct {
 	MerchantID        uuid.UUID
 	Reference         string
@@ -1455,7 +1461,7 @@ type BillingSolanaPayReceipt struct {
 	CreatedAt         time.Time
 }
 
-// #1086: one Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then openrails.solana_pay_gc deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land.
+// One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land.
 type BillingSolanaPayReference struct {
 	MerchantID        uuid.UUID
 	Reference         string
@@ -1475,6 +1481,7 @@ type BillingSolanaPayReference struct {
 	UpdatedAt         time.Time
 }
 
+// On-chain mirror of one Solana subscription: its program accounts, mint and next pull.
 type BillingSolanaSubscription struct {
 	ID                       uuid.UUID
 	MerchantID               uuid.UUID
@@ -1523,14 +1530,14 @@ type BillingSubscription struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_customer_tier_group_active, which enforces one active/pending/past_due/unknown subscription per (customer, tier group). Regrouping is prohibited while the product has live subscriptions.
+	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs uq_subscriptions_customer_tier_group_active: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
 	CustomerID          uuid.UUID
-	// PSP that produced this remote subscription mirror row. Required (or#893).
+	// PSP that produced this remote subscription mirror row. Required.
 	PspID uuid.UUID
-	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
+	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
@@ -1540,7 +1547,7 @@ type BillingSubscription struct {
 	DunningPolicy       []byte
 }
 
-// #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).
+// A scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).
 type BillingSubscriptionReprice struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1553,22 +1560,22 @@ type BillingSubscriptionReprice struct {
 	CreatedAt      time.Time
 	AppliedAt      *time.Time
 	CanceledAt     *time.Time
-	// #781: true when this INCREASE reprice's effective_at was inside the merchant's configured notice window and was scheduled anyway via the explicit acknowledge_short_notice override on the request — the audit record for the support/emergency bypass path.
+	// True when this INCREASE reprice's effective_at was inside the merchant's configured notice window and was scheduled anyway via the explicit acknowledge_short_notice override on the request — the audit record for the support/emergency bypass path.
 	AcknowledgedShortNotice bool
-	// #813: 'reprice' = #773 same-product price move; 'plan_change' = cross-product migration — the renewal-boundary pickup also moves product_id and cuts entitlement/credit snapshots over.
+	// 'reprice' = same-product price move; 'plan_change' = cross-product migration — the renewal-boundary pickup also moves product_id and cuts entitlement/credit snapshots over.
 	Kind string
-	// #813: why this row could not be auto-scheduled (rail_requires_user_action, missing rail config, rail push failure). Only set when status=blocked.
+	// Why this row could not be auto-scheduled (rail_requires_user_action, missing rail config, rail push failure). Only set when status=blocked.
 	BlockedReason string
 }
 
-// #733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.
+// Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.
 type BillingSubscriptionStatusTransition struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
 	FromStatus     *BillingSubscriptionStatus
 	ToStatus       BillingSubscriptionStatus
-	// cancel_type on the subscription at transition time (meaningful for to_status=cancelled).
+	// The subscription's cancel_type at transition time (meaningful for to_status=cancelled).
 	CancelType      *string
 	OccurredAt      time.Time
 	Decision        *string
@@ -1576,7 +1583,7 @@ type BillingSubscriptionStatusTransition struct {
 	ToPaidThrough   *time.Time
 }
 
-// #1094: one row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.
+// One row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.
 type BillingSubscriptionVerification struct {
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
@@ -1586,7 +1593,7 @@ type BillingSubscriptionVerification struct {
 	LastError      *string
 }
 
-// Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
+// Append-only multi-dimensional metered usage. Source of truth for usage reporting + invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table.
 type BillingUsageEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1610,7 +1617,7 @@ type BillingUsageEvent struct {
 	CreatedAt        time.Time
 }
 
-// #678 webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.
+// Webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.
 type BillingWebhookEvent struct {
 	MerchantID uuid.UUID
 	// Dedup operation key, webhook.<rail>.<event_type> — matches the Redis key derivation.
@@ -1620,18 +1627,18 @@ type BillingWebhookEvent struct {
 	CompletedAt time.Time
 }
 
-// #786 per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.
+// Per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.
 type BillingWebhookHealth struct {
 	MerchantID uuid.UUID
 	Rail       string
-	// last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).
+	// Last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).
 	LastAcceptedAt *time.Time
 	LastPullAt     *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
 
-// #786 UTC-day webhook counter buckets backing the #733 webhook_rejects / webhook_drift_events windowed metrics.
+// UTC-day webhook counter buckets backing the webhook_rejects / webhook_drift_events windowed metrics.
 type BillingWebhookHealthDaily struct {
 	MerchantID uuid.UUID
 	Rail       string
