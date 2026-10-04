@@ -99,7 +99,7 @@ func PublicStripeWebhookURL(cfg *config.Config, accountID string) (string, bool,
 }
 
 func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookParams) (ManagedStripeWebhookResult, error) {
-	if p.Config != nil && p.Config.IsLimitedMode() {
+	if p.Config != nil && config.IsLimitedMode(p.Config) {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes disabled"}, nil
 	}
 	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.PspID)

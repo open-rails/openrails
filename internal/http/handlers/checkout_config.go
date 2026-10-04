@@ -85,7 +85,7 @@ func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, boo
 		r.ErrorJSON(http.StatusServiceUnavailable, "merchant configuration unavailable")
 		return merchants.PublicCheckoutConfig{}, false
 	}
-	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
+	env := config.ExpectedProviderEnvironment(r.State.Config != nil && config.IsTestMode(r.State.Config))
 	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env, pspArmed(r.State.RailConfigs))
 	if err != nil {
 		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("checkout config: PSPs could not be loaded")

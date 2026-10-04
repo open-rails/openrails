@@ -30,9 +30,9 @@ func TestHasPermissionWildcards(t *testing.T) {
 
 func TestDelegatedGateAndExplicitMapping(t *testing.T) {
 	for _, p := range []*DelegatedPrincipal{nil, {SubjectID: "s"}, {MerchantID: " ", SubjectID: "s"}, {MerchantID: "m", SubjectID: " "}, {MerchantID: "m", SubjectID: "s", CredentialClass: "admin"}} {
-		require.ErrorIs(t, p.Validate(), ErrDelegatedPrincipalInvalid)
+		require.ErrorIs(t, ValidateDelegatedPrincipal(p), ErrDelegatedPrincipalInvalid)
 	}
-	require.NoError(t, (&DelegatedPrincipal{MerchantID: "m", SubjectID: "s", CredentialClass: CredentialClassAutomation}).Validate())
+	require.NoError(t, ValidateDelegatedPrincipal(&DelegatedPrincipal{MerchantID: "m", SubjectID: "s", CredentialClass: CredentialClassAutomation}))
 
 	base := DelegatedPrincipal{MerchantID: "00000000-0000-0000-0000-000000000001", MerchantSlug: "host-one", SubjectID: "user-1", Permissions: []string{"billing:*"}, Email: "u@example.com", Username: "u"}
 	gate := func(mutate func(*DelegatedPrincipal), err error) DelegatedGate {

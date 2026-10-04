@@ -18,9 +18,13 @@ import (
 	"github.com/open-rails/openrails/internal/http/routebundle"
 )
 
+// customerAuth is Deps.AuthenticateCustomer.
+type customerAuth = func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)
+
 // httpRuntime is a database-free runtime: route materialization and every
-// refusal exercised here happen before a handler touches storage.
-func httpRuntime(cfg *config.HTTPConfig, managementAuth bool) *Engine {
+// refusal exercised here happen before a handler touches storage. Delegated
+// customer profiles refuse every request unless customer says otherwise.
+func httpRuntime(cfg *config.HTTPConfig, managementAuth bool, customer ...customerAuth) *Engine {
 	var auth *billingauth.Integration
 	if managementAuth {
 		reject := func(context.Context, *http.Request) (billingauth.Identity, error) {
@@ -34,10 +38,14 @@ func httpRuntime(cfg *config.HTTPConfig, managementAuth bool) *Engine {
 		}
 	}
 	c := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
-	return &Engine{http: cfg, App: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth}}}
+	authenticate := customerAuth(rejectDelegated)
+	if len(customer) > 0 {
+		authenticate = customer[0]
+	}
+	return &Engine{http: cfg, App: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth, AuthenticateCustomer: authenticate}}}
 }
 
-func rejectDelegated(*http.Request) (*billingauth.DelegatedPrincipal, error) {
+func rejectDelegated(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
 	return nil, billingauth.ErrUnauthenticated
 }
 
@@ -72,7 +80,7 @@ func TestHTTPConfigurationIsCopiedAndRoutesMemoized(t *testing.T) {
 	sandbox.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true}}}
 	_, err = httpConfig(sandbox, nil)
 	require.ErrorContains(t, err, "requires")
-	policy := &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/portal", Authenticate: rejectDelegated}}}
+	policy := &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/portal", Delegated: true}}}
 	sandbox.HTTP = policy
 	copied, err := httpConfig(sandbox, nil)
 	require.NoError(t, err)
@@ -114,7 +122,7 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 	}
 
 	full := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true,
-		CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: rejectDelegated}}}
+		CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}
 	rt := httpRuntime(full, true)
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
 	mux := mountAt(t, rt, "/api/pay")
@@ -159,8 +167,9 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 	const target = "/api/pay/v1/customers/a%2Fb/invoices/invoice-1?view=raw"
 	const body = "{ \"signed\" : \"unaltered\" }\n"
 	calls := 0
-	verifier := func(r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+	verifier := func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error) {
 		calls++
+		require.Equal(t, "/v1/me", profile)
 		require.Equal(t, target, r.RequestURI)
 		require.Equal(t, "/api/pay/v1/customers/a%2Fb/invoices/invoice-1", r.URL.RawPath)
 		require.Equal(t, "a/b", r.PathValue("customer_id"))
@@ -170,7 +179,7 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 		require.Equal(t, body, string(raw))
 		return nil, billingauth.ErrUnauthenticated
 	}
-	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: verifier}}}, false), "/api/pay")
+	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}, false, verifier), "/api/pay")
 	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, target, body, "Authorization", "Bearer signed").Code)
 	require.Equal(t, 1, calls)
 
@@ -188,7 +197,7 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 // One limiter per runtime: a second host mount or a sibling route in the same
 // bucket must not reset the counters.
 func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
-	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: rejectDelegated}}}, false)
+	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}, false)
 	rt.App.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
 	first, second := mountAt(t, rt, "/first"), mountAt(t, rt, "/second")
 	for i, tc := range []struct {
@@ -227,10 +236,13 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 			return &billingauth.DelegatedPrincipal{MerchantID: "11111111-1111-4111-8111-111111111111", SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
 		}
 	}
+	audiences := map[string]string{"/billing/v1/me": "portal", "/api/v1/merchants/{slug}/billing/me": "platform"}
 	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{
-		{Prefix: "/billing/v1/me", Authenticate: verifier("portal")},
-		{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: config.CustomerSubscriptionManagement, Authenticate: verifier("platform")},
-	}}, false)
+		{Prefix: "/billing/v1/me", Delegated: true},
+		{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: config.CustomerSubscriptionManagement, Delegated: true},
+	}}, false, func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error) {
+		return verifier(audiences[profile])(r)
+	})
 	mux := mountAt(t, rt, "/api/pay")
 	const portal, platform = "/billing/v1/me", "/api/v1/merchants/host-selected/billing/me"
 	for _, tc := range []struct {
@@ -266,12 +278,12 @@ func TestCustomerExposureValidation(t *testing.T) {
 		return err
 	}
 	for _, prefix := range []string{"/", "/customer/", "/customer/../other", "/customer/{tail...}", "/customer/{slug}/%2f"} {
-		require.Error(t, validate(config.CustomerRoutesConfig{Prefix: prefix, Authenticate: rejectDelegated}), prefix)
+		require.Error(t, validate(config.CustomerRoutesConfig{Prefix: prefix, Delegated: true}), prefix)
 	}
 	require.ErrorContains(t, validate(config.CustomerRoutesConfig{Prefix: "/portal"}), "own authenticator",
 		"without Deps.Authenticate a customer mount needs its own")
 	conflicting, err := httpConfig(config.Config{HTTP: &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{
-		{Prefix: "/v1/me", Authenticate: rejectDelegated}, {Prefix: "/v1/me", Authenticate: rejectDelegated},
+		{Prefix: "/v1/me", Delegated: true}, {Prefix: "/v1/me", Delegated: true},
 	}}}, nil)
 	require.NoError(t, err)
 	_, err = httpRuntime(conflicting, false).Routes()
@@ -279,7 +291,7 @@ func TestCustomerExposureValidation(t *testing.T) {
 }
 
 func TestCustomerBillingManagementScope(t *testing.T) {
-	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/v1/me", Scope: config.CustomerBillingManagement, Authenticate: rejectDelegated}}}, false)
+	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/v1/me", Scope: config.CustomerBillingManagement, Delegated: true}}}, false)
 	mux := mountAt(t, rt, "/api/pay")
 	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods", "/checkout/cs_existing"} {
 		require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, "/api/pay/v1/me"+path, "").Code, path)
@@ -308,16 +320,16 @@ func TestCustomerBillingManagementScope(t *testing.T) {
 // them, and admission still requires that origin.
 func TestCustomerCookieAdmission(t *testing.T) {
 	calls := 0
-	authn := func(r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+	authn := func(r *http.Request, _ string) (*billingauth.DelegatedPrincipal, error) {
 		calls++
 		if _, err := r.Cookie("session"); err != nil {
 			return nil, billingauth.ErrUnauthenticated
 		}
 		return &billingauth.DelegatedPrincipal{MerchantID: "11111111-1111-4111-8111-111111111111", SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
 	}
-	routes := []config.CustomerRoutesConfig{{Prefix: "/portal", Scope: config.CustomerSubscriptionManagement, Authenticate: authn}}
-	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: routes}, false), "/api/pay")
-	admitting := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: routes, CookieOrigin: "https://portal.example"}, false), "/api/pay")
+	routes := []config.CustomerRoutesConfig{{Prefix: "/portal", Scope: config.CustomerSubscriptionManagement, Delegated: true}}
+	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: routes}, false, authn), "/api/pay")
+	admitting := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: routes, CookieOrigin: "https://portal.example"}, false, authn), "/api/pay")
 	_, err := httpConfig(config.Config{HTTP: &config.HTTPConfig{CookieOrigin: "http://portal.example"}}, nil)
 	require.ErrorContains(t, err, "CookieOrigin", "plain HTTP only on loopback")
 	for _, tc := range []struct {

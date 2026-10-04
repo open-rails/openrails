@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/adminconsole"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
@@ -16,14 +17,14 @@ import (
 // the path 404s like any unknown path, assets or not. The console owns its GET
 // subtree, so it registers last and refuses a path over another route.
 func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
-	if s.cfg == nil || !s.cfg.AdminConsole.IsEnabled() {
+	if s.cfg == nil || !config.AdminConsoleEnabled(s.cfg.AdminConsole) {
 		return nil
 	}
 	if !adminconsole.Present(s.consoleAssets) {
 		return fmt.Errorf("admin_console.enabled is set but web/admin holds no console build: " +
 			"build it (`task admin-build`) before go build — or unset admin_console.enabled")
 	}
-	path := s.cfg.AdminConsole.MountPath()
+	path := config.AdminConsoleMountPath(s.cfg.AdminConsole)
 	for _, entry := range mux.Entries {
 		if entry.Path == path || strings.HasPrefix(entry.Path, path+"/") {
 			return fmt.Errorf("admin_console.path %q overlaps the OpenRails route %s %s; choose another path", path, entry.Method, entry.Path)
@@ -32,10 +33,10 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	cfg := adminconsole.Config{
 		AuthBaseURL:            s.cfg.AdminConsole.AuthBaseURL,
 		APIBaseURL:             s.cfg.AdminConsole.APIBaseURL,
-		NLWidgetsEnabled:       s.cfg.LLM.IsConfigured(),
-		AskEnabled:             s.cfg.LLM.AskConfigured(),
-		CatalogCopilotEnabled:  s.cfg.LLM.CatalogCopilotConfigured(),
-		CatalogDraftingEnabled: s.cfg.LLM.CatalogDraftingConfigured(),
+		NLWidgetsEnabled:       config.LLMConfigured(s.cfg.LLM),
+		AskEnabled:             config.LLMAskConfigured(s.cfg.LLM),
+		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(s.cfg.LLM),
+		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
 	}
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = s.controlPlane.AuthAPIBase()

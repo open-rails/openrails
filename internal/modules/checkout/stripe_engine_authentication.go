@@ -26,7 +26,7 @@ func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uui
 	if err != nil {
 		return empty, err
 	}
-	if principal.Validate() != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() {
+	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() {
 		return empty, apperr.New(403, "customer_session_required", "payment authentication requires an interactive customer session")
 	}
 	if s == nil || s.SubscriptionService == nil {

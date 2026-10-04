@@ -92,12 +92,11 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 }
 
 func TestEmbeddedDefaults(t *testing.T) {
-	defaults := config.GetDefaultBillingConfig()
 	for _, posture := range []config.CredentialPosture{config.CredentialPostureSandbox, config.CredentialPostureLive} {
 		cfg := &config.Config{TestMode: posture, ProviderWriteMode: " Full "}
 		require.NoError(t, validate(cfg, config.Deps{}))
-		require.Equal(t, defaults.RateLimits, cfg.RateLimits, "an embedded surface never ships unthrottled")
-		require.Equal(t, config.CaptchaProviderTurnstile, cfg.Captcha.EffectiveProvider())
+		require.Equal(t, config.DefaultRateLimits(), cfg.RateLimits, "an embedded surface never ships unthrottled")
+		require.Equal(t, config.CaptchaProviderTurnstile, config.CaptchaProvider(cfg.Captcha))
 	}
 
 	custom := &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}

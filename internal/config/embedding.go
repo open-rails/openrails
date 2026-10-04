@@ -1,11 +1,6 @@
 package config
 
-import (
-	"net/http"
-
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
-)
+import "github.com/open-rails/openrails/billing"
 
 // RiverOwnership says who runs OpenRails' River job fleet. The fleet is where
 // money moves (renewals, dunning, invoices, provider intents), so it always
@@ -20,9 +15,6 @@ const (
 	// (riverhelpers.New) and starts that fleet itself.
 	RiverHostOwned RiverOwnership = "host"
 )
-
-// HostOwned reports whether the host runs the fleet.
-func (o RiverOwnership) HostOwned() bool { return o == RiverHostOwned }
 
 // HTTPConfig selects the HTTP surface Client.Routes publishes. Provider
 // webhooks and capability discovery are always included; every other group is
@@ -77,17 +69,20 @@ const (
 // merchant administration, provider callbacks or credential management.
 type CustomerRoutesConfig struct {
 	// Prefix is the profile's base relative to the mount; default /v1/me.
-	// Whole-segment {parameters} reach Authenticate through Request.PathValue.
+	// Whole-segment {parameters} reach Deps.AuthenticateCustomer through
+	// Request.PathValue.
 	Prefix string
 	// Merchant is the merchant slug native customers buy from; default
 	// Config.Merchant.Slug.
 	Merchant string
 	// Treasury adds the separately permission-gated /v1/customers group.
 	Treasury bool
-	Scope    CustomerHTTPScope
-	// Authenticate maps a request to an explicit merchant and paying subject
-	// for this profile instead of Deps.Authenticate.
-	Authenticate func(*http.Request) (*billingauth.DelegatedPrincipal, error)
+	// Scope selects the profile's routes. Zero is CustomerSelfService.
+	Scope CustomerHTTPScope
+	// Delegated authenticates this profile with Deps.AuthenticateCustomer,
+	// which names an explicit merchant and paying customer, instead of
+	// Deps.Authenticate.
+	Delegated bool
 }
 
 // ProviderCredentialSnapshot supplies immutable host-owned credentials for an

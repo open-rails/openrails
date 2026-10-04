@@ -35,7 +35,7 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 		return r.armingFailure(err)
 	}
 	store := backend.Secrets
-	svc, err := merchants.NewService(r.DB.DataPool(), store, config.ExpectedProviderEnvironment(r.Config.IsTestMode()))
+	svc, err := merchants.NewService(r.DB.DataPool(), store, config.ExpectedProviderEnvironment(config.IsTestMode(r.Config)))
 	if err != nil {
 		backend.Close()
 		return r.armingFailure(fmt.Errorf("merchants service unavailable (#699): %w", err))
@@ -46,7 +46,7 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	// decorative, not a wiring that makes the purge reachable (Service.Delete
 	// still has no route and no CLI; see merchants.PurgeInventory).
 	svc.WithDestructivePolicy(destructive.New(r.DB))
-	overlap, err := r.Config.WebhookSecretOverlapDuration()
+	overlap, err := config.WebhookSecretOverlapDuration(r.Config)
 	if err != nil {
 		backend.Close()
 		return r.armingFailure(err)

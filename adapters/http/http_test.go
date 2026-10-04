@@ -54,7 +54,7 @@ type routeSource struct {
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
-	deny := func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
+	deny := func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	}
 	auth := &billingauth.Integration{
@@ -65,8 +65,8 @@ func inventoryBundle(t *testing.T) *Bundle {
 			return billingauth.ErrUnauthenticated
 		}),
 	}
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: deny}},
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: deny}}
+	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)

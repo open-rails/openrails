@@ -55,7 +55,7 @@ func (a *NMIArmer) merchants() *merchants.Service {
 	return a.MerchantsFn()
 }
 
-func (a *NMIArmer) testMode() bool { return a != nil && a.Config != nil && a.Config.IsTestMode() }
+func (a *NMIArmer) testMode() bool { return a != nil && a.Config != nil && config.IsTestMode(a.Config) }
 
 // Environment is the deployment's PSP environment (#681).
 func (a *NMIArmer) Environment() string { return config.ExpectedProviderEnvironment(a.testMode()) }

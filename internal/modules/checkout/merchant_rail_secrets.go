@@ -112,7 +112,7 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 // pspEnvironment is the environment PSP rows carry in
 // this deployment: test under test_mode, live otherwise (#641).
 func (s *CheckoutService) pspEnvironment() string {
-	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && s.Config.IsTestMode())
+	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && config.IsTestMode(s.Config))
 }
 
 // railTarget is a resolved checkout destination: the payment PROVIDER (the
@@ -364,7 +364,7 @@ func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBi
 	if err != nil {
 		return nil, err
 	}
-	return ccbill.NewClient(cfg, s.Config != nil && s.Config.IsTestMode())
+	return ccbill.NewClient(cfg, s.Config != nil && config.IsTestMode(s.Config))
 }
 
 func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {

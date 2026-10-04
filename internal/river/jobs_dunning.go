@@ -113,7 +113,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 		Clock:    w.Clock,
 	}
 	if w.Config != nil {
-		runner.Config = w.Config
+		runner.Config = config.Mode{Config: w.Config}
 	}
 	return runner
 }
@@ -155,10 +155,10 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	observeOnly := false
 	if w.Config != nil {
 		switch {
-		case w.Config.IsProviderReadOnly():
+		case config.IsProviderReadOnly(w.Config):
 			observeOnly = true
 			log.WithContext(ctx).Warn("Readonly mode: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
-		case w.Config.IsLimitedMode():
+		case config.IsLimitedMode(w.Config):
 			materialize = true
 			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — stale subscriptions park as unknown (no local cancellations), charge intents enqueue PARKED (no provider writes until mode=full)")
 		}

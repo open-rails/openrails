@@ -139,7 +139,7 @@ func (h *SubscriptionCollectionHandler) submissionHeld(in gen.BillingRailIntent)
 	if h.Config.EngineAdmissionHold {
 		return "new engine payment submission is held"
 	}
-	if blocked, reason := intents.GateExecution(h.Config, intents.Origin(in.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Config}, intents.Origin(in.Origin)); blocked {
 		return reason
 	}
 	if h.Resolver == nil {

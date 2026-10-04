@@ -31,7 +31,7 @@ func resolveActiveSolanaPSP(ctx context.Context, database *db.DB, cfg *config.Co
 	}
 	environment := config.ExpectedProviderEnvironment(false)
 	if cfg != nil {
-		environment = config.ExpectedProviderEnvironment(cfg.IsTestMode())
+		environment = config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
 	}
 
 	var row gen.BillingPsp

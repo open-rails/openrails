@@ -14,6 +14,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -190,7 +191,7 @@ func (c *Client) CheckoutFrameAncestors() string {
 	if c == nil || c.engine == nil {
 		return "frame-ancestors 'self'"
 	}
-	return c.engine.App.Config.CheckoutFrameAncestors()
+	return config.CheckoutFrameAncestors(c.engine.App.Config)
 }
 
 // RoutesRequireRoot reports whether Routes must be mounted at the router's

@@ -21,7 +21,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Every refusal precedes AuthKit's construction, so none needs a database.
@@ -41,7 +40,7 @@ func TestNewRefusesIncompleteConfiguration(t *testing.T) {
 		"request_origin":                 {&config.Config{}, &config.AuthConfig{Issuer: issuer, RequestOrigin: "https://a.example/billing"}, pool, nil},
 		"pgx pool is required":           {&config.Config{}, &config.AuthConfig{Issuer: issuer}, nil, nil},
 		"merchant creation slug pattern": {&config.Config{}, &config.AuthConfig{Issuer: issuer}, pool, []Option{WithMerchantCreation(MerchantCreationConfig{SlugPattern: "("})}},
-		"naming policy":                  {&config.Config{}, &config.AuthConfig{Issuer: issuer, Naming: merchant.NamingConfig{FormerNames: merchant.FormerNamesConfig{Mode: "sometimes"}}}, pool, nil},
+		"naming policy":                  {&config.Config{}, &config.AuthConfig{Issuer: issuer, Naming: config.NamingConfig{FormerNames: config.FormerNamesConfig{Mode: "sometimes"}}}, pool, nil},
 		"explicit client-IP posture":     {&config.Config{}, &config.AuthConfig{Issuer: issuer, MintDisabled: true}, pool, nil},
 		"rate limits need Redis":         {&config.Config{}, &config.AuthConfig{Issuer: issuer, DirectPeerIP: true, MintDisabled: true}, pool, nil},
 		"AUTHKIT_ACTIVE_KEY_ID":          {&config.Config{}, &config.AuthConfig{Issuer: issuer, ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"}, pool, nil},
@@ -91,10 +90,10 @@ func TestAuthAPIPath(t *testing.T) {
 // "no wait", AuthKit's is its default.
 func TestUsernamePolicyFollowsNaming(t *testing.T) {
 	week, zero := 7*24*time.Hour, time.Duration(0)
-	p, err := merchant.NamingConfig{RenameInterval: &zero, FormerNames: merchant.FormerNamesConfig{Duration: &week}}.Normalize()
+	p, err := config.NormalizeNaming(config.NamingConfig{RenameInterval: &zero, FormerNames: config.FormerNamesConfig{Duration: &week}})
 	require.NoError(t, err)
 	require.Equal(t, authkit.UsernameConfig{Renames: true, RenameInterval: -1, FormerNames: authkit.FormerNamesConfig{Mode: authkit.FormerNamesFinite, Duration: week}}, usernames(p))
-	p, err = merchant.NamingConfig{FormerNames: merchant.FormerNamesConfig{Mode: merchant.FormerNamesForever}}.Normalize()
+	p, err = config.NormalizeNaming(config.NamingConfig{FormerNames: config.FormerNamesConfig{Mode: config.FormerNamesForever}})
 	require.NoError(t, err)
 	require.Equal(t, authkit.UsernameConfig{Renames: true, RenameInterval: 72 * time.Hour, FormerNames: authkit.FormerNamesConfig{Mode: authkit.FormerNamesForever}}, usernames(p))
 }

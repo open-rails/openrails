@@ -40,7 +40,7 @@ func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, 
 	if err != nil {
 		return gen.BillingRailIntent{}, false, err
 	}
-	if principal.Validate() != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != payer.String() {
+	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != payer.String() {
 		return gen.BillingRailIntent{}, false, ErrCustomerSessionRequired
 	}
 	if payer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {

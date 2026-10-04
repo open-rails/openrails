@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/hosttools"
 )
 
@@ -92,21 +93,22 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, pspStr, sinceSt
 		return err
 	}
 	return hosttools.PullProvider(cmd.Context(), hosttools.PullProviderOptions{
-		Config:               cfg,
-		MerchantID:           mid,
-		Providers:            providerNames,
-		PSP:                  pspStr,
-		Since:                sinceStr,
-		Until:                untilStr,
-		Format:               format,
-		LogDir:               logDir,
-		MerchantManifestPath: manifestPath,
-		Insert:               insert,
-		Overwrite:            overwrite,
-		Prune:                prune,
-		PruneExpectRows:      expectRows,
-		PruneActor:           cliActor(),
-		Out:                  os.Stdout,
+		Config:                   cfg,
+		MerchantID:               mid,
+		Providers:                providerNames,
+		PSP:                      pspStr,
+		Since:                    sinceStr,
+		Until:                    untilStr,
+		Format:                   format,
+		LogDir:                   logDir,
+		MerchantManifestPath:     manifestPath,
+		MerchantManifestOverlays: hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays,
+		Insert:                   insert,
+		Overwrite:                overwrite,
+		Prune:                    prune,
+		PruneExpectRows:          expectRows,
+		PruneActor:               cliActor(),
+		Out:                      os.Stdout,
 	})
 }
 

@@ -16,7 +16,7 @@ const (
 
 // WebhookSecretOverlapDuration is how long a rotated-out webhook signing secret
 // keeps verifying. Empty means 24h.
-func (cfg *Config) WebhookSecretOverlapDuration() (time.Duration, error) {
+func WebhookSecretOverlapDuration(cfg *Config) (time.Duration, error) {
 	raw := ""
 	if cfg != nil {
 		raw = strings.TrimSpace(cfg.WebhookSecretOverlap)
@@ -38,7 +38,7 @@ func (cfg *Config) WebhookSecretOverlapDuration() (time.Duration, error) {
 // billing-portal return URLs may name (SEC-33): ReturnOrigins, else the origin
 // of PublicBillingBaseURL, then HTTP.Checkout.EmbedOrigins. Empty refuses
 // every return URL.
-func (cfg *Config) AllowedReturnOrigins() []string {
+func AllowedReturnOrigins(cfg *Config) []string {
 	if cfg == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func (cfg *Config) AllowedReturnOrigins() []string {
 	}
 	// The sites framing this host's payment page are where its redirect
 	// rails return the buyer.
-	for _, raw := range cfg.HostedCheckout().EmbedOrigins {
+	for _, raw := range HostedCheckout(cfg).EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
 			out = append(out, origin)
 		}
@@ -65,7 +65,7 @@ func (cfg *Config) AllowedReturnOrigins() []string {
 
 // ReturnURLAllowed reports whether raw is an absolute URL whose origin exactly
 // matches an allowed return origin.
-func (cfg *Config) ReturnURLAllowed(raw string) bool {
+func ReturnURLAllowed(cfg *Config, raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.User != nil || u.Opaque != "" {
 		return false
@@ -74,7 +74,7 @@ func (cfg *Config) ReturnURLAllowed(raw string) bool {
 	if !ok {
 		return false
 	}
-	for _, allowed := range cfg.AllowedReturnOrigins() {
+	for _, allowed := range AllowedReturnOrigins(cfg) {
 		if origin == allowed {
 			return true
 		}
@@ -83,7 +83,7 @@ func (cfg *Config) ReturnURLAllowed(raw string) bool {
 }
 
 // HostedCheckout is Config.HTTP.Checkout, zero when checkout is not published.
-func (cfg *Config) HostedCheckout() CheckoutConfig {
+func HostedCheckout(cfg *Config) CheckoutConfig {
 	if cfg == nil || cfg.HTTP == nil || cfg.HTTP.Checkout == nil {
 		return CheckoutConfig{}
 	}
@@ -92,11 +92,11 @@ func (cfg *Config) HostedCheckout() CheckoutConfig {
 
 // CheckoutEmbedAllowed reports whether origin may frame the payment page this
 // host serves: one of EmbedOrigins, or the page's own origin.
-func (cfg *Config) CheckoutEmbedAllowed(origin string) bool {
+func CheckoutEmbedAllowed(cfg *Config, origin string) bool {
 	if origin == "" {
 		return false
 	}
-	checkout := cfg.HostedCheckout()
+	checkout := HostedCheckout(cfg)
 	if page, ok := URLOrigin(checkout.PageURL); ok && page == origin {
 		return true
 	}
@@ -110,9 +110,9 @@ func (cfg *Config) CheckoutEmbedAllowed(origin string) bool {
 
 // CheckoutFrameAncestors is the Content-Security-Policy of the payment page
 // this host serves: only the host itself and EmbedOrigins may frame it.
-func (cfg *Config) CheckoutFrameAncestors() string {
+func CheckoutFrameAncestors(cfg *Config) string {
 	policy := "frame-ancestors 'self'"
-	for _, raw := range cfg.HostedCheckout().EmbedOrigins {
+	for _, raw := range HostedCheckout(cfg).EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
 			policy += " " + origin
 		}
@@ -120,8 +120,8 @@ func (cfg *Config) CheckoutFrameAncestors() string {
 	return policy
 }
 
-// Validate checks PageURL and EmbedOrigins.
-func (c CheckoutConfig) Validate() error {
+// ValidateCheckout checks PageURL and EmbedOrigins.
+func ValidateCheckout(c CheckoutConfig) error {
 	if raw := strings.TrimSpace(c.PageURL); raw != "" {
 		u, err := url.Parse(raw)
 		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || !webScheme(u) {
@@ -156,7 +156,7 @@ func URLOrigin(raw string) (string, bool) {
 }
 
 func validateSecurityPolicy(cfg *Config) error {
-	if _, err := cfg.WebhookSecretOverlapDuration(); err != nil {
+	if _, err := WebhookSecretOverlapDuration(cfg); err != nil {
 		return err
 	}
 	for _, raw := range cfg.ReturnOrigins {

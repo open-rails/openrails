@@ -74,7 +74,7 @@ type ChallengeStore struct {
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
 func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) Verifier {
-	if !cfg.IsEnabled() {
+	if !config.CaptchaEnabled(cfg) {
 		return nil
 	}
 
@@ -89,7 +89,7 @@ func (v *siteVerifyVerifier) verifyURL() string {
 	if v.verifyURLOverride != "" {
 		return v.verifyURLOverride
 	}
-	return v.cfg.EffectiveVerifyURL()
+	return config.CaptchaVerifyURL(v.cfg)
 }
 
 func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error) {
@@ -145,11 +145,11 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 		ErrorCodes: payload.ErrorCodes,
 	}
 
-	if result.Success && payload.Score != nil && *payload.Score < v.cfg.EffectiveMinScore() {
+	if result.Success && payload.Score != nil && *payload.Score < config.CaptchaMinScore {
 		result.Success = false
 		result.ErrorCodes = append(result.ErrorCodes, "low-score")
 	}
-	if result.Success && v.cfg.EffectiveProvider() == config.CaptchaProviderRecaptchaV3 && strings.TrimSpace(payload.Action) != v.cfg.EffectiveAction() {
+	if result.Success && config.CaptchaProvider(v.cfg) == config.CaptchaProviderRecaptchaV3 && strings.TrimSpace(payload.Action) != config.CaptchaAction {
 		result.Success = false
 		result.ErrorCodes = append(result.ErrorCodes, "action-mismatch")
 	}
@@ -281,11 +281,11 @@ func (s *ChallengeStore) pruneLocked(memory map[string]time.Time, now time.Time)
 // ShouldApply reports whether captcha escalation is enabled for a rate-limit bucket.
 func ShouldApply(cfg *config.CaptchaConfig, bucket string) bool {
 	bucket = strings.ToLower(strings.TrimSpace(bucket))
-	if !cfg.IsEnabled() || bucket == "" || bucket == "webhook" {
+	if !config.CaptchaEnabled(cfg) || bucket == "" || bucket == "webhook" {
 		return false
 	}
 
-	for _, allowed := range cfg.EffectiveChallengeBuckets() {
+	for _, allowed := range config.CaptchaChallengeBuckets() {
 		if bucket == allowed {
 			return true
 		}
@@ -303,5 +303,5 @@ func ExtremeThreshold(limit *config.RateLimit, cfg *config.CaptchaConfig) int {
 	if threshold <= 0 {
 		threshold = 60
 	}
-	return threshold * cfg.EffectiveExtremeMultiplier()
+	return threshold * config.CaptchaExtremeMultiplier
 }

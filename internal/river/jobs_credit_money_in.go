@@ -127,7 +127,7 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 		} else if n > 0 {
 			logger.WithField("invoices", n).Info("invoices marked past_due")
 		}
-		if w.Config != nil && w.Config.IsLimitedMode() {
+		if w.Config != nil && config.IsLimitedMode(w.Config) {
 			logger.Warn("limited mode: skipping invoice collection charges (#345)")
 			return nil
 		}

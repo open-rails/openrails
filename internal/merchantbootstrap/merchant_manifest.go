@@ -671,7 +671,7 @@ func ResolveManifestCustodian(cfg *config.Config, entry CustodianEntry) (Resolve
 	out := ResolvedManifestCustodian{
 		key:         strings.TrimSpace(entry.key),
 		kind:        custodians.Normalize(entry.kind),
-		environment: config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()),
+		environment: config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg)),
 		accountID:   strings.TrimSpace(entry.config.AccountID),
 		settings:    entry.config.Settings,
 		archived:    entry.config.Archived,
@@ -1247,7 +1247,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	if err != nil {
 		return err
 	}
-	if cfg.SecretStoreBackend() != config.SecretBackendSnapshot {
+	if config.SecretStoreBackend(cfg) != config.SecretBackendSnapshot {
 		return fmt.Errorf("managed provider declarations require the Client payment-provider publication operation with operation ID and expected revision")
 	}
 	// Bind credential custody before loading any replacement snapshot material.
@@ -1509,7 +1509,7 @@ func ManifestProviderEnvironment(cfg *config.Config, account config.ProviderRail
 	if strings.TrimSpace(account.LegacyEnvironment) != "" {
 		return "", fmt.Errorf("psp `environment:` is no longer configurable (#882) — it is derived from test_mode (sandbox => test, live => live); remove the key")
 	}
-	return config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()), nil
+	return config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg)), nil
 }
 
 // ManifestSolanaNetwork maps a PSP environment onto the Solana network the same
@@ -1651,7 +1651,7 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 			}
 		}
 	}
-	if cfg.SecretStoreBackend() != config.SecretBackendSnapshot && (len(mt.PSPs) > 0 || len(mt.Custodians) > 0) {
+	if config.SecretStoreBackend(cfg) != config.SecretBackendSnapshot && (len(mt.PSPs) > 0 || len(mt.Custodians) > 0) {
 		return fmt.Errorf("managed provider declarations require explicit Client publication operations; startup metadata and credential custody are separate")
 	}
 	return nil

@@ -21,7 +21,7 @@ func openEmbeddedDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool)
 		err      error
 	)
 	if pool != nil {
-		schema := cfg.SchemaName()
+		schema := config.SchemaName(cfg)
 		database, err = db.NewWithPGXPool(pool, schema)
 		if err != nil {
 			return nil, err

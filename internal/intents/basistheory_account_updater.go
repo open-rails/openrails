@@ -338,7 +338,7 @@ func (h *AccountUpdaterBatchHandler) client(ctx context.Context, p AccountUpdate
 		APIKey:        cc.APIKey,
 		BaseURL:       baseURL,
 		WebhookKeyURL: cc.WebhookKeyURL,
-		ReadOnly:      h.Config != nil && h.Config.IsProviderReadOnly(),
+		ReadOnly:      h.Config != nil && config.IsProviderReadOnly(h.Config),
 		Outbound:      h.Outbound,
 	})
 	if err != nil {

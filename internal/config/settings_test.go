@@ -197,7 +197,7 @@ func TestSecretFiles(t *testing.T) {
 // Reserved characters in credentials must not be able to redirect the DSN host.
 func TestConnectionStringEncodesCredentials(t *testing.T) {
 	c := &DBConfig{Host: "db.internal", Port: "5432", Database: "billing", Username: "open rails", Password: "p@ss/w:rd?#"}
-	u, err := url.Parse(c.GetConnectionString())
+	u, err := url.Parse(DBConnectionString(c))
 	require.NoError(t, err)
 	require.Equal(t, "postgresql", u.Scheme)
 	require.Equal(t, "db.internal:5432", u.Host)
@@ -208,10 +208,10 @@ func TestConnectionStringEncodesCredentials(t *testing.T) {
 	require.Equal(t, "require", u.Query().Get("sslmode"), "TLS unless explicitly disabled")
 
 	c.SSLMode = "disable"
-	u, err = url.Parse(c.GetConnectionString())
+	u, err = url.Parse(DBConnectionString(c))
 	require.NoError(t, err)
 	require.Equal(t, "disable", u.Query().Get("sslmode"))
 
-	require.Equal(t, "postgres://x/y", (&DBConfig{URL: "postgres://x/y", Host: "ignored", Port: "1", Database: "d", Username: "u"}).GetConnectionString())
-	require.Empty(t, (&DBConfig{Host: "h", Port: "1", Database: "d"}).GetConnectionString(), "incomplete parts never guess")
+	require.Equal(t, "postgres://x/y", DBConnectionString(&DBConfig{URL: "postgres://x/y", Host: "ignored", Port: "1", Database: "d", Username: "u"}))
+	require.Empty(t, DBConnectionString(&DBConfig{Host: "h", Port: "1", Database: "d"}), "incomplete parts never guess")
 }

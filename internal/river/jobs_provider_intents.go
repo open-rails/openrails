@@ -64,7 +64,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	}
 	args := job.Args
 	store := intents.NewStore(w.DB)
-	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: w.Config, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB)}
+	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: config.Mode{Config: w.Config}, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB)}
 	runner.OnSuccessorCommitted = func(mid, id uuid.UUID) {
 		if mid == args.MerchantID && id == args.IntentID {
 			successorCommitted = true

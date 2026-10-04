@@ -87,7 +87,7 @@ func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) stri
 }
 func (s *CheckoutSessionService) captureBinding(owner billing.MerchantID, psp gen.BillingPsp, custodian gen.BillingCustodian) (models.CheckoutCapture, error) {
 	var empty models.CheckoutCapture
-	if s.config == nil || s.config.HyperSwitch == nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(s.config.IsTestMode()) {
+	if s.config == nil || s.config.HyperSwitch == nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.config)) {
 		return empty, ErrCheckoutCaptureUnavailable
 	}
 	var settings map[string]any

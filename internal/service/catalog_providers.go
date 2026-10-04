@@ -355,7 +355,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	if product != nil {
 		productKey = strings.TrimSpace(product.Key)
 	}
-	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
+	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && config.IsLimitedMode(s.rt.Config)
 	// Provider objects key on the RECURRING cadence (nil for one-off / finite
 	// windows — those settle as one-time charges; the access window is OpenRails-side).
 	reqCycle := priceRequestCycleDays(req)
@@ -500,7 +500,7 @@ type railAccountRef struct {
 }
 
 func (s *Service) catalogProviderEnvironment() string {
-	return config.ExpectedProviderEnvironment(s.rt != nil && s.rt.Config != nil && s.rt.Config.IsTestMode())
+	return config.ExpectedProviderEnvironment(s.rt != nil && s.rt.Config != nil && config.IsTestMode(s.rt.Config))
 }
 
 // merchantAccountRails maps the ctx merchant's declared account keys
@@ -647,5 +647,5 @@ func copyStringMap(in map[string]string) map[string]string {
 // (AutoCreate, Attach's find-or-create, Update propagation) are blocked by the
 // operating mode (mode=limited/readonly, #346). Reads/verification stay on.
 func (s *Service) catalogRemoteWritesDisabled() bool {
-	return s != nil && s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
+	return s != nil && s.rt != nil && s.rt.Config != nil && config.IsLimitedMode(s.rt.Config)
 }

@@ -11,11 +11,11 @@ import (
 var testMasterKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 
 func validConfig() *Config {
-	cfg := GetDefaultBillingConfig()
-	cfg.TestMode = CredentialPostureSandbox
-	cfg.ProviderWriteMode = ProviderWriteModeFull
-	assembleDBURL(cfg)
-	return cfg
+	return &Config{
+		TestMode: CredentialPostureSandbox, ProviderWriteMode: ProviderWriteModeFull,
+		DB:         &DBConfig{URL: "postgresql://app:app_password@localhost:5434/openrails_db?sslmode=disable"},
+		RateLimits: DefaultRateLimits(), Captcha: DefaultCaptcha(),
+	}
 }
 
 func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
@@ -36,9 +36,6 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		"captcha disabled":       {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, ""},
 		"captcha half pair":      {func(c *Config) { c.Captcha.SecretKey = "secret" }, "BOTH site_key and secret_key"},
 		"captcha unsupported":    {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "unsupported provider"},
-		"port ephemeral range":   {func(c *Config) { c.Port = 44553 }, ""},
-		"port above range":       {func(c *Config) { c.Port = 70000 }, "invalid port"},
-		"port int16 wrap":        {func(c *Config) { c.Port = -20983 }, "invalid port"},
 		"quiescence sub-second":  {func(c *Config) { c.ProviderBillingQuiescenceInterval = "500ms" }, "at least one second"},
 		"quiescence fractional":  {func(c *Config) { c.ProviderBillingQuiescenceInterval = "1500ms" }, "whole seconds"},
 		"reconcile typo":         {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
@@ -120,47 +117,35 @@ func TestPostureAccessorsFailClosed(t *testing.T) {
 	} {
 		for _, posture := range []CredentialPosture{"", CredentialPostureLive, CredentialPostureSandbox} {
 			cfg := &Config{TestMode: posture, ProviderWriteMode: row.mode}
-			require.Equal(t, posture == CredentialPostureSandbox, cfg.IsTestMode())
-			require.Equal(t, row.limited, cfg.IsLimitedMode(), row.mode)
-			require.Equal(t, row.readonly, cfg.IsProviderReadOnly(), row.mode)
-			require.True(t, cfg.RequiresSecretEncryption())
+			require.Equal(t, posture == CredentialPostureSandbox, IsTestMode(cfg))
+			require.Equal(t, row.limited, IsLimitedMode(cfg), row.mode)
+			require.Equal(t, row.readonly, IsProviderReadOnly(cfg), row.mode)
 		}
 	}
 	require.Equal(t, ProviderEnvironmentTest, ExpectedProviderEnvironment(true))
 	require.Equal(t, ProviderEnvironmentLive, ExpectedProviderEnvironment(false))
 
 	var nilCfg *Config
-	require.Equal(t, SecretBackendSnapshot, nilCfg.SecretStoreBackend())
-	require.Equal(t, SecretBackendVault, (&Config{SecretBackend: " Vault "}).SecretStoreBackend())
-	require.False(t, GetDefaultBillingConfig().AllowCatalogUpdates)
+	require.Equal(t, SecretBackendSnapshot, SecretStoreBackend(nilCfg))
+	require.Equal(t, SecretBackendVault, SecretStoreBackend(&Config{SecretBackend: " Vault "}))
 }
 
 func TestScalarParsingBoundaries(t *testing.T) {
-	for raw, want := range map[string]FlexiblePort{"44553": 44553, "65535": 65535, " 3053 ": 3053, "": 0} {
-		var got FlexiblePort
-		require.NoError(t, got.UnmarshalText([]byte(raw)))
-		require.Equal(t, want, got)
-	}
-	for _, raw := range []string{"65536", "0", "-1", "not-a-port"} {
-		var got FlexiblePort
-		require.Error(t, got.UnmarshalText([]byte(raw)), raw)
-	}
-
 	for raw, want := range map[string]CredentialPosture{"": "", " SANDBOX ": CredentialPostureSandbox, "live": CredentialPostureLive} {
-		var got CredentialPosture
-		require.NoError(t, got.UnmarshalText([]byte(raw)))
+		got, err := ParseCredentialPosture(raw)
+		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}
-	var posture CredentialPosture
-	require.Error(t, posture.UnmarshalText([]byte("true")), "a bool-shaped posture must never decode")
+	_, err := ParseCredentialPosture("true")
+	require.Error(t, err, "a bool-shaped posture must never decode")
 
 	for raw, want := range map[string]time.Duration{"": 24 * time.Hour, "36h": 36 * time.Hour} {
-		got, err := (&Config{ProviderBillingQuiescenceInterval: raw}).ProviderBillingQuiescence()
+		got, err := ProviderBillingQuiescence(&Config{ProviderBillingQuiescenceInterval: raw})
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}
 	for _, raw := range []string{"0", "-1h", "tomorrow"} {
-		_, err := (&Config{ProviderBillingQuiescenceInterval: raw}).ProviderBillingQuiescence()
+		_, err := ProviderBillingQuiescence(&Config{ProviderBillingQuiescenceInterval: raw})
 		require.Error(t, err, raw)
 	}
 
@@ -168,16 +153,16 @@ func TestScalarParsingBoundaries(t *testing.T) {
 		interval time.Duration
 		enabled  bool
 	}{"": {time.Hour, true}, "30m": {30 * time.Minute, true}, "0": {0, false}, "-5m": {0, false}} {
-		interval, enabled, err := (&Config{CatalogReconciliationInterval: raw}).CatalogReconciliationSchedule()
+		interval, enabled, err := CatalogReconciliationSchedule(&Config{CatalogReconciliationInterval: raw})
 		require.NoError(t, err)
 		require.Equal(t, want.interval, interval, raw)
 		require.Equal(t, want.enabled, enabled, raw)
 	}
 
 	for raw, want := range map[string]string{"": DefaultSchema, "  Custom_Billing  ": "custom_billing"} {
-		require.Equal(t, want, (&Config{Schema: raw}).SchemaName())
+		require.Equal(t, want, SchemaName(&Config{Schema: raw}))
 	}
-	require.Equal(t, DefaultSchema, (*Config)(nil).SchemaName())
+	require.Equal(t, DefaultSchema, SchemaName((*Config)(nil)))
 	for _, raw := range []string{"1schema", "bad schema", "bad-schema", `"quoted"`, "a.b"} {
 		require.Error(t, validateSchema(raw), raw)
 	}
@@ -185,7 +170,7 @@ func TestScalarParsingBoundaries(t *testing.T) {
 	for cfg, model := range map[LLMConfig]string{
 		{}: LLMDefaultModelAnthropic, {Provider: "openai"}: LLMDefaultModelOpenAI, {Provider: "openai", Model: " custom "}: "custom",
 	} {
-		require.Equal(t, model, cfg.ResolvedModel())
+		require.Equal(t, model, LLMModel(&cfg))
 	}
 }
 

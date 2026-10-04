@@ -138,7 +138,7 @@ type Factory struct{ base http.RoundTripper }
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return f.newClient(cfg == nil || cfg.IsProviderReadOnly(), cfg != nil && cfg.IsTestMode(), timeout)
+	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), cfg != nil && config.IsTestMode(cfg), timeout)
 }
 
 func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {

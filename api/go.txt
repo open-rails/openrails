@@ -7,6 +7,9 @@ pkg openrails, const CustomerScope billingauth.Scope = "customer"
 pkg openrails, const CustomerSelfService config.CustomerHTTPScope = 0
 pkg openrails, const CustomerSubscriptionManagement config.CustomerHTTPScope = 1
 pkg openrails, const Delegated billingauth.PrincipalKind = "delegated"
+pkg openrails, const FormerNamesFinite config.FormerNamesMode = "finite"
+pkg openrails, const FormerNamesForever config.FormerNamesMode = "forever"
+pkg openrails, const FormerNamesImmediate config.FormerNamesMode = "immediate"
 pkg openrails, const Live config.CredentialPosture = "live"
 pkg openrails, const Machine billingauth.PrincipalKind = "machine"
 pkg openrails, const MerchantScope billingauth.Scope = "merchant"
@@ -37,18 +40,6 @@ pkg openrails, func WithMerchantID(billing.MerchantID) ClientOption
 pkg openrails, func WithOwnCatalog() ClientOption
 pkg openrails, func WithTimeout(time.Duration) ClientOption
 pkg openrails, func WithTokenProvider(func(context.Context) (string, error)) ClientOption
-pkg openrails, method (*AdminConsoleConfig) IsEnabled() bool
-pkg openrails, method (*AdminConsoleConfig) MountPath() string
-pkg openrails, method (*AuthConfig) ValidateTransport() error
-pkg openrails, method (*CaptchaConfig) EffectiveAction() string
-pkg openrails, method (*CaptchaConfig) EffectiveChallengeBuckets() []string
-pkg openrails, method (*CaptchaConfig) EffectiveChallengeTTL() time.Duration
-pkg openrails, method (*CaptchaConfig) EffectiveExtremeMultiplier() int
-pkg openrails, method (*CaptchaConfig) EffectiveMinScore() float64
-pkg openrails, method (*CaptchaConfig) EffectiveProvider() string
-pkg openrails, method (*CaptchaConfig) EffectiveScriptURL() string
-pkg openrails, method (*CaptchaConfig) EffectiveVerifyURL() string
-pkg openrails, method (*CaptchaConfig) IsEnabled() bool
 pkg openrails, method (*CatalogClient) Apply(context.Context, *billing.CatalogApplyParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*CatalogClient) Revision(context.Context, ...RequestOption) (*billing.CatalogRevision, error)
 pkg openrails, method (*Client) AbandonEngineTakeover(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.EngineTakeover, error)
@@ -203,34 +194,6 @@ pkg openrails, method (*Client) UsageRollup(context.Context, string, string, tim
 pkg openrails, method (*Client) Verify(context.Context, ...RequestOption) error
 pkg openrails, method (*Client) VoidInvoice(context.Context, uuid.UUID, ...RequestOption) (*billing.MerchantInvoiceDTO, error)
 pkg openrails, method (*Client) With(...ClientOption) (*Client, error)
-pkg openrails, method (*Config) AllowedReturnOrigins() []string
-pkg openrails, method (*Config) CatalogReconciliationSchedule() (time.Duration, bool, error)
-pkg openrails, method (*Config) CheckoutEmbedAllowed(string) bool
-pkg openrails, method (*Config) CheckoutFrameAncestors() string
-pkg openrails, method (*Config) GetProviderWriteMode() string
-pkg openrails, method (*Config) HostedCheckout() config.CheckoutConfig
-pkg openrails, method (*Config) IsLimitedMode() bool
-pkg openrails, method (*Config) IsProviderReadOnly() bool
-pkg openrails, method (*Config) IsTestMode() bool
-pkg openrails, method (*Config) ProviderBillingQuiescence() (time.Duration, error)
-pkg openrails, method (*Config) RequiresSecretEncryption() bool
-pkg openrails, method (*Config) ReturnURLAllowed(string) bool
-pkg openrails, method (*Config) SandboxCCBillDataLinkURL() string
-pkg openrails, method (*Config) SandboxNMIGatewayURL() string
-pkg openrails, method (*Config) SandboxSolanaRPCURL() string
-pkg openrails, method (*Config) SandboxStripeAPIURL() string
-pkg openrails, method (*Config) SchemaName() string
-pkg openrails, method (*Config) SecretStoreBackend() string
-pkg openrails, method (*Config) WebhookSecretOverlapDuration() (time.Duration, error)
-pkg openrails, method (*CredentialPosture) UnmarshalText([]byte) error
-pkg openrails, method (*DBConfig) GetConnectionString() string
-pkg openrails, method (*DelegatedPrincipal) Validate() error
-pkg openrails, method (*LLMConfig) AskConfigured() bool
-pkg openrails, method (*LLMConfig) CatalogCopilotConfigured() bool
-pkg openrails, method (*LLMConfig) CatalogDraftingConfigured() bool
-pkg openrails, method (*LLMConfig) IsConfigured() bool
-pkg openrails, method (*LLMConfig) ResolvedModel() string
-pkg openrails, method (*LLMConfig) ResolvedProvider() string
 pkg openrails, method (*MerchantConfigurationClient) Apply(context.Context, *billing.MerchantConfigurationApplyParams, ...RequestOption) (*billing.MerchantConfigurationReceipt, error)
 pkg openrails, method (*MerchantConfigurationClient) Retrieve(context.Context, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (*PaymentProviderClient) Archive(context.Context, string, uuid.UUID, *billing.ArchivePaymentProviderAccountParams, ...RequestOption) (*billing.PaymentProviderConfig, error)
@@ -252,33 +215,31 @@ pkg openrails, method (*ProductClient) List(context.Context, *billing.ProductLis
 pkg openrails, method (*ProductClient) Retrieve(context.Context, string, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*ProductClient) RetrieveByKey(context.Context, string, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*ProductClient) Update(context.Context, string, *billing.ProductUpdateParams, ...RequestOption) (*billing.Product, error)
-pkg openrails, method (CheckoutConfig) Validate() error
 pkg openrails, method (GateError) Error() string
 pkg openrails, method (InvoiceSweepArgs) InsertOpts() river.InsertOpts
 pkg openrails, method (InvoiceSweepArgs) Kind() string
-pkg openrails, method (RiverOwnership) HostOwned() bool
 pkg openrails, type AdminConsoleConfig = config.AdminConsoleConfig
 pkg openrails, type AdminConsoleConfig struct
-pkg openrails, type AdminConsoleConfig struct, APIBaseURL string `koanf:"api_base_url,omitempty"`
-pkg openrails, type AdminConsoleConfig struct, AuthBaseURL string `koanf:"auth_base_url,omitempty"`
-pkg openrails, type AdminConsoleConfig struct, Enabled bool `koanf:"enabled,omitempty"`
-pkg openrails, type AdminConsoleConfig struct, Path string `koanf:"path,omitempty"`
+pkg openrails, type AdminConsoleConfig struct, APIBaseURL string
+pkg openrails, type AdminConsoleConfig struct, AuthBaseURL string
+pkg openrails, type AdminConsoleConfig struct, Enabled bool
+pkg openrails, type AdminConsoleConfig struct, Path string
 pkg openrails, type AuthConfig = config.AuthConfig
 pkg openrails, type AuthConfig struct
-pkg openrails, type AuthConfig struct, ActiveKeyID string `koanf:"active_key_id,omitempty"`
-pkg openrails, type AuthConfig struct, ActivePrivateKeyPEM string `koanf:"active_private_key_pem,omitempty"`
-pkg openrails, type AuthConfig struct, AllowEphemeralSigningKey bool `koanf:"allow_ephemeral_signing_key,omitempty"`
-pkg openrails, type AuthConfig struct, AllowLoopbackHTTP bool `koanf:"allow_loopback_http,omitempty"`
-pkg openrails, type AuthConfig struct, AllowMemory bool `koanf:"allow_memory,omitempty"`
-pkg openrails, type AuthConfig struct, AllowMissingSenders bool `koanf:"allow_missing_senders,omitempty"`
-pkg openrails, type AuthConfig struct, AllowPrivateNetworkJWKS bool `koanf:"allow_private_network_jwks,omitempty"`
-pkg openrails, type AuthConfig struct, DirectPeerIP bool `koanf:"direct_peer_ip,omitempty"`
-pkg openrails, type AuthConfig struct, Issuer string `koanf:"issuer,omitempty"`
-pkg openrails, type AuthConfig struct, KeysPath string `koanf:"keys_path,omitempty"`
-pkg openrails, type AuthConfig struct, MintDisabled bool `koanf:"mint_disabled,omitempty"`
-pkg openrails, type AuthConfig struct, Naming merchant.NamingConfig `koanf:"naming,omitempty"`
-pkg openrails, type AuthConfig struct, PublicKeysJSON string `koanf:"public_keys,omitempty"`
-pkg openrails, type AuthConfig struct, RequestOrigin string `koanf:"request_origin,omitempty"`
+pkg openrails, type AuthConfig struct, ActiveKeyID string
+pkg openrails, type AuthConfig struct, ActivePrivateKeyPEM string
+pkg openrails, type AuthConfig struct, AllowEphemeralSigningKey bool
+pkg openrails, type AuthConfig struct, AllowLoopbackHTTP bool
+pkg openrails, type AuthConfig struct, AllowMemory bool
+pkg openrails, type AuthConfig struct, AllowMissingSenders bool
+pkg openrails, type AuthConfig struct, AllowPrivateNetworkJWKS bool
+pkg openrails, type AuthConfig struct, DirectPeerIP bool
+pkg openrails, type AuthConfig struct, Issuer string
+pkg openrails, type AuthConfig struct, KeysPath string
+pkg openrails, type AuthConfig struct, MintDisabled bool
+pkg openrails, type AuthConfig struct, Naming config.NamingConfig
+pkg openrails, type AuthConfig struct, PublicKeysJSON string
+pkg openrails, type AuthConfig struct, RequestOrigin string
 pkg openrails, type AuthRateLimit = config.AuthRateLimit
 pkg openrails, type AuthRateLimit struct
 pkg openrails, type AuthRateLimit struct, Cooldown time.Duration
@@ -320,9 +281,9 @@ pkg openrails, type Cache interface, Get(context.Context, string, any) error
 pkg openrails, type Cache interface, Set(context.Context, string, any, time.Duration) error
 pkg openrails, type CaptchaConfig = config.CaptchaConfig
 pkg openrails, type CaptchaConfig struct
-pkg openrails, type CaptchaConfig struct, Provider string `koanf:"provider"`
-pkg openrails, type CaptchaConfig struct, SecretKey string `koanf:"secret_key"`
-pkg openrails, type CaptchaConfig struct, SiteKey string `koanf:"site_key"`
+pkg openrails, type CaptchaConfig struct, Provider string
+pkg openrails, type CaptchaConfig struct, SecretKey string
+pkg openrails, type CaptchaConfig struct, SiteKey string
 pkg openrails, type CatalogClient struct
 pkg openrails, type CheckoutConfig = config.CheckoutConfig
 pkg openrails, type CheckoutConfig struct
@@ -349,47 +310,44 @@ pkg openrails, type Client struct, Products *ProductClient
 pkg openrails, type ClientOption func(*Client)
 pkg openrails, type Config = config.Config
 pkg openrails, type Config struct
-pkg openrails, type Config struct, AdminConsole *config.AdminConsoleConfig `koanf:"admin_console,omitempty"`
-pkg openrails, type Config struct, AlertSecretBackend string `koanf:"alert_secret_backend,omitempty"`
-pkg openrails, type Config struct, AllowCatalogUpdates bool `koanf:"allow_catalog_updates,omitempty"`
-pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist,omitempty"`
-pkg openrails, type Config struct, Captcha *config.CaptchaConfig `koanf:"captcha,omitempty"`
-pkg openrails, type Config struct, Catalog *billing.CatalogApplyParams `koanf:"-"`
-pkg openrails, type Config struct, CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval,omitempty"`
-pkg openrails, type Config struct, CloudflareProxies []string `koanf:"cloudflare_proxies,omitempty"`
-pkg openrails, type Config struct, ControlPlane *config.ControlPlaneConfig `koanf:"-"`
-pkg openrails, type Config struct, CredentialReadOnly bool `koanf:"credential_read_only,omitempty"`
-pkg openrails, type Config struct, CredentialSnapshotID string `koanf:"credential_snapshot_id,omitempty"`
-pkg openrails, type Config struct, DB *config.DBConfig `koanf:"db,omitempty"`
-pkg openrails, type Config struct, DashboardBaseURL string `koanf:"dashboard_base_url,omitempty"`
-pkg openrails, type Config struct, Encryption *config.EncryptionConfig `koanf:"encryption,omitempty"`
-pkg openrails, type Config struct, EngineAdmissionHold bool `koanf:"engine_admission_hold"`
-pkg openrails, type Config struct, HTTP *config.HTTPConfig `koanf:"-"`
-pkg openrails, type Config struct, Host string `koanf:"host,omitempty"`
-pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig `koanf:"hyperswitch,omitempty"`
-pkg openrails, type Config struct, LLM *config.LLMConfig `koanf:"llm,omitempty"`
-pkg openrails, type Config struct, Logger *config.LoggerConfig `koanf:"logger,omitempty"`
-pkg openrails, type Config struct, Merchant config.MerchantDeclaration `koanf:"-"`
-pkg openrails, type Config struct, MerchantConfigHTTP bool `koanf:"merchant_config_http,omitempty"`
-pkg openrails, type Config struct, MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays,omitempty"`
-pkg openrails, type Config struct, Port config.FlexiblePort `koanf:"port,omitempty"`
-pkg openrails, type Config struct, ProviderBillingQuiescenceInterval string `koanf:"provider_billing_quiescence_interval,omitempty"`
-pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
-pkg openrails, type Config struct, ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
-pkg openrails, type Config struct, PublicBillingBaseURL string `koanf:"public_billing_base_url,omitempty"`
-pkg openrails, type Config struct, RateLimits *config.RateLimitsConfig `koanf:"rate_limits,omitempty"`
-pkg openrails, type Config struct, RateLimitsDisabled bool `koanf:"rate_limits_disabled,omitempty"`
-pkg openrails, type Config struct, Redis *config.RedisConfig `koanf:"redis,omitempty"`
-pkg openrails, type Config struct, ReturnOrigins []string `koanf:"return_origins,omitempty"`
-pkg openrails, type Config struct, River config.RiverOwnership `koanf:"-"`
-pkg openrails, type Config struct, RiverSchema string `koanf:"-"`
-pkg openrails, type Config struct, Schema string `koanf:"schema,omitempty"`
-pkg openrails, type Config struct, SecretBackend string `koanf:"secret_backend,omitempty"`
-pkg openrails, type Config struct, SendGrid *config.SendGridConfig `koanf:"sendgrid,omitempty"`
-pkg openrails, type Config struct, TestMode config.CredentialPosture `koanf:"test_mode,omitempty"`
-pkg openrails, type Config struct, TrustedProxies []string `koanf:"trusted_proxies,omitempty"`
-pkg openrails, type Config struct, Vault *config.VaultConfig `koanf:"vault,omitempty"`
-pkg openrails, type Config struct, WebhookSecretOverlap string `koanf:"webhook_secret_overlap,omitempty"`
+pkg openrails, type Config struct, AdminConsole *config.AdminConsoleConfig
+pkg openrails, type Config struct, AlertSecretBackend string
+pkg openrails, type Config struct, AllowCatalogUpdates bool
+pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string
+pkg openrails, type Config struct, Captcha *config.CaptchaConfig
+pkg openrails, type Config struct, Catalog *billing.CatalogApplyParams
+pkg openrails, type Config struct, CatalogReconciliationInterval string
+pkg openrails, type Config struct, CloudflareProxies []string
+pkg openrails, type Config struct, ControlPlane *config.ControlPlaneConfig
+pkg openrails, type Config struct, CredentialReadOnly bool
+pkg openrails, type Config struct, CredentialSnapshotID string
+pkg openrails, type Config struct, DB *config.DBConfig
+pkg openrails, type Config struct, DashboardBaseURL string
+pkg openrails, type Config struct, Encryption *config.EncryptionConfig
+pkg openrails, type Config struct, EngineAdmissionHold bool
+pkg openrails, type Config struct, HTTP *config.HTTPConfig
+pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig
+pkg openrails, type Config struct, LLM *config.LLMConfig
+pkg openrails, type Config struct, Logger *config.LoggerConfig
+pkg openrails, type Config struct, Merchant config.MerchantDeclaration
+pkg openrails, type Config struct, MerchantConfigHTTP bool
+pkg openrails, type Config struct, ProviderBillingQuiescenceInterval string
+pkg openrails, type Config struct, ProviderSandbox *config.ProviderSandboxConfig
+pkg openrails, type Config struct, ProviderWriteMode string
+pkg openrails, type Config struct, PublicBillingBaseURL string
+pkg openrails, type Config struct, RateLimits *config.RateLimitsConfig
+pkg openrails, type Config struct, RateLimitsDisabled bool
+pkg openrails, type Config struct, Redis *config.RedisConfig
+pkg openrails, type Config struct, ReturnOrigins []string
+pkg openrails, type Config struct, River config.RiverOwnership
+pkg openrails, type Config struct, RiverSchema string
+pkg openrails, type Config struct, Schema string
+pkg openrails, type Config struct, SecretBackend string
+pkg openrails, type Config struct, SendGrid *config.SendGridConfig
+pkg openrails, type Config struct, TestMode config.CredentialPosture
+pkg openrails, type Config struct, TrustedProxies []string
+pkg openrails, type Config struct, Vault *config.VaultConfig
+pkg openrails, type Config struct, WebhookSecretOverlap string
 pkg openrails, type ControlPlaneConfig = config.ControlPlaneConfig
 pkg openrails, type ControlPlaneConfig struct
 pkg openrails, type ControlPlaneConfig struct, Auth config.AuthConfig
@@ -422,21 +380,21 @@ pkg openrails, type CustomerHTTPScope = config.CustomerHTTPScope
 pkg openrails, type CustomerHTTPScope uint8
 pkg openrails, type CustomerRoutesConfig = config.CustomerRoutesConfig
 pkg openrails, type CustomerRoutesConfig struct
-pkg openrails, type CustomerRoutesConfig struct, Authenticate func(*http.Request) (*billingauth.DelegatedPrincipal, error)
+pkg openrails, type CustomerRoutesConfig struct, Delegated bool
 pkg openrails, type CustomerRoutesConfig struct, Merchant string
 pkg openrails, type CustomerRoutesConfig struct, Prefix string
 pkg openrails, type CustomerRoutesConfig struct, Scope config.CustomerHTTPScope
 pkg openrails, type CustomerRoutesConfig struct, Treasury bool
 pkg openrails, type DBConfig = config.DBConfig
 pkg openrails, type DBConfig struct
-pkg openrails, type DBConfig struct, Database string `koanf:"database"`
-pkg openrails, type DBConfig struct, Host string `koanf:"host"`
-pkg openrails, type DBConfig struct, Password string `koanf:"password"`
-pkg openrails, type DBConfig struct, Port string `koanf:"port"`
-pkg openrails, type DBConfig struct, SQLTrace bool `koanf:"sql_trace"`
-pkg openrails, type DBConfig struct, SSLMode string `koanf:"sslmode"`
-pkg openrails, type DBConfig struct, URL string `koanf:"url"`
-pkg openrails, type DBConfig struct, Username string `koanf:"username"`
+pkg openrails, type DBConfig struct, Database string
+pkg openrails, type DBConfig struct, Host string
+pkg openrails, type DBConfig struct, Password string
+pkg openrails, type DBConfig struct, Port string
+pkg openrails, type DBConfig struct, SQLTrace bool
+pkg openrails, type DBConfig struct, SSLMode string
+pkg openrails, type DBConfig struct, URL string
+pkg openrails, type DBConfig struct, Username string
 pkg openrails, type DelegatedPrincipal = billingauth.DelegatedPrincipal
 pkg openrails, type DelegatedPrincipal struct
 pkg openrails, type DelegatedPrincipal struct, CredentialClass billingauth.CredentialClass
@@ -453,6 +411,7 @@ pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, AuthKit billingauth.Verifier
 pkg openrails, type Deps struct, Authenticate func(*http.Request) (billingauth.Identity, error)
+pkg openrails, type Deps struct, AuthenticateCustomer func(*http.Request, string) (*billingauth.DelegatedPrincipal, error)
 pkg openrails, type Deps struct, AuthorityFor func(context.Context, billingauth.Requirement) (billingauth.Authority, error)
 pkg openrails, type Deps struct, Authorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error
 pkg openrails, type Deps struct, Cache cache.Cache
@@ -480,7 +439,13 @@ pkg openrails, type EmailSender interface, CheckHealth(context.Context) error
 pkg openrails, type EmailSender interface, Send(context.Context, iam.EmailMessage) error
 pkg openrails, type EncryptionConfig = config.EncryptionConfig
 pkg openrails, type EncryptionConfig struct
-pkg openrails, type EncryptionConfig struct, MasterKey string `koanf:"master_key,omitempty"`
+pkg openrails, type EncryptionConfig struct, MasterKey string
+pkg openrails, type FormerNamesConfig = config.FormerNamesConfig
+pkg openrails, type FormerNamesConfig struct
+pkg openrails, type FormerNamesConfig struct, Duration *time.Duration
+pkg openrails, type FormerNamesConfig struct, Mode config.FormerNamesMode
+pkg openrails, type FormerNamesMode = config.FormerNamesMode
+pkg openrails, type FormerNamesMode string
 pkg openrails, type GateError = billingauth.GateError
 pkg openrails, type GateError struct
 pkg openrails, type GateError struct, Code string
@@ -498,9 +463,9 @@ pkg openrails, type HTTPConfig struct, MerchantAdmin bool
 pkg openrails, type HTTPConfig struct, MerchantConfig bool
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
-pkg openrails, type HyperSwitchConfig struct, APIBaseURL string `koanf:"api_base_url"`
-pkg openrails, type HyperSwitchConfig struct, AllowLoopbackHTTP bool `koanf:"allow_loopback_http"`
-pkg openrails, type HyperSwitchConfig struct, SDKURL string `koanf:"sdk_url"`
+pkg openrails, type HyperSwitchConfig struct, APIBaseURL string
+pkg openrails, type HyperSwitchConfig struct, AllowLoopbackHTTP bool
+pkg openrails, type HyperSwitchConfig struct, SDKURL string
 pkg openrails, type Identity = billingauth.Identity
 pkg openrails, type Identity struct
 pkg openrails, type Identity struct, CredentialClass billingauth.CredentialClass
@@ -528,16 +493,16 @@ pkg openrails, type InvoiceSweepArgs struct, FinalizePreviousMonth bool `json:"f
 pkg openrails, type InvoiceSweepArgs struct, UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
 pkg openrails, type LLMConfig = config.LLMConfig
 pkg openrails, type LLMConfig struct
-pkg openrails, type LLMConfig struct, APIKey string `koanf:"api_key,omitempty"`
-pkg openrails, type LLMConfig struct, AskEnabled bool `koanf:"ask_enabled,omitempty"`
-pkg openrails, type LLMConfig struct, BaseURL string `koanf:"base_url,omitempty"`
-pkg openrails, type LLMConfig struct, CatalogCopilotEnabled bool `koanf:"catalog_copilot_enabled,omitempty"`
-pkg openrails, type LLMConfig struct, CatalogDraftingEnabled bool `koanf:"catalog_drafting_enabled,omitempty"`
-pkg openrails, type LLMConfig struct, Model string `koanf:"model,omitempty"`
-pkg openrails, type LLMConfig struct, Provider string `koanf:"provider,omitempty"`
+pkg openrails, type LLMConfig struct, APIKey string
+pkg openrails, type LLMConfig struct, AskEnabled bool
+pkg openrails, type LLMConfig struct, BaseURL string
+pkg openrails, type LLMConfig struct, CatalogCopilotEnabled bool
+pkg openrails, type LLMConfig struct, CatalogDraftingEnabled bool
+pkg openrails, type LLMConfig struct, Model string
+pkg openrails, type LLMConfig struct, Provider string
 pkg openrails, type LoggerConfig = config.LoggerConfig
 pkg openrails, type LoggerConfig struct
-pkg openrails, type LoggerConfig struct, Level string `koanf:"level"`
+pkg openrails, type LoggerConfig struct, Level string
 pkg openrails, type MerchantConfigurationClient struct
 pkg openrails, type MerchantCreationConfig = config.MerchantCreationConfig
 pkg openrails, type MerchantCreationConfig struct
@@ -565,6 +530,11 @@ pkg openrails, type MerchantProfileConfig struct, FromEmail string `yaml:"from_e
 pkg openrails, type MerchantProfileConfig struct, LogoURL string `yaml:"logo_url,omitempty" koanf:"logo_url"`
 pkg openrails, type MerchantProfileConfig struct, SignupURL string `yaml:"signup_url,omitempty" koanf:"signup_url"`
 pkg openrails, type MerchantProfileConfig struct, SupportURL string `yaml:"support_url,omitempty" koanf:"support_url"`
+pkg openrails, type NamingConfig = config.NamingConfig
+pkg openrails, type NamingConfig struct
+pkg openrails, type NamingConfig struct, Enabled *bool
+pkg openrails, type NamingConfig struct, FormerNames config.FormerNamesConfig
+pkg openrails, type NamingConfig struct, RenameInterval *time.Duration
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig map[string]config.ProviderRailAccountConfig
 pkg openrails, type PSPSignerConfig = config.PSPSignerConfig
@@ -597,20 +567,23 @@ pkg openrails, type ProviderRailAccountConfig struct, Settings map[string]any `y
 pkg openrails, type ProviderRailAccountConfig struct, Signer *config.PSPSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
 pkg openrails, type ProviderSandboxConfig = config.ProviderSandboxConfig
 pkg openrails, type ProviderSandboxConfig struct
-pkg openrails, type ProviderSandboxConfig struct, CCBillDataLinkURL string `koanf:"ccbill_datalink_url,omitempty"`
-pkg openrails, type ProviderSandboxConfig struct, NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
-pkg openrails, type ProviderSandboxConfig struct, SolanaRPCURL string `koanf:"solana_rpc_url,omitempty"`
-pkg openrails, type ProviderSandboxConfig struct, StripeAPIURL string `koanf:"stripe_api_url,omitempty"`
+pkg openrails, type ProviderSandboxConfig struct, CCBillDataLinkURL string
+pkg openrails, type ProviderSandboxConfig struct, NMIGatewayURL string
+pkg openrails, type ProviderSandboxConfig struct, SolanaRPCURL string
+pkg openrails, type ProviderSandboxConfig struct, StripeAPIURL string
 pkg openrails, type RateLimit = config.RateLimit
 pkg openrails, type RateLimit struct
-pkg openrails, type RateLimit struct, RequestsPerMinute int `koanf:"requests_per_minute"`
+pkg openrails, type RateLimit struct, RequestsPerMinute int
 pkg openrails, type RateLimitsConfig = config.RateLimitsConfig
 pkg openrails, type RateLimitsConfig map[string]*config.RateLimit
 pkg openrails, type RedisConfig = config.RedisConfig
 pkg openrails, type RedisConfig struct
-pkg openrails, type RedisConfig struct, Addr string `koanf:"addr"`
-pkg openrails, type RedisConfig struct, DB int `koanf:"db"`
-pkg openrails, type RedisConfig struct, Password string `koanf:"password"`
+pkg openrails, type RedisConfig struct, Addr string
+pkg openrails, type RedisConfig struct, DB int
+pkg openrails, type RedisConfig struct, Password string
+pkg openrails, type RequestAuthenticator = billingauth.Verifier
+pkg openrails, type RequestAuthenticator interface
+pkg openrails, type RequestAuthenticator interface, AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)
 pkg openrails, type RequestOption func(*requestOptions)
 pkg openrails, type Requirement = billingauth.Requirement
 pkg openrails, type Requirement struct
@@ -631,7 +604,7 @@ pkg openrails, type Scope = billingauth.Scope
 pkg openrails, type Scope string
 pkg openrails, type SendGridConfig = config.SendGridConfig
 pkg openrails, type SendGridConfig struct
-pkg openrails, type SendGridConfig struct, APIKey string `koanf:"api_key"`
+pkg openrails, type SendGridConfig struct, APIKey string
 pkg openrails, type Target = billingauth.Target
 pkg openrails, type Target struct
 pkg openrails, type Target struct, AuthorityGroupID string
@@ -640,17 +613,17 @@ pkg openrails, type Target struct, MerchantID billing.MerchantID
 pkg openrails, type Target struct, MerchantSlug string
 pkg openrails, type VaultConfig = config.VaultConfig
 pkg openrails, type VaultConfig struct
-pkg openrails, type VaultConfig struct, Address string `koanf:"address,omitempty"`
-pkg openrails, type VaultConfig struct, AuthMethod string `koanf:"auth_method,omitempty"`
-pkg openrails, type VaultConfig struct, Enabled bool `koanf:"enabled,omitempty"`
-pkg openrails, type VaultConfig struct, K8sRole string `koanf:"k8s_role,omitempty"`
-pkg openrails, type VaultConfig struct, KVMount string `koanf:"kv_mount,omitempty"`
-pkg openrails, type VaultConfig struct, Namespace string `koanf:"namespace,omitempty"`
-pkg openrails, type VaultConfig struct, RoleID string `koanf:"role_id,omitempty"`
-pkg openrails, type VaultConfig struct, ScopePrefix string `koanf:"scope_prefix,omitempty"`
-pkg openrails, type VaultConfig struct, SecretID string `koanf:"secret_id,omitempty"`
-pkg openrails, type VaultConfig struct, Token string `koanf:"token,omitempty"`
-pkg openrails, type VaultConfig struct, TransitMount string `koanf:"transit_mount,omitempty"`
+pkg openrails, type VaultConfig struct, Address string
+pkg openrails, type VaultConfig struct, AuthMethod string
+pkg openrails, type VaultConfig struct, Enabled bool
+pkg openrails, type VaultConfig struct, K8sRole string
+pkg openrails, type VaultConfig struct, KVMount string
+pkg openrails, type VaultConfig struct, Namespace string
+pkg openrails, type VaultConfig struct, RoleID string
+pkg openrails, type VaultConfig struct, ScopePrefix string
+pkg openrails, type VaultConfig struct, SecretID string
+pkg openrails, type VaultConfig struct, Token string
+pkg openrails, type VaultConfig struct, TransitMount string
 pkg openrails, var ErrForbidden error
 pkg openrails, var ErrNoControlPlane error
 pkg openrails, var ErrRemoteClient error

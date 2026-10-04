@@ -7,7 +7,6 @@ import (
 	"time"
 
 	billing "github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,15 +68,15 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.Contains(t, cfg.DB.URL, "@example.com:")
 	require.True(t, cfg.Vault.Enabled)
 	require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
-	require.Equal(t, billing.SecretBackendDB, cfg.SecretStoreBackend())
+	require.Equal(t, billing.SecretBackendDB, billing.SecretStoreBackend(cfg.Config))
 	require.Equal(t, "SG.test-key", cfg.SendGrid.APIKey)
-	require.True(t, cfg.IsLimitedMode())
-	require.False(t, cfg.IsProviderReadOnly())
-	interval, enabled, err := cfg.CatalogReconciliationSchedule()
+	require.True(t, billing.IsLimitedMode(cfg.Config))
+	require.False(t, billing.IsProviderReadOnly(cfg.Config))
+	interval, enabled, err := billing.CatalogReconciliationSchedule(cfg.Config)
 	require.NoError(t, err)
 	require.True(t, enabled)
 	require.Equal(t, 30*time.Minute, interval)
-	quiet, err := cfg.ProviderBillingQuiescence()
+	quiet, err := billing.ProviderBillingQuiescence(cfg.Config)
 	require.NoError(t, err)
 	require.Equal(t, 36*time.Hour, quiet)
 	require.True(t, cfg.AllowCatalogUpdates)
@@ -194,13 +193,13 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 		values   map[string]any
 		enabled  bool
 		interval time.Duration
-		mode     merchant.FormerNames
+		mode     billing.FormerNamesMode
 		duration time.Duration
 	}{
-		"defaults":              {nil, true, 72 * time.Hour, merchant.FormerNamesFinite, 90 * 24 * time.Hour},
-		"disabled zero forever": {map[string]any{"auth.naming.enabled": false, "auth.naming.rename_interval": "0s", "auth.naming.former_names.mode": "forever"}, false, 0, merchant.FormerNamesForever, 0},
-		"finite duration":       {map[string]any{"auth.naming.former_names.duration": "240h"}, true, 72 * time.Hour, merchant.FormerNamesFinite, 240 * time.Hour},
-		"immediate":             {map[string]any{"auth.naming.former_names.mode": "immediate"}, true, 72 * time.Hour, merchant.FormerNamesImmediate, 0},
+		"defaults":              {nil, true, 72 * time.Hour, billing.FormerNamesFinite, 90 * 24 * time.Hour},
+		"disabled zero forever": {map[string]any{"auth.naming.enabled": false, "auth.naming.rename_interval": "0s", "auth.naming.former_names.mode": "forever"}, false, 0, billing.FormerNamesForever, 0},
+		"finite duration":       {map[string]any{"auth.naming.former_names.duration": "240h"}, true, 72 * time.Hour, billing.FormerNamesFinite, 240 * time.Hour},
+		"immediate":             {map[string]any{"auth.naming.former_names.mode": "immediate"}, true, 72 * time.Hour, billing.FormerNamesImmediate, 0},
 	} {
 		var opts []LoadOption
 		for key, value := range row.values {
@@ -208,7 +207,7 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 		}
 		cfg, err := Load("", opts...)
 		require.NoError(t, err, name)
-		policy, err := cfg.Auth.Naming.Normalize()
+		policy, err := billing.NormalizeNaming(cfg.Auth.Naming)
 		require.NoError(t, err, name)
 		require.Equal(t, row.enabled, policy.Enabled, name)
 		require.Equal(t, row.interval, policy.RenameInterval, name)
@@ -229,17 +228,19 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 	require.False(t, *cfg.Auth.Naming.Enabled)
 	require.NotNil(t, cfg.Auth.Naming.RenameInterval)
 	require.Zero(t, *cfg.Auth.Naming.RenameInterval)
-	policy, err := cfg.Auth.Naming.Normalize()
+	policy, err := billing.NormalizeNaming(cfg.Auth.Naming)
 	require.NoError(t, err)
-	require.Equal(t, merchant.FormerNamesImmediate, policy.FormerNames)
+	require.Equal(t, billing.FormerNamesImmediate, policy.FormerNames)
 }
 
 // Sandbox posture never relaxes auth transport; only the explicit loopback
 // exception admits HTTP, and only to a loopback host.
 func TestAuthTransportIsExplicit(t *testing.T) {
-	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &billing.AuthConfig{}}
-	cfg.TestMode, cfg.ProviderWriteMode = billing.CredentialPostureSandbox, billing.ProviderWriteModeFull
-	cfg.DB.URL = cfg.DB.GetConnectionString()
+	f := defaults()
+	f.TestMode, f.ProviderWriteMode = "sandbox", billing.ProviderWriteModeFull
+	f.DB.URL = billing.DBConnectionString(f.DB)
+	cfg, err := f.config()
+	require.NoError(t, err)
 	require.NoError(t, Validate(cfg))
 
 	for _, row := range []struct {

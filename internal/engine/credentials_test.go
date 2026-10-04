@@ -35,7 +35,7 @@ func TestCredentialSnapshotStripePostureIsAtomic(t *testing.T) {
 					{MerchantID: id, Rail: "stripe", AccountID: "acct_first", Credentials: map[string]string{"secret_key": first}},
 					{MerchantID: id, Rail: " STRIPE ", AccountID: "acct_second", Credentials: map[string]string{"secret_key": key}},
 				})
-				name, nameErr := merchants.PSPSecretName("stripe", config.ExpectedProviderEnvironment(rt.Config.IsTestMode()), "acct_first", "secret_key")
+				name, nameErr := merchants.PSPSecretName("stripe", config.ExpectedProviderEnvironment(config.IsTestMode(rt.Config)), "acct_first", "secret_key")
 				require.NoError(t, nameErr)
 				seeded, readErr := store.Get(context.Background(), id, name)
 				valid := len(key) > len("sk_test_") && (key[:2] == "sk" || key[:2] == "rk") && key[2:8] == prefix

@@ -57,6 +57,13 @@ type (
 	ProviderSandboxConfig = config.ProviderSandboxConfig
 	HyperSwitchConfig     = config.HyperSwitchConfig
 
+	NamingConfig      = config.NamingConfig
+	FormerNamesConfig = config.FormerNamesConfig
+	FormerNamesMode   = config.FormerNamesMode
+
+	// RequestAuthenticator is what Deps.AuthKit accepts.
+	RequestAuthenticator = billingauth.Verifier
+
 	ProviderCredentialSnapshot = config.ProviderCredentialSnapshot
 	Cache                      = cache.Cache
 	EmailSender                = config.EmailSender
@@ -94,6 +101,10 @@ const (
 	SecretBackendSnapshot = config.SecretBackendSnapshot
 	SecretBackendVault    = config.SecretBackendVault
 	SecretBackendDB       = config.SecretBackendDB
+
+	FormerNamesFinite    = config.FormerNamesFinite
+	FormerNamesForever   = config.FormerNamesForever
+	FormerNamesImmediate = config.FormerNamesImmediate
 
 	RiverManaged   = config.RiverManaged
 	RiverHostOwned = config.RiverHostOwned

@@ -99,10 +99,10 @@ type DelegatedPrincipal struct {
 // its explicit merchant or subject mapping. OpenRails maps it to 401.
 var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an explicit merchant and subject")
 
-// Validate enforces the explicit-mapping contract: a usable principal carries
+// ValidateDelegatedPrincipal enforces the explicit-mapping contract: a usable principal carries
 // a non-empty merchant id and subject. (Merchant-id FORMAT and the permission
 // catalog are enforced by the adapting middleware, which owns those types.)
-func (p *DelegatedPrincipal) Validate() error {
+func ValidateDelegatedPrincipal(p *DelegatedPrincipal) error {
 	if p == nil || strings.TrimSpace(p.MerchantID) == "" || strings.TrimSpace(p.SubjectID) == "" || (p.CredentialClass != CredentialClassUnknown && p.CredentialClass != CredentialClassUserSession && p.CredentialClass != CredentialClassAutomation) {
 		return ErrDelegatedPrincipalInvalid
 	}

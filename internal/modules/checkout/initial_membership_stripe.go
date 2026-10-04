@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -25,7 +26,7 @@ func (h *InitialMembershipIntentHandler) stripeEngineService(ctx context.Context
 	return service, nil
 }
 func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload) intents.Outcome {
-	if h.Checkout.Config == nil || h.Checkout.Config.IsProviderReadOnly() {
+	if h.Checkout.Config == nil || config.IsProviderReadOnly(h.Checkout.Config) {
 		return intents.Parked("Stripe engine writes unavailable")
 	}
 	service, err := h.stripeEngineService(ctx, in)
@@ -118,7 +119,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context
 	if h.Checkout.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(h.Checkout.Config, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Checkout.Config}, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeEngineService(ctx, current)

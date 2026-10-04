@@ -50,7 +50,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	}
 	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	rt.StripeClients = stripeapi.NewFactory(nil)
-	if api := cfg.SandboxStripeAPIURL(); api != "" {
+	if api := config.SandboxStripeAPIURL(cfg); api != "" {
 		rt.StripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
 	}
 	cleanup := func() {
@@ -69,7 +69,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
 	}
 	rt.SetConfiguredMerchant(selected.ID)
-	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
+	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
 		rt.Merchants, err = pullProviderManifestPlane(ctx, cfg, database, PullProviderOptions{
 			MerchantID: selected.ID, MerchantManifestPath: opts.MerchantManifestPath,
 		})
@@ -81,7 +81,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 			// supplies no credential fallback: any required provider secret
 			// remains absent and reference validation must fail closed.
 			rt.ManifestSecrets = merchants.NewManifestSecretStore()
-			rt.Merchants, err = merchants.NewService(database.DataPool(), rt.ManifestSecrets, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
+			rt.Merchants, err = merchants.NewService(database.DataPool(), rt.ManifestSecrets, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
 			if err != nil {
 				return fail(err)
 			}
@@ -99,10 +99,10 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	readConfig.ProviderWriteMode = config.ProviderWriteModeReadOnly
 	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{Config: &readConfig, MerchantsFn: func() *merchants.Service { return rt.Merchants }}
 	network := "mainnet"
-	if cfg.IsTestMode() {
+	if config.IsTestMode(cfg) {
 		network = "devnet"
 	}
-	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(catalogPlanAddressReader{merchants: rt.Merchants, environment: config.ExpectedProviderEnvironment(cfg.IsTestMode())}, rt.SolanaRPCResolver.ChainReader(), network, solanatokens.ForNetwork(network))
+	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(catalogPlanAddressReader{merchants: rt.Merchants, environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}, rt.SolanaRPCResolver.ChainReader(), network, solanatokens.ForNetwork(network))
 	svc, err := service.New(rt)
 	if err != nil {
 		return fail(err)

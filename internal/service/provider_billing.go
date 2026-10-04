@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -40,7 +41,7 @@ func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx
 	if rt.Config == nil {
 		return nil, fmt.Errorf("provider billing qualification requires runtime config")
 	}
-	quiescence, err := rt.Config.ProviderBillingQuiescence()
+	quiescence, err := config.ProviderBillingQuiescence(rt.Config)
 	if err != nil {
 		return nil, err
 	}

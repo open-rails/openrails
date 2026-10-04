@@ -117,7 +117,7 @@ func (s *StripeService) decodeEngineSetup(ctx context.Context, p StripeEngineSet
 		ClientSecret  string            `json:"client_secret"`
 		MethodTypes   []string          `json:"payment_method_types"`
 	}
-	if json.Unmarshal(body, &si) != nil || !stripeEngineID(si.ID, "seti_") || reference != "" && si.ID != reference || rawID(si.Customer) != p.CustomerRef || si.Usage != "off_session" || si.LiveMode == nil || *si.LiveMode == s.Config.IsTestMode() || len(si.MethodTypes) != 1 || si.MethodTypes[0] != "card" {
+	if json.Unmarshal(body, &si) != nil || !stripeEngineID(si.ID, "seti_") || reference != "" && si.ID != reference || rawID(si.Customer) != p.CustomerRef || si.Usage != "off_session" || si.LiveMode == nil || *si.LiveMode == config.IsTestMode(s.Config) || len(si.MethodTypes) != 1 || si.MethodTypes[0] != "card" {
 		return StripeEngineSetup{}, errors.New("Stripe setup differs from accepted customer and usage")
 	}
 	for k, v := range p.metadata() {
@@ -154,7 +154,7 @@ func (s *StripeService) decodeEngineSetup(ctx context.Context, p StripeEngineSet
 			ExpYear  int    `json:"exp_year"`
 		} `json:"card"`
 	}
-	if json.Unmarshal(body, &method) != nil || method.ID != out.MethodRef || method.Type != "card" || rawID(method.Customer) != p.CustomerRef || method.LiveMode == nil || *method.LiveMode == s.Config.IsTestMode() || method.Card == nil || len(method.Card.LastFour) != 4 || method.Card.ExpMonth < 1 || method.Card.ExpMonth > 12 || method.Card.ExpYear < 2000 {
+	if json.Unmarshal(body, &method) != nil || method.ID != out.MethodRef || method.Type != "card" || rawID(method.Customer) != p.CustomerRef || method.LiveMode == nil || *method.LiveMode == config.IsTestMode(s.Config) || method.Card == nil || len(method.Card.LastFour) != 4 || method.Card.ExpMonth < 1 || method.Card.ExpMonth > 12 || method.Card.ExpYear < 2000 {
 		return out, errors.New("Stripe setup card is not attached to accepted customer")
 	}
 	out.LastFour = method.Card.LastFour

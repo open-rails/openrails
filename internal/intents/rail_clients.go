@@ -71,11 +71,11 @@ func ccbillDataLinkForMerchant(ctx context.Context, cfg *config.Config, src rail
 		return nil, fmt.Errorf("ccbill account %s has no datalink credentials", proc.EffectiveAccountID())
 	}
 	if cfg != nil {
-		c.TestMode = cfg.IsTestMode()
+		c.TestMode = config.IsTestMode(cfg)
 	}
 	dl := ccbill.NewDataLinkClient(c)
 	if cfg != nil {
-		dl.ReadOnly = cfg.IsProviderReadOnly()
+		dl.ReadOnly = config.IsProviderReadOnly(cfg)
 	}
 	if endpointOverride != "" {
 		dl.BaseURL = endpointOverride

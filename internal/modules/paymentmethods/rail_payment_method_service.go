@@ -275,7 +275,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	// outright. The email is not needed to vault a card, so omit it in test
 	// mode rather than block every sandbox checkout.
 	vaultEmail := req.Email
-	if s != nil && s.Config != nil && s.Config.IsTestMode() {
+	if s != nil && s.Config != nil && config.IsTestMode(s.Config) {
 		vaultEmail = ""
 	}
 	vaultData := nmi.CreateCustomerVaultData{
@@ -544,7 +544,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 			return nil, nil, err
 		}
 		// Environment follows deployment posture (#681): test rows under test_mode.
-		env := config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
+		env := config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
 		scope, ok, err := scopeResolver.ActivePSPScope(ctx, tid, string(models.RailNMI), env)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve merchant NMI account: %w", err)
@@ -581,7 +581,7 @@ func (s *RailPaymentMethodService) resolveNMIClientByName(ctx context.Context, n
 	}
 	if keyResolver != nil {
 		if tid, err := merchant.Require(ctx); err == nil {
-			env := config.ExpectedProviderEnvironment(s.Config != nil && s.Config.IsTestMode())
+			env := config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
 			scope, found, err := keyResolver.PSPScopeByKey(ctx, tid, name, env)
 			if err != nil {
 				return nil, nil, fmt.Errorf("resolve PSP %q: %w", name, err)

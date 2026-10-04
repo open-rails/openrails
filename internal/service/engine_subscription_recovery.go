@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
@@ -46,7 +47,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}
-	if s.rt.Config == nil || s.rt.Config.IsProviderReadOnly() {
+	if s.rt.Config == nil || config.IsProviderReadOnly(s.rt.Config) {
 		out.BlockedReason = "provider_writes_disabled"
 		return out, nil
 	}

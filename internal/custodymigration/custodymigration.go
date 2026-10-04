@@ -549,7 +549,7 @@ func (p *planner) targetPSPID() *uuid.UUID {
 
 func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if pool != nil {
-		schema := cfg.SchemaName()
+		schema := config.SchemaName(cfg)
 		return db.NewWithPGXPool(pool, schema)
 	}
 	if cfg == nil || cfg.DB == nil {

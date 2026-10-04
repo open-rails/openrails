@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -169,7 +170,7 @@ func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *Check
 		}
 		terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyNMISchedule, SubscriptionID: uuidutil.NewV7(), PaymentID: paymentID, CustomerID: customer, PSPID: saved.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: saved.ID, ProductName: product.DisplayName, Amount: amount, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: delayed != nil, Entitlements: benefits}
 		email := req.Email
-		if s.Config != nil && s.Config.IsTestMode() {
+		if s.Config != nil && config.IsTestMode(s.Config) {
 			email = ""
 		}
 		payload := InitialMembershipPayload{Terms: terms, Instrument: charge.FreezeInstrument(saved), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, PSP: target.PSP, Email: email, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), NativeSchedule: &subscriptions.NMIInitialScheduleTerms{PlanID: plan, StartDate: startDate, DayFrequency: *days, PlanPayments: 0, Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}}

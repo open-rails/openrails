@@ -39,7 +39,7 @@ func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProb
 	if iputil.IsValidCCBillIP(clientIP) {
 		return true
 	}
-	if cfg == nil || !cfg.IsTestMode() {
+	if cfg == nil || !config.IsTestMode(cfg) {
 		return false
 	}
 	if !iputil.IPInAnyCIDR(clientIP, cfg.CCBillWebhookIPAllowlist) {

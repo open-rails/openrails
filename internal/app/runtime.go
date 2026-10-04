@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -248,6 +249,9 @@ type Runtime struct {
 	// action; ErrForbidden for one who may no longer buy. Nil uses the
 	// identity given at mint.
 	CheckoutCustomer func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error)
+	// AuthenticateCustomer authenticates Delegated customer route profiles
+	// (Deps.AuthenticateCustomer); profile is the profile's prefix.
+	AuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)
 
 	// CardAbuseGuard escalates repeated card-charge failures to a captcha, and
 	// to a captcha for everyone while the ledger reports an attack (#371). Nil

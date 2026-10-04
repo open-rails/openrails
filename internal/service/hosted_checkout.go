@@ -64,7 +64,7 @@ func (s *Service) CreateHostedCheckoutSession(ctx context.Context, in HostedChec
 		return nil, err
 	}
 	successURL := strings.TrimSpace(in.SuccessURL)
-	if successURL != "" && !rt.Config.ReturnURLAllowed(successURL) {
+	if successURL != "" && !config.ReturnURLAllowed(rt.Config, successURL) {
 		return nil, apperr.Invalidf("success_url origin is not allowed").WithParam("success_url")
 	}
 	offer, priceID, err := s.hostedOffer(ctx, rt, in)
@@ -85,7 +85,7 @@ func (s *Service) CreateHostedCheckoutSession(ctx context.Context, in HostedChec
 		return nil, fmt.Errorf("create hosted checkout session: %w", err)
 	}
 	link := &billing.HostedCheckoutSessionLink{ID: id, ExpiresAt: session.ExpiresAt}
-	if page := strings.TrimSpace(rt.Config.HostedCheckout().PageURL); page != "" {
+	if page := strings.TrimSpace(config.HostedCheckout(rt.Config).PageURL); page != "" {
 		link.URL = page + "#" + id
 	}
 	return link, nil
@@ -143,7 +143,7 @@ func (s *Service) GetHostedCheckoutSession(ctx context.Context, id string) (*bil
 	for _, option := range session.Offer.Options {
 		out.Rails = append(out.Rails, option.HostedCheckoutRail)
 	}
-	if rt.Config.CheckoutEmbedAllowed(session.Origin) {
+	if config.CheckoutEmbedAllowed(rt.Config, session.Origin) {
 		out.EmbedOrigin = session.Origin
 	}
 	if out.SavedMethods, err = hostedSavedMethods(ctx, rt, session); err != nil {

@@ -21,10 +21,10 @@ func validateCustomerRoutes(exposures []config.CustomerRoutesConfig, auth *billi
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
-		if e.Authenticate == nil && (auth == nil || auth.Authentication == nil) {
+		if !e.Delegated && (auth == nil || auth.Authentication == nil) {
 			return fmt.Errorf("openrails HTTP: customer exposure %q requires its own authenticator", e.Prefix)
 		}
-		if e.Authenticate == nil && strings.TrimSpace(e.Merchant) == "" {
+		if !e.Delegated && strings.TrimSpace(e.Merchant) == "" {
 			return fmt.Errorf("openrails HTTP: native customer routes require an explicit merchant slug")
 		}
 		if e.Treasury && e.Prefix != "/v1/me" {
@@ -65,10 +65,13 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutesConfig, au
 			e.Prefix = "/v1/me"
 		}
 		var authn billingauth.DelegatedAuthenticator
-		if e.Authenticate != nil {
-			authenticate := e.Authenticate
+		if e.Delegated {
+			authenticate, profile := a.Runtime.AuthenticateCustomer, e.Prefix
+			if authenticate == nil {
+				return nil, fmt.Errorf("openrails HTTP: customer exposure %q is Delegated; set Deps.AuthenticateCustomer", e.Prefix)
+			}
 			authn = billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-				return authenticate(r)
+				return authenticate(r, profile)
 			})
 		}
 		native := authn == nil

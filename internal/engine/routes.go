@@ -96,15 +96,15 @@ func (e *Engine) Console() http.Handler { return e.console }
 // console builds the embedded host's console at construction, so a build it
 // cannot serve refuses boot.
 func console(cfg *config.Config, assets fs.FS) (http.Handler, error) {
-	if cfg.ControlPlane != nil || !cfg.AdminConsole.IsEnabled() || !adminconsole.Present(assets) {
+	if cfg.ControlPlane != nil || !config.AdminConsoleEnabled(cfg.AdminConsole) || !adminconsole.Present(assets) {
 		return nil, nil
 	}
-	return adminconsole.Handler(cfg.AdminConsole.MountPath(), adminconsole.Config{
+	return adminconsole.Handler(config.AdminConsoleMountPath(cfg.AdminConsole), adminconsole.Config{
 		AuthBaseURL:            cfg.AdminConsole.AuthBaseURL,
 		APIBaseURL:             cfg.AdminConsole.APIBaseURL,
-		NLWidgetsEnabled:       cfg.LLM.IsConfigured(),
-		AskEnabled:             cfg.LLM.AskConfigured(),
-		CatalogCopilotEnabled:  cfg.LLM.CatalogCopilotConfigured(),
-		CatalogDraftingEnabled: cfg.LLM.CatalogDraftingConfigured(),
+		NLWidgetsEnabled:       config.LLMConfigured(cfg.LLM),
+		AskEnabled:             config.LLMAskConfigured(cfg.LLM),
+		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(cfg.LLM),
+		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(cfg.LLM),
 	}, assets)
 }

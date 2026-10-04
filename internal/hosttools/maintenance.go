@@ -181,7 +181,7 @@ func TransitionProviderCredentials(ctx context.Context, target, source *app.App,
 	if id.IsZero() {
 		return nil, fmt.Errorf("credential transition requires a merchant")
 	}
-	if config.ExpectedProviderEnvironment(target.Config.IsTestMode()) != config.ExpectedProviderEnvironment(source.Config.IsTestMode()) {
+	if config.ExpectedProviderEnvironment(config.IsTestMode(target.Config)) != config.ExpectedProviderEnvironment(config.IsTestMode(source.Config)) {
 		return nil, fmt.Errorf("credential transition requires matching provider environments")
 	}
 	result, err := target.Runtime.Merchants.TransitionProviderCredentials(ctx, id, rail, params, source.Runtime.Merchants.Secrets())

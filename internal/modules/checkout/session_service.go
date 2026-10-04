@@ -327,7 +327,7 @@ func (s *CheckoutSessionService) Clock() clockwork.Clock {
 }
 
 func (s *CheckoutSessionService) requireProviderWrites() error {
-	if s == nil || s.config == nil || s.config.IsProviderReadOnly() {
+	if s == nil || s.config == nil || config.IsProviderReadOnly(s.config) {
 		return fmt.Errorf("%w: provider writes are disabled", ErrCheckoutSessionValidation)
 	}
 	return nil

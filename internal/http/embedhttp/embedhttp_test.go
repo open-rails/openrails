@@ -80,7 +80,6 @@ func TestCapabilities(t *testing.T) {
 func TestHTTPConfigValidation(t *testing.T) {
 	authn := identityAuth(billingauth.Identity{}, nil)
 	full := &billingauth.Integration{Authentication: authn.Authentication, Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error { return nil })}
-	host := func(*http.Request) (*billingauth.DelegatedPrincipal, error) { return nil, nil }
 	customer := func(c config.CustomerRoutesConfig) *config.HTTPConfig {
 		return &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{c}}
 	}
@@ -99,14 +98,14 @@ func TestHTTPConfigValidation(t *testing.T) {
 		{"customer without any authenticator", customer(config.CustomerRoutesConfig{Merchant: "store"}), nil, false},
 		{"native customer without merchant", customer(config.CustomerRoutesConfig{}), authn, false},
 		{"native customer", customer(config.CustomerRoutesConfig{Merchant: "store"}), authn, true},
-		{"treasury off the canonical mount", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenant/me", Treasury: true, Authenticate: host}), nil, false},
-		{"unknown scope", customer(config.CustomerRoutesConfig{Scope: 9, Authenticate: host}), nil, false},
-		{"parameterized prefix", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenants/{tenant}/me", Authenticate: host}), nil, true},
+		{"treasury off the canonical mount", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenant/me", Treasury: true, Delegated: true}), nil, false},
+		{"unknown scope", customer(config.CustomerRoutesConfig{Scope: 9, Delegated: true}), nil, false},
+		{"parameterized prefix", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenants/{tenant}/me", Delegated: true}), nil, true},
 	} {
 		require.Equal(t, tc.ok, ValidateHTTPConfig(tc.cfg, tc.auth) == nil, tc.name)
 	}
 	for _, prefix := range []string{"/", "me", "/a/../b", "/a/", "/a/*", "/a b", "/a/{x.y}", "/a/b{c}", "/a/{}"} {
-		require.Error(t, ValidateHTTPConfig(customer(config.CustomerRoutesConfig{Prefix: prefix, Authenticate: host}), nil), prefix)
+		require.Error(t, ValidateHTTPConfig(customer(config.CustomerRoutesConfig{Prefix: prefix, Delegated: true}), nil), prefix)
 	}
 }
 

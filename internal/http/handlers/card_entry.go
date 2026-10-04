@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
@@ -20,7 +21,7 @@ func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) 
 		r.ErrorJSON(http.StatusBadRequest, paymentmethods.ErrCardWithToken.Error())
 		return false
 	}
-	if live := r.State == nil || r.State.Config == nil || !r.State.Config.IsTestMode(); live && !r.SecureTransport() {
+	if live := r.State == nil || r.State.Config == nil || !config.IsTestMode(r.State.Config); live && !r.SecureTransport() {
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "card_requires_https", "a card is accepted only over HTTPS"))
 		return false
 	}

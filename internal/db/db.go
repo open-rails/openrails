@@ -57,7 +57,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("database config is nil")
 	}
-	url := cfg.DB.GetConnectionString()
+	url := config.DBConnectionString(cfg.DB)
 	if url == "" {
 		return nil, fmt.Errorf("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
@@ -69,7 +69,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(cfg.SchemaName())}, nil
+	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg))}, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,

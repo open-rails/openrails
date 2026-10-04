@@ -94,10 +94,10 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	// A control plane checks this when it builds its surface, so its
 	// maintenance commands run on a console-less binary.
-	if cfg.ControlPlane == nil && cfg.AdminConsole.IsEnabled() && !adminconsole.Present(consoleAssets) {
+	if cfg.ControlPlane == nil && config.AdminConsoleEnabled(cfg.AdminConsole) && !adminconsole.Present(consoleAssets) {
 		return nil, fmt.Errorf("openrails: Config.AdminConsole is enabled but there is no console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
 	}
-	if deps.Postgres != nil && (cfg.DB == nil || cfg.DB.GetConnectionString() == "") {
+	if deps.Postgres != nil && (cfg.DB == nil || config.DBConnectionString(cfg.DB) == "") {
 		url := deps.Postgres.Config().ConnString()
 		if url == "" {
 			return nil, fmt.Errorf("openrails: Config.DB is required when Deps.Postgres was not built from a connection string")
@@ -110,7 +110,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		cfg.DB = &db
 	}
 	bootstrap := &app.BootstrapOptions{
-		HostRiver:        cfg.River.HostOwned(),
+		HostRiver:        cfg.River == config.RiverHostOwned,
 		RiverSchema:      cfg.RiverSchema,
 		PGXPool:          deps.Postgres,
 		Redis:            deps.Redis,
@@ -122,7 +122,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		DNSResolver:      deps.DNSResolver,
 		Clock:            deps.Clock,
 	}
-	if !cfg.River.HostOwned() && strings.TrimSpace(bootstrap.RiverSchema) == "" {
+	if cfg.River != config.RiverHostOwned && strings.TrimSpace(bootstrap.RiverSchema) == "" {
 		bootstrap.RiverSchema = config.DefaultRiverSchema
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
@@ -150,6 +150,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	rt.Auth = auth
 	rt.CheckoutCustomer = checkoutCustomer(deps)
+	rt.AuthenticateCustomer = deps.AuthenticateCustomer
 	signerPending, err := configureMerchant(ctx, application, e.merchant)
 	if err != nil {
 		return fail(err)
@@ -165,7 +166,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 			return fail(err)
 		}
 	}
-	if !cfg.River.HostOwned() {
+	if cfg.River != config.RiverHostOwned {
 		if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
 			return fail(fmt.Errorf("build billing periodic jobs: %w", err))
 		}
@@ -234,6 +235,15 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			}
 		}
 	}
+	delegated := false
+	if cfg.HTTP != nil {
+		for _, routes := range cfg.HTTP.CustomerRoutes {
+			delegated = delegated || routes.Delegated
+		}
+	}
+	if delegated != (deps.AuthenticateCustomer != nil) {
+		return fmt.Errorf("openrails: set Deps.AuthenticateCustomer exactly when a Config.HTTP.CustomerRoutes profile is Delegated")
+	}
 	if (deps.UserExists == nil) != (deps.UserEmail == nil) {
 		return fmt.Errorf("openrails: set Deps.UserExists and Deps.UserEmail together")
 	}
@@ -262,12 +272,11 @@ func validate(cfg *config.Config, deps config.Deps) error {
 		}
 	}
 	if !cfg.RateLimitsDisabled {
-		defaults := config.GetDefaultBillingConfig()
 		if cfg.RateLimits == nil {
-			cfg.RateLimits = defaults.RateLimits
+			cfg.RateLimits = config.DefaultRateLimits()
 		}
 		if cfg.Captcha == nil {
-			cfg.Captcha = defaults.Captcha
+			cfg.Captcha = config.DefaultCaptcha()
 		}
 	}
 	return nil
@@ -294,7 +303,7 @@ func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPC
 	out := *cfg.HTTP
 	out.CustomerRoutes = append([]config.CustomerRoutesConfig(nil), cfg.HTTP.CustomerRoutes...)
 	for i := range out.CustomerRoutes {
-		if out.CustomerRoutes[i].Authenticate == nil && strings.TrimSpace(out.CustomerRoutes[i].Merchant) == "" {
+		if !out.CustomerRoutes[i].Delegated && strings.TrimSpace(out.CustomerRoutes[i].Merchant) == "" {
 			out.CustomerRoutes[i].Merchant = cfg.Merchant.Slug
 		}
 	}
@@ -306,7 +315,7 @@ func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPC
 	if out.Checkout != nil {
 		checkout := *out.Checkout
 		checkout.EmbedOrigins = append([]string(nil), checkout.EmbedOrigins...)
-		if err := checkout.Validate(); err != nil {
+		if err := config.ValidateCheckout(checkout); err != nil {
 			return nil, fmt.Errorf("openrails: Config.HTTP.Checkout: %w", err)
 		}
 		out.Checkout = &checkout
@@ -316,8 +325,8 @@ func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPC
 			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes serves the standalone surface; Config.HTTP may only add CustomerRoutes")
 		}
 		for _, routes := range out.CustomerRoutes {
-			if routes.Authenticate == nil {
-				return nil, fmt.Errorf("openrails: with Config.ControlPlane, CustomerRoutes need their own Authenticate")
+			if !routes.Delegated {
+				return nil, fmt.Errorf("openrails: with Config.ControlPlane, CustomerRoutes must be Delegated (Deps.AuthenticateCustomer)")
 			}
 		}
 		return &out, nil

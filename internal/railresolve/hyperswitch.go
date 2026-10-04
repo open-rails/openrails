@@ -20,7 +20,7 @@ import (
 // qualifies the concrete deployment contract before granting SDK or PSP access.
 // An archive does not itself revoke an existing obligation's custody.
 func HyperSwitchClient(ctx context.Context, cfg *config.Config, secrets merchants.MerchantSecretReader, owner billing.MerchantID, row gen.BillingCustodian) (*hyperswitch.Client, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || secrets == nil || owner.IsZero() || row.ID == uuid.Nil || row.MerchantID != owner.UUID() || row.Kind != models.CustodianHyperSwitch || row.Environment != config.ExpectedProviderEnvironment(cfg.IsTestMode()) {
+	if cfg == nil || cfg.HyperSwitch == nil || secrets == nil || owner.IsZero() || row.ID == uuid.Nil || row.MerchantID != owner.UUID() || row.Kind != models.CustodianHyperSwitch || row.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(cfg)) {
 		return nil, hyperswitch.ErrBinding
 	}
 	var settings map[string]any
@@ -49,5 +49,5 @@ func HyperSwitchClient(ctx context.Context, cfg *config.Config, secrets merchant
 	if err != nil || strings.TrimSpace(secret.Value) == "" || secret.Version < floor {
 		return nil, hyperswitch.ErrUnavailable
 	}
-	return hyperswitch.New(hyperswitch.Config{BaseURL: cfg.HyperSwitch.APIBaseURL, MerchantID: row.AccountID, ProfileID: parsed.ProfileID, APIKey: hyperswitch.Secret(secret.Value), ReadOnly: cfg.IsProviderReadOnly()})
+	return hyperswitch.New(hyperswitch.Config{BaseURL: cfg.HyperSwitch.APIBaseURL, MerchantID: row.AccountID, ProfileID: parsed.ProfileID, APIKey: hyperswitch.Secret(secret.Value), ReadOnly: config.IsProviderReadOnly(cfg)})
 }

@@ -51,7 +51,7 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 	return nil
 }
 
-// Top-level koanf keys, derived from the Config struct's tags so a new
+// Top-level koanf keys, derived from fileConfig's tags so a new
 // multi-word top-level field can never silently miss the env mapping the way
 // SECRET_BACKEND did under first-underscore splitting (#710). Scalar keys map
 // only on an exact env-name match; nested keys (struct/map fields) also map
@@ -59,8 +59,8 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 var envTopLevelScalarKeys, envTopLevelNestedKeys = topLevelKoanfKeys()
 
 func topLevelKoanfKeys() (scalar, nested map[string]bool) {
-	scalar, nested = map[string]bool{}, map[string]bool{"auth": true}
-	t := reflect.TypeOf(billing.Config{})
+	scalar, nested = map[string]bool{}, map[string]bool{}
+	t := reflect.TypeOf(fileConfig{})
 	for i := 0; i < t.NumField(); i++ {
 		name, _, _ := strings.Cut(t.Field(i).Tag.Get("koanf"), ",")
 		if name == "" || name == "-" {
@@ -184,7 +184,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 
 	// Defaults contain no environment-dependent security exceptions.
-	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &billing.AuthConfig{}}
+	f := defaults()
 
 	// A .env in the working directory is a real config source, so consuming
 	// one is LOGGED (or#915): a deployment silently absorbing a stray .env is
@@ -304,19 +304,19 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 
 	if databaseOnly {
-		dbConfig := cfg.DB
+		dbConfig := f.DB
 		if err := k.UnmarshalWithConf("db", dbConfig, koanf.UnmarshalConf{
-			Tag: "koanf",
 			DecoderConfig: &mapstructure.DecoderConfig{
 				DecodeHook: mapstructure.ComposeDecodeHookFunc(mapstructure.StringToTimeDurationHookFunc(), mapstructure.TextUnmarshallerHookFunc()),
 				Result:     dbConfig, WeaklyTypedInput: true, ErrorUnused: true,
+				TagName: "koanf", MatchName: matchField,
 			},
 		}); err != nil {
 			return nil, fmt.Errorf("unmarshaling database config: %w", err)
 		}
 		databaseConfig := &Config{Config: &billing.Config{DB: dbConfig, Schema: k.String("schema")}}
-		databaseConfig.DB.URL = databaseConfig.DB.GetConnectionString()
-		databaseConfig.Schema = databaseConfig.SchemaName()
+		databaseConfig.DB.URL = billing.DBConnectionString(databaseConfig.DB)
+		databaseConfig.Schema = billing.SchemaName(databaseConfig.Config)
 		if err := billing.ValidateDatabase(databaseConfig.Config); err != nil {
 			return nil, err
 		}
@@ -424,23 +424,24 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var")
 	}
 
-	// Unmarshal into config struct (overlay onto defaults). Strict (or#915,
+	// Unmarshal into fileConfig (overlay onto defaults). Strict (or#915,
 	// matching the merchant overlay's ErrorUnused): a yaml key or an env var
 	// inside one of our sections that hits no struct field refuses boot —
 	// "config I set is silently ignored" is the failure mode this kills.
 	// (envKeyToConfigKey already drops env names outside our sections, so the
 	// ambient process environment cannot trip this.)
-	if err := k.UnmarshalWithConf("", cfg, koanf.UnmarshalConf{
-		Tag: "koanf",
+	if err := k.UnmarshalWithConf("", f, koanf.UnmarshalConf{
 		DecoderConfig: &mapstructure.DecoderConfig{
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
 				mapstructure.StringToTimeDurationHookFunc(),
 				mapstructure.StringToSliceHookFunc(","),
 				mapstructure.TextUnmarshallerHookFunc(),
 			),
-			Result:           cfg,
+			Result:           f,
 			WeaklyTypedInput: true,
 			ErrorUnused:      true,
+			TagName:          "koanf",
+			MatchName:        matchField,
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot — or#915): %w", err)
@@ -449,15 +450,19 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if !k.Exists("test_mode") {
 		return nil, fmt.Errorf("test_mode is required: declare sandbox or live")
 	}
+	cfg, err := f.config()
+	if err != nil {
+		return nil, err
+	}
 	// Assemble DB URL from pieces if not explicitly set
 	if cfg.DB != nil {
-		cfg.DB.URL = cfg.DB.GetConnectionString()
+		cfg.DB.URL = billing.DBConnectionString(cfg.DB)
 	}
 
 	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
-	// stored config value matches what SchemaName() resolves to. Validation of the
+	// stored config value matches what SchemaName resolves to. Validation of the
 	// identifier happens in Validate(). Defaults to `billing` (config.DefaultSchema).
-	cfg.Schema = cfg.SchemaName()
+	cfg.Schema = billing.SchemaName(cfg.Config)
 
 	// Validate the loaded configuration
 	if err := Validate(cfg); err != nil {

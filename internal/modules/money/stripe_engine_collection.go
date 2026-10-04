@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
@@ -139,7 +140,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 	if h.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(h.Config, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Config}, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeEngineService(ctx, current)
