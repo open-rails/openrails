@@ -486,3 +486,62 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	_ = res.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
 }
+
+// A PSP whose card_entry is server (#1129) takes the card on OpenRails through
+// the shared page too: the page posts it with the session id, OpenRails vaults
+// it once and charges, and a replay charges nothing more.
+func TestHostedCheckoutServerCardEntry(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.selfService = true
+	w.declare = func(psps map[string]openrails.PSPConfig) {
+		account := psps["nmi"]["nmi"]
+		account.Settings = map[string]any{"card_entry": "server"}
+		psps["nmi"]["nmi"] = account
+	}
+	w.mount = func(h *openrails.HTTPConfig) { h.Checkout = &openrails.CheckoutConfig{} }
+	w.start()
+	buyer := w.newCustomer()
+	price := w.membership("content:members", 9_990_000)
+	session := hostedSession{w: w, id: buyer.mint(map[string]any{"price_id": price.ID})["id"].(string)}
+
+	var option string
+	for _, raw := range session.read()["rails"].([]any) {
+		if rail := raw.(map[string]any); rail["rail"] == "nmi" {
+			require.Equal(t, "card", rail["driver"], "%v", rail)
+			require.NotContains(t, rail, "public_config", "no gateway key: the page loads no gateway script")
+			option = rail["id"].(string)
+		}
+	}
+	require.NotEmpty(t, option)
+	body := func() map[string]any {
+		return map[string]any{"option_id": option, "card": entryCard(entryVisa), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"}
+	}
+
+	withToken := body()
+	withToken["payment_token"] = "tok-1234"
+	status, out := session.pay(withToken)
+	require.Equal(t, http.StatusBadRequest, status, "%v", out)
+	require.Empty(t, w.cardVaults("add_customer"))
+
+	status, paid := session.pay(body())
+	require.Equal(t, http.StatusOK, status, "%v", paid)
+	require.Equal(t, "succeeded", paid["status"], "%v", paid)
+	w.settle()
+	require.True(t, buyer.entitled("content:members"))
+	require.Len(t, w.nmi.ledger(""), 1)
+	vaults := w.cardVaults("add_customer")
+	require.Len(t, vaults, 1, "the card was vaulted once")
+	require.Equal(t, entryVisa, vaults[0].Get("ccnumber"))
+
+	status, again := session.pay(body())
+	require.Equal(t, http.StatusOK, status, "%v", again)
+	require.Equal(t, "succeeded", again["status"])
+	require.Equal(t, paid["subscription_id"], again["subscription_id"])
+	require.Len(t, w.nmi.ledger(""), 1, "a replay charges nothing more")
+	require.Len(t, w.cardVaults("add_customer"), 1, "nor sends the card again")
+
+	saved := session.read()["saved_methods"].([]any)
+	require.Len(t, saved, 1, "the vaulted card is offered on the card option")
+	require.Equal(t, option, saved[0].(map[string]any)["option_id"])
+}

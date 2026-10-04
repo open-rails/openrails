@@ -100,6 +100,11 @@ func PayHostedCheckoutSession(r *httprequest.Request) {
 	if !r.BindJSON(&body) {
 		return
 	}
+	defer body.Card.Zero()
+	// Every other field is scanned by the engine's checkout.
+	if body.Card != nil && !cardFieldAdmitted(r, strings.TrimSpace(body.PaymentToken) != "") {
+		return
+	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)

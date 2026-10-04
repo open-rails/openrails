@@ -63,6 +63,8 @@ database share it, so one of them can serve the payment page for all.
   page (the mint answers `url = PageURL#id`); `EmbedOrigins` are the sites
   allowed to frame the page this host serves. Both empty is the single-site
   case: the app renders `<Checkout source={client.checkoutSource(id)}>` itself.
+- A PSP whose `card_entry` is `server` (driver `card`) takes the card in the
+  pay body's `card` field, through the shared page as anywhere else.
 - Paying runs the engine's checkout with one idempotency key per attempt, so a
   double click or a retry charges once. The attempt advances only after a
   terminal failure; a session has 10 attempts. A decline answers

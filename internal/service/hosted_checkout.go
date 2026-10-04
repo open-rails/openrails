@@ -245,6 +245,10 @@ func (s *Service) PayHostedCheckoutSession(ctx context.Context, id string, input
 			if session.Spent() {
 				return hostedSpent(nil), nil
 			}
+			if payment.Card != nil {
+				// The engine wiped the card: the next attempt needs it again.
+				return &billing.HostedCheckoutPayResult{Status: "failed", FailureMessage: "Enter the card again."}, nil
+			}
 		case errors.Is(err, checkout.ErrCheckoutSessionPending), errors.Is(err, checkout.ErrCheckoutProcessing):
 			return nil, hostedcheckout.ErrBusy
 		default:
@@ -494,7 +498,7 @@ func hostedAppOrigin(cfg *config.Config, successURL string) string {
 func hostedSavedMethods(ctx context.Context, rt *app.Runtime, session hostedcheckout.Session) ([]billing.HostedCheckoutSavedMethod, error) {
 	byPSP := map[string]hostedcheckout.Option{}
 	for _, option := range session.Offer.Options {
-		if option.Driver == "collect_js" {
+		if hostedcheckout.TakesCards(option.Driver) {
 			byPSP[option.PSPID] = option
 		}
 	}

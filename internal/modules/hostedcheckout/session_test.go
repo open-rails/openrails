@@ -84,10 +84,36 @@ func TestPayment(t *testing.T) {
 
 	_, err = Payment(card, billing.HostedCheckoutPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "QA"}, "", owns)
 	require.NoError(t, err, "a postal code is not demanded where none exists")
+
+	// A PSP whose card_entry is server takes the card itself (#1129).
+	server := Option{HostedCheckoutRail: billing.HostedCheckoutRail{ID: "option_server", Rail: "nmi", Driver: "card"}, Selector: "cards", PSPID: "psp-4"}
+	entered, err := billing.NewCard("4111111111111111", 10, 2027, "0739")
+	require.NoError(t, err)
+	defer entered.Zero()
+	got, err = Payment(server, billing.HostedCheckoutPayRequest{Card: entered, NameOnCard: "A Buyer", Country: "US", Zip: "10001", LastFour: "0000"}, "", owns)
+	require.NoError(t, err)
+	require.Same(t, entered, got.Card)
+	require.Empty(t, got.LastFour, "the card names itself")
+	_, err = Payment(server, billing.HostedCheckoutPayRequest{PaymentMethodID: method}, "", owns)
+	require.NoError(t, err)
+	for name, tc := range map[string]struct {
+		option Option
+		in     billing.HostedCheckoutPayRequest
+	}{
+		"a token for a card page":     {server, billing.HostedCheckoutPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "US", Zip: "10001"}},
+		"card and a saved method":     {server, billing.HostedCheckoutPayRequest{Card: entered, PaymentMethodID: method}},
+		"a card for a tokenizing PSP": {card, billing.HostedCheckoutPayRequest{Card: entered, NameOnCard: "A", Country: "US", Zip: "10001"}},
+		"a card on a redirect":        {redirect, billing.HostedCheckoutPayRequest{Card: entered}},
+		"a card on solana":            {solana, billing.HostedCheckoutPayRequest{Card: entered, TokenSymbol: "USDC"}},
+		"a card without a name":       {server, billing.HostedCheckoutPayRequest{Card: entered, Country: "US", Zip: "10001"}},
+	} {
+		_, err := Payment(tc.option, tc.in, "", owns)
+		require.ErrorIs(t, err, ErrInvalid, name)
+	}
 }
 
 func TestDrivable(t *testing.T) {
-	for driver, ok := range map[string]bool{"collect_js": true, "redirect": true, "solana_pay": true, "stripe_elements": false, "": false} {
+	for driver, ok := range map[string]bool{"collect_js": true, "card": true, "redirect": true, "solana_pay": true, "stripe_elements": false, "": false} {
 		require.Equal(t, ok, Drivable(driver), driver)
 	}
 }

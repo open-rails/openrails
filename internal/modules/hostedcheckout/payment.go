@@ -11,11 +11,14 @@ import (
 // billing client of the buyer's, so Stripe Elements card setup is not offered.
 func Drivable(driver string) bool {
 	switch driver {
-	case "collect_js", "redirect", "solana_pay":
+	case "collect_js", "card", "redirect", "solana_pay":
 		return true
 	}
 	return false
 }
+
+// TakesCards reports whether driver pays with a new or saved card.
+func TakesCards(driver string) bool { return driver == "collect_js" || driver == "card" }
 
 // Payment turns the browser's pay body into the engine's payment options for
 // the minted option it names. The option decides the PSP and the settlement
@@ -31,7 +34,6 @@ func Payment(option Option, input billing.HostedCheckoutPayRequest, verifiedEmai
 			return billing.CheckoutPaymentOptions{}, ErrInvalid
 		}
 	}
-	// #1129's card field joins this mapping.
 	out := billing.CheckoutPaymentOptions{
 		Rail: option.Selector, PSPID: option.PSPID,
 		PaymentToken: input.PaymentToken, PaymentMethodID: input.PaymentMethodID,
@@ -39,11 +41,21 @@ func Payment(option Option, input billing.HostedCheckoutPayRequest, verifiedEmai
 		Address1: input.Address1, City: input.City, State: input.State, Zip: input.Zip, Country: input.Country,
 		LastFour: input.LastFour, CardType: input.CardType, ExpiryDate: input.ExpiryDate,
 	}
-	hasToken, hasMethod := input.PaymentToken != "", input.PaymentMethodID != ""
+	hasToken, hasMethod, hasCard := input.PaymentToken != "", input.PaymentMethodID != "", input.Card != nil
 	switch option.Driver {
-	case "collect_js":
-		if hasToken == hasMethod {
+	case "collect_js", "card":
+		// A collect_js page tokenizes the card; a card page (the PSP's
+		// card_entry is server) sends it to OpenRails.
+		newCard, other := hasToken, hasCard
+		if option.Driver == "card" {
+			newCard, other = hasCard, hasToken
+		}
+		if other || newCard == hasMethod {
 			return billing.CheckoutPaymentOptions{}, ErrInvalid
+		}
+		if hasCard {
+			// The card names itself; the engine stamps its display fields.
+			out.Card, out.LastFour, out.CardType, out.ExpiryDate = input.Card, "", "", ""
 		}
 		// The compact card form collects name, country and postal code only.
 		out.Address1, out.City, out.State = "", "", ""
@@ -61,11 +73,11 @@ func Payment(option Option, input billing.HostedCheckoutPayRequest, verifiedEmai
 			return billing.CheckoutPaymentOptions{}, ErrInvalid
 		}
 	case "redirect":
-		if hasToken || hasMethod {
+		if hasToken || hasMethod || hasCard {
 			return billing.CheckoutPaymentOptions{}, ErrInvalid
 		}
 	case "solana_pay":
-		if hasToken || hasMethod {
+		if hasToken || hasMethod || hasCard {
 			return billing.CheckoutPaymentOptions{}, ErrInvalid
 		}
 		bound := strings.ToUpper(strings.TrimSpace(option.PublicConfig["token_symbol"]))

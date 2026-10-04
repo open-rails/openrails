@@ -3,11 +3,11 @@
 ## Hosted checkout sessions (openrails#1124)
 
 - OpenRails serves the checkout session; hosts no longer write
-  `/api/v1/checkout/sessions` routes. `client.createCheckoutSession({ priceKey |
-priceId, successUrl })` mints one for the signed-in customer and
+  `/api/v1/checkout/sessions` routes. `client.createCheckoutSession()` mints
+  one for the signed-in customer (`priceKey` or `priceId`, `successUrl`) and
   `client.checkoutSource(id)` reads and pays it with the id alone (no bearer).
   A refusal the buyer can act on resolves as a `failed`, `blocked` or
-  `expired` result.
+  `expired` result. A `card` rail pays through the shared page too.
 - `<CheckoutFrame url onComplete theme>` frames the shared payment page and
   `<CheckoutPage>` is that page; they speak an origin-checked frame protocol
   (`ready`, `resize`, `complete`, `redirect`; `init {theme}`).
