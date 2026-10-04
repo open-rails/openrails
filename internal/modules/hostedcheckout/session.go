@@ -79,7 +79,7 @@ type Session struct {
 	Offer           Offer
 	SuccessURL      string
 	Origin          string
-	Attempt         int
+	Attempt         int32
 	EngineSessionID *uuid.UUID
 	ExpiresAt       time.Time
 }
@@ -110,7 +110,7 @@ func (s Session) AttemptKey() string {
 	for _, b := range sum {
 		letters = append(letters, 'a'+b>>4, 'a'+b&0x0f)
 	}
-	return "hosted:" + string(letters) + ":" + strconv.Itoa(s.Attempt)
+	return "hosted:" + string(letters) + ":" + strconv.Itoa(int(s.Attempt))
 }
 
 // NewID mints a session id: ocs_ and 256 random bits.
@@ -191,7 +191,7 @@ func (s *Store) Get(ctx context.Context, id string, now time.Time) (Session, err
 		return Session{}, err
 	}
 	out := Session{ID: id, CustomerID: row.CustomerID, PriceID: row.PriceID, SuccessURL: row.SuccessUrl, Origin: row.Origin,
-		Attempt: int(row.Attempt), EngineSessionID: row.EngineSessionID, ExpiresAt: row.ExpiresAt}
+		Attempt: row.Attempt, EngineSessionID: row.EngineSessionID, ExpiresAt: row.ExpiresAt}
 	if err := json.Unmarshal(row.Offer, &out.Offer); err != nil {
 		return Session{}, fmt.Errorf("decode checkout offer: %w", err)
 	}
@@ -206,7 +206,7 @@ func (s *Store) Bind(ctx context.Context, session Session, engineSessionID uuid.
 		return err
 	}
 	_, err = s.db.Gen(ctx).BindHostedCheckoutEngineSession(ctx, gen.BindHostedCheckoutEngineSessionParams{
-		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: int32(session.Attempt), EngineSessionID: engineSessionID,
+		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: session.Attempt, EngineSessionID: engineSessionID,
 	})
 	return err
 }
@@ -223,7 +223,7 @@ func (s *Store) Advance(ctx context.Context, session Session, now time.Time) (Se
 		return Session{}, err
 	}
 	if _, err := s.db.Gen(ctx).AdvanceHostedCheckoutAttempt(ctx, gen.AdvanceHostedCheckoutAttemptParams{
-		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: int32(session.Attempt), Now: now,
+		MerchantID: mid.UUID(), IDHash: IDHash(session.ID), Attempt: session.Attempt, Now: now,
 	}); err != nil {
 		return Session{}, err
 	}
