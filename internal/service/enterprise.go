@@ -162,9 +162,15 @@ type UsageRateCardInput struct {
 // SetUsageRateCard upserts an in_arrears usage rate card: the merchant
 // default (ProductID set) or a negotiated per-payer override (Payer set).
 func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) error {
-	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+	write := func(ctx context.Context, scoped *Service) (struct{}, error) {
 		return struct{}{}, scoped.setUsageRateCard(ctx, in)
-	})
+	}
+	var err error
+	if in.Payer != nil {
+		_, err = payerTermsMutation(ctx, s, write)
+	} else {
+		_, err = catalogMutation(ctx, s, write)
+	}
 	return err
 }
 
@@ -251,7 +257,7 @@ func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.Custome
 
 // DeletePayerRateCard removes a payer's negotiated override for a meter.
 func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
-	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+	_, err := payerTermsMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		return struct{}{}, scoped.deletePayerRateCard(ctx, payer, meterKey)
 	})
 	return err

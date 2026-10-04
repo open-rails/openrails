@@ -66,13 +66,18 @@ func Graph(client any) *app.App {
 }
 
 // New builds the engine. ctx bounds the wait for the database; nothing else
-// does. Only Postgres fails construction: Vault login, PSP posture and Redis
-// recover in the background and fail only the features that need them.
+// does. Only Postgres and a refused Config.Catalog fail construction: Vault
+// login, PSP posture, Redis and a declared catalog's unconfirmed provider
+// references recover in the background (see Ready and Probes).
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := validate(&cfg, deps); err != nil {
+		return nil, err
+	}
+	catalogDoc, err := declaredCatalog(cfg)
+	if err != nil {
 		return nil, err
 	}
 	auth, err := integration(deps)
@@ -168,6 +173,11 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	if e.svc, err = service.New(rt); err != nil {
 		return fail(err)
+	}
+	if catalogDoc != nil {
+		if err := e.applyDeclaredCatalog(ctx, *catalogDoc); err != nil {
+			return fail(err)
+		}
 	}
 	declaration := e.merchant
 	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {

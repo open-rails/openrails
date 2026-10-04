@@ -28,6 +28,13 @@ type CatalogRevision struct {
 	WritesAllowed bool  `json:"writes_allowed"`
 }
 
+// CodeCatalogDeclared refuses a catalog write while Config.Catalog declares
+// the catalog (HTTP 405): the next boot would overwrite it. Change the
+// declaration and restart instead.
+const CodeCatalogDeclared = "catalog_declared"
+
+var ErrCatalogDeclared error = newCodedError(CodeCatalogDeclared, ErrInvalid)
+
 func ParseCatalogApplicationYAML(raw []byte) (*CatalogApplyParams, error) {
 	return catalog.ParseApplicationYAML(raw)
 }

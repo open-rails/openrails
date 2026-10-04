@@ -41,7 +41,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 
 // New runs the OpenRails engine in this process and returns the same Client
 // NewRemote builds, over an in-process transport. ctx bounds the wait for the
-// database; nothing else does. Vault login, PSP posture checks and Redis recover
+// database; nothing else does. With Config.Catalog, New applies it before
+// returning and fails with the reason if it is refused; only provider
+// references it cannot confirm within seconds finish in the background, and
+// Ready fails until they do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
 // opts apply as they do to NewRemote (WithCurrency, WithTimeout, ...).
 func New(ctx context.Context, cfg Config, deps Deps, opts ...ClientOption) (*Client, error) {
@@ -100,8 +103,9 @@ func (c *Client) Close(ctx context.Context) error {
 }
 
 // Ready reports whether the Client can serve. Embedded: Postgres, the merchant
-// directory and River (bound when host-owned, running when managed); optional
-// providers never fail it (see Probes). Remote: the server's /health/ready.
+// directory, Config.Catalog (applied) and River (bound when host-owned,
+// running when managed); optional providers never fail it (see Probes).
+// Remote: the server's /health/ready.
 func (c *Client) Ready(ctx context.Context) error {
 	if c.engine != nil {
 		return c.engine.Ready(ctx)

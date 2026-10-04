@@ -1,7 +1,7 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
 // members-only video site where users sign in with AuthKit, buy a monthly
-// "premium" plan and only premium members can watch. newBilling, applyCatalog
-// and run are the README's code; newAuth is a development AuthKit.
+// "premium" plan and only premium members can watch. newBilling and run are
+// the README's code; newAuth is a development AuthKit.
 //
 // Run it from this directory (it reads catalog.yaml) with DATABASE_URL and the
 // PSP's MOBIUS_ACCOUNT_ID, MOBIUS_SECURITY_KEY and MOBIUS_WEBHOOK_SIGNING_SECRET
@@ -58,6 +58,17 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		return nil, err
 	}
 
+	// What you sell. OpenRails applies it in New: an unchanged file is a no-op, an edited one
+	// is applied, and the catalog is read-only to everything else until you edit the file.
+	raw, err := os.ReadFile("catalog.yaml")
+	if err != nil {
+		return nil, err
+	}
+	catalog, err := billing.ParseCatalogApplicationYAML(raw)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := openrails.Config{
 		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
 		TestMode:          openrails.Sandbox,            // Sandbox or Live: which PSP credentials are accepted
@@ -66,6 +77,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			Slug: "myvideos", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
+		Catalog: catalog,
 		HTTP: &openrails.HTTPConfig{
 			Checkout: &openrails.CheckoutConfig{}, // products, prices, hosted checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
@@ -86,21 +98,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		Postgres: db,   // required: the same pool your app uses
 		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
 	})
-}
-
-// applyCatalog makes OpenRails' catalog match catalog.yaml: an unchanged file is a no-op,
-// an edited one is applied. Run it on every boot.
-func applyCatalog(ctx context.Context, bill *openrails.Client) error {
-	raw, err := os.ReadFile("catalog.yaml")
-	if err != nil {
-		return err
-	}
-	params, err := billing.ParseCatalogApplicationYAML(raw)
-	if err != nil {
-		return err
-	}
-	_, err = bill.Catalog.Apply(ctx, params)
-	return err
 }
 
 func main() {
@@ -128,9 +125,6 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer bill.Close(ctx)
-	if err := applyCatalog(ctx, bill); err != nil {
-		return err
-	}
 
 	// One River worker fleet runs your jobs, AuthKit's and OpenRails' (rebills, retries, invoices).
 	// The fleet is yours, so you create River's tables ("" is River's default schema, public).

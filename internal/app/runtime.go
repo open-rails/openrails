@@ -71,6 +71,8 @@ type Runtime struct {
 	// signerIdentity records a Vault Transit key that no longer matches its
 	// stored Solana identity.
 	signerIdentity dependencyState
+	// declaredCatalog records why Config.Catalog is not applied yet.
+	declaredCatalog dependencyState
 	// ApproveSolanaSigner, set by the embedded constructor, accepts the
 	// identity a changed Transit signer now reports (hosttools.ApproveSolanaSigner).
 	ApproveSolanaSigner func(ctx context.Context, merchantID billing.MerchantID, key string) error

@@ -19,7 +19,8 @@ type ReadinessDependency struct {
 }
 
 // Ready is the readiness shared by the standalone /readyz and embedded
-// Runtime.Ready. Only Postgres and River are required. Redis, Vault and PSP
+// Runtime.Ready. Postgres, River and a declared catalog (applied) are
+// required. Redis, Vault and PSP
 // posture are reported from cached background state as optional (degraded)
 // entries; Ready never contacts them.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
@@ -46,6 +47,9 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 		merchantsErr = fmt.Errorf("merchants service not armed (#699)")
 	}
 	add("merchants", false, merchantsErr)
+	if observed, err := r.declaredCatalog.observed(); observed {
+		add("catalog", false, err)
+	}
 
 	var riverErr error
 	if r.hostRiver && !r.hostRiverBound.Load() {
