@@ -40,7 +40,7 @@ const (
 	codePaymentMethodUpdateRetryRequired    = "payment_method_update_retry_required"
 )
 
-type listPaymentMethodsQuery struct {
+type ListPaymentMethodsQuery struct {
 	Limit  int `form:"limit"`
 	Offset int `form:"offset"`
 }
@@ -49,7 +49,7 @@ type paymentMethodURI struct {
 	ID string `uri:"id" binding:"required"`
 }
 
-type createPaymentMethodRequest struct {
+type CreatePaymentMethodRequest struct {
 	PaymentToken string `json:"payment_token" binding:"required_without=Card"`
 	NameOnCard   string `json:"name_on_card" binding:"omitempty"`
 	Address1     string `json:"address1" binding:"omitempty"`
@@ -80,7 +80,7 @@ type createPaymentMethodRequest struct {
 	RawVerificationValue *json.RawMessage `json:"verification_value,omitempty"`
 }
 
-type updatePaymentMethodRequest struct {
+type UpdatePaymentMethodRequest struct {
 	PaymentToken string  `json:"payment_token" binding:"required_without=Card"`
 	NameOnCard   *string `json:"name_on_card"`
 	Address1     *string `json:"address1"`
@@ -116,7 +116,7 @@ type rawCardField struct {
 	value *json.RawMessage
 }
 
-func (req *createPaymentMethodRequest) rejectRawCardFields() error {
+func (req *CreatePaymentMethodRequest) rejectRawCardFields() error {
 	return rejectRawCardFieldValues(
 		rawCardField{name: "card_number", value: req.RawCardNumber},
 		rawCardField{name: "number", value: req.RawNumber},
@@ -130,7 +130,7 @@ func (req *createPaymentMethodRequest) rejectRawCardFields() error {
 	)
 }
 
-func (req *updatePaymentMethodRequest) rejectRawCardFields() error {
+func (req *UpdatePaymentMethodRequest) rejectRawCardFields() error {
 	return rejectRawCardFieldValues(
 		rawCardField{name: "card_number", value: req.RawCardNumber},
 		rawCardField{name: "number", value: req.RawNumber},
@@ -155,7 +155,7 @@ func rejectRawCardFieldValues(fields ...rawCardField) error {
 
 type subscriptionSummary = billing.PaymentMethodSubscription
 
-type paymentMethodResponse = billing.PaymentMethod
+type PaymentMethodResponse = billing.PaymentMethod
 
 // paymentMethodHealth is the #589 DERIVED per-method health, computed at query
 // time (never a stored column). last_charge_* come from billing.payments via the
@@ -175,7 +175,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	req := new(createPaymentMethodRequest)
+	req := new(CreatePaymentMethodRequest)
 	if !r.BindJSON(req) {
 		return
 	}
@@ -267,7 +267,7 @@ func createPaymentMethodProviderError(err error) *api.APIError {
 	)
 }
 
-func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
+func toCreatePaymentMethodRequest(req *CreatePaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
 	lastFour := strings.TrimSpace(req.LastFour)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
@@ -318,7 +318,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if !r.BindURI(path) {
 		return
 	}
-	body := new(updatePaymentMethodRequest)
+	body := new(UpdatePaymentMethodRequest)
 	if !r.BindJSON(body) {
 		return
 	}
@@ -467,7 +467,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 }
 
 func ListPaymentMethods(r *httprequest.Request) {
-	req := &listPaymentMethodsQuery{Limit: 20, Offset: 0}
+	req := &ListPaymentMethodsQuery{Limit: 20, Offset: 0}
 	if !r.BindQuery(req) {
 		return
 	}
@@ -643,7 +643,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 	}
 }
 
-func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) paymentMethodResponse {
+func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) PaymentMethodResponse {
 	card := &paymentMethodCardDetails{Brand: pm.CardType, Last4: pm.LastFour}
 	if pm.ExpiryDate != nil {
 		if month, year, err := sharedformat.ParseExpiry(*pm.ExpiryDate); err == nil {
@@ -663,7 +663,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 	}
 
 	metadata := paymentMethodMetadataToAPI(pm.Metadata)
-	return paymentMethodResponse{
+	return PaymentMethodResponse{
 		ID:             billing.PaymentMethodID(pm.ID).String(),
 		Object:         "payment_method",
 		Type:           "card",
@@ -782,8 +782,8 @@ func stringPtrFromMap(metadata map[string]string, key string) *string {
 	return &value
 }
 
-func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]models.PaymentMethodCharge) []paymentMethodResponse {
-	result := make([]paymentMethodResponse, len(methods))
+func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]models.PaymentMethodCharge) []PaymentMethodResponse {
+	result := make([]PaymentMethodResponse, len(methods))
 	for i, pm := range methods {
 		var charge *models.PaymentMethodCharge
 		if c, ok := charges[pm.ID]; ok {
@@ -798,7 +798,7 @@ func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]
 // subscription default or client-side "first card" inference participates.
 // Here the defaults are load-bearing (the response IS the payment methods), so
 // a loader failure is the caller's 500; the admin profile degrades instead.
-func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]paymentMethodResponse, bool) {
+func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]PaymentMethodResponse, bool) {
 	response := paymentMethodsToAPI(methods, paymentMethodCharges(r, methods))
 	stampDefaultPaymentMethod(r, methods, response)
 	if err := applyCollectionDefaults(r, payer, methods, response); err != nil {
@@ -813,7 +813,7 @@ func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity
 // onto its already-built API response. response must be index-aligned with
 // methods (paymentMethodsToAPI). The loader error is returned untouched so the
 // caller decides whether it is fatal.
-func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod, response []paymentMethodResponse) error {
+func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod, response []PaymentMethodResponse) error {
 	if len(methods) == 0 {
 		return nil
 	}
@@ -838,7 +838,7 @@ var loadCollectionPaymentMethodDefaults = func(r *httprequest.Request, payer ide
 
 // stampDefaultPaymentMethod marks the customer's default method on an
 // index-aligned response. Best-effort: a lookup failure leaves no mark.
-func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.PaymentMethod, response []paymentMethodResponse) {
+func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.PaymentMethod, response []PaymentMethodResponse) {
 	if r.State.PaymentMethodService == nil || len(methods) == 0 {
 		return
 	}
@@ -863,8 +863,8 @@ func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.Payment
 	}
 }
 
-func singlePaymentMethodToAPI(r *httprequest.Request, pm *models.PaymentMethod) paymentMethodResponse {
-	out := []paymentMethodResponse{paymentMethodToAPI(pm, nil)}
+func singlePaymentMethodToAPI(r *httprequest.Request, pm *models.PaymentMethod) PaymentMethodResponse {
+	out := []PaymentMethodResponse{paymentMethodToAPI(pm, nil)}
 	stampDefaultPaymentMethod(r, []*models.PaymentMethod{pm}, out)
 	return out[0]
 }

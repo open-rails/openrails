@@ -160,7 +160,7 @@ func ServiceGetCustomersWithEntitlement(r *httprequest.Request) {
 	})
 }
 
-type serviceExternalSubjectEntitlementsRequest struct {
+type ServiceExternalSubjectEntitlementsRequest struct {
 	Subjects []string `json:"subjects"`
 	At       string   `json:"at,omitempty"` // RFC3339; empty = now
 }
@@ -172,7 +172,7 @@ type serviceExternalSubjectEntitlementsRequest struct {
 // the request credential, so no issuer is accepted (#555); customer identity is
 // (merchant, subject).
 func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
-	var req serviceExternalSubjectEntitlementsRequest
+	var req ServiceExternalSubjectEntitlementsRequest
 	if !r.BindJSON(&req) {
 		return
 	}

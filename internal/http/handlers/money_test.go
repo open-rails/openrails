@@ -88,14 +88,14 @@ func TestAdminRefundIdempotencyIdentity(t *testing.T) {
 	require.NotEqual(t, id, adminRefundReservationTransactionID(uuid.New(), "refund-key"))
 	require.NotEqual(t, id, adminRefundReservationTransactionID(payment, "other-key"))
 
-	original := refundRequest{Amount: 500, Reason: "requested_by_customer", RevokeAccess: true}
+	original := RefundRequest{Amount: 500, Reason: "requested_by_customer", RevokeAccess: true}
 	meta := adminRefundMetadata(" key-123 ", original, "completed", "re_123")
 	require.Equal(t, "key-123", meta["admin_refund_idempotency_key"])
 	require.Equal(t, "re_123", meta["provider_refund_id"])
 	existing := &models.Payment{Amount: -500, Metadata: meta}
 
-	require.True(t, adminRefundMatchesRequest(existing, refundRequest{Amount: 500, Reason: " requested_by_customer ", RevokeAccess: true}))
-	for _, changed := range []refundRequest{
+	require.True(t, adminRefundMatchesRequest(existing, RefundRequest{Amount: 500, Reason: " requested_by_customer ", RevokeAccess: true}))
+	for _, changed := range []RefundRequest{
 		{Amount: 400, Reason: original.Reason, RevokeAccess: true},
 		{Amount: 500, Reason: "duplicate", RevokeAccess: true},
 		{Amount: 500, Reason: original.Reason},
@@ -105,7 +105,7 @@ func TestAdminRefundIdempotencyIdentity(t *testing.T) {
 	}
 	require.False(t, adminRefundMatchesRequest(nil, original))
 
-	full := refundRequest{Full: true}
+	full := RefundRequest{Full: true}
 	require.True(t, adminRefundMatchesRequest(&models.Payment{Amount: -999, Metadata: adminRefundMetadata("k", full, "completed", "")}, full),
 		"a full refund matches whatever amount it resolved to")
 }

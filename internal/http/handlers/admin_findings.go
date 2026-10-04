@@ -35,21 +35,21 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 // findingView is one queue item: the persisted record plus the parsed
 // structured recommendation (nil when the finding has no mechanical fix —
 // approve is unavailable for those).
-type findingView struct {
+type FindingView struct {
 	reconcile.FindingRecord
 	Recommendation *recommend.Recommendation `json:"recommendation,omitempty"`
 }
 
-func newFindingView(rec reconcile.FindingRecord) findingView {
-	v := findingView{FindingRecord: rec}
+func newFindingView(rec reconcile.FindingRecord) FindingView {
+	v := FindingView{FindingRecord: rec}
 	if parsed, ok := recommend.FromEvidence(rec.Evidence); ok {
 		v.Recommendation = &parsed
 	}
 	return v
 }
 
-type findingsListResponse struct {
-	Items  []findingView         `json:"items"`
+type FindingsListResponse struct {
+	Items  []FindingView         `json:"items"`
 	Total  int64                 `json:"total"`
 	Limit  int                   `json:"limit"`
 	Offset int                   `json:"offset"`
@@ -100,11 +100,11 @@ func AdminListFindings(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to compute finding gauges")
 		return
 	}
-	views := make([]findingView, 0, len(items))
+	views := make([]FindingView, 0, len(items))
 	for _, item := range items {
 		views = append(views, newFindingView(item))
 	}
-	r.JSON(http.StatusOK, findingsListResponse{
+	r.JSON(http.StatusOK, FindingsListResponse{
 		Items:  views,
 		Total:  total,
 		Limit:  filter.Limit,
@@ -138,7 +138,7 @@ func AdminGetFinding(r *httprequest.Request) {
 	r.JSON(http.StatusOK, newFindingView(finding))
 }
 
-type resolveFindingRequest struct {
+type ResolveFindingRequest struct {
 	Outcome string `json:"outcome"`
 	Notes   string `json:"notes"`
 	// RAW on purpose (or#863): plain binding decodes JSON numbers as float64,
@@ -147,8 +147,8 @@ type resolveFindingRequest struct {
 	OverrideParams json.RawMessage `json:"override_params,omitempty"`
 }
 
-type resolveFindingResponse struct {
-	Finding   findingView    `json:"finding"`
+type ResolveFindingResponse struct {
+	Finding   FindingView    `json:"finding"`
 	Execution map[string]any `json:"execution,omitempty"`
 }
 
@@ -191,7 +191,7 @@ func AdminResolveFinding(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid finding id")
 		return
 	}
-	var req resolveFindingRequest
+	var req ResolveFindingRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -230,7 +230,7 @@ func AdminResolveFinding(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "finding resolved but failed to reload")
 		return
 	}
-	r.JSON(http.StatusOK, resolveFindingResponse{Finding: newFindingView(updated), Execution: execution})
+	r.JSON(http.StatusOK, ResolveFindingResponse{Finding: newFindingView(updated), Execution: execution})
 }
 
 // resolveFinding resolves one open finding; see resolveFindingOutcome.

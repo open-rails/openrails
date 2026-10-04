@@ -16,7 +16,7 @@ import (
 // UUIDs and PSP account ids, so the TEXT is platform-only. The merchant tier
 // still gets the signal it needs (whether a kind is erroring, when, and the
 // streak) without another merchant's error text.
-type workerHealthItem struct {
+type WorkerHealthItem struct {
 	WorkerKind            string     `json:"worker_kind"`
 	RegisteredAt          time.Time  `json:"registered_at"`
 	ExpectedPeriodSeconds *int64     `json:"expected_period_seconds,omitempty"`
@@ -46,15 +46,15 @@ func listWorkerHealth(r *httprequest.Request, withErrorText bool) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve worker health")
 		return
 	}
-	items := make([]workerHealthItem, 0, len(rows))
+	items := make([]WorkerHealthItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, workerHealthItemFromGen(row, withErrorText))
 	}
 	r.SuccessJSON(items)
 }
 
-func workerHealthItemFromGen(row gen.BillingWorkerState, withErrorText bool) workerHealthItem {
-	item := workerHealthItem{
+func workerHealthItemFromGen(row gen.BillingWorkerState, withErrorText bool) WorkerHealthItem {
+	item := WorkerHealthItem{
 		WorkerKind:            row.WorkerKind,
 		RegisteredAt:          row.RegisteredAt,
 		ExpectedPeriodSeconds: row.ExpectedPeriodSeconds,

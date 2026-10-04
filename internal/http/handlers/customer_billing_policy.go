@@ -11,12 +11,12 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-type customerBillingPolicyWrite struct {
+type CustomerBillingPolicyWrite struct {
 	PolicyName json.RawMessage `json:"policy_name"`
 }
 
-func (body *customerBillingPolicyWrite) UnmarshalJSON(raw []byte) error {
-	type declared customerBillingPolicyWrite
+func (body *CustomerBillingPolicyWrite) UnmarshalJSON(raw []byte) error {
+	type declared CustomerBillingPolicyWrite
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode((*declared)(body))
@@ -47,7 +47,7 @@ func ServiceSetCustomerBillingPolicy(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	var body customerBillingPolicyWrite
+	var body CustomerBillingPolicyWrite
 	if !r.BindJSON(&body) {
 		return
 	}

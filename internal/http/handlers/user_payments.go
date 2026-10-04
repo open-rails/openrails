@@ -62,7 +62,7 @@ func GetUserPayments(r *httprequest.Request) {
 		return
 	}
 
-	data := make([]userPaymentObject, len(payments))
+	data := make([]UserPaymentObject, len(payments))
 	for i, payment := range payments {
 		data[i] = PaymentToUserAPI(payment, refundTotals[payment.ID])
 	}

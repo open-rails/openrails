@@ -94,7 +94,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 // confirmSolanaCancelRequest carries the signature of the cancel_subscription
 // transaction the wallet signed + sent (#271). OpenRails confirms it landed
 // on-chain before mirroring the cancel into the DB.
-type confirmSolanaCancelRequest struct {
+type ConfirmSolanaCancelRequest struct {
 	Signature string `json:"signature" binding:"required"`
 }
 
@@ -134,7 +134,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 
-	var req confirmSolanaCancelRequest
+	var req ConfirmSolanaCancelRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -173,14 +173,14 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 
 // solanaTierChangeRequest is the body for the prepare endpoint: the target price
 // to change TO. The acting user must own the path subscription.
-type solanaTierChangeRequest struct {
+type SolanaTierChangeRequest struct {
 	NewPriceID string `json:"new_price_id" binding:"required"`
 }
 
 // solanaTierChangeConfirmRequest is the body for the confirm endpoint: the
 // signature of the atomic tier-change tx the wallet signed + sent, plus the same
 // target price (so confirm resolves the identical canonical terms as prepare).
-type solanaTierChangeConfirmRequest struct {
+type SolanaTierChangeConfirmRequest struct {
 	Signature  string `json:"signature" binding:"required"`
 	NewPriceID string `json:"new_price_id" binding:"required"`
 }
@@ -393,7 +393,7 @@ func PrepareSolanaTierChange(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req solanaTierChangeRequest
+	var req SolanaTierChangeRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -451,7 +451,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req solanaTierChangeConfirmRequest
+	var req SolanaTierChangeConfirmRequest
 	if !r.BindJSON(&req) {
 		return
 	}

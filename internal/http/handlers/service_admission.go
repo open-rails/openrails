@@ -62,7 +62,7 @@ func admitVerdictStatus(res *billingservice.AdmitResult) int {
 	}
 }
 
-type serviceAdmitBatchRequest struct {
+type ServiceAdmitBatchRequest struct {
 	Items []serviceAdmitRequest `json:"items"`
 }
 
@@ -159,7 +159,7 @@ func serviceAdmitBatchVerdicts(
 // items, so cold payers conflating admits collapse N hops into one without one
 // broke payer poisoning the flight.
 func ServiceAdmitBatch(r *httprequest.Request) {
-	var req serviceAdmitBatchRequest
+	var req ServiceAdmitBatchRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -227,14 +227,14 @@ func ServiceGetTrustLevel(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "trust_level": trustLevel})
 }
 
-type serviceReportWastedSpendRequest = billing.WastedSpendReport
+type ServiceReportWastedSpendRequest = billing.WastedSpendReport
 
 // ServiceReportWastedSpend records host-reported WASTED $ (#497): delegated
 // invokers accrue toward their flat cutoff; direct payer credentials use
 // trust-level grace and then normal ledger charging. Operator API key,
 // credits:write.
 func ServiceReportWastedSpend(r *httprequest.Request) {
-	var req serviceReportWastedSpendRequest
+	var req ServiceReportWastedSpendRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -283,14 +283,14 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 	r.JSON(http.StatusOK, res)
 }
 
-type serviceCreditLimitRequest = billing.CreditLimitRequest
+type ServiceCreditLimitRequest = billing.CreditLimitRequest
 
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
 // Owner authority at the route (`merchant:credits:grant`) - NOT self-serve.
 func ServiceSetCreditLimit(r *httprequest.Request) {
-	var req serviceCreditLimitRequest
+	var req ServiceCreditLimitRequest
 	if !r.BindJSON(&req) {
 		return
 	}

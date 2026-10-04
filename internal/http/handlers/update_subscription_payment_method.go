@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type updateSubscriptionPaymentMethodBody = billing.UpdateSubscriptionPaymentMethodRequest
+type UpdateSubscriptionPaymentMethodBody = billing.UpdateSubscriptionPaymentMethodRequest
 
 func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
@@ -47,7 +47,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 
-	var req updateSubscriptionPaymentMethodBody
+	var req UpdateSubscriptionPaymentMethodBody
 	if !r.BindJSON(&req) {
 		return
 	}

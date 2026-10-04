@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-type portalResponse struct {
+type PortalResponse struct {
 	URL string `json:"url"`
 }
 
@@ -37,7 +37,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		writeRefusal(r, err, "billing portal unavailable")
 		return
 	}
-	r.SuccessJSON(portalResponse{URL: urlStr})
+	r.SuccessJSON(PortalResponse{URL: urlStr})
 }
 
 // portalReturnOrigin returns the browser's origin only when it is an allowed

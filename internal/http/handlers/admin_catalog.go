@@ -384,7 +384,7 @@ func AdminGetPriceKeyHistory(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[billingservice.PriceKeyHistoryEntry]{
+	r.JSON(http.StatusOK, PaginatedResponse[billingservice.PriceKeyHistoryEntry]{
 		Items:  items,
 		Total:  int64(len(items)),
 		Limit:  len(items),
@@ -392,7 +392,7 @@ func AdminGetPriceKeyHistory(r *httprequest.Request) {
 	})
 }
 
-type setPriceKeyRequest struct {
+type SetPriceKeyRequest struct {
 	Key string `json:"key"`
 }
 
@@ -405,7 +405,7 @@ func AdminSetPriceKey(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
 	}
-	var req setPriceKeyRequest
+	var req SetPriceKeyRequest
 	if !bindCatalogJSON(r, &req) {
 		return
 	}
@@ -423,7 +423,7 @@ func AdminSetPriceKey(r *httprequest.Request) {
 
 // -- Helpers -----------------------------------------------------------------
 
-type paginatedResponse[T any] struct {
+type PaginatedResponse[T any] struct {
 	Items  []T   `json:"items"`
 	Total  int64 `json:"total"`
 	Limit  int   `json:"limit"`

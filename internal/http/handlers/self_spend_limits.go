@@ -15,7 +15,7 @@ import (
 // windows it is actually metered against, with their live totals — a read over
 // the accounting admission already keeps, not a second one.
 
-type selfSpendLimitsDocument struct {
+type SelfSpendLimitsDocument struct {
 	Currency string                              `json:"currency"`
 	Invoker  string                              `json:"invoker"`
 	Windows  []billingservice.InvokerSpendWindow `json:"windows"`
@@ -77,7 +77,7 @@ func GetMySpendLimits(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(selfSpendLimitsDocument{Currency: currency, Invoker: invoker, Windows: windows})
+	r.SuccessJSON(SelfSpendLimitsDocument{Currency: currency, Invoker: invoker, Windows: windows})
 }
 
 // addressedSpendScope names the first cross-subject addressing parameter present

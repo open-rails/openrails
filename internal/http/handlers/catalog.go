@@ -15,11 +15,11 @@ type catalogPaginationParams struct {
 	Offset int `form:"offset"`
 }
 
-type getProductsQuery struct {
+type GetProductsQuery struct {
 	catalogPaginationParams
 }
 
-type getPricesQuery struct {
+type GetPricesQuery struct {
 	catalogPaginationParams
 	Currency string `form:"currency"`
 	Product  string `form:"product"`
@@ -32,7 +32,7 @@ func (q *catalogPaginationParams) setDefaults(defaultLimit int) {
 }
 
 func GetProducts(r *httprequest.Request) {
-	req := &getProductsQuery{}
+	req := &GetProductsQuery{}
 	req.setDefaults(20)
 	if !r.BindQuery(req) {
 		return
@@ -58,7 +58,7 @@ func GetProducts(r *httprequest.Request) {
 }
 
 func GetPrices(r *httprequest.Request) {
-	req := &getPricesQuery{}
+	req := &GetPricesQuery{}
 	req.setDefaults(20)
 	if !r.BindQuery(req) {
 		return

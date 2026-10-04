@@ -47,7 +47,7 @@ type checkoutSessionPaymentParams struct {
 	Card *cardguard.Card `json:"card,omitempty"`
 }
 
-type checkoutSessionCreateRequest struct {
+type CheckoutSessionCreateRequest struct {
 	// Exactly one PriceID or PriceKey is required for purchase/subscribe. For solana_cancel /
 	// solana_tier_change it is optional (cancel uses the subscription's current
 	// price; tier-change uses new_price_id).
@@ -76,7 +76,7 @@ type checkoutSessionCreateRequest struct {
 	CancelURL  string `json:"cancel_url,omitempty" binding:"omitempty,url"`
 }
 
-type checkoutSessionConfirmRequest struct {
+type CheckoutSessionConfirmRequest struct {
 	Payment struct {
 		Capture   *billing.CustodianCaptureReference `json:"capture,omitempty"`
 		Rail      string                             `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi stripe"`
@@ -87,7 +87,7 @@ type checkoutSessionConfirmRequest struct {
 
 func CreateCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var req checkoutSessionCreateRequest
+	var req CheckoutSessionCreateRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -208,7 +208,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
 		return
 	}
-	var req checkoutSessionConfirmRequest
+	var req CheckoutSessionConfirmRequest
 	if !r.BindJSON(&req) {
 		return
 	}

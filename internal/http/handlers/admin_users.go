@@ -28,14 +28,14 @@ type adminUserPath struct {
 // returns the user's billing sections so admins don't fan out across dedicated
 // per-section endpoints. Every section is the shared Client DTO the dedicated
 // route serves.
-type adminUserBillingProfile struct {
+type AdminUserBillingProfile struct {
 	CustomerID     billing.CustomerID           `json:"customer_id"`
 	Email          *string                      `json:"email,omitempty"`
 	TrustLevel     string                       `json:"trust_level,omitempty"`
 	Subscriptions  []billing.Subscription       `json:"subscriptions"`
 	Entitlements   []billing.EntitlementRecord  `json:"entitlements"`
 	Payments       []billing.Payment            `json:"payments"`
-	PaymentMethods []paymentMethodResponse      `json:"payment_methods"`
+	PaymentMethods []PaymentMethodResponse      `json:"payment_methods"`
 	CreditBalance  []adminCreditBalanceResponse `json:"credit_balance"`
 	ProductAccess  []billing.ProductAccessGrant `json:"product_access"`
 }
@@ -61,7 +61,7 @@ type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
 
-type adminCancelSubscriptionRequest = billing.CancelSubscriptionRequest
+type AdminCancelSubscriptionRequest = billing.CancelSubscriptionRequest
 
 func GetAdminUserBillingProfile(r *httprequest.Request) {
 	var path adminUserPath
@@ -81,12 +81,12 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	ctx := r.Request.Context()
 	now := r.Clock.Now()
-	profile := adminUserBillingProfile{
+	profile := AdminUserBillingProfile{
 		CustomerID:     billing.CustomerID(customerID),
 		Subscriptions:  []billing.Subscription{},
 		Entitlements:   []billing.EntitlementRecord{},
 		Payments:       []billing.Payment{},
-		PaymentMethods: []paymentMethodResponse{},
+		PaymentMethods: []PaymentMethodResponse{},
 		CreditBalance:  []adminCreditBalanceResponse{},
 		ProductAccess:  []billing.ProductAccessGrant{},
 	}
@@ -302,7 +302,7 @@ func AdminCancelSubscription(r *httprequest.Request) {
 		return
 	}
 	subscriptionID := typedSubscriptionID.UUID()
-	req := new(adminCancelSubscriptionRequest)
+	req := new(AdminCancelSubscriptionRequest)
 	if !r.BindJSON(req) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request body")
 		return

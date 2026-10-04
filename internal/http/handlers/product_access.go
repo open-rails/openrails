@@ -35,7 +35,7 @@ type adminProductAccessGrantPath struct {
 	GrantID string `uri:"id" binding:"required"`
 }
 
-type grantProductAccessRequest struct {
+type GrantProductAccessRequest struct {
 	ProductID billing.ProductID `json:"product_id"`
 	EndsAt    *string           `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
 }
@@ -215,7 +215,7 @@ func grantAdminProductAccess(r *httprequest.Request, gate billingauth.Gate) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	var req grantProductAccessRequest
+	var req GrantProductAccessRequest
 	if !r.BindJSON(&req) {
 		return
 	}

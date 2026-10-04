@@ -113,14 +113,14 @@ func TestPaymentActionKeyRefusesCardData(t *testing.T) {
 // trip into the vault request and back out without the provider payload.
 func TestPaymentMethodRequestMapping(t *testing.T) {
 	for _, field := range []string{"card_number", "number", "pan", "primary_account_number", "cvv", "cvc", "cvn", "security_code", "verification_value"} {
-		var create createPaymentMethodRequest
+		var create CreatePaymentMethodRequest
 		require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok","`+field+`":"4111111111111111"}`), &create))
 		require.ErrorContains(t, create.rejectRawCardFields(), field)
-		var update updatePaymentMethodRequest
+		var update UpdatePaymentMethodRequest
 		require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok","`+field+`":"123"}`), &update))
 		require.ErrorContains(t, update.rejectRawCardFields(), field)
 	}
-	var clean createPaymentMethodRequest
+	var clean CreatePaymentMethodRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok"}`), &clean))
 	require.NoError(t, clean.rejectRawCardFields())
 
@@ -130,7 +130,7 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 		{"JP", "100-0001"},
 		{"BR", "01001-000"},
 	} {
-		got := toCreatePaymentMethodRequest(&createPaymentMethodRequest{
+		got := toCreatePaymentMethodRequest(&CreatePaymentMethodRequest{
 			PaymentToken: "opaque-provider-token", Provider: "mobius", NameOnCard: "Ada Lovelace",
 			Country: tc.country, Zip: tc.zip, Phone: "+49 30 123456", LastFour: "card-4242",
 		}, "ada@example.com")
@@ -143,7 +143,7 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 			require.NotContains(t, got.Metadata, key)
 		}
 	}
-	address := toCreatePaymentMethodRequest(&createPaymentMethodRequest{
+	address := toCreatePaymentMethodRequest(&CreatePaymentMethodRequest{
 		PaymentToken: "tok", NameOnCard: "Ada Lovelace", Address1: "1 Main", Address2: "Unit 2", City: "Denver", State: "CO", Zip: "80202", Country: "US",
 	}, "")
 	require.Equal(t, []any{"Ada Lovelace", "US", "80202", "1 Main", "Unit 2", "Denver", "CO"},
@@ -151,13 +151,13 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 
 	// One name per field: the retired aliases are unknown fields.
 	for _, alias := range []string{"first_name", "last_name", "postal_code", "billing_country"} {
-		err := httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &createPaymentMethodRequest{})
+		err := httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &CreatePaymentMethodRequest{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
-		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &updatePaymentMethodRequest{})
+		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &UpdatePaymentMethodRequest{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
 	}
 	for _, alias := range []string{"first_name", "last_name"} {
-		err := httprequest.DecodeStrict([]byte(`{"price_id":"p","payment":{"`+alias+`":"x"}}`), &checkoutSessionCreateRequest{})
+		err := httprequest.DecodeStrict([]byte(`{"price_id":"p","payment":{"`+alias+`":"x"}}`), &CheckoutSessionCreateRequest{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
 	}
 
@@ -205,7 +205,7 @@ func TestPaymentMethodHealth(t *testing.T) {
 }
 
 func TestUsageMeterAndRateCardInput(t *testing.T) {
-	spec, err := usageMeterSpec(" Storage.GB ", adminUsageMeterRequest{
+	spec, err := usageMeterSpec(" Storage.GB ", AdminUsageMeterRequest{
 		EventType: " storage.used ", ValueProperty: " bytes ", Aggregation: " SUM ", Unit: " GB ",
 		GroupBy: map[string]string{" region ": " metadata.region "},
 	})
@@ -214,7 +214,7 @@ func TestUsageMeterAndRateCardInput(t *testing.T) {
 		Key: "storage-gb", EventType: "storage.used", ValueProperty: "bytes", Aggregation: catalog.AggregationSum,
 		Unit: "GB", GroupBy: map[string]string{"region": "metadata.region"},
 	}, spec)
-	_, err = usageMeterSpec("requests", adminUsageMeterRequest{Aggregation: catalog.AggregationMax})
+	_, err = usageMeterSpec("requests", AdminUsageMeterRequest{Aggregation: catalog.AggregationMax})
 	require.EqualError(t, err, "usage meter aggregation must be sum or count")
 
 	product := uuid.New()
@@ -222,7 +222,7 @@ func TestUsageMeterAndRateCardInput(t *testing.T) {
 		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: currency, PerUnit: &catalog.PerUnitPrice{UnitAmount: 100}}
 	}
 	meter := billingservice.UsageMeterDTO{Key: "storage-gb", GroupBy: map[string]string{"region": "metadata.region"}}
-	input, err := defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{
+	input, err := defaultUsageRateCardInput(meter, AdminDefaultUsageRateCardRequest{
 		ProductID: billing.ProductID(product).String(), Filter: map[string][]string{" region ": {" eu ", "eu"}}, Price: price("usd"),
 	})
 	require.NoError(t, err)
@@ -231,9 +231,9 @@ func TestUsageMeterAndRateCardInput(t *testing.T) {
 	require.Equal(t, "USD", input.Price.Currency)
 	require.Equal(t, map[string][]string{"region": {"eu"}}, input.Filter)
 
-	_, err = defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{ProductID: billing.ProductID(product).String(), Price: price("GBP")})
+	_, err = defaultUsageRateCardInput(meter, AdminDefaultUsageRateCardRequest{ProductID: billing.ProductID(product).String(), Price: price("GBP")})
 	require.EqualError(t, err, `money: unknown currency "GBP"`)
-	_, err = defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{ProductID: "nope", Price: price("USD")})
+	_, err = defaultUsageRateCardInput(meter, AdminDefaultUsageRateCardRequest{ProductID: "nope", Price: price("USD")})
 	require.EqualError(t, err, "product_id required")
 }
 

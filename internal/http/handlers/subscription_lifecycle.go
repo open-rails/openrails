@@ -23,7 +23,7 @@ const (
 	maxCancelFeedbackChars = 500
 )
 
-type cancelSubscriptionRequest struct {
+type CancelSubscriptionRequest struct {
 	Feedback string `json:"feedback"`
 }
 
@@ -42,7 +42,7 @@ func subscriptionLifecycleUniqueOpts() river.UniqueOpts {
 }
 
 func CancelSubscription(r *httprequest.Request) {
-	req := new(cancelSubscriptionRequest)
+	req := new(CancelSubscriptionRequest)
 	if !r.BindJSON(req) {
 		return
 	}

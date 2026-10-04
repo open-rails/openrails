@@ -39,7 +39,7 @@ const (
 	productArchiveMaxReason    = 500
 )
 
-type productArchiveRequest struct {
+type ProductArchiveRequest struct {
 	ProductID  string                  `json:"product_id,omitempty"`
 	ProductKey string                  `json:"product_key,omitempty"`
 	Purchases  productArchivePurchases `json:"purchases"`
@@ -72,7 +72,7 @@ func productArchiveError(status int, code, message string) *api.APIError {
 
 // fingerprint canonicalizes the caller's terms. A relative window is part of
 // the identity, never the instant it resolved to, so a replay matches.
-func (req productArchiveRequest) fingerprint() []byte {
+func (req ProductArchiveRequest) fingerprint() []byte {
 	canonical := map[string]string{
 		"product_id": strings.TrimSpace(req.ProductID), "product_key": strings.TrimSpace(req.ProductKey),
 		"action": req.Purchases.Action, "reason": strings.TrimSpace(req.Reason),
@@ -89,7 +89,7 @@ func (req productArchiveRequest) fingerprint() []byte {
 	return sum[:]
 }
 
-func (req *productArchiveRequest) validate() *api.APIError {
+func (req *ProductArchiveRequest) validate() *api.APIError {
 	invalid := func(msg string) *api.APIError {
 		return productArchiveError(http.StatusBadRequest, api.CodeInvalidParam, msg)
 	}
@@ -130,7 +130,7 @@ func (req *productArchiveRequest) validate() *api.APIError {
 // CreateProductArchive archives a product and applies the caller's purchase
 // policy. POST /merchant/catalog/product-archives, Idempotency-Key required.
 func CreateProductArchive(r *httprequest.Request) {
-	var req productArchiveRequest
+	var req ProductArchiveRequest
 	if !bindCatalogJSON(r, &req) {
 		return
 	}
@@ -223,7 +223,7 @@ func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (product
 
 // acceptProductArchive records the receipt once per key; a replay with other
 // terms is refused before anything else happens.
-func acceptProductArchive(ctx context.Context, r *httprequest.Request, req productArchiveRequest, key string) (productArchiveOperation, *api.APIError) {
+func acceptProductArchive(ctx context.Context, r *httprequest.Request, req ProductArchiveRequest, key string) (productArchiveOperation, *api.APIError) {
 	var op productArchiveOperation
 	var refusal *api.APIError
 	fingerprint := req.fingerprint()
@@ -416,7 +416,7 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 	if reason == "" {
 		reason = "product archived"
 	}
-	refund, status, err := executeAdminRefund(ctx, r, purchase.ID, refundRequest{Full: true, Reason: reason, RevokeAccess: true}, productArchiveRefundKey(op))
+	refund, status, err := executeAdminRefund(ctx, r, purchase.ID, RefundRequest{Full: true, Reason: reason, RevokeAccess: true}, productArchiveRefundKey(op))
 	if err != nil {
 		var refusal *adminRefundStatusError
 		if !errors.As(err, &refusal) {

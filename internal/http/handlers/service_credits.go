@@ -28,9 +28,9 @@ func serviceIdempotencyConflict(r *httprequest.Request, err error) bool {
 	return true
 }
 
-type serviceDepositRequest = billing.DepositCreditsRequest
+type ServiceDepositRequest = billing.DepositCreditsRequest
 
-type serviceCaptureRequest = billing.CaptureRequest
+type ServiceCaptureRequest = billing.CaptureRequest
 
 // servicePayer converts a typed wire customer id to the engine's payer
 // identity; the zero id is nil (absent).
@@ -132,7 +132,7 @@ func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
 
 // serviceBalanceResponse is the customer balance snapshot served by
 // GET /v1/merchant/credits/balance (issue #235/#247).
-type serviceBalanceResponse = billing.CreditAccount
+type ServiceBalanceResponse = billing.CreditAccount
 
 // ServiceGetCreditsBalance returns the customer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
@@ -164,7 +164,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(serviceBalanceResponse{
+	r.SuccessJSON(ServiceBalanceResponse{
 		CustomerID:            billing.CustomerID(snap.CustomerID).String(),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
@@ -196,7 +196,7 @@ type serviceTxnResponse struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-type serviceUsageRollupRequest struct {
+type ServiceUsageRollupRequest struct {
 	CustomerID billing.CustomerID `json:"customer_id"`
 	Currency   string             `json:"currency"`
 	From       time.Time          `json:"from" binding:"required"` // RFC3339, inclusive
@@ -204,14 +204,14 @@ type serviceUsageRollupRequest struct {
 	GroupBy    string             `json:"group_by" binding:"required"`
 }
 
-type serviceRecordUsageRequest = billing.UsageReport
+type ServiceRecordUsageRequest = billing.UsageReport
 
 // ServiceRecordUsage records one host-reported metered usage event (#797): a
 // usage_events row (plus a ledger debit for a non-zero amount) that the
 // rate-card rating sweep aggregates into arrears invoice lines. Idempotent on
 // (payer, event_type, source, source_id). Operator API key, admissions:create.
 func ServiceRecordUsage(r *httprequest.Request) {
-	var req serviceRecordUsageRequest
+	var req ServiceRecordUsageRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -266,7 +266,7 @@ func ServiceRecordUsage(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "recorded": true})
 }
 
-type serviceEndpointRevenueRequest struct {
+type ServiceEndpointRevenueRequest struct {
 	Resource string    `json:"resource" binding:"required"`
 	Currency string    `json:"currency"`
 	From     time.Time `json:"from" binding:"required"`
@@ -277,7 +277,7 @@ type serviceEndpointRevenueRequest struct {
 // the typed resource column) across all customers in the merchant (#410) — powers
 // host-four endpoint revenue analytics. Operator API key, credits:read.
 func ServiceResourceRevenue(r *httprequest.Request) {
-	var req serviceEndpointRevenueRequest
+	var req ServiceEndpointRevenueRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -306,7 +306,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 // window (#311) — the OpenRails-sourced data behind the host-four platform's
 // /budget-usage + revenue analytics. Operator API key, credits:read scope.
 func ServiceUsageRollup(r *httprequest.Request) {
-	var req serviceUsageRollupRequest
+	var req ServiceUsageRollupRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -342,7 +342,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 }
 
 func ServiceDepositCredits(r *httprequest.Request) {
-	var req serviceDepositRequest
+	var req ServiceDepositRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -407,7 +407,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 // source_id is the caller's REPRODUCIBLE idempotency key (the deposit's
 // structural identity — unique per (merchant, customer) in the database);
 // source is a descriptive label and deliberately NOT part of the key.
-type adminGrantCreditsRequest struct {
+type AdminGrantCreditsRequest struct {
 	Invoker     string     `json:"invoker"`
 	Currency    string     `json:"currency"`
 	Amount      int64      `json:"amount,string" binding:"required"`
@@ -428,7 +428,7 @@ func AdminGrantCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	var req adminGrantCreditsRequest
+	var req AdminGrantCreditsRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -542,7 +542,7 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "request_id required")
 		return
 	}
-	var req serviceCaptureRequest
+	var req ServiceCaptureRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -607,7 +607,7 @@ func ServiceReleaseHold(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"ok": true})
 }
 
-type serviceExtendHoldRequest struct {
+type ServiceExtendHoldRequest struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -618,7 +618,7 @@ func ServiceExtendHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "request_id required")
 		return
 	}
-	var req serviceExtendHoldRequest
+	var req ServiceExtendHoldRequest
 	if !r.BindJSON(&req) {
 		return
 	}
