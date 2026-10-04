@@ -43,6 +43,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
+  formatCard,
+  formatCardExpiry,
   formatDate,
   formatNativeAmount,
   nativeAmountFromInput,
@@ -68,6 +70,8 @@ export function CustomerDetailPage() {
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!profile)
     return <p className="text-sm text-muted-foreground">Customer not found.</p>
+  const payments = profile.payments ?? []
+  const methods = profile.payment_methods ?? []
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -185,7 +189,7 @@ export function CustomerDetailPage() {
               <CardTitle className="text-sm">Payments</CardTitle>
             </CardHeader>
             <CardContent>
-              {profile.payments.length === 0 ? (
+              {payments.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No payments.</p>
               ) : (
                 <Table>
@@ -201,6 +205,9 @@ export function CustomerDetailPage() {
                         Amount
                       </TableHead>
                       <TableHead className="text-muted-foreground">
+                        Kind
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
                         Rail
                       </TableHead>
                       <TableHead className="text-muted-foreground">
@@ -209,7 +216,7 @@ export function CustomerDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {profile.payments.map((p) => (
+                    {payments.map((p) => (
                       <LinkedTableRow key={p.id} to={`/payments/${p.id}`}>
                         <TableCell>
                           <Link
@@ -225,7 +232,8 @@ export function CustomerDetailPage() {
                         <TableCell className="tabular-nums">
                           {formatNativeAmount(p.amount, p.currency)}
                         </TableCell>
-                        <TableCell>{p.rail}</TableCell>
+                        <TableCell>{p.kind}</TableCell>
+                        <TableCell>{p.rail ?? p.channel}</TableCell>
                         <TableCell className="tabular-nums">
                           {formatDate(p.created_at)}
                         </TableCell>
@@ -253,26 +261,22 @@ export function CustomerDetailPage() {
               </Button>
             </CardHeader>
             <CardContent>
-              {profile.payment_methods.length === 0 ? (
+              {methods.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No payment methods on file.
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-3">
-                  {profile.payment_methods.map((pm) => (
+                  {methods.map((pm) => (
                     <div key={pm.id} className="rounded-md border p-3 text-sm">
-                      <p className="font-medium">
-                        {pm.card?.brand ?? pm.type} ••••{" "}
-                        {pm.card?.last4 ?? "????"}
-                      </p>
+                      <p className="font-medium">{formatCard(pm.card)}</p>
                       <p className="text-xs text-muted-foreground">
-                        {pm.rail} · exp {pm.card?.exp_month ?? "??"}/
-                        {pm.card?.exp_year ?? "????"}
+                        {pm.rail} · exp {formatCardExpiry(pm.card)}
                       </p>
                       <CollectionDefaultBadges
-                        currencies={pm.collection_default_currencies}
+                        currencies={pm.collection_currencies ?? []}
                       />
-                      {pm.health?.expiry_status &&
+                      {pm.health.expiry_status &&
                         pm.health.expiry_status !== "valid" && (
                           <Badge
                             variant="secondary"
@@ -791,9 +795,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
           ...(amount !== undefined ? { amount } : {}),
         })
         toast.success(
-          result.status === "exists"
-            ? "Payment already recorded"
-            : "Payment recorded"
+          result.recorded ? "Payment recorded" : "Payment already recorded"
         )
         handleOpenChange(false)
       } catch (err) {

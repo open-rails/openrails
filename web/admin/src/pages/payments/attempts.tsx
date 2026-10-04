@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
+import { CursorPager } from "@/components/cursor-pager"
 import { DataTable } from "@/components/data-table"
 import { Fact } from "@/components/fact-card"
 import { StatusBadge } from "@/components/status-badge"
@@ -19,8 +20,14 @@ import {
   type AttemptFilters,
   type CycleFilters,
 } from "@/lib/api/endpoints"
-import type { PaymentAttempt, RebillCycle } from "@/lib/api/types"
-import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
+import type { PaymentAttempt, RebillCycle } from "@/lib/api/generated/wire"
+import { useUrlCursor } from "@/hooks/use-cursor-paging"
+import {
+  formatCard,
+  formatDate,
+  formatNativeAmount,
+  shortId,
+} from "@/lib/format"
 import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
@@ -30,9 +37,6 @@ export function Outcome({ category }: { category: string }) {
     <StatusBadge status={category === "approved" ? "approved" : "declined"} />
   )
 }
-
-const card = (a: PaymentAttempt) =>
-  a.card_last4 ? `${a.card_brand ?? "card"} ·${a.card_last4}` : "—"
 
 const attemptColumns: ColumnDef<PaymentAttempt, unknown>[] = [
   {
@@ -65,7 +69,7 @@ const attemptColumns: ColumnDef<PaymentAttempt, unknown>[] = [
       ),
   },
   { header: "Owner", cell: ({ row }) => row.original.owner },
-  { header: "Card", cell: ({ row }) => card(row.original) },
+  { header: "Card", cell: ({ row }) => formatCard(row.original.card) },
   {
     header: "Amount",
     cell: ({ row }) =>
@@ -87,7 +91,7 @@ function FilterChips({ keys }: { keys: readonly string[] }) {
   const drop = (key?: string) => {
     const p = new URLSearchParams(params)
     for (const k of key ? [key] : active) p.delete(k)
-    p.delete("offset")
+    p.delete("cursor")
     setParams(p)
   }
   return (
@@ -117,25 +121,13 @@ function FilterChips({ keys }: { keys: readonly string[] }) {
   )
 }
 
-function usePaging() {
-  const [params, setParams] = useSearchParams()
-  return {
-    params,
-    offset: Number(params.get("offset") ?? 0),
-    setOffset: (next: number) => {
-      const p = new URLSearchParams(params)
-      p.set("offset", String(next))
-      setParams(p)
-    },
-  }
-}
-
 export function AttemptsPage() {
-  const { params, offset, setOffset } = usePaging()
+  const [params] = useSearchParams()
+  const paging = useUrlCursor()
   const navigate = useNavigate()
   const filters: AttemptFilters = filtersFrom(params, ATTEMPT_FILTERS)
-  const { data, isPending } = useQuery(
-    adminQueries.attempts(filters, PAGE, offset)
+  const { data, isPending, isFetching } = useQuery(
+    adminQueries.attempts(filters, PAGE, paging.cursor)
   )
   return (
     <div className="flex flex-col gap-4">
@@ -147,12 +139,13 @@ export function AttemptsPage() {
         columns={attemptColumns}
         data={data?.data ?? []}
         loading={isPending}
-        total={data?.total}
-        limit={data?.limit ?? PAGE}
-        offset={data?.offset ?? offset}
-        onPageChange={setOffset}
         onRowClick={(row) => navigate(`/payments/attempts/${row.id}`)}
         emptyMessage="No attempts match."
+      />
+      <CursorPager
+        pages={paging}
+        nextCursor={data?.next_cursor}
+        busy={isFetching}
       />
     </div>
   )
@@ -222,7 +215,7 @@ export function AttemptDetailPage() {
           {a.currency ? formatNativeAmount(a.amount, a.currency) : "—"}
         </Fact>
         <Fact label="Card">
-          {card(a)} ({a.card_entry})
+          {formatCard(a.card)} ({a.card_entry})
         </Fact>
         <Fact label="Customer">
           <To to={`/customers/${a.customer_id}`}>
@@ -259,7 +252,7 @@ export function AttemptDetailPage() {
         <Fact label="Checkout">
           {a.checkout_id ? (
             <To to={`/payments/attempts?checkout_id=${a.checkout_id}`}>
-              {`${a.checkout_target ?? "checkout"} attempts`}
+              {`${a.checkout_target || "checkout"} attempts`}
             </To>
           ) : (
             "—"
@@ -324,11 +317,12 @@ const cycleColumns: ColumnDef<RebillCycle, unknown>[] = [
 ]
 
 export function CyclesPage() {
-  const { params, offset, setOffset } = usePaging()
+  const [params] = useSearchParams()
+  const paging = useUrlCursor()
   const navigate = useNavigate()
   const filters: CycleFilters = filtersFrom(params, CYCLE_FILTERS)
-  const { data, isPending } = useQuery(
-    adminQueries.cycles(filters, PAGE, offset)
+  const { data, isPending, isFetching } = useQuery(
+    adminQueries.cycles(filters, PAGE, paging.cursor)
   )
   return (
     <div className="flex flex-col gap-4">
@@ -338,12 +332,13 @@ export function CyclesPage() {
         columns={cycleColumns}
         data={data?.data ?? []}
         loading={isPending}
-        total={data?.total}
-        limit={data?.limit ?? PAGE}
-        offset={data?.offset ?? offset}
-        onPageChange={setOffset}
         onRowClick={(row) => navigate(`/payments/cycles/${row.id}`)}
         emptyMessage="No rebill cycles match."
+      />
+      <CursorPager
+        pages={paging}
+        nextCursor={data?.next_cursor}
+        busy={isFetching}
       />
     </div>
   )

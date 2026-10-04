@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useParams } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
+import { CursorPager } from "@/components/cursor-pager"
 import { DataTable } from "@/components/data-table"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
@@ -17,13 +18,18 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { useCursorPages } from "@/lib/cursor-pages"
+import type { Invoice, InvoicePayment } from "@/lib/api/generated/wire"
+import type { InvoiceAction } from "@/lib/api/invoice-endpoints"
 import { invoiceQueries, invoiceActionMutation } from "@/lib/invoice-queries"
-import type {
-  InvoiceAction,
-  InvoicePayment,
-  MerchantInvoice,
-} from "@/lib/api/invoice-types"
-import { formatDate, formatUnits, shortId } from "@/lib/format"
+import { adminQueries } from "@/lib/queries"
+import {
+  currencyScale,
+  formatCard,
+  formatDate,
+  formatNativeAmount,
+  shortId,
+} from "@/lib/format"
 import {
   allowedInvoiceActions,
   invoiceActionDescriptions,
@@ -41,11 +47,7 @@ const historyColumns: ColumnDef<InvoicePayment, unknown>[] = [
   {
     header: "Amount",
     cell: ({ row }) =>
-      formatUnits(
-        row.original.amount,
-        row.original.currency,
-        row.original.unit_decimals
-      ),
+      formatNativeAmount(row.original.amount, row.original.currency),
   },
   {
     header: "Status",
@@ -54,7 +56,7 @@ const historyColumns: ColumnDef<InvoicePayment, unknown>[] = [
   { header: "Method", cell: ({ row }) => row.original.rail ?? "—" },
   {
     header: "Reference",
-    cell: ({ row }) => row.original.rail_payment_id ?? shortId(row.original.id),
+    cell: ({ row }) => row.original.transaction_id ?? shortId(row.original.id),
   },
   {
     header: "Failure",
@@ -79,8 +81,8 @@ export function InvoiceDetailPage() {
   if (!invoice) return <p>Invoice not found.</p>
   return <InvoiceDetail key={invoice.id} invoice={invoice} />
 }
-export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
-  const [offset, setOffset] = useState(0)
+export function InvoiceDetail({ invoice }: { invoice: Invoice }) {
+  const paging = useCursorPages(invoice.id)
   const [action, setAction] = useState<InvoiceAction | null>(null)
   const [amount, setAmount] = useState("")
   const [reference, setReference] = useState("")
@@ -91,9 +93,17 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
   const mutation = useMutation(
     invoiceActionMutation(client, invoice.customer_id)
   )
-  const history = useQuery(invoiceQueries.payments(invoice.id, 20, offset))
+  const history = useQuery(
+    invoiceQueries.payments(invoice.id, 20, paging.cursor)
+  )
+  // The retry picker offers the customer's saved cards, read on demand.
+  const methods = useQuery(
+    adminQueries.customerPaymentMethods(
+      action === "retry_collection" ? invoice.customer_id : undefined
+    )
+  )
   const actions = allowedInvoiceActions(invoice)
-  const pending = Boolean(invoice.collection_intent_id)
+  const operation = invoice.recovery?.operation
   async function submit() {
     if (!action || mutation.isPending) return
     setError(null)
@@ -106,26 +116,26 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
         throw new Error("Choose a saved payment method.")
       if (action === "record_payment" && !reference.trim())
         throw new Error("Enter the bank or payment reference.")
+      let paid: string | undefined
+      if (action === "record_payment") {
+        const scale = currencyScale(invoice.currency)
+        if (scale === undefined)
+          throw new Error(`${invoice.currency} is not a registered currency.`)
+        paid = invoicePaymentAmount(amount, invoice.amount_due, scale)
+      }
       const result = await mutation.mutateAsync({
         id: invoice.id,
         action,
-        amount:
-          action === "record_payment"
-            ? invoicePaymentAmount(
-                amount,
-                invoice.amount_due,
-                invoice.unit_decimals
-              )
-            : undefined,
+        amount: paid,
         reference: reference.trim(),
         paymentMethodId: paymentMethod,
         idempotencyKey: retryKey,
       })
       toast(invoiceResultMessage(result))
       if (
-        "attempt" in result &&
-        (result.attempt.status === "settled" ||
-          result.attempt.status === "failed")
+        "payment" in result &&
+        (result.payment.status === "settled" ||
+          result.payment.status === "failed")
       )
         setRetryKey(crypto.randomUUID())
       setAction(null)
@@ -164,7 +174,7 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
               <CardTitle>{label}</CardTitle>
             </CardHeader>
             <CardContent className="text-xl">
-              {formatUnits(value, invoice.currency, invoice.unit_decimals)}
+              {formatNativeAmount(value, invoice.currency)}
             </CardContent>
           </Card>
         ))}
@@ -229,7 +239,7 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
               </tr>
             </thead>
             <tbody>
-              {invoice.line_items.map((item, i) => (
+              {(invoice.line_items ?? []).map((item, i) => (
                 <tr key={i}>
                   <td className="py-2">
                     {item.event_type}
@@ -243,17 +253,13 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
                   </td>
                   <td>{item.count}</td>
                   <td className="text-right">
-                    {formatUnits(
-                      item.amount,
-                      invoice.currency,
-                      invoice.unit_decimals
-                    )}
+                    {formatNativeAmount(item.amount, invoice.currency)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!invoice.line_items.length && <p>No line items.</p>}
+          {!invoice.line_items?.length && <p>No line items.</p>}
         </CardContent>
       </Card>
       <Card>
@@ -271,10 +277,10 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
               {invoice.last_collection_failure_code.replaceAll("_", " ")}
             </p>
           )}
-          {pending && (
+          {operation && (
             <p role="status" className="text-sm">
-              Collection operation {invoice.collection_intent_id} is in progress
-              or unresolved. It must finish or be resolved with{" "}
+              Collection operation {operation.id} ({operation.status}) is in
+              progress or unresolved. It must finish or be resolved with{" "}
               <code>openrails intents resolve</code> before another support
               action.
             </p>
@@ -293,7 +299,7 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
               </Button>
             ))}
           </div>
-          {!actions.length && !pending && (
+          {!actions.length && !operation && (
             <p className="text-sm text-muted-foreground">
               No actions are available for your permissions and this invoice
               state.
@@ -311,16 +317,19 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
               {history.error.message}
             </p>
           ) : (
-            <DataTable
-              columns={historyColumns}
-              data={history.data?.items ?? []}
-              loading={history.isPending}
-              total={history.data?.total ?? 0}
-              limit={20}
-              offset={offset}
-              onPageChange={setOffset}
-              emptyMessage="No payment attempts recorded."
-            />
+            <>
+              <DataTable
+                columns={historyColumns}
+                data={history.data?.data ?? []}
+                loading={history.isPending}
+                emptyMessage="No payment attempts recorded."
+              />
+              <CursorPager
+                pages={paging}
+                nextCursor={history.data?.next_cursor}
+                busy={history.isFetching}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -367,11 +376,17 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
           )}
           {action === "retry_collection" && (
             <div>
-              {!invoice.payment_methods?.length && (
-                <p className="mb-2 text-sm">
-                  No saved payment methods. Add one on the customer page before
-                  retrying collection.
+              {methods.error ? (
+                <p role="alert" className="mb-2 text-destructive">
+                  {methods.error.message}
                 </p>
+              ) : (
+                methods.data?.length === 0 && (
+                  <p className="mb-2 text-sm">
+                    No saved payment methods. Add one on the customer page
+                    before retrying collection.
+                  </p>
+                )
               )}
               <Label htmlFor="invoice-payment-method">
                 Saved payment method
@@ -383,12 +398,12 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
                 onChange={(e) => setPaymentMethod(e.target.value)}
               >
                 <option value="">Choose a method</option>
-                {(invoice.payment_methods ?? []).map((method) => (
+                {(methods.data ?? []).map((method) => (
                   <option key={method.id} value={method.id}>
-                    {method.card_type ?? method.rail}{" "}
-                    {method.last_four
-                      ? `ending ${method.last_four}`
-                      : shortId(method.id)}
+                    {method.card?.last4
+                      ? formatCard(method.card)
+                      : shortId(method.id)}{" "}
+                    ({method.rail})
                   </option>
                 ))}
               </select>

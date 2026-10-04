@@ -211,7 +211,7 @@ describe("drill-down", () => {
     const params = new URL(url, "http://console").searchParams
     expect(url.startsWith("/payments/attempts?")).toBe(true)
     await client().fetchQuery(
-      adminQueries.attempts(filtersFrom(params, ATTEMPT_FILTERS), 50, 0)
+      adminQueries.attempts(filtersFrom(params, ATTEMPT_FILTERS), 50)
     )
     const sent = new URLSearchParams(requests.at(-1)!.query)
     expect(requests.at(-1)!.path).toBe("/merchant/payment-attempts")
@@ -224,7 +224,6 @@ describe("drill-down", () => {
       since: range.from,
       until: range.to,
       limit: "50",
-      offset: "0",
     })
   })
 
@@ -233,7 +232,7 @@ describe("drill-down", () => {
     const url = listURL("cycles", tile("recovery").listFilters, all, range)
     const params = new URL(url, "http://console").searchParams
     await client().fetchQuery(
-      adminQueries.cycles(filtersFrom(params, CYCLE_FILTERS), 50, 0)
+      adminQueries.cycles(filtersFrom(params, CYCLE_FILTERS), 50, "cursor-2")
     )
     expect(requests.at(-1)!.path).toBe("/merchant/rebill-cycles")
     expect(Object.fromEntries(new URLSearchParams(requests.at(-1)!.query)))
@@ -242,6 +241,7 @@ describe("drill-down", () => {
         outcome: "collected",
         due_since: range.from,
         due_until: range.to,
+        cursor: "cursor-2",
       })
   })
 

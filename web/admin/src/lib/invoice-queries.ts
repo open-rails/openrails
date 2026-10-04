@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   queryOptions,
   mutationOptions,
   type QueryClient,
@@ -6,7 +7,8 @@ import {
 import { selectedMerchant } from "./api/client"
 import { queryKeys } from "./queries"
 import * as invoiceAPI from "./api/invoice-endpoints"
-import type { InvoiceFilters, InvoiceProfile } from "./api/invoice-types"
+import type { InvoiceFilters } from "./api/invoice-endpoints"
+import type { InvoiceProfile } from "./api/generated/wire"
 
 export const invoiceKeys = {
   root: () =>
@@ -16,11 +18,12 @@ export const invoiceKeys = {
     [...queryKeys.customer(customerId), "invoice-profile"] as const,
 }
 export const invoiceQueries = {
-  list: (filters: InvoiceFilters, limit: number, offset: number) =>
+  list: (filters: InvoiceFilters, limit: number, cursor?: string) =>
     queryOptions({
-      queryKey: [...invoiceKeys.root(), "list", filters, limit, offset],
+      queryKey: [...invoiceKeys.root(), "list", filters, limit, cursor],
       queryFn: ({ signal }) =>
-        invoiceAPI.listInvoices(filters, limit, offset, signal),
+        invoiceAPI.listInvoices(filters, { limit, cursor }, signal),
+      placeholderData: keepPreviousData,
     }),
   detail: (id: string) =>
     queryOptions({
@@ -28,12 +31,13 @@ export const invoiceQueries = {
       queryFn: ({ signal }) => invoiceAPI.getInvoice(id, signal),
       enabled: !!id,
     }),
-  payments: (id: string, limit: number, offset: number) =>
+  payments: (id: string, limit: number, cursor?: string) =>
     queryOptions({
-      queryKey: [...invoiceKeys.detail(id), "payments", limit, offset],
+      queryKey: [...invoiceKeys.detail(id), "payments", limit, cursor],
       queryFn: ({ signal }) =>
-        invoiceAPI.listInvoicePayments(id, limit, offset, signal),
+        invoiceAPI.listInvoicePayments(id, { limit, cursor }, signal),
       enabled: !!id,
+      placeholderData: keepPreviousData,
     }),
   profile: (customerId: string) =>
     queryOptions({

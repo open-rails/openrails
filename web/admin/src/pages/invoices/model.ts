@@ -1,9 +1,9 @@
 import type {
-  InvoiceAction,
+  Invoice,
+  InvoiceCollection,
   InvoiceProfile,
-  InvoiceRetryResponse,
-  MerchantInvoice,
-} from "@/lib/api/invoice-types"
+} from "@/lib/api/generated/wire"
+import type { InvoiceAction } from "@/lib/api/invoice-endpoints"
 import { amountFromInput } from "@/lib/format"
 
 export const invoiceActionLabels: Record<InvoiceAction, string> = {
@@ -21,18 +21,16 @@ export const invoiceActionDescriptions: Record<InvoiceAction, string> = {
   retry_collection:
     "Retry the unpaid amount using the selected saved payment method. Uncertain or in-progress collections must finish reconciliation first.",
 }
-export function allowedInvoiceActions(invoice: MerchantInvoice) {
+export function allowedInvoiceActions(invoice: Invoice) {
   return invoice.available_actions ?? []
 }
-export function invoiceResultMessage(
-  result: MerchantInvoice | InvoiceRetryResponse
-) {
-  if ("attempt" in result) {
-    if (result.attempt.status === "settled")
+export function invoiceResultMessage(result: Invoice | InvoiceCollection) {
+  if ("payment" in result) {
+    if (result.payment.status === "settled")
       return result.replayed
         ? "Existing payment confirmed."
         : "Invoice payment collected."
-    if (result.attempt.status === "failed")
+    if (result.payment.status === "failed")
       return "Collection failed. Review the payment history before trying again."
     return "Collection is pending verification. No new collection should be started."
   }
@@ -48,10 +46,7 @@ export function invoicePaymentAmount(
     throw new Error(
       `Enter a positive amount with up to ${decimals} decimal places.`
     )
-  if (
-    BigInt(amount) <= 0n ||
-    BigInt(amount) > BigInt(amountDue)
-  )
+  if (BigInt(amount) <= 0n || BigInt(amount) > BigInt(amountDue))
     throw new Error(
       "Payment must be positive and no greater than the unpaid balance."
     )
@@ -76,7 +71,7 @@ export function invoiceProfileValues(
     po: profile?.po_number ?? "",
     memo: profile?.memo ?? "",
     contacts: (profile?.billing_contacts ?? []).map((c) => ({
-      name: c.name ?? "",
+      name: c.name,
       email: c.email,
     })),
     tax: Object.entries(profile?.tax ?? {}).map(([key, value]) => ({

@@ -10,6 +10,7 @@ import {
 import type { Guard } from "@openrails/auth-ui/react"
 
 import type { OpenRailsErrorCode } from "./generated/error-codes"
+import type { ListPage } from "./generated/wire"
 
 export interface BootstrapConfig {
   auth_base_url: string
@@ -145,7 +146,15 @@ function buildURL(base: string, path: string, query?: RequestOptions["query"]) {
   return url
 }
 
-async function send<T>(path: string, opts: RequestOptions): Promise<T> {
+export interface ApiResponse<T> {
+  status: number
+  body: T
+}
+
+async function send<T>(
+  path: string,
+  opts: RequestOptions
+): Promise<ApiResponse<T>> {
   if (!session) throw new Error("console session not bound")
   const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers["Content-Type"] = "application/json"
@@ -169,17 +178,22 @@ async function send<T>(path: string, opts: RequestOptions): Promise<T> {
     throw error
   }
   if (!res.ok) throw await parseError(res)
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  const body = res.status === 204 ? undefined : await res.json()
+  return { status: res.status, body: body as T }
 }
 
 // api calls the merchant API (api_base_url-relative path, e.g.
 // "/merchant/payments"). A write OpenRails refuses for a stale sign-in opens
 // auth-ui's step-up dialog and runs again once the user has confirmed.
-export async function api<T>(
+export const api = async <T>(path: string, opts: RequestOptions = {}) =>
+  (await apiResponse<T>(path, opts)).body
+
+// apiResponse is api with the success status, for routes whose 200 and 201
+// mean different things.
+export async function apiResponse<T>(
   path: string,
   opts: RequestOptions = {}
-): Promise<T> {
+): Promise<ApiResponse<T>> {
   const method = (opts.method ?? "GET").toUpperCase()
   if (method === "GET" || method === "HEAD") return send<T>(path, opts)
   let refusal: ApiError | undefined
@@ -203,7 +217,31 @@ export async function api<T>(
   }
 }
 
-// Standard list envelope used by most /v1/merchant list endpoints.
+// One cursor page request: cursor is the previous page's next_cursor.
+export interface PageRequest {
+  limit?: number
+  cursor?: string
+}
+
+// collectCursorPages walks a cursor list to its end.
+export async function collectCursorPages<T>(
+  loadPage: (cursor?: string) => Promise<ListPage<T>>,
+  signal?: AbortSignal
+): Promise<T[]> {
+  const rows: T[] = []
+  let cursor: string | undefined
+  for (;;) {
+    signal?.throwIfAborted()
+    const page = await loadPage(cursor)
+    rows.push(...page.data)
+    if (!page.next_cursor) return rows
+    if (page.next_cursor === cursor)
+      throw new Error("List paging stopped before all records were loaded")
+    cursor = page.next_cursor
+  }
+}
+
+// Offset envelope of the lists not yet on cursor pages.
 export interface ListEnvelope<T> {
   object: "list"
   data: T[]

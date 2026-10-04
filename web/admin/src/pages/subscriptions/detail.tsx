@@ -42,7 +42,12 @@ import {
 } from "@/components/ui/table"
 import type { SubscriptionReprice } from "@/lib/api/types"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
+import {
+  formatCard,
+  formatDate,
+  formatNativeAmount,
+  shortId,
+} from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
@@ -210,6 +215,7 @@ export function SubscriptionDetailPage() {
                   <TableHead className="text-muted-foreground">
                     Status
                   </TableHead>
+                  <TableHead className="text-muted-foreground">Kind</TableHead>
                   <TableHead className="text-muted-foreground">
                     Amount
                   </TableHead>
@@ -232,6 +238,7 @@ export function SubscriptionDetailPage() {
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
+                    <TableCell>{p.kind}</TableCell>
                     <TableCell>
                       {formatNativeAmount(p.amount, p.currency)}
                     </TableCell>
@@ -449,12 +456,11 @@ function ChangePaymentMethodDialog({
                     <SelectValue placeholder="Pick a stored payment method" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(pms?.data ?? [])
+                    {(pms ?? [])
                       .filter((pm) => pm.rail === rail)
                       .map((pm) => (
                         <SelectItem key={pm.id} value={pm.id}>
-                          {pm.card?.brand ?? pm.type} ••••{" "}
-                          {pm.card?.last4 ?? "????"} ({pm.rail})
+                          {formatCard(pm.card)} ({pm.rail})
                         </SelectItem>
                       ))}
                   </SelectContent>

@@ -2,13 +2,13 @@
 // from the server, and the amounts it shows.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { InvoiceProfile, InvoiceRetryResponse, MerchantInvoice } from "@/lib/api/invoice-types"
+import type { Invoice, InvoiceCollection, InvoiceProfile } from "@/lib/api/generated/wire"
 import {
   invoiceActionMutation, invoiceKeys, invoiceProfileMutation, invoiceQueries,
 } from "@/lib/invoice-queries"
 import { queryKeys } from "@/lib/queries"
 import {
-  calls, client, exec, MAX_INT64, render, selectMerchant, server,
+  anInvoice, calls, client, exec, MAX_INT64, render, selectMerchant, server,
   type Recorded, type Reply,
 } from "@/test/harness"
 import { InvoiceProfileEditor } from "../customers/invoice-profile"
@@ -17,17 +17,17 @@ import {
   allowedInvoiceActions, invoiceProfileRequest, invoiceProfileValues, invoiceResultMessage,
 } from "./model"
 
-const invoice = (
-  actions: MerchantInvoice["available_actions"],
-  overrides: Partial<MerchantInvoice> = {}
-): MerchantInvoice => ({
-  id: "invoice-1", customer_id: "customer-1", currency: "JPY", unit_decimals: 4,
-  invoice_number: "INV-1", status: "open", period_from: "2026-09-01T00:00:00Z",
-  period_to: "2026-10-01T00:00:00Z", total_amount: "120000", subtotal_amount: "120000",
-  amount_paid: "20000", amount_due: "100000", collection_method: "send_invoice",
-  collection_failure_count: 0, available_actions: actions,
-  line_items: [{ event_type: "usage", amount: "120000", count: 1 }],
-  ...overrides,
+const invoice = (actions: Invoice["available_actions"], overrides: Partial<Invoice> = {}) =>
+  anInvoice("invoice-1", {
+    customer_id: "customer-1", currency: "JPY", invoice_number: "INV-1",
+    total_amount: "120000", subtotal_amount: "120000", amount_paid: "20000", amount_due: "100000",
+    collection_method: "send_invoice", available_actions: actions,
+    line_items: [{ event_type: "usage", amount: "120000", count: 1, dimensions: null }],
+    ...overrides,
+  })
+const profile = (overrides: Partial<InvoiceProfile> = {}): InvoiceProfile => ({
+  net_terms_days: 30, collection_method: "send_invoice", po_number: "", tax: null,
+  billing_contacts: null, memo: "", ...overrides,
 })
 
 let requests: Recorded[]
@@ -61,8 +61,21 @@ describe("invoice requests and cache", () => {
 
   it("leaves filtering and paging to the server", async () => {
     const queries = client()
-    await queries.fetchQuery(invoiceQueries.list({ currency: "JPY", status: "past_due" }, 25, 50))
-    expect(requests[0].query).toBe("currency=JPY&status=past_due&limit=25&offset=50")
+    await queries.fetchQuery(invoiceQueries.list({ currency: "JPY", status: "past_due" }, 25, "cur_2"))
+    await queries.fetchQuery(invoiceQueries.payments("invoice-1", 20, "cur_3"))
+    expect(requests.map((r) => r.query)).toEqual([
+      "currency=JPY&status=past_due&limit=25&cursor=cur_2", "limit=20&cursor=cur_3",
+    ])
+  })
+
+  it("reads a customer without a profile as none, and any other failure as one", async () => {
+    const queries = client()
+    routes["/merchant/customers/customer-1/invoice-profile"] = () =>
+      Response.json({ error: { code: "resource_not_found", message: "no profile" } }, { status: 404 })
+    expect(await queries.fetchQuery(invoiceQueries.profile("customer-1"))).toBeNull()
+    routes["/merchant/customers/customer-2/invoice-profile"] = () =>
+      Response.json({ error: { code: "service_unavailable", message: "down" } }, { status: 503 })
+    await expect(queries.fetchQuery(invoiceQueries.profile("customer-2"))).rejects.toThrow("down")
   })
 
   it("refreshes the merchant that started an action, even when it fails", async () => {
@@ -83,9 +96,7 @@ describe("invoice requests and cache", () => {
     const queries = client()
     const invoiceKey = invoiceKeys.detail("invoice-1")
     queries.setQueryData(invoiceKey, { po_number: "OLD" })
-    await exec(queries, invoiceProfileMutation(queries, "customer-1"), {
-      net_terms_days: 7, collection_method: "send_invoice", po_number: "NEW",
-    } as InvoiceProfile)
+    await exec(queries, invoiceProfileMutation(queries, "customer-1"), profile({ net_terms_days: 7, po_number: "NEW" }))
     expect(calls(requests)).toEqual(["PUT /merchant/customers/customer-1/invoice-profile"])
     expect(queries.getQueryData(invoiceKey)).toEqual({ po_number: "OLD" })
   })
@@ -93,11 +104,10 @@ describe("invoice requests and cache", () => {
 
 describe("invoice support model", () => {
   it("preserves profile tax facts and validates terms and contacts", () => {
-    const original: InvoiceProfile = {
-      net_terms_days: 30, collection_method: "send_invoice", po_number: " PO-1 ",
-      billing_contacts: [{ email: "ap@example.test" }],
+    const original = profile({
+      po_number: " PO-1 ", billing_contacts: [{ name: "", email: "ap@example.test" }],
       tax: { tax_id: "VAT-1", registration: { country: "GB" }, rate: 0.2 },
-    }
+    })
     const values = invoiceProfileValues(original)
     expect(invoiceProfileRequest(values, original)).toMatchObject({
       net_terms_days: 30, po_number: "PO-1", tax: original.tax,
@@ -112,17 +122,19 @@ describe("invoice support model", () => {
 
   it("takes the offered actions from the server, not from role names", () => {
     const actions = (available: string[]) =>
-      allowedInvoiceActions({ available_actions: available } as unknown as MerchantInvoice)
+      allowedInvoiceActions({ available_actions: available } as unknown as Invoice)
     expect(actions([])).toEqual([])
+    expect(allowedInvoiceActions(invoice(null))).toEqual([])
     expect(actions(["void"])).toEqual(["void"])
   })
 
   it("never describes a failed or uncertain collection as paid", () => {
     const result = (status: string, replayed = false) =>
-      ({ attempt: { status }, replayed }) as unknown as InvoiceRetryResponse
+      ({ payment: { status }, replayed }) as unknown as InvoiceCollection
     expect(invoiceResultMessage(result("failed"))).toContain("failed")
     expect(invoiceResultMessage(result("attempted"))).toContain("pending verification")
     expect(invoiceResultMessage(result("settled", true))).toBe("Existing payment confirmed.")
+    expect(invoiceResultMessage(invoice([]))).toBe("Invoice updated.")
   })
 })
 
@@ -141,10 +153,10 @@ describe("invoice rendering", () => {
     const html = render(
       <InvoiceDetail
         invoice={invoice(["void", "record_payment"], {
-          currency: "USD", unit_decimals: 6,
+          currency: "USD",
           total_amount: MAX_INT64, subtotal_amount: MAX_INT64,
           amount_paid: "9007199254740993", amount_due: "9214364837600034814",
-          line_items: [{ event_type: "usage", amount: MAX_INT64, count: 1 }],
+          line_items: [{ event_type: "usage", amount: MAX_INT64, count: 1, dimensions: null }],
         })}
       />
     )
@@ -157,16 +169,20 @@ describe("invoice rendering", () => {
     expect(html).not.toContain("Retry collection")
   })
 
-  it("makes a read-only profile inspectable without a save control", () => {
+  it("shows an unresolved collection operation instead of offering actions", () => {
     const html = render(
-      <InvoiceProfileEditor
-        customerId="customer-1"
-        canUpdate={false}
-        profile={{ net_terms_days: 30, collection_method: "send_invoice", po_number: "PO-1" }}
-      />
+      <InvoiceDetail invoice={invoice([], { recovery: { retryable: false, blocked_reason: "payment_in_progress", operation: { id: "op_1", status: "pending" } } })} />
     )
-    expect(html).toContain("PO-1")
-    expect(html).toContain("disabled")
-    expect(html).not.toContain("Save invoice profile")
+    expect(html).toContain("Collection operation op_1 (pending)")
+    expect(html).not.toContain("No actions are available")
+  })
+
+  it("edits a stored profile, and an empty one when the customer has none", () => {
+    const stored = render(<InvoiceProfileEditor customerId="customer-1" profile={profile({ po_number: "PO-1" })} />)
+    expect(stored).toContain("PO-1")
+    expect(stored).toContain("Save invoice profile")
+    const empty = render(<InvoiceProfileEditor customerId="customer-1" profile={null} />)
+    expect(empty).toContain('value="0"')
+    expect(empty).toContain("Save invoice profile")
   })
 })

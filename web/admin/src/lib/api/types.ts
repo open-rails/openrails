@@ -2,10 +2,20 @@
 // Money is native units at the currency registry scale; exact wires send int64
 // decimal strings (docs/money-wire.md).
 
-import type { Balance, Customer } from "./generated/wire"
+import type {
+  Balance,
+  Customer,
+  Payment,
+  PaymentMethod,
+} from "./generated/wire"
 
 export type SubscriptionStatus =
-  "pending" | "active" | "past_due" | "awaiting_method" | "unverified" | "cancelled"
+  | "pending"
+  | "active"
+  | "past_due"
+  | "awaiting_method"
+  | "unverified"
+  | "cancelled"
 export type Rail = "nmi" | "ccbill" | "solana" | "stripe" | string
 
 // --- Shared Client DTOs (subscription and profile endpoints) ---
@@ -84,33 +94,6 @@ export interface RawProductAccessGrant {
   revoke_reason?: string
 }
 
-export interface PaymentMethodResponse {
-  collection_default_currencies?: string[]
-  id: string // pm_...
-  object: "payment_method"
-  type: string
-  rail: Rail
-  card?: {
-    brand?: string
-    last4?: string
-    exp_month?: number
-    exp_year?: number
-  }
-  created_at: string
-  health?: {
-    expiry_status?: "valid" | "expiring_soon" | "expired"
-    last_charged_at?: string
-    last_charge_outcome?: string
-    active: boolean
-  }
-  subscriptions?: {
-    id: string
-    display_name: string
-    description: string
-    created_at: string
-  }[]
-}
-
 // CustomerBillingProfile composes the shared Client DTOs each dedicated
 // route serves (subscriptions, payments, entitlements, product access).
 export interface CustomerBillingProfile {
@@ -118,96 +101,16 @@ export interface CustomerBillingProfile {
   balances: Balance[]
   subscriptions: AdminSubscription[]
   entitlements: RawEntitlement[]
-  payments: PaymentObject[]
-  payment_methods: PaymentMethodResponse[]
+  payments: Payment[] | null
+  payment_methods: PaymentMethod[] | null
   product_access: RawProductAccessGrant[]
-}
-
-// --- Stripe-shaped payment object (payments endpoints) ---
-
-export interface PaymentObject {
-  id: string // pay_...
-  object: "charge" | "refund"
-  status?:
-    "succeeded" | "pending" | "failed" | "refunded" | "partially_refunded"
-  amount: string
-  amount_refunded: string
-  currency: string
-  customer_id: string // plain UUID
-  subscription_id?: string // sub_...
-  rail: Rail
-  transaction_id: string
-  refunded: boolean
-  captured?: boolean
-  refunds?: { object: "list"; data: PaymentObject[] }
-  created_at: string
-}
-
-// --- Payment attempts and rebill cycles (#1116) ---
-
-export interface PaymentAttempt {
-  id: string // att_...
-  object: "payment_attempt"
-  kind: string
-  owner: string
-  card_entry: string
-  source: string
-  observed_via: string
-  category: string
-  reason?: string
-  action?: string
-  response_code?: string
-  response_text?: string
-  issuer_code?: string
-  issuer_text?: string
-  avs_result?: string
-  cvv_result?: string
-  card_brand?: string
-  card_last4?: string
-  card_bin?: string
-  token_type?: string
-  transaction_id?: string
-  rail: Rail
-  psp_id: string // plain UUID
-  customer_id: string // plain UUID
-  amount: string // native units
-  currency?: string
-  attempted_at: string
-  checkout_id?: string
-  checkout_target?: string
-  cycle_id?: string // cyc_...
-  subscription_id?: string // sub_...
-  payment_method_id?: string // pm_...
-  payment_id?: string // pay_...
-  enriched_at?: string
-}
-
-export interface RebillCycle {
-  id: string // cyc_...
-  object: "rebill_cycle"
-  subscription_id: string // sub_...
-  customer_id: string
-  psp_id: string
-  rail: Rail
-  owner: string
-  due_at: string
-  amount: string
-  currency: string
-  first_outcome: string
-  outcome: "collected" | "lost" | "open"
-  missed_at?: string
-  miss_reason?: string
-  collected_at?: string
-  recovered_by?: string
-  closes_at: string
-  attempts?: PaymentAttempt[]
 }
 
 // --- Subscription admin response (list/detail) ---
 
 export interface AdminSubscription extends RawSubscription {
   // Recovery history: the same Payment shape the payments endpoints serve.
-  payments?: PaymentObject[]
+  payments?: Payment[]
 }
 
 export interface TierChangePreview {

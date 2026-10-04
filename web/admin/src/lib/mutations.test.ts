@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { adminMutations as M } from "@/lib/mutations"
 import { queryKeys } from "@/lib/queries"
 import {
-  calls, client, exec, invalidated, MAX_INT64, seedCache, selectMerchant,
+  aPayment, calls, client, cursorPages, exec, invalidated, MAX_INT64, seedCache, selectMerchant,
   server, type Recorded, type Reply,
 } from "@/test/harness"
 
@@ -222,6 +222,28 @@ it("walks every export page, stops on an empty one, and looks one customer up", 
     "status=past_due&limit=200&offset=0", "status=past_due&limit=200&offset=200",
     "q=a%40example.test&limit=1",
   ])
+})
+
+it("exports every payment by cursor, under the list's filters", async () => {
+  const queryClient = client()
+  selectMerchant("merchant-a")
+  routes["/merchant/payments"] = cursorPages(["pay_1", "pay_2", "pay_3"].map((id) => aPayment(id)), 2)
+  const rows = await exec(queryClient, M.exportPayments(), { kind: "refund", rail: "nmi" })
+  expect(rows.map((row) => row.id)).toEqual(["pay_1", "pay_2", "pay_3"])
+  expect(requests.map((request) => request.query)).toEqual([
+    "kind=refund&rail=nmi&limit=200", "kind=refund&rail=nmi&limit=200&cursor=2",
+  ])
+})
+
+it("tells a new off-channel payment from one already recorded", async () => {
+  const queryClient = client()
+  selectMerchant("merchant-a")
+  const recorded = aPayment("pay_1", { channel: "manual", rail: null, psp_id: null })
+  for (const [status, isNew] of [[201, true], [200, false]] as const) {
+    routes["POST /merchant/customers/cus_1/payments/off-channel"] = () => Response.json(recorded, { status })
+    expect(await exec(queryClient, M.recordCustomerOffChannelPayment(queryClient, "cus_1"), offChannel))
+      .toEqual({ payment: recorded, recorded: isNew })
+  }
 })
 
 describe("price change", () => {

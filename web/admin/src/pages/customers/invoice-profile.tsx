@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { invoiceQueries, invoiceProfileMutation } from "@/lib/invoice-queries"
-import type { InvoiceProfile } from "@/lib/api/invoice-types"
+import type { InvoiceProfile } from "@/lib/api/generated/wire"
 import {
   invoiceProfileValues,
   invoiceProfileRequest,
@@ -38,27 +38,23 @@ export function CustomerInvoiceProfileSection({
             {query.error.message}
           </p>
         ) : (
-          query.data && (
-            <InvoiceProfileEditor
-              key={customerId}
-              customerId={customerId}
-              profile={query.data.profile}
-              canUpdate={query.data.can_update}
-            />
-          )
+          <InvoiceProfileEditor
+            key={customerId}
+            customerId={customerId}
+            profile={query.data}
+          />
         )}
       </CardContent>
     </Card>
   )
 }
+// A customer without a profile edits an empty one; saving creates it.
 export function InvoiceProfileEditor({
   customerId,
   profile,
-  canUpdate,
 }: {
   customerId: string
   profile: InvoiceProfile | null
-  canUpdate: boolean
 }) {
   const [values, setValues] = useState(() => invoiceProfileValues(profile))
   const [error, setError] = useState<string | null>(null)
@@ -88,17 +84,14 @@ export function InvoiceProfileEditor({
       className="mt-4 space-y-4"
       onSubmit={(event) => {
         event.preventDefault()
-        if (canUpdate && !mutation.isPending) void save()
+        if (!mutation.isPending) void save()
       }}
     >
       <p className="text-sm text-muted-foreground">
         Terms and billing facts for future invoices. Issued invoices keep their
         original snapshots. Tax details are recorded; no tax is calculated.
       </p>
-      <fieldset
-        disabled={!canUpdate || mutation.isPending}
-        className="space-y-4"
-      >
+      <fieldset disabled={mutation.isPending} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor="invoice-profile-terms">Payment terms (days)</Label>
@@ -187,19 +180,17 @@ export function InvoiceProfileEditor({
               </Button>
             </div>
           ))}
-          {canUpdate && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                update({
-                  contacts: [...values.contacts, { name: "", email: "" }],
-                })
-              }
-            >
-              Add contact
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              update({
+                contacts: [...values.contacts, { name: "", email: "" }],
+              })
+            }
+          >
+            Add contact
+          </Button>
         </div>
         <div className="space-y-2">
           <p className="text-sm font-medium">Tax details</p>
@@ -241,17 +232,15 @@ export function InvoiceProfileEditor({
               </Button>
             </div>
           ))}
-          {canUpdate && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                update({ tax: [...values.tax, { key: "", value: "" }] })
-              }
-            >
-              Add tax detail
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              update({ tax: [...values.tax, { key: "", value: "" }] })
+            }
+          >
+            Add tax detail
+          </Button>
         </div>
       </fieldset>
       {error && (
@@ -264,11 +253,9 @@ export function InvoiceProfileEditor({
           Invoice profile saved. Issued invoices were not changed.
         </p>
       )}
-      {canUpdate && (
-        <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? "Saving…" : "Save invoice profile"}
-        </Button>
-      )}
+      <Button type="submit" disabled={mutation.isPending}>
+        {mutation.isPending ? "Saving…" : "Save invoice profile"}
+      </Button>
     </form>
   )
 }

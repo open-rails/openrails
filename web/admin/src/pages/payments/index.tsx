@@ -10,6 +10,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 
+import { CursorPager } from "@/components/cursor-pager"
 import { DataTable } from "@/components/data-table"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
@@ -22,7 +23,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { PaymentObject } from "@/lib/api/types"
+import type { PaymentFilters } from "@/lib/api/endpoints"
+import type { Payment } from "@/lib/api/generated/wire"
+import { useUrlCursor } from "@/hooks/use-cursor-paging"
 import {
   currencyScale,
   formatNativeAmount,
@@ -36,8 +39,14 @@ import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
+const KINDS = [
+  ["", "All"],
+  ["charge", "Charges"],
+  ["refund", "Refunds"],
+  ["chargeback", "Chargebacks"],
+] as const
 
-const columns: ColumnDef<PaymentObject, unknown>[] = [
+const columns: ColumnDef<Payment, unknown>[] = [
   {
     header: "Amount",
     cell: ({ row }) => (
@@ -50,8 +59,12 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     header: "Status",
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
-  { header: "Type", cell: ({ row }) => row.original.object },
-  { header: "Rail", cell: ({ row }) => row.original.rail },
+  { header: "Kind", cell: ({ row }) => row.original.kind },
+  // Off-rail payments name their channel instead.
+  {
+    header: "Rail",
+    cell: ({ row }) => row.original.rail ?? row.original.channel,
+  },
   {
     header: "Payment",
     cell: ({ row }) => (
@@ -63,7 +76,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
   {
     header: "Refunded",
     cell: ({ row }) =>
-      row.original.amount_refunded ? (
+      row.original.amount_refunded !== "0" ? (
         <span className="text-muted-foreground tabular-nums">
           {formatNativeAmount(
             row.original.amount_refunded,
@@ -102,29 +115,31 @@ function csvEscape(v: unknown): string {
 export function PaymentsPage() {
   const [params, setParams] = useSearchParams()
   const rail = params.get("rail") ?? ""
-  const view = params.get("view") ?? ""
+  const kind = (params.get("kind") ?? "") as Payment["kind"] | ""
   const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
-  const offset = Number(params.get("offset") ?? 0)
+  const paging = useUrlCursor()
   const [input, setInput] = React.useState("")
   const navigate = useNavigate()
   const customerLookup = useMutation(adminMutations.findCustomer())
   const exportPayments = useMutation(adminMutations.exportPayments())
 
-  const filters = {
+  const filters: PaymentFilters = {
     rail: rail || undefined,
-    refunds_only: view === "refunds" ? true : undefined,
+    kind: kind || undefined,
     customer_id: userId || undefined,
   }
-  const { data, isPending: loading } = useQuery(
-    adminQueries.payments(filters, PAGE, offset)
-  )
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+  } = useQuery(adminQueries.payments(filters, PAGE, paging.cursor))
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
     if (value) p.set(key, value)
     else p.delete(key)
-    p.delete("offset")
+    p.delete("cursor")
     setParams(p)
   }
 
@@ -142,7 +157,7 @@ export function PaymentsPage() {
       const p = new URLSearchParams(params)
       p.set("customer_id", c.id)
       p.set("customer", c.email || shortId(c.id, 13))
-      p.delete("offset")
+      p.delete("cursor")
       setParams(p)
       setInput("")
     } catch (err) {
@@ -154,7 +169,7 @@ export function PaymentsPage() {
     const p = new URLSearchParams(params)
     p.delete("customer_id")
     p.delete("customer")
-    p.delete("offset")
+    p.delete("cursor")
     setParams(p)
   }
 
@@ -164,8 +179,9 @@ export function PaymentsPage() {
       const csv = [
         [
           "id",
-          "type",
+          "kind",
           "status",
+          "channel",
           "amount",
           "amount_refunded",
           "currency",
@@ -177,8 +193,9 @@ export function PaymentsPage() {
         ...rows.map((r) =>
           [
             r.id,
-            r.object,
+            r.kind,
             r.status,
+            r.channel,
             csvAmount(r.amount, r.currency),
             csvAmount(r.amount_refunded, r.currency),
             r.currency,
@@ -252,9 +269,7 @@ export function PaymentsPage() {
           <Button
             size="sm"
             onClick={exportCsv}
-            disabled={
-              exportPayments.isPending || loading || (data?.total ?? 0) === 0
-            }
+            disabled={exportPayments.isPending || loading || !data?.data.length}
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
             {exportPayments.isPending ? "Exporting…" : "Export CSV"}
@@ -262,23 +277,20 @@ export function PaymentsPage() {
         </div>
       </div>
 
-      <Tabs value={view} onValueChange={(v) => setParam("view", v ?? "")}>
+      <Tabs value={kind} onValueChange={(v) => setParam("kind", v ?? "")}>
         <TabsList
           variant="line"
           className="w-full justify-start gap-6 rounded-none p-0"
         >
-          <TabsTrigger
-            value=""
-            className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
-          >
-            All
-          </TabsTrigger>
-          <TabsTrigger
-            value="refunds"
-            className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
-          >
-            Refunds
-          </TabsTrigger>
+          {KINDS.map(([value, label]) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+            >
+              {label}
+            </TabsTrigger>
+          ))}
         </TabsList>
       </Tabs>
 
@@ -304,16 +316,13 @@ export function PaymentsPage() {
         columns={columns}
         data={data?.data ?? []}
         loading={loading}
-        total={data?.total}
-        limit={data?.limit ?? PAGE}
-        offset={data?.offset ?? offset}
-        onPageChange={(next) => {
-          const p = new URLSearchParams(params)
-          p.set("offset", String(next))
-          setParams(p)
-        }}
         onRowClick={(row) => navigate(`/payments/${row.id}`)}
         emptyMessage="No payments match."
+      />
+      <CursorPager
+        pages={paging}
+        nextCursor={data?.next_cursor}
+        busy={isFetching}
       />
     </div>
   )

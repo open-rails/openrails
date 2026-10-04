@@ -1,4 +1,4 @@
-import { selectedMerchant } from "@/lib/api/client"
+import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
 import {
@@ -57,7 +57,6 @@ import {
   revokeTeamInvite,
   setCreditLimit,
   updateProduct,
-  type OffChannelPaymentRequest,
   type DefaultUsageRateCardRequest,
   type CustomerUsageRateOverrideRequest,
   type PaymentFilters,
@@ -75,11 +74,13 @@ import {
   putDashboard,
   type Widget,
 } from "@/lib/api/metrics"
-import type { Customer } from "@/lib/api/generated/wire"
+import type {
+  CreateOffChannelPaymentParams,
+  Customer,
+} from "@/lib/api/generated/wire"
 import type {
   MerchantSettings,
   MerchantNotification,
-  PaymentObject,
   AdminSubscription,
 } from "@/lib/api/types"
 import { merchantQueryKeys } from "@/lib/queries"
@@ -113,7 +114,7 @@ const collectAllCursorPages = async <T>(
   ) => Promise<{ data: T[]; next_cursor: string | null }>
 ) => {
   const rows: T[] = []
-  for (let cursor = ""; ; ) {
+  for (let cursor = ""; ;) {
     const page = await listPage(EXPORT_PAGE, cursor)
     rows.push(...page.data)
     if (!page.next_cursor) return rows
@@ -275,8 +276,8 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...paymentsKey, "export"],
       mutationFn: (filters: PaymentFilters) =>
-        collectAllPages<PaymentObject>((limit, offset) =>
-          listPayments(filters, limit, offset)
+        collectCursorPages((cursor) =>
+          listPayments(filters, { limit: EXPORT_PAGE, cursor })
         ),
     })
   },
@@ -521,7 +522,7 @@ export const adminMutations = {
     const paymentsKey = keys.payments()
     return mutationOptions({
       mutationKey: [...customerKey, "payments", "off-channel"],
-      mutationFn: (payment: OffChannelPaymentRequest) =>
+      mutationFn: (payment: CreateOffChannelPaymentParams) =>
         createOffChannelPayment(customerId, payment),
       onSuccess: () =>
         Promise.all([
@@ -814,7 +815,10 @@ export const adminMutations = {
         rail: string
         provider: UpsertProviderRequest
       }) => {
-        if (selectedMerchant() !== merchant) throw new Error("Merchant changed; reopen this provider form before saving")
+        if (selectedMerchant() !== merchant)
+          throw new Error(
+            "Merchant changed; reopen this provider form before saving"
+          )
         return putPaymentProvider(rail, provider)
       },
       onSuccess: invalidateExactOnSuccess(queryClient, [

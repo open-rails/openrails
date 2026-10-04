@@ -1,9 +1,12 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 
-import { selectedMerchant, type ItemsEnvelope } from "@/lib/api/client"
+import {
+  collectCursorPages,
+  selectedMerchant,
+  type ItemsEnvelope,
+} from "@/lib/api/client"
 import {
   getCatalogRevision,
-  getCustomerPaymentMethods,
   getCustomerProfile,
   getMerchantSettings,
   getPayment,
@@ -18,6 +21,7 @@ import {
   dryRunCheckoutRouting,
   listApiKeys,
   listCatalogDrift,
+  listCustomerPaymentMethods,
   listCustomers,
   listCustomerUsageRateOverrides,
   listFindings,
@@ -183,19 +187,29 @@ export const adminQueries = {
         ),
       enabled: Boolean(id),
     }),
+  // Every saved method: pickers must offer all of them.
   customerPaymentMethods: (customerId?: string) =>
     queryOptions({
       queryKey: [
         ...queryKeys.customer(customerId ?? "unselected"),
         "payment-methods",
       ],
-      queryFn: ({ signal }) => getCustomerPaymentMethods(customerId!, signal),
+      queryFn: ({ signal }) =>
+        collectCursorPages(
+          (cursor) =>
+            listCustomerPaymentMethods(
+              customerId!,
+              { limit: 100, cursor },
+              signal
+            ),
+          signal
+        ),
       enabled: Boolean(customerId),
     }),
-  payments: (filters: PaymentFilters, limit: number, offset: number) =>
+  payments: (filters: PaymentFilters, limit: number, cursor?: string) =>
     queryOptions({
-      queryKey: [...queryKeys.payments(), { filters, limit, offset }],
-      queryFn: ({ signal }) => listPayments(filters, limit, offset, signal),
+      queryKey: [...queryKeys.payments(), { filters, limit, cursor }],
+      queryFn: ({ signal }) => listPayments(filters, { limit, cursor }, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load payments" },
     }),
@@ -206,11 +220,11 @@ export const adminQueries = {
       enabled: Boolean(id),
       meta: { errorAction: "Load payment" },
     }),
-  attempts: (filters: AttemptFilters, limit: number, offset: number) =>
+  attempts: (filters: AttemptFilters, limit: number, cursor?: string) =>
     queryOptions({
-      queryKey: [...queryKeys.attempts(), { filters, limit, offset }],
+      queryKey: [...queryKeys.attempts(), { filters, limit, cursor }],
       queryFn: ({ signal }) =>
-        listPaymentAttempts(filters, limit, offset, signal),
+        listPaymentAttempts(filters, { limit, cursor }, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load payment attempts" },
     }),
@@ -221,10 +235,11 @@ export const adminQueries = {
       enabled: Boolean(id),
       meta: { errorAction: "Load payment attempt" },
     }),
-  cycles: (filters: CycleFilters, limit: number, offset: number) =>
+  cycles: (filters: CycleFilters, limit: number, cursor?: string) =>
     queryOptions({
-      queryKey: [...queryKeys.cycles(), { filters, limit, offset }],
-      queryFn: ({ signal }) => listRebillCycles(filters, limit, offset, signal),
+      queryKey: [...queryKeys.cycles(), { filters, limit, cursor }],
+      queryFn: ({ signal }) =>
+        listRebillCycles(filters, { limit, cursor }, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load rebill cycles" },
     }),
