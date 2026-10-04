@@ -5,16 +5,26 @@ import { OPENRAILS_CURRENCY_SCALES } from "./generated/openrails-routes"
 import {
   billingStatusSchema,
   cardSetupSchema,
+  currencyRegistrySchema,
   paymentAuthenticationSchema,
   invoicePageSchema,
   invoiceSchema,
   pageSchema,
   paymentMethodSchema,
   paymentSchema,
+  priceSchema,
+  productSchema,
   solanaCancelTxSchema,
+  solanaConfigSchema,
+  solanaTierChangeSchema,
+  solanaTierChangeTxSchema,
+  solanaTokensSchema,
   subscriptionSchema,
+  tierChangePreviewSchema,
+  tierChangeSchema,
   type BillingStatus,
   type CardSetup,
+  type Currency,
   type PaymentAuthentication,
   type CurrencyScales,
   type Invoice,
@@ -22,7 +32,15 @@ import {
   type Page,
   type Payment,
   type PaymentMethod,
+  type Price,
+  type Product,
+  type SolanaConfig,
+  type SolanaTierChange,
+  type SolanaTierChangeTx,
+  type SolanaToken,
   type Subscription,
+  type TierChange,
+  type TierChangePreview,
 } from "./types"
 
 export interface BillingClientOptions {
@@ -215,6 +233,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   const subscriptionPage = pageSchema(subscriptionSchema)
   const methodPage = pageSchema(paymentMethodSchema)
   const paymentPage = pageSchema(paymentSchema)
+  const productPage = pageSchema(productSchema)
+  const pricePage = pageSchema(priceSchema)
 
   return {
     baseUrl: base,
@@ -276,6 +296,74 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         method: "PUT",
         body: { payment_method_id: paymentMethodId },
       })
+    },
+
+    /** What `changeTier` would charge now and at the next renewal. */
+    previewTierChange(
+      subscriptionId: string,
+      priceId: string,
+      signal?: AbortSignal
+    ): Promise<TierChangePreview> {
+      return json(
+        tierChangePreviewSchema,
+        `/me/subscriptions/${id(subscriptionId)}/change-tier/preview`,
+        { method: "POST", body: { price_id: priceId }, signal }
+      )
+    },
+
+    /**
+     * Moves the subscription to another price of its tier group: an upgrade
+     * charges the saved card now, a downgrade applies at period end.
+     * `idempotencyKey` identifies this attempt; reuse it until the change
+     * resolves (`processing`, a `tier_change_in_flight` refusal or a lost
+     * response) so the stored result replays instead of charging twice.
+     */
+    changeTier(
+      subscriptionId: string,
+      input: { priceId: string; idempotencyKey: string }
+    ): Promise<TierChange> {
+      return json(
+        tierChangeSchema,
+        `/me/subscriptions/${id(subscriptionId)}/change-tier`,
+        {
+          method: "POST",
+          body: { price_id: input.priceId },
+          headers: { "Idempotency-Key": input.idempotencyKey },
+        }
+      )
+    },
+
+    /**
+     * Solana rail: the tier-change transaction for the wallet to sign and
+     * send. Pass the resulting signature to `confirmSolanaTierChange`.
+     */
+    prepareSolanaTierChange(
+      subscriptionId: string,
+      newPriceId: string
+    ): Promise<SolanaTierChangeTx> {
+      return json(
+        solanaTierChangeTxSchema,
+        `/me/subscriptions/${id(subscriptionId)}/solana-tier-change`,
+        { method: "POST", body: { new_price_id: newPriceId } }
+      )
+    },
+
+    /**
+     * Records the landed transaction. Keep the signature until this succeeds:
+     * confirming it again replays the result (`already_confirmed`).
+     */
+    confirmSolanaTierChange(
+      subscriptionId: string,
+      input: { signature: string; newPriceId: string }
+    ): Promise<SolanaTierChange> {
+      return json(
+        solanaTierChangeSchema,
+        `/me/subscriptions/${id(subscriptionId)}/solana-tier-change/confirm`,
+        {
+          method: "POST",
+          body: { signature: input.signature, new_price_id: input.newPriceId },
+        }
+      )
     },
 
     /**
@@ -444,6 +532,70 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     getStatus(signal?: AbortSignal): Promise<BillingStatus> {
       return json(billingStatusSchema, "/me/status", { signal })
+    },
+
+    /** Active products with their active prices. */
+    listProducts(opts: ListOptions = {}): Promise<Page<Product>> {
+      return json(productPage, "/products", {
+        query: { limit: opts.limit ?? 100, offset: opts.offset },
+        signal: opts.signal,
+      })
+    },
+
+    /** Active prices. `product` is a `prod_` id; `type` is `recurring | one_time`. */
+    listPrices(
+      opts: ListOptions & {
+        currency?: string
+        product?: string
+        type?: string
+      } = {}
+    ): Promise<Page<Price>> {
+      return json(pricePage, "/prices", {
+        query: {
+          currency: opts.currency,
+          product: opts.product,
+          type: opts.type,
+          limit: opts.limit ?? 100,
+          offset: opts.offset,
+        },
+        signal: opts.signal,
+      })
+    },
+
+    /** The server's currency registry; `currencies` is the pinned copy. */
+    async listCurrencies(signal?: AbortSignal): Promise<Currency[]> {
+      const registry = await json(currencyRegistrySchema, "/currencies", {
+        signal,
+      })
+      return registry.currencies
+    },
+
+    /** Network and accepted tokens; served only with a Solana PSP. */
+    getSolanaConfig(signal?: AbortSignal): Promise<SolanaConfig> {
+      return json(solanaConfigSchema, "/solana/config", { signal })
+    },
+
+    /**
+     * Accepted tokens with live prices. `priceId` or `checkoutSessionId` adds
+     * each token's `quote`; `wallet` adds its `balance`.
+     */
+    async listSolanaTokens(
+      opts: {
+        priceId?: string
+        checkoutSessionId?: string
+        wallet?: string
+        signal?: AbortSignal
+      } = {}
+    ): Promise<SolanaToken[]> {
+      const { tokens } = await json(solanaTokensSchema, "/solana/tokens", {
+        query: {
+          price_id: opts.priceId,
+          checkout_session_id: opts.checkoutSessionId,
+          wallet: opts.wallet,
+        },
+        signal: opts.signal,
+      })
+      return tokens
     },
 
     /** Currency code (upper case) to native-unit decimals. */

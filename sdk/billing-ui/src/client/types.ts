@@ -1,6 +1,7 @@
-// Wire types of the OpenRails customer surface (`/billing/v1/me/*`), validated
-// at the boundary. Money is an int64 string in the currency's native unit;
-// its scale comes from GET /currencies. Fixtures: src/test/fixtures/wire.
+// Wire types of the OpenRails customer surface (`/billing/v1/me/*`) and public
+// catalog, validated at the boundary. Money is an int64 string in the
+// currency's native unit; its scale comes from GET /currencies. Fixtures:
+// src/test/fixtures/wire.
 import { z } from "zod"
 
 import { isAmount } from "../lib/money"
@@ -236,10 +237,204 @@ export type BillingStatus = z.infer<typeof billingStatusSchema>
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>
 
+export const currencySchema = z.object({
+  code: z.string(),
+  /** Native-unit decimals of every amount on the wire. */
+  decimals: z.number(),
+  /** Decimals the provider settles in. */
+  minor_decimals: z.number().nullish(),
+})
+export type Currency = z.infer<typeof currencySchema>
+
+export const currencyRegistrySchema = z.object({
+  currencies: z.array(currencySchema),
+})
+
+/** A catalog price (`GET /prices`, embedded in `GET /products`). */
+export const priceSchema = z.object({
+  id: z.string(),
+  key: z.string().nullish(),
+  unit_amount: amount,
+  currency: z.string(),
+  /** `one_time | recurring` */
+  type: z.string().nullish(),
+  /** Exact hours, e.g. `"720h"`; absent on a one-time price. */
+  recurring: z.object({ interval: z.string() }).nullish(),
+  /** Product id. */
+  product: z.string().nullish(),
+  active: z.boolean().nullish(),
+  /** PSP keys the price is linked to. */
+  providers: z.array(z.string()).nullish(),
+  metadata: z.record(z.string(), z.string()).nullish(),
+  created_at: time.nullish(),
+})
+export type Price = z.infer<typeof priceSchema>
+
+export const productSchema = z.object({
+  id: z.string(),
+  key: z.string().nullish(),
+  name: z.string(),
+  description: z.string().nullish(),
+  /** Keyed by the entitlements the product grants. */
+  entitlements_spec: z.record(z.string(), z.number().nullable()).nullish(),
+  /** Products sharing a group are tiers a subscription can change between. */
+  tier_group: z.string().nullish(),
+  tier_rank: z.number().nullish(),
+  active: z.boolean().nullish(),
+  metadata: z.record(z.string(), z.string()).nullish(),
+  created_at: time.nullish(),
+  updated_at: time.nullish(),
+  prices: z
+    .array(priceSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+})
+export type Product = z.infer<typeof productSchema>
+
+export const tierChangePreviewSchema = z.object({
+  /** `upgrade | downgrade` */
+  action: z.string(),
+  price_id: z.string(),
+  rail: z.string().nullish(),
+  currency: z.string(),
+  /** Charged immediately; `"0"` for a downgrade. */
+  amount_due_now: amount,
+  /** The new price, charged at the next renewal. */
+  next_charge_amount: amount,
+  next_charge_date: time.nullish(),
+  /** `now | period_end` */
+  effective: z.string(),
+  /** The rail finalizes the exact amount (Stripe upgrades). */
+  is_estimate: z.boolean().nullish(),
+  message: z.string().nullish(),
+})
+export type TierChangePreview = z.infer<typeof tierChangePreviewSchema>
+
+export const tierChangeSchema = z.object({
+  /** `succeeded | processing | requires_action | blocked` */
+  status: z.string(),
+  /** `upgrade | downgrade` */
+  action: z.string().nullish(),
+  /** `now | period_end` */
+  effective: z.string().nullish(),
+  price_id: z.string().nullish(),
+  /** The subscription now carrying the plan (an upgrade may open a successor). */
+  subscription_id: z.string().nullish(),
+  url: z.string().nullish(),
+  next_action: z
+    .object({
+      /** `payment_authentication` uses `operation_id`. */
+      type: z.string(),
+      redirect_to_url: z.object({ url: z.string().nullish() }).nullish(),
+    })
+    .nullish(),
+  /** When a scheduled downgrade takes effect. */
+  delayed_start: time.nullish(),
+  currency: z.string().nullish(),
+  amount_due_now: amount.nullish(),
+  next_charge_amount: amount.nullish(),
+  next_charge_date: time.nullish(),
+  message: z.string().nullish(),
+  /** The durable operation: unresolved while `processing`, the payment to authenticate on `requires_action`. */
+  operation_id: z.string().nullish(),
+})
+export type TierChange = z.infer<typeof tierChangeSchema>
+
 export const solanaCancelTxSchema = z.object({
   transaction: z.string().min(1),
   subscription_pda: z.string().nullish(),
 })
+
+const tokenUnits = z.string().regex(/^\d+$/, "units must be a uint64 string")
+
+export const solanaTokenSchema = z.object({
+  symbol: z.string(),
+  name: z.string().nullish(),
+  mint: z.string(),
+  decimals: z.number(),
+  /** USD price as an exact decimal string; absent without a feed quote. */
+  price: z.string().nullish(),
+  /** The stablecoin to present first. */
+  preferred: z.boolean().nullish(),
+  /** Can back a recurring subscription, not only a one-off payment. */
+  recurring_eligible: z.boolean().nullish(),
+  /** What the requested price costs in this token. */
+  quote: z
+    .object({
+      /** Display decimal of `units`. */
+      amount: z.string(),
+      /** Exact on-chain base units. */
+      units: tokenUnits,
+      token_price_usd: z.string().nullish(),
+      fx_rate: z.string().nullish(),
+      fx_currency: z.string().nullish(),
+      quoted_at: time.nullish(),
+      expires_at: time.nullish(),
+    })
+    .nullish(),
+  /** The requested wallet's holding. */
+  balance: z
+    .object({
+      amount: z.string(),
+      units: tokenUnits,
+      /** Covers `quote`. */
+      sufficient: z.boolean().nullish(),
+    })
+    .nullish(),
+})
+export type SolanaToken = z.infer<typeof solanaTokenSchema>
+
+export const solanaTokensSchema = z.object({
+  tokens: z
+    .array(solanaTokenSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+})
+
+export const solanaConfigSchema = z.object({
+  /** `mainnet | devnet | testnet` */
+  network: z.string(),
+  /** `solana:<network>` */
+  chain: z.string().nullish(),
+  /** Never set by OpenRails: wallets bring their own RPC. */
+  rpcUrl: z.string().nullish(),
+  /** Explorer `?cluster=` value; absent on mainnet. */
+  explorerCluster: z.string().nullish(),
+  preferredToken: z.string().nullish(),
+  tokens: z
+    .array(solanaTokenSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+  features: z
+    .object({
+      solanaPay: z.boolean().nullish(),
+      recurringSubscriptions: z.boolean().nullish(),
+      solanaPayRecurringSubscriptions: z.boolean().nullish(),
+    })
+    .nullish(),
+})
+export type SolanaConfig = z.infer<typeof solanaConfigSchema>
+
+export const solanaTierChangeTxSchema = z.object({
+  /** Base64; partially signed for an upgrade, unsigned for a downgrade. */
+  transaction: z.string().min(1),
+  /** `upgrade | downgrade` */
+  kind: z.string().nullish(),
+  new_subscription_pda: z.string().nullish(),
+})
+export type SolanaTierChangeTx = z.infer<typeof solanaTierChangeTxSchema>
+
+export const solanaTierChangeSchema = z.object({
+  /** The subscription now carrying the plan. */
+  subscription_id: z.string().nullish(),
+  new_subscription_id: z.string().nullish(),
+  /** `upgrade | downgrade` */
+  kind: z.string().nullish(),
+  status: z.string().nullish(),
+  /** An earlier confirm already recorded this change. */
+  already_confirmed: z.boolean().nullish(),
+})
+export type SolanaTierChange = z.infer<typeof solanaTierChangeSchema>
 
 /** An in-page card setup; `payment_method_id` is set once the card is saved. */
 export const cardSetupSchema = z.object({
