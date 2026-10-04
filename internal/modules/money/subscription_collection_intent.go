@@ -86,7 +86,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	if in.Rail == "stripe" {
 		return h.executeStripeEngine(ctx, in, p)
 	}
-	charger, err := prepareEngineNMICharge(ctx, h.Resolver, method, p.HyperSwitch)
+	charger, err := prepareEngineNMICharge(ctx, h.Resolver, method, p.Instrument.PSPID, p.HyperSwitch)
 	if err != nil {
 		return intents.Parked("arm accepted recurring charge: " + err.Error())
 	}
@@ -263,7 +263,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if err := p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 			return err
 		}
-		binding, err := engineCollectionBinding(ctx, q, method, p.HyperSwitch.APIBaseURL)
+		binding, err := engineCollectionBinding(ctx, q, method, p.Instrument.PSPID, p.HyperSwitch.APIBaseURL)
 		if err != nil {
 			return err
 		}

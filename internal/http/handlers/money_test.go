@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -112,52 +113,50 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 	charge := func(status string) *models.Payment {
 		return &models.Payment{ID: uuid.New(), Rail: models.RailNMI, Amount: 1000, Currency: "USD", Status: status, CreatedAt: time.Unix(100, 0)}
 	}
-	for status, want := range map[string]struct {
-		status   string
-		captured bool
-	}{"completed": {"succeeded", true}, "": {"succeeded", true}, "pending": {"pending", false}, "failed": {"failed", false}} {
+	for status, want := range map[string]billing.PaymentStatus{"completed": billing.PaymentSucceeded, "pending": billing.PaymentPending, "failed": billing.PaymentFailed} {
 		got := PaymentToAPI(charge(status), nil)
-		require.Equal(t, "charge", got.Object)
-		require.Equal(t, want.status, got.Status, status)
-		require.Equal(t, want.captured, got.Captured, status)
+		require.Equal(t, billing.PaymentCharge, got.Kind)
+		require.Equal(t, want, got.Status, status)
+		require.Nil(t, got.Refunds, "a list item carries no refunds")
 	}
 
 	original := uuid.New()
-	for _, status := range []string{"", "pending", "failed"} {
-		refund := &models.Payment{ID: uuid.New(), RefundedPaymentID: &original, Amount: -500, Currency: "USD", Status: status}
-		got := PaymentToAPI(refund, nil)
-		require.Equal(t, "refund", got.Object)
-		require.False(t, got.Captured)
-		require.Equal(t, map[string]string{"": "succeeded", "pending": "pending", "failed": "failed"}[status], got.Status)
+	for status, want := range map[string]billing.PaymentStatus{"completed": billing.PaymentSucceeded, "pending": billing.PaymentPending, "failed": billing.PaymentFailed} {
+		got := PaymentToAPI(&models.Payment{ID: uuid.New(), RefundedPaymentID: &original, Amount: -500, Currency: "USD", Status: status}, nil)
+		require.Equal(t, billing.PaymentRefund, got.Kind)
+		require.Equal(t, want, got.Status)
 	}
+	chargeback := "chargeback"
+	require.Equal(t, billing.PaymentChargeback, PaymentToAPI(&models.Payment{ID: uuid.New(), Amount: -500, Status: "completed", ReversalKind: &chargeback}, nil).Kind)
 
 	refund := func(amount int64, status string) *models.Payment {
 		return &models.Payment{ID: uuid.New(), RefundedPaymentID: &original, Amount: amount, Currency: "USD", Status: status}
 	}
 	for _, tc := range []struct {
-		name     string
-		refunds  []*models.Payment
-		total    int64
-		status   string
-		refunded bool
+		name    string
+		refunds []*models.Payment
+		total   int64
+		status  billing.PaymentStatus
 	}{
-		{"none", nil, 0, "succeeded", false},
-		{"only completed refunds count", []*models.Payment{refund(-300, "completed"), refund(-400, "pending"), refund(-500, "failed")}, 300, "partially_refunded", false},
-		{"multiple full", []*models.Payment{refund(-300, "completed"), refund(-700, "completed")}, 1000, "refunded", true},
-		{"legacy positive amount", []*models.Payment{refund(300, "completed")}, 300, "partially_refunded", false},
+		{"none", []*models.Payment{}, 0, billing.PaymentSucceeded},
+		{"only completed refunds count", []*models.Payment{refund(-300, "completed"), refund(-400, "pending"), refund(-500, "failed")}, 300, billing.PaymentPartiallyRefunded},
+		{"multiple full", []*models.Payment{refund(-300, "completed"), refund(-700, "completed")}, 1000, billing.PaymentRefunded},
+		{"legacy positive amount", []*models.Payment{refund(300, "completed")}, 300, billing.PaymentPartiallyRefunded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := charge("completed")
 			detail := PaymentToAPI(p, tc.refunds)
-			require.Equal(t, []any{tc.total, tc.status, tc.refunded}, []any{detail.AmountRefunded, detail.Status, detail.Refunded})
-			if tc.refunds != nil {
-				require.Len(t, detail.Refunds.Data, len(tc.refunds))
-			}
-			history := PaymentToUserAPI(p, tc.total)
-			require.Equal(t, []any{detail.AmountRefunded, detail.Status, detail.Refunded, detail.Captured},
-				[]any{history.AmountRefunded, history.Status, history.Refunded, history.Captured}, "history and detail agree")
+			require.Equal(t, []any{tc.total, tc.status}, []any{detail.AmountRefunded, detail.Status})
+			require.Len(t, detail.Refunds, len(tc.refunds))
+			history := paymentView(p, tc.total)
+			require.Equal(t, []any{detail.AmountRefunded, detail.Status}, []any{history.AmountRefunded, history.Status}, "history and detail agree")
 		})
 	}
 	failed := PaymentToAPI(charge("failed"), []*models.Payment{refund(-1000, "completed")})
-	require.Equal(t, "failed", failed.Status, "a failed charge never reads as refunded")
+	require.Equal(t, billing.PaymentFailed, failed.Status, "a failed charge never reads as refunded")
+	require.NotNil(t, failed.Failure)
+
+	manual := PaymentToAPI(&models.Payment{ID: uuid.New(), Rail: models.Rail(models.ChannelManual), Amount: 1000, Status: "completed"}, nil)
+	require.Equal(t, billing.ChannelManual, manual.Channel)
+	require.Nil(t, manual.Rail, "an off-rail payment names no rail")
 }

@@ -7,7 +7,7 @@ import type {
 } from "../client/types"
 import type { Translator } from "../i18n/messages"
 import { formatAmount } from "../lib/money"
-import { accessLabel, everyLabel, intervalHours } from "../lib/period"
+import { accessLabel, everyLabel } from "../lib/period"
 
 export function formatDate(
   value: string | null | undefined,
@@ -61,13 +61,14 @@ export function paymentItem(
   p: Payment,
   m: Translator
 ): { name: string; detail: string | null } {
-  const hours = intervalHours(p.price?.recurring?.interval)
-  const recurring =
-    p.price?.type === "recurring" || hours !== null || !!p.subscription_id
+  const recurring = !!p.price?.auto_renew || !!p.subscription_id
   const name =
     p.product?.display_name?.trim() ||
     m.t(recurring ? "history.subscription" : "history.purchase")
-  return { name, detail: recurring ? everyLabel(hours, m) : null }
+  return {
+    name,
+    detail: recurring ? everyLabel(p.price?.access_duration_hours, m) : null,
+  }
 }
 
 export function brandName(brand: string | null | undefined, fallback: string) {
@@ -121,7 +122,7 @@ const TONE: Record<string, StatusTone> = {
   active: "success",
   succeeded: "success",
   paid: "success",
-  default: "neutral",
+  collection: "neutral",
   pending: "warning",
   past_due: "warning",
   awaiting_method: "warning",

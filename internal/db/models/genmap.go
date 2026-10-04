@@ -252,12 +252,9 @@ func PaymentMethodFromGen(p gen.BillingPaymentMethod) (*PaymentMethod, error) {
 		RailCustomerRef: p.RailCustomerRef,
 		RailMethodRef:   p.RailMethodRef,
 
-		InitialTransactionID: p.InitialTransactionID,
-		LastFour:             p.LastFour,
-		CardType:             p.CardType,
-		ExpiryDate:           p.ExpiryDate,
-		CreatedAt:            p.CreatedAt,
-		UpdatedAt:            p.UpdatedAt,
+		Card:      CardFromColumns(p.CardBrand, p.CardLast4, p.CardExpMonth, p.CardExpYear),
+		CreatedAt: p.CreatedAt,
+		UpdatedAt: p.UpdatedAt,
 
 		StoredCredentialRecurringRef:   p.StoredCredentialRecurringRef,
 		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,

@@ -343,8 +343,8 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
 -- rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
 -- the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
 -- for HashiCorp Vault, and the column already carries the right name.
-SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, last_four, card_type,
-       expiry_date
+SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
+       card_exp_month, card_exp_year
 FROM billing.payment_methods
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
@@ -482,13 +482,15 @@ RETURNING id, entitlements_spec_snapshot;
 -- PS-7: adopt the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows
 UPDATE billing.payment_methods
-SET last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
-    expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
+SET card_last4 = COALESCE(sqlc.narg(card_last4)::text, card_last4),
+    card_exp_month = COALESCE(sqlc.narg(card_exp_month)::smallint, card_exp_month),
+    card_exp_year = COALESCE(sqlc.narg(card_exp_year)::smallint, card_exp_year),
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND merchant_id = sqlc.arg(merchant_id)
-  AND (last_four IS DISTINCT FROM NULLIF(sqlc.arg(last_four)::text, '')
-       OR expiry_date IS DISTINCT FROM NULLIF(sqlc.arg(expiry_date)::text, ''));
+  AND ((sqlc.narg(card_last4)::text IS NOT NULL AND card_last4 IS DISTINCT FROM sqlc.narg(card_last4)::text)
+       OR (sqlc.narg(card_exp_month)::smallint IS NOT NULL AND card_exp_month IS DISTINCT FROM sqlc.narg(card_exp_month)::smallint)
+       OR (sqlc.narg(card_exp_year)::smallint IS NOT NULL AND card_exp_year IS DISTINCT FROM sqlc.narg(card_exp_year)::smallint));
 
 -- #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
 -- WRITERS (#665): reconcile.MarkReconciledSourceDomains flips a domain

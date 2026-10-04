@@ -26,7 +26,7 @@ export const de: BillingUiMessageBundle = {
     expired: "Abgelaufen",
     expiring_soon: "Läuft bald ab",
     needs_attention: "Prüfen",
-    default: "Standard",
+    collection: "Rechnungen",
   },
   interval: {
     every: {
@@ -119,9 +119,9 @@ export const de: BillingUiMessageBundle = {
     fallbackBrand: "Karte",
     expires: "Gültig bis {date}",
     usedBy: "Verwendet von {names}",
-    defaultFor: "Standard für {currencies}",
-    makeDefault: "Als Standard festlegen",
-    madeDefault: "Standardkarte aktualisiert.",
+    collectsFor: "Zahlt {currencies}-Rechnungen",
+    useForInvoices: "Für Rechnungen verwenden",
+    usedForInvoices: "Karte für Rechnungen aktualisiert.",
     remove: "Entfernen",
     removeLabel: "{label} entfernen",
     removeTitle: "{label} entfernen?",

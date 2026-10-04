@@ -133,7 +133,7 @@ func (h *SubscriptionCollectionHandler) resendLostNMISubmission(ctx context.Cont
 	if err != nil {
 		return h.closeChangedResend(ctx, in, p, attempt, err)
 	}
-	charger, err := prepareEngineNMICharge(ctx, h.Resolver, method, p.HyperSwitch)
+	charger, err := prepareEngineNMICharge(ctx, h.Resolver, method, p.Instrument.PSPID, p.HyperSwitch)
 	if err != nil {
 		return intents.Parked("arm accepted recurring charge: " + err.Error())
 	}

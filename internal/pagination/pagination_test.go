@@ -28,7 +28,7 @@ type row struct {
 }
 
 // table is a list ordered by (created_at DESC, id DESC), queried the way the
-// TimeID keyset query does.
+// pagination.TimeID keyset query does.
 type table []row
 
 func (t table) query(afterAt *time.Time, afterID *uuid.UUID, fetch int32) []row {

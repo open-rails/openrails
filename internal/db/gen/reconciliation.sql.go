@@ -2370,27 +2370,31 @@ func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, arg Mar
 
 const reconcileAdoptPaymentMethod = `-- name: ReconcileAdoptPaymentMethod :execrows
 UPDATE billing.payment_methods
-SET last_four = COALESCE(NULLIF($1::text, ''), last_four),
-    expiry_date = COALESCE(NULLIF($2::text, ''), expiry_date),
+SET card_last4 = COALESCE($1::text, card_last4),
+    card_exp_month = COALESCE($2::smallint, card_exp_month),
+    card_exp_year = COALESCE($3::smallint, card_exp_year),
     updated_at = now()
-WHERE id = $3
-  AND merchant_id = $4
-  AND (last_four IS DISTINCT FROM NULLIF($1::text, '')
-       OR expiry_date IS DISTINCT FROM NULLIF($2::text, ''))
+WHERE id = $4
+  AND merchant_id = $5
+  AND (($1::text IS NOT NULL AND card_last4 IS DISTINCT FROM $1::text)
+       OR ($2::smallint IS NOT NULL AND card_exp_month IS DISTINCT FROM $2::smallint)
+       OR ($3::smallint IS NOT NULL AND card_exp_year IS DISTINCT FROM $3::smallint))
 `
 
 type ReconcileAdoptPaymentMethodParams struct {
-	LastFour   string
-	ExpiryDate string
-	ID         uuid.UUID
-	MerchantID uuid.UUID
+	CardLast4    *string
+	CardExpMonth *int16
+	CardExpYear  *int16
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
 }
 
 // PS-7: adopt the rail's vault metadata for a stored payment method.
 func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg ReconcileAdoptPaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileAdoptPaymentMethod,
-		arg.LastFour,
-		arg.ExpiryDate,
+		arg.CardLast4,
+		arg.CardExpMonth,
+		arg.CardExpYear,
 		arg.ID,
 		arg.MerchantID,
 	)
@@ -2517,8 +2521,8 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 }
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
-SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, last_four, card_type,
-       expiry_date
+SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
+       card_exp_month, card_exp_year
 FROM billing.payment_methods
 WHERE payment_methods.merchant_id = $1::uuid AND rail = ANY ($2::text[])
   AND psp_id = $3::uuid
@@ -2536,9 +2540,10 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	Rail            string
 	RailCustomerRef string
 	RailMethodRef   string
-	LastFour        *string
-	CardType        *string
-	ExpiryDate      *string
+	CardBrand       *string
+	CardLast4       *string
+	CardExpMonth    *int16
+	CardExpYear     *int16
 }
 
 // rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
@@ -2559,9 +2564,10 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 			&i.Rail,
 			&i.RailCustomerRef,
 			&i.RailMethodRef,
-			&i.LastFour,
-			&i.CardType,
-			&i.ExpiryDate,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.CardExpMonth,
+			&i.CardExpYear,
 		); err != nil {
 			return nil, err
 		}

@@ -1,3 +1,4 @@
+import type { CardDetails } from "./api/generated/wire"
 import currencyUnits from "./currency-units.json"
 
 // Money is an integer count of native units. A JSON number is exact only as a
@@ -162,6 +163,15 @@ export function formatDate(iso?: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   })
+}
+
+// formatCard names a card by brand and last four digits.
+export function formatCard(card?: CardDetails | null): string {
+  return card?.last4 ? `${card.brand ?? "card"} ••••${card.last4}` : "—"
+}
+
+export function formatCardExpiry(card?: CardDetails | null): string {
+  return `${card?.exp_month ?? "??"}/${card?.exp_year ?? "????"}`
 }
 
 export function shortId(id: string, n = 8): string {

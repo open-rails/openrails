@@ -45,8 +45,7 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 
 			// Refused: nothing changes, at NMI or locally.
 			refused := card{Brand: "mastercard", Last4: "0051", Decline: "200"}
-			status, body := e.c.call(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(refused),
-				"last_four": refused.Last4, "card_type": refused.Brand, "expiry_date": "12/35"})
+			status, body := e.c.call(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"payment_token": w.nmi.Tokenize(refused)})
 			require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
 			require.Equal(t, "card_declined", errorCode(body))
 			w.settle()

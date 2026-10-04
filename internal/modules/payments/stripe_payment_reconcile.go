@@ -47,7 +47,6 @@ func MirrorAttachedStripePaymentMethod(
 		clock,
 		truth.CustomerID,
 		truth.ID,
-		truth.ID,
 		truth.Card,
 	)
 }
@@ -99,7 +98,6 @@ func ConvergeStripeCustomerPaymentState(
 				customers,
 				clock,
 				state.CustomerID,
-				method.ID,
 				method.ID,
 				method.Card,
 			)

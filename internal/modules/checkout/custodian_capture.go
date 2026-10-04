@@ -429,12 +429,8 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 		if err != nil || !sameCaptureAccount(canonical, current) {
 			return ErrCheckoutSessionConflict
 		}
-		expiry := method.MaskedExpiry()
-		var brand *string
-		if method.Data.Card.Brand != "" {
-			brand = &method.Data.Card.Brand
-		}
-		attached, err := queries.AttachCapturedPaymentMethod(c, gen.AttachCapturedPaymentMethodParams{ID: uuid.New(), MerchantID: owner.UUID(), CustomerID: locked.CustomerID, PspID: locked.PspID, CustodianID: new(canonical.CustodianID), VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: method.ID, LastFour: new(method.Data.Card.Last4), CardType: brand, ExpiryDate: new(expiry), Now: s.now().UTC()})
+		brand, last4, month, year := models.ParseCard(method.Data.Card.Brand, method.Data.Card.Last4, method.MaskedExpiry()).Columns()
+		attached, err := queries.AttachCapturedPaymentMethod(c, gen.AttachCapturedPaymentMethodParams{ID: uuid.New(), MerchantID: owner.UUID(), CustomerID: locked.CustomerID, CustodianID: new(canonical.CustodianID), VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: method.ID, CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year, Now: s.now().UTC()})
 		if err != nil {
 			return err
 		}

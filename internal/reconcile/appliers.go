@@ -146,11 +146,13 @@ func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMe
 	if err != nil {
 		return false, err
 	}
+	_, last4, month, year := a.Card.Columns()
 	n, err := w.DB.Gen(ctx).ReconcileAdoptPaymentMethod(ctx, gen.ReconcileAdoptPaymentMethodParams{
-		LastFour:   a.LastFour,
-		ExpiryDate: a.ExpiryDate,
-		ID:         a.PaymentMethodID,
-		MerchantID: tid.UUID(),
+		CardLast4:    last4,
+		CardExpMonth: month,
+		CardExpYear:  year,
+		ID:           a.PaymentMethodID,
+		MerchantID:   tid.UUID(),
 	})
 	return n > 0, err
 }

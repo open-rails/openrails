@@ -33,12 +33,19 @@ export function subscription(overrides: Partial<Row> = {}): Row {
 export function paymentMethod(overrides: Partial<Row> = {}): Row {
   return {
     id: "pm_1",
-    object: "payment_method",
-    type: "card",
+    customer_id: "22222222-2222-2222-2222-222222222222",
     rail: "nmi",
     psp_id: "55555555-5555-5555-5555-555555555555",
     card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
-    health: { expiry_status: "valid", active: true },
+    billing_details: null,
+    health: {
+      expiry_status: "valid",
+      last_charged_at: null,
+      last_charge_outcome: null,
+      active: true,
+    },
+    subscriptions: [],
+    collection_currencies: [],
     created_at: "2026-09-01T00:00:00Z",
     ...overrides,
   } as Row
@@ -47,16 +54,25 @@ export function paymentMethod(overrides: Partial<Row> = {}): Row {
 export function payment(overrides: Partial<Row> = {}): Row {
   return {
     id: "pay_1",
-    object: "charge",
+    kind: "charge",
     status: "succeeded",
     amount: "9990000",
     amount_refunded: "0",
     currency: "USD",
     customer_id: "22222222-2222-2222-2222-222222222222",
+    subscription_id: null,
+    price_id: "price_plus",
+    product: null,
+    channel: "rail",
     rail: "nmi",
-    refunded: false,
+    psp_id: "55555555-5555-5555-5555-555555555555",
+    transaction_id: "txn_1",
+    card: { brand: "visa", last4: "4242", exp_month: null, exp_year: null },
+    failure: null,
+    refunded_payment_id: null,
+    reason: null,
+    refunds: null,
     created_at: "2026-09-16T00:00:00Z",
-    card: { brand: "visa", last4: "4242" },
     ...overrides,
   } as Row
 }
@@ -91,6 +107,15 @@ export function product(overrides: Partial<Row> = {}): Row {
     ],
     ...overrides,
   } as Row
+}
+
+// A cursor list; the fake's cursor is the next row's offset.
+const cursorPage = (rows: Row[], limit: number, cursor: string | null) => {
+  const from = Number(cursor ?? 0)
+  return {
+    data: rows.slice(from, from + limit),
+    next_cursor: from + limit < rows.length ? String(from + limit) : null,
+  }
 }
 
 const page = (data: Row[], limit: number, offset: number, total: number) => ({
@@ -149,6 +174,7 @@ export function fakeBilling(
       const body = init.body ? JSON.parse(String(init.body)) : undefined
       const limit = Number(url.searchParams.get("limit") ?? 20)
       const offset = Number(url.searchParams.get("offset") ?? 0)
+      const cursor = url.searchParams.get("cursor")
       let m: RegExpMatchArray | null
 
       if (key === "GET /me/subscriptions")
@@ -252,14 +278,11 @@ export function fakeBilling(
         return json(200, { success: true })
       }
       if (key === "GET /me/payment-methods")
-        return json(
-          200,
-          page(state.methods, limit, offset, state.methods.length)
-        )
+        return json(200, cursorPage(state.methods, limit, cursor))
       if (key === "POST /me/payment-methods") {
         // Like OpenRails: the PSP that tokenized the card is required.
         const body = JSON.parse(String(init.body ?? "{}")) as Row
-        if (!body.provider) return apiError(400, "invalid_request")
+        if (!body.psp_id) return apiError(400, "invalid_param")
         const created = paymentMethod({
           id: `pm_${state.methods.length + 1}`,
           card: {
@@ -270,7 +293,7 @@ export function fakeBilling(
           },
         })
         state.methods.push(created)
-        return json(200, created)
+        return json(201, created)
       }
       if ((m = key.match(/^DELETE \/me\/payment-methods\/([^/]+)$/))) {
         const id = decodeURIComponent(m[1])
@@ -280,13 +303,16 @@ export function fakeBilling(
       if (key === "PUT /me/collection-payment-method") {
         const code = String(body.currency)
         for (const pm of state.methods) {
-          const others = (
-            (pm.collection_default_currencies as string[]) ?? []
-          ).filter((c) => c !== code)
-          pm.collection_default_currencies =
+          const others = ((pm.collection_currencies as string[]) ?? []).filter(
+            (c) => c !== code
+          )
+          pm.collection_currencies =
             pm.id === body.payment_method_id ? [...others, code] : others
         }
-        return json(200, { success: true })
+        return json(200, {
+          currency: code,
+          payment_method_id: body.payment_method_id,
+        })
       }
       if (key === "GET /products")
         return json(
@@ -294,15 +320,7 @@ export function fakeBilling(
           page(state.products, limit, offset, state.products.length)
         )
       if (key === "GET /me/payments")
-        return json(
-          200,
-          page(
-            state.payments.slice(offset, offset + limit),
-            limit,
-            offset,
-            state.payments.length
-          )
-        )
+        return json(200, cursorPage(state.payments, limit, cursor))
       return apiError(404, "resource_not_found", `no route ${key}`)
     }
   )

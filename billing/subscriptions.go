@@ -64,7 +64,7 @@ type Subscription struct {
 	ScheduledPrice        *SubscriptionPrice `json:"scheduled_price,omitempty"`
 	ScheduledProduct      *ProductSummary    `json:"scheduled_product,omitempty"`
 	// Card is display data for the card behind PaymentMethodID, when it is one.
-	Card *SubscriptionCard `json:"card,omitempty"`
+	Card *CardDetails `json:"card,omitempty"`
 	// CancelPortalURL is where the customer cancels when CancelMode is
 	// external_portal (rails that keep cancellation on their own site).
 	CancelPortalURL *string `json:"cancel_portal_url,omitempty"`
@@ -73,14 +73,6 @@ type Subscription struct {
 	Access    *SubscriptionAccess `json:"access,omitempty"`
 	CreatedAt time.Time           `json:"created_at"`
 	UpdatedAt time.Time           `json:"updated_at"`
-}
-
-// SubscriptionCard is the stored card's display data: no PAN, no token.
-type SubscriptionCard struct {
-	Brand    string `json:"brand,omitempty"`
-	Last4    string `json:"last4,omitempty"`
-	ExpMonth *int   `json:"exp_month,omitempty"`
-	ExpYear  *int   `json:"exp_year,omitempty"`
 }
 
 // SubscriptionAccess is how a customer currently holds premium access: Kind

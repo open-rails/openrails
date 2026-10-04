@@ -104,7 +104,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != accepted.CustomerID || method.PspID != accepted.PSPID || method.ParkReason != "" {
+		if method.CustomerID != accepted.CustomerID || !charge.ChargeableOn(method, accepted.PSPID) || method.ParkReason != "" {
 			return charge.ErrInstrumentChanged
 		}
 		if sessionID != nil {
@@ -132,13 +132,13 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 			if s.Config.HyperSwitch == nil {
 				return errors.New("engine HyperSwitch custody is not configured")
 			}
-			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, s.Config.HyperSwitch.APIBaseURL)
+			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, accepted.PSPID, s.Config.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}
 			binding = &frozen
 		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), binding, false); err != nil {
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, accepted.PSPID), binding, false); err != nil {
 			return err
 		}
 		price, err := d.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: mid.UUID(), ID: accepted.PriceID})
@@ -168,7 +168,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
 			label = *psp.Key
 		}
-		payload := subscriptions.InitialMembershipPayload{CheckoutSessionID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
+		payload := subscriptions.InitialMembershipPayload{CheckoutSessionID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method, accepted.PSPID), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
 		return err
 	})

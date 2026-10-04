@@ -29,7 +29,7 @@ createRoot(document.getElementById("root")!).render(
   <BillingUiProvider appearance={{ theme }} locale="en-US">
     <BillingProvider client={client} onChange={(c) => changes.push(c.type)}>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "32px 16px" }}>
-        <AccountBilling plansHref="/plans" defaultCurrency="USD" />
+        <AccountBilling plansHref="/plans" collectionCurrency="USD" />
       </main>
     </BillingProvider>
   </BillingUiProvider>

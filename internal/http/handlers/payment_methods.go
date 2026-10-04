@@ -1,11 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,158 +37,67 @@ const (
 	codePaymentMethodUpdateRetryRequired    = "payment_method_update_retry_required"
 )
 
-type ListPaymentMethodsQuery struct {
-	Limit  int `form:"limit"`
-	Offset int `form:"offset"`
-}
-
-type paymentMethodURI struct {
-	ID string `uri:"id" binding:"required"`
-}
-
-type CreatePaymentMethodRequest struct {
-	PaymentToken string `json:"payment_token" binding:"required_without=Card"`
-	NameOnCard   string `json:"name_on_card" binding:"omitempty"`
-	Address1     string `json:"address1" binding:"omitempty"`
-	City         string `json:"city" binding:"omitempty"`
-	State        string `json:"state" binding:"omitempty"`
-	Zip          string `json:"zip" binding:"omitempty"`
-	Country      string `json:"country" binding:"omitempty"`
-	Phone        string `json:"phone" binding:"omitempty"`
-	Email        string `json:"email" binding:"omitempty,email"`
-	Company      string `json:"company" binding:"omitempty"`
-	Address2     string `json:"address2" binding:"omitempty"`
-	Provider     string `json:"provider" binding:"omitempty"`
-	LastFour     string `json:"last_four" binding:"omitempty"`
-	CardType     string `json:"card_type" binding:"omitempty"`
-	ExpiryDate   string `json:"expiry_date" binding:"omitempty"`
-
-	// Card is the card itself, for a PSP whose card_entry is server (#1129).
-	Card *cardguard.Card `json:"card,omitempty"`
-
-	RawCardNumber        *json.RawMessage `json:"card_number,omitempty"`
-	RawNumber            *json.RawMessage `json:"number,omitempty"`
-	RawPAN               *json.RawMessage `json:"pan,omitempty"`
-	RawPrimaryAccountNum *json.RawMessage `json:"primary_account_number,omitempty"`
-	RawCVV               *json.RawMessage `json:"cvv,omitempty"`
-	RawCVC               *json.RawMessage `json:"cvc,omitempty"`
-	RawCVN               *json.RawMessage `json:"cvn,omitempty"`
-	RawSecurityCode      *json.RawMessage `json:"security_code,omitempty"`
-	RawVerificationValue *json.RawMessage `json:"verification_value,omitempty"`
-}
-
-type UpdatePaymentMethodRequest struct {
-	PaymentToken string  `json:"payment_token" binding:"required_without=Card"`
-	NameOnCard   *string `json:"name_on_card"`
-	Address1     *string `json:"address1"`
-	City         *string `json:"city"`
-	State        *string `json:"state"`
-	Zip          *string `json:"zip"`
-	Country      *string `json:"country"`
-	Phone        *string `json:"phone"`
-	Email        *string `json:"email" binding:"omitempty,email"`
-	Company      *string `json:"company"`
-	Address2     *string `json:"address2"`
-	Provider     *string `json:"provider"`
-	LastFour     *string `json:"last_four" binding:"omitempty"`
-	CardType     *string `json:"card_type" binding:"omitempty"`
-	ExpiryDate   *string `json:"expiry_date" binding:"omitempty"`
-
-	// Card replaces the method's card, for a PSP whose card_entry is server.
-	Card *cardguard.Card `json:"card,omitempty"`
-
-	RawCardNumber        *json.RawMessage `json:"card_number,omitempty"`
-	RawNumber            *json.RawMessage `json:"number,omitempty"`
-	RawPAN               *json.RawMessage `json:"pan,omitempty"`
-	RawPrimaryAccountNum *json.RawMessage `json:"primary_account_number,omitempty"`
-	RawCVV               *json.RawMessage `json:"cvv,omitempty"`
-	RawCVC               *json.RawMessage `json:"cvc,omitempty"`
-	RawCVN               *json.RawMessage `json:"cvn,omitempty"`
-	RawSecurityCode      *json.RawMessage `json:"security_code,omitempty"`
-	RawVerificationValue *json.RawMessage `json:"verification_value,omitempty"`
-}
-
-type rawCardField struct {
-	name  string
-	value *json.RawMessage
-}
-
-func (req *CreatePaymentMethodRequest) rejectRawCardFields() error {
-	return rejectRawCardFieldValues(
-		rawCardField{name: "card_number", value: req.RawCardNumber},
-		rawCardField{name: "number", value: req.RawNumber},
-		rawCardField{name: "pan", value: req.RawPAN},
-		rawCardField{name: "primary_account_number", value: req.RawPrimaryAccountNum},
-		rawCardField{name: "cvv", value: req.RawCVV},
-		rawCardField{name: "cvc", value: req.RawCVC},
-		rawCardField{name: "cvn", value: req.RawCVN},
-		rawCardField{name: "security_code", value: req.RawSecurityCode},
-		rawCardField{name: "verification_value", value: req.RawVerificationValue},
-	)
-}
-
-func (req *UpdatePaymentMethodRequest) rejectRawCardFields() error {
-	return rejectRawCardFieldValues(
-		rawCardField{name: "card_number", value: req.RawCardNumber},
-		rawCardField{name: "number", value: req.RawNumber},
-		rawCardField{name: "pan", value: req.RawPAN},
-		rawCardField{name: "primary_account_number", value: req.RawPrimaryAccountNum},
-		rawCardField{name: "cvv", value: req.RawCVV},
-		rawCardField{name: "cvc", value: req.RawCVC},
-		rawCardField{name: "cvn", value: req.RawCVN},
-		rawCardField{name: "security_code", value: req.RawSecurityCode},
-		rawCardField{name: "verification_value", value: req.RawVerificationValue},
-	)
-}
-
-func rejectRawCardFieldValues(fields ...rawCardField) error {
-	for _, field := range fields {
-		if field.value != nil {
-			return fmt.Errorf("%s must be tokenized by the payment provider before calling OpenRails", field.name)
-		}
+// ListPaymentMethods (GET /me/payment-methods) is one page of the caller's
+// saved cards, newest first.
+func ListPaymentMethods(r *httprequest.Request) {
+	customer, ok := selfAccountPayer(r)
+	if !ok {
+		return
 	}
-	return nil
+	listPaymentMethods(r, customer)
 }
 
-type subscriptionSummary = billing.PaymentMethodSubscription
+// ListCustomerPaymentMethods (GET /merchant/customers/{customer_id}/payment-methods)
+// is one page of a customer's saved cards, newest first.
+func ListCustomerPaymentMethods(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+	if !ok {
+		return
+	}
+	listPaymentMethods(r, customer)
+}
 
-type PaymentMethodResponse = billing.PaymentMethod
+func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID) {
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	methods, err := r.State.PaymentMethodService.ListPage(r.Request.Context(), customer.UUID(), page)
+	if err != nil {
+		writeRefusal(r, err, "failed to list payment methods")
+		return
+	}
+	out, err := paymentMethodsView(r, customer, methods.Items)
+	if err != nil {
+		r.InternalError("failed to read payment methods", err)
+		return
+	}
+	r.SuccessJSON(billing.ListPage[billing.PaymentMethod]{Items: out, Next: methods.Next})
+}
 
-// paymentMethodHealth is the #589 DERIVED per-method health, computed at query
-// time (never a stored column). last_charge_* come from billing.payments via the
-// subscription link; expiry_status from the card's expiry vs now.
-type paymentMethodHealth = billing.PaymentMethodHealth
-
-type paymentMethodBillingDetails = billing.BillingDetails
-
-type paymentMethodAddress = billing.BillingAddress
-
-type paymentMethodCardDetails = billing.CardDetails
-
+// CreatePaymentMethod (POST /me/payment-methods) saves a card with a PSP.
 func CreatePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return
 	}
-
-	req := new(CreatePaymentMethodRequest)
-	if !r.BindJSON(req) {
+	var req billing.CreatePaymentMethodParams
+	if !r.BindJSON(&req) {
 		return
 	}
 	defer req.Card.Zero()
-	if err := req.rejectRawCardFields(); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+	pspID, err := uuid.Parse(strings.TrimSpace(req.PSPID))
+	if err != nil {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must name a PSP").WithParam("psp_id"))
 		return
 	}
-
 	if req.Card != nil {
-		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", req.NameOnCard, req.Address1, req.Address2,
-			req.City, req.State, req.Zip, req.Country, req.Phone, req.Email, req.Company, req.Provider) {
+		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", billingDetailStrings(req.BillingDetails)...) {
 			return
 		}
 	} else if strings.TrimSpace(req.PaymentToken) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "payment_token is required")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "payment_token or card is required").WithParam("payment_token"))
 		return
 	}
 	if refuseBlockedCardAttempt(r, user.ID) {
@@ -203,40 +109,48 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	ctx, cancel := r.Budget(createPaymentMethodTimeout)
 	defer cancel()
 
-	email := strings.TrimSpace(req.Email)
-	if email == "" && user.Email != nil {
-		email = strings.TrimSpace(*user.Email)
+	details := billingDetailsInput(req.BillingDetails)
+	if details.Email == "" && user.Email != nil {
+		details.Email = strings.TrimSpace(*user.Email)
 	}
-
-	createReq := toCreatePaymentMethodRequest(req, email)
+	create := &paymentmethods.CreatePaymentMethodRequest{
+		PaymentToken: strings.TrimSpace(req.PaymentToken),
+		Card:         req.Card,
+		PSPID:        pspID,
+		NameOnCard:   details.Name,
+		Address1:     details.Line1,
+		Address2:     details.Line2,
+		City:         details.City,
+		State:        details.State,
+		Zip:          details.PostalCode,
+		Country:      details.Country,
+		Phone:        details.Phone,
+		Email:        details.Email,
+		Metadata:     details.metadata(),
+	}
 	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
-		createReq.Metadata["e2e_run_id"] = e2eRunID
+		create.Metadata["e2e_run_id"] = e2eRunID
 	}
 
-	pm, err := r.State.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, createReq)
+	pm, err := r.State.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, create)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"request_id": r.RequestID(),
-			"user_id":    user.ID,
-		}).Error("Failed to create payment method")
-		// or#896: an unsupported rail is not a misconfiguration — say so.
-		if errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail) {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
+		log.WithError(err).WithFields(log.Fields{"request_id": r.RequestID(), "user_id": user.ID}).Error("Failed to create payment method")
+		switch {
+		case errors.Is(err, paymentmethods.ErrPSPRequired), errors.Is(err, paymentmethods.ErrPSPUnavailable),
+			errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
+			r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("psp_id"))
+			return
+		case errors.Is(err, merchants.ErrSecretBackendUnavailable):
+			r.ErrorCode(billing.CodeServiceUnavailable, "payment rail credentials are temporarily unavailable")
+			return
+		case errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused):
+			r.ErrorCode(billing.CodePaymentDuplicateRefused, err.Error())
+			return
+		case writeCardEntryError(r, err):
 			return
 		}
-		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
-			return
-		}
-		if errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused) {
-			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentDuplicateRefused, err.Error()))
-			return
-		}
-		if writeCardEntryError(r, err) {
-			return
-		}
-		if providerErr := createPaymentMethodProviderError(err); providerErr != nil {
-			r.APIError(providerErr)
+		if ambiguous := createPaymentMethodProviderError(err); ambiguous != nil {
+			r.APIError(ambiguous)
 			return
 		}
 		// Only a card the provider refused counts toward card-testing blocks.
@@ -248,104 +162,47 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			writePaymentMethodError(r, pmErr)
 			return
 		}
-		r.ErrorJSON(http.StatusBadRequest, "failed to create payment method")
+		r.ErrorCode(billing.CodePaymentProviderRejected, "failed to create payment method")
 		return
 	}
-
-	r.SuccessJSON(singlePaymentMethodToAPI(r, pm))
+	writePaymentMethod(r, http.StatusCreated, identity.CustomerIDFromString(user.ID), pm)
 }
 
+const codePaymentMethodUpdateUnsupported = "payment_method_update_unsupported"
+
+// createPaymentMethodProviderError is the refusal of a card save the provider
+// may or may not have made; nil for any other error. The provider's own text
+// is never echoed.
 func createPaymentMethodProviderError(err error) *api.APIError {
 	if !nmi.IsTransportAmbiguous(err) {
 		return nil
 	}
-	return api.NewAPIError(
-		http.StatusConflict,
-		api.ErrorTypeAPI,
-		codePaymentMethodProviderOutcomeUnknown,
-		"The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.",
-	)
+	return api.Coded(codePaymentMethodProviderOutcomeUnknown, "The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.")
 }
 
-func toCreatePaymentMethodRequest(req *CreatePaymentMethodRequest, email string) *paymentmethods.CreatePaymentMethodRequest {
-	lastFour := strings.TrimSpace(req.LastFour)
-	if len(lastFour) > 4 {
-		lastFour = lastFour[len(lastFour)-4:]
-	}
-	country := strings.TrimSpace(req.Country)
-	postalCode := strings.TrimSpace(req.Zip)
-
-	metadata := map[string]any{}
-	setMetadata := func(key, value string) {
-		if value := strings.TrimSpace(value); value != "" {
-			metadata[key] = value
-		}
-	}
-	setMetadata("name_on_card", req.NameOnCard)
-	setMetadata("billing_country", country)
-	setMetadata("postal_code", postalCode)
-	setMetadata("billing_email", email)
-	setMetadata("billing_phone", req.Phone)
-	setMetadata("billing_address1", req.Address1)
-	setMetadata("billing_address2", req.Address2)
-	setMetadata("billing_city", req.City)
-	setMetadata("billing_state", req.State)
-	setMetadata("billing_company", req.Company)
-
-	return &paymentmethods.CreatePaymentMethodRequest{
-		PaymentToken: req.PaymentToken,
-		Card:         req.Card,
-		NameOnCard:   req.NameOnCard,
-		Address1:     req.Address1,
-		City:         req.City,
-		State:        req.State,
-		Zip:          postalCode,
-		Country:      country,
-		Phone:        req.Phone,
-		Email:        email,
-		Company:      req.Company,
-		Address2:     req.Address2,
-		Provider:     req.Provider,
-		LastFour:     lastFour,
-		CardType:     req.CardType,
-		ExpiryDate:   req.ExpiryDate,
-		Metadata:     metadata,
-	}
-}
-
-func UpdatePaymentMethod(r *httprequest.Request) {
-	path := new(paymentMethodURI)
-	if !r.BindURI(path) {
+// ReplacePaymentMethodCard (PUT /me/payment-methods/{id}) replaces a saved
+// card in place; 202 while the provider converges.
+func ReplacePaymentMethodCard(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return
 	}
-	body := new(UpdatePaymentMethodRequest)
-	if !r.BindJSON(body) {
+	var body billing.ReplacePaymentMethodCardParams
+	if !r.BindJSON(&body) {
 		return
 	}
 	defer body.Card.Zero()
-	if err := body.rejectRawCardFields(); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+	methodID, err := billing.ParsePaymentMethodID(r.Param("id"))
+	if err != nil || methodID.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid payment method id").WithParam("id"))
 		return
 	}
 
-	user := r.GetUser()
-	if user == nil {
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
-		return
-	}
-
-	typedMethodID, err := billing.ParsePaymentMethodID(path.ID)
-	if err != nil || typedMethodID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
-		return
-	}
-	methodID := typedMethodID.UUID()
-
-	trimmedToken := strings.TrimSpace(body.PaymentToken)
+	token := strings.TrimSpace(body.PaymentToken)
 	attemptKey := ""
 	if body.Card != nil {
-		if !cardFieldAdmitted(r, trimmedToken != "", optionalStrings(body.NameOnCard, body.Address1, body.Address2,
-			body.City, body.State, body.Zip, body.Country, body.Phone, body.Email, body.Company, body.Provider)...) {
+		if !cardFieldAdmitted(r, token != "", billingDetailStrings(body.BillingDetails)...) {
 			return
 		}
 		// A retry of this replacement is recognised by its Idempotency-Key,
@@ -353,82 +210,52 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		if attemptKey = strings.TrimSpace(r.Header("Idempotency-Key")); attemptKey == "" {
 			attemptKey = uuid.NewString()
 		} else if len(attemptKey) > 255 || cardguard.ContainsPAN(attemptKey) {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, "Idempotency-Key must be at most 255 bytes and carry no card data"))
+			r.APIError(api.Coded(billing.CodeInvalidParam, "Idempotency-Key must be at most 255 bytes and carry no card data"))
 			return
 		}
-	} else if trimmedToken == "" {
-		r.ErrorJSON(http.StatusBadRequest, "payment_token is required")
+	} else if token == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "payment_token or card is required").WithParam("payment_token"))
 		return
 	}
 
-	pm, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), methodID, user.ID)
-	if err != nil {
-		switch {
-		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
-			// SEC-33: a foreign id is indistinguishable from a missing one.
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-			return
-		default:
-			log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to validate payment method ownership")
-			r.ErrorJSON(http.StatusInternalServerError, "Failed to validate payment method")
-			return
-		}
+	pm, ok := ownedPaymentMethod(r, methodID.UUID(), user.ID)
+	if !ok {
+		return
 	}
-
 	if !rails.SupportsPaymentMethodCRUD(pm.Rail) {
-		// or#896: name the rail and where the instrument actually lives.
-		r.ErrorJSON(http.StatusBadRequest, paymentmethods.RailPaymentMethodsUnsupported(string(pm.Rail)).Error())
+		r.APIError(api.Coded(codePaymentMethodUpdateUnsupported, paymentmethods.RailPaymentMethodsUnsupported(string(pm.Rail)).Error()))
 		return
 	}
 
-	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
-		PaymentToken: &trimmedToken,
-		Card:         body.Card,
-		AttemptKey:   attemptKey,
-		Provider:     body.Provider,
-		NameOnCard:   body.NameOnCard,
-		Address1:     body.Address1,
-		City:         body.City,
-		State:        body.State,
-		Zip:          body.Zip,
-		Country:      body.Country,
-		Phone:        body.Phone,
-		Email:        body.Email,
-		Company:      body.Company,
-		Address2:     body.Address2,
-		LastFour:     body.LastFour,
-		CardType:     body.CardType,
-		ExpiryDate:   body.ExpiryDate,
+	update := &paymentmethods.UpdatePaymentMethodRequest{PaymentToken: &token, Card: body.Card, AttemptKey: attemptKey}
+	if body.BillingDetails != nil {
+		details := billingDetailsInput(body.BillingDetails)
+		update.NameOnCard, update.Address1, update.Address2 = &details.Name, &details.Line1, &details.Line2
+		update.City, update.State, update.Zip, update.Country = &details.City, &details.State, &details.PostalCode, &details.Country
+		update.Phone, update.Email = &details.Phone, &details.Email
 	}
 
 	ctx, cancel := r.Budget(updatePaymentMethodTimeout)
 	defer cancel()
 
-	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, updateReq)
+	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, update)
 	if err != nil {
-		fields := log.Fields{"payment_method_id": methodID, "user_id": user.ID, "rail": pm.Rail}
+		fields := log.Fields{"payment_method_id": pm.ID, "user_id": user.ID, "rail": pm.Rail}
 		switch {
 		case writeCardEntryError(r, err):
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
-			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict, "Payment method changed before the update could be accepted"))
+			r.ErrorCode(billing.CodeResourceConflict, "Payment method changed before the update could be accepted")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing):
-			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict, "Payment method deletion is already processing"))
+			r.ErrorCode(billing.CodeResourceConflict, "Payment method deletion is already processing")
 			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "payment_method_update_unsupported", err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
+		case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported), errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
+			r.ErrorCode(codePaymentMethodUpdateUnsupported, err.Error())
 			return
 		case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
 			log.WithError(err).WithFields(fields).Warn("Payment method update unavailable because provider credentials could not be loaded")
-			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable,
-				"Payment rail credentials are temporarily unavailable"))
+			r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodUpdateProcessing):
 			log.WithError(err).WithFields(fields).Info("Payment method update is still converging")
@@ -436,14 +263,12 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodRetokenize):
 			log.WithError(err).WithFields(fields).Info("Payment method update requires a fresh token")
-			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, codePaymentMethodUpdateRetryRequired,
-				"The card was not updated. Enter the card again to create a fresh token."))
+			r.ErrorCode(codePaymentMethodUpdateRetryRequired, "The card was not updated. Enter the card again to create a fresh token.")
 			return
 		}
 		var validation *paymentmethods.PaymentMethodUpdateValidationError
 		if errors.As(err, &validation) {
-			log.WithError(err).WithFields(fields).Info("Payment method update request was invalid")
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, validation.Message))
+			r.ErrorCode(billing.CodeInvalidParam, validation.Message)
 			return
 		}
 		var refused *paymentmethods.PaymentMethodError
@@ -455,102 +280,29 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		var terminal *paymentmethods.PaymentMethodUpdateFailedError
 		if errors.As(err, &terminal) {
 			log.WithError(err).WithFields(fields).Error("Payment method update failed permanently")
-			r.APIError(api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, codePaymentMethodUpdateFailed,
-				"Payment method could not be updated at the payment provider"))
+			r.ErrorCode(codePaymentMethodUpdateFailed, "Payment method could not be updated at the payment provider")
 			return
 		}
 		r.InternalError("Failed to update payment method", err)
 		return
 	}
-
-	r.SuccessJSON(singlePaymentMethodToAPI(r, updated))
+	writePaymentMethod(r, http.StatusOK, identity.CustomerIDFromString(user.ID), updated)
 }
 
-func ListPaymentMethods(r *httprequest.Request) {
-	req := &ListPaymentMethodsQuery{Limit: 20, Offset: 0}
-	if !r.BindQuery(req) {
-		return
-	}
-
-	if l := r.Request.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100 {
-			req.Limit = v
-		} else if err != nil {
-			log.WithError(err).WithField("limit", l).Error("Invalid limit parameter")
-			r.ErrorJSON(http.StatusBadRequest, "Invalid limit parameter - must be a positive integer")
-			return
-		} else if v > 100 {
-			log.WithField("limit", v).Error("Limit too large")
-			r.ErrorJSON(http.StatusBadRequest, "Limit cannot exceed 100")
-			return
-		}
-	}
-	if o := r.Request.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
-			req.Offset = v
-		} else if err != nil {
-			log.WithError(err).WithField("offset", o).Error("Invalid offset parameter")
-			r.ErrorJSON(http.StatusBadRequest, "Invalid offset parameter - must be a non-negative integer")
-			return
-		}
-	}
-
-	user := r.GetUser()
-	if user == nil {
-		log.Error("User not found in request context")
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
-		return
-	}
-
-	if req.Limit < 1 || req.Limit > 100 {
-		r.ErrorJSON(http.StatusBadRequest, "Limit must be between 1 and 100")
-		return
-	}
-	if req.Offset < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "Offset must be non-negative")
-		return
-	}
-
-	methods, totalItems, err := r.State.PaymentMethodService.ListByUserID(r.Request.Context(), user.ID, req.Limit, req.Offset)
-	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"user_id": user.ID, "limit": req.Limit, "offset": req.Offset}).Error("Failed to retrieve payment methods")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to retrieve payment methods")
-		return
-	}
-
-	response, ok := paymentMethodsWithCollectionDefaults(r, identity.CustomerIDFromString(user.ID), methods)
-	if !ok {
-		return
-	}
-	r.SuccessJSON(api.NewList(response, totalItems, req.Limit, req.Offset))
-}
-
-// paymentMethodCharges loads the derived last-charge health for the listed
-// methods. Enrichment is best-effort: a lookup failure degrades to no health
-// rather than failing the listing.
-func paymentMethodCharges(r *httprequest.Request, methods []*models.PaymentMethod) map[uuid.UUID]models.PaymentMethodCharge {
-	charges, err := r.State.PaymentMethodService.LatestCharges(r.Request.Context(), methods)
-	if err != nil {
-		log.WithError(err).Warn("failed to derive payment-method charge health; returning methods without it")
-		return nil
-	}
-	return charges
-}
-
+// DeletePaymentMethod (DELETE /me/payment-methods/{id}): 204, or 202 while
+// the provider converges.
 func DeletePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
-		log.Error("User not found in request context")
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return
 	}
-
 	deletePaymentMethodForCustomer(r, user.ID)
 }
 
-// AdminDeletePaymentMethod uses the same ownership and durable provider path as
-// self-service, after merchant permission and customer scope have been checked.
-func AdminDeletePaymentMethod(r *httprequest.Request) {
+// DeleteCustomerPaymentMethod is DeletePaymentMethod for merchant staff, after
+// permission and customer scope are checked.
+func DeleteCustomerPaymentMethod(r *httprequest.Request) {
 	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
 	if !ok {
 		return
@@ -559,46 +311,36 @@ func AdminDeletePaymentMethod(r *httprequest.Request) {
 }
 
 func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
-	path := new(paymentMethodURI)
-	if !r.BindURI(path) {
+	methodID, err := billing.ParsePaymentMethodID(r.Param("id"))
+	if err != nil || methodID.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid payment method id").WithParam("id"))
 		return
 	}
-
-	typedId, err := billing.ParsePaymentMethodID(path.ID)
-	if err != nil || typedId.IsZero() {
-		log.WithError(err).WithField("id", path.ID).Error("Invalid payment method ID format")
-		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
+	pm, ok := ownedPaymentMethod(r, methodID.UUID(), customerID)
+	if !ok {
 		return
 	}
-	id := typedId.UUID()
-
-	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, customerID)
-	if err != nil {
-		switch {
-		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
-			log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Warn("Payment method not found for deletion")
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
-			log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Warn("Unauthorized payment method deletion attempt")
-			// SEC-33: a foreign id is indistinguishable from a missing one.
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-			return
-		default:
-			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Error("Failed to validate payment method ownership")
-			r.ErrorJSON(http.StatusInternalServerError, "Failed to validate payment method")
-			return
-		}
-	}
-
-	err = r.State.RailPaymentMethodService.DeletePaymentMethod(r.Request.Context(), paymentMethod)
-	if err != nil {
-		respondPaymentMethodDeleteError(r, paymentMethod, customerID, err)
+	if err := r.State.RailPaymentMethodService.DeletePaymentMethod(r.Request.Context(), pm); err != nil {
+		respondPaymentMethodDeleteError(r, pm, customerID, err)
 		return
 	}
-
-	log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID, "rail": paymentMethod.Rail}).Info("Payment method successfully deleted")
+	log.WithFields(log.Fields{"payment_method_id": pm.ID, "user_id": customerID, "rail": pm.Rail}).Info("Payment method successfully deleted")
 	r.Status(http.StatusNoContent)
+}
+
+// ownedPaymentMethod loads a method the customer owns; another customer's is
+// indistinguishable from a missing one.
+func ownedPaymentMethod(r *httprequest.Request, id uuid.UUID, customerID string) (*models.PaymentMethod, bool) {
+	pm, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, customerID)
+	switch {
+	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound), errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
+		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
+		return nil, false
+	case err != nil:
+		r.InternalError("Failed to validate payment method", err)
+		return nil, false
+	}
+	return pm, true
 }
 
 func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentMethod, userID string, err error) {
@@ -608,318 +350,227 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 		log.WithError(err).WithFields(fields).Info("Payment method deletion is still converging")
 		r.Status(http.StatusAccepted)
 	case errors.Is(err, paymentmethods.ErrPaymentMethodInUse):
-		log.WithError(err).WithFields(fields).Warn("Payment method deletion blocked because the method is in use")
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict,
-			"Cannot delete payment method linked to an active, pending, or past-due subscription"))
+		r.ErrorCode(billing.CodeResourceConflict, "Cannot delete payment method linked to an active, pending, or past-due subscription")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
-		log.WithError(err).WithFields(fields).Warn("Payment method deletion refused because it cannot be scoped safely")
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict,
-			"Payment method cannot be deleted safely; contact support"))
+		r.ErrorCode(billing.CodeResourceConflict, "Payment method cannot be deleted safely; contact support")
 	case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, codePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
+		r.APIError(api.Coded(codePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
 	case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
-		log.WithError(err).WithFields(fields).Info("Payment method deletion is managed by the payment rail")
-		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, codePaymentMethodDeleteUnsupported, err.Error()).
-			WithMetadata(map[string]any{"rail": pm.Rail}))
+		r.APIError(api.Coded(codePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"rail": pm.Rail}))
 	case errors.Is(err, intents.ErrRateCeilingTripped):
 		// #732: the operator alert is raised by the destructive-operation
 		// ceiling; this surface returns a stable refusal and never deletes locally.
 		log.WithError(err).WithFields(fields).Warn("Payment method delete refused by destructive-operation rate ceiling")
-		r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded,
-			"Destructive operation rate limit reached; try again later or contact support"))
+		r.ErrorCode(billing.CodeRateLimitExceeded, "Destructive operation rate limit reached; try again later or contact support")
 	case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
 		log.WithError(err).WithFields(fields).Warn("Payment method delete unavailable because provider credentials could not be loaded")
-		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable,
-			"Payment rail credentials are temporarily unavailable"))
+		r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
 	default:
 		var terminal *paymentmethods.PaymentMethodDeleteFailedError
 		if errors.As(err, &terminal) {
 			log.WithError(err).WithFields(fields).Error("Payment method deletion failed permanently at the provider")
-			r.APIError(api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, codePaymentMethodDeleteFailed,
-				"Payment method could not be deleted at the payment provider"))
+			r.ErrorCode(codePaymentMethodDeleteFailed, "Payment method could not be deleted at the payment provider")
 			return
 		}
 		r.InternalError("Failed to delete payment method", err)
 	}
 }
 
-func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) PaymentMethodResponse {
-	card := &paymentMethodCardDetails{Brand: pm.CardType, Last4: pm.LastFour}
-	if pm.ExpiryDate != nil {
-		if month, year, err := sharedformat.ParseExpiry(*pm.ExpiryDate); err == nil {
-			card.ExpMonth = &month
-			card.ExpYear = &year
+// SetCollectionPaymentMethod (PUT /me/collection-payment-method) makes one of
+// the caller's cards collect its invoices in one currency.
+func SetCollectionPaymentMethod(r *httprequest.Request) {
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return
+	}
+	var req billing.CollectionPaymentMethod
+	if !r.BindJSON(&req) {
+		return
+	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	if err := money.RequireBillingCurrency(currency); err != nil {
+		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("currency"))
+		return
+	}
+	if req.PaymentMethodID.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "payment_method_id is required").WithParam("payment_method_id"))
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	if err := svc.SetInvoiceCollectionPaymentMethod(r.Request.Context(), payer, currency, req.PaymentMethodID.UUID()); err != nil {
+		if errors.Is(err, money.ErrCollectionPaymentMethodInvalid) {
+			r.ErrorCode(billing.CodeCollectionPaymentMethodInvalid, "")
+			return
 		}
+		r.InternalError("failed to set collection payment method", err)
+		return
 	}
-
-	var subs []subscriptionSummary
-	for _, s := range pm.Subscriptions {
-		summary := subscriptionSummary{ID: billing.SubscriptionID(s.ID).String(), CreatedAt: s.CreatedAt}
-		if s.Product != nil {
-			summary.DisplayName = s.Product.DisplayName
-			summary.Description = s.Product.Description
-		}
-		subs = append(subs, summary)
-	}
-
-	metadata := paymentMethodMetadataToAPI(pm.Metadata)
-	return PaymentMethodResponse{
-		ID:             billing.PaymentMethodID(pm.ID).String(),
-		Object:         "payment_method",
-		Type:           "card",
-		Rail:           string(pm.Rail),
-		PSPID:          pm.PspID.String(),
-		BillingDetails: paymentMethodBillingDetailsFromMetadata(metadata),
-		Card:           card,
-		CreatedAt:      pm.CreatedAt,
-		Metadata:       metadata,
-		Health:         paymentMethodHealthFrom(pm, charge),
-		Subscriptions:  subs,
-	}
+	r.SuccessJSON(billing.CollectionPaymentMethod{Currency: currency, PaymentMethodID: req.PaymentMethodID})
 }
 
-// paymentMethodHealthFrom derives #589 health: expiry from the card, last-charge
-// from the (optional) derived charge record. A method is "active" unless its card
-// is expired or its most recent charge hard-failed.
-func paymentMethodHealthFrom(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) *paymentMethodHealth {
-	h := &paymentMethodHealth{Active: true, ExpiryStatus: cardExpiryStatus(pm.ExpiryDate)}
-	if charge != nil {
-		t := charge.LastChargedAt
-		h.LastChargedAt = &t
-		h.LastChargeOutcome = chargeOutcome(charge.Status)
+func writePaymentMethod(r *httprequest.Request, status int, customer identity.CustomerID, pm *models.PaymentMethod) {
+	out, err := paymentMethodsView(r, customer, []*models.PaymentMethod{pm})
+	if err != nil {
+		r.InternalError("failed to read payment method", err)
+		return
 	}
-	if h.ExpiryStatus == "expired" || h.LastChargeOutcome == "failed" {
-		h.Active = false
+	r.JSON(status, out[0])
+}
+
+// paymentMethodsView builds the wire methods of one customer: each card's
+// derived health, the subscriptions it pays and the currencies it collects.
+func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, methods []*models.PaymentMethod) ([]billing.PaymentMethod, error) {
+	out := make([]billing.PaymentMethod, 0, len(methods))
+	if len(methods) == 0 {
+		return out, nil
+	}
+	ctx := r.Request.Context()
+	charges, err := r.State.PaymentMethodService.LatestCharges(ctx, methods)
+	if err != nil {
+		return nil, err
+	}
+	collects, err := money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(ctx, customer)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	for _, pm := range methods {
+		var charge *models.PaymentMethodCharge
+		if c, ok := charges[pm.ID]; ok {
+			charge = &c
+		}
+		out = append(out, PaymentMethodToAPI(pm, charge, collects[pm.ID], now))
+	}
+	return out, nil
+}
+
+// PaymentMethodToAPI is a stored card on the wire.
+func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge, collects []string, now time.Time) billing.PaymentMethod {
+	subs := make([]billing.PaymentMethodSubscription, 0, len(pm.Subscriptions))
+	for _, s := range pm.Subscriptions {
+		item := billing.PaymentMethodSubscription{ID: billing.SubscriptionID(s.ID), CreatedAt: s.CreatedAt}
+		if s.Product != nil {
+			item.DisplayName = s.Product.DisplayName
+		}
+		subs = append(subs, item)
+	}
+	if collects == nil {
+		collects = []string{}
+	}
+	out := billing.PaymentMethod{
+		ID:                   billing.PaymentMethodID(pm.ID),
+		CustomerID:           billing.CustomerID(pm.CustomerID),
+		Rail:                 string(pm.Rail),
+		Card:                 pm.Card.Details(),
+		BillingDetails:       billingDetailsFromMetadata(pm.Metadata),
+		Health:               paymentMethodHealth(pm.Card, charge, now),
+		Subscriptions:        subs,
+		CollectionCurrencies: collects,
+		CreatedAt:            pm.CreatedAt,
+	}
+	if pm.PspID != nil {
+		psp := pm.PspID.String()
+		out.PSPID = &psp
+	}
+	return out
+}
+
+// paymentMethodHealth derives the card's standing: active unless it expired
+// or its most recent charge failed.
+func paymentMethodHealth(card models.Card, charge *models.PaymentMethodCharge, now time.Time) billing.PaymentMethodHealth {
+	h := billing.PaymentMethodHealth{Active: true}
+	if expires := card.ExpiresAt(); !expires.IsZero() {
+		status := billing.CardExpiryValid
+		switch {
+		case !now.Before(expires):
+			status = billing.CardExpiryExpired
+			h.Active = false
+		case now.AddDate(0, 0, 60).After(expires):
+			status = billing.CardExpiryExpiringSoon
+		}
+		h.ExpiryStatus = &status
+	}
+	if charge != nil {
+		at, outcome := charge.LastChargedAt, billing.ChargeSucceeded
+		if charge.Status != "completed" {
+			outcome = billing.ChargeFailed
+			h.Active = false
+		}
+		h.LastChargedAt, h.LastChargeOutcome = &at, &outcome
 	}
 	return h
 }
 
-// cardExpiryStatus classifies a card's "MM/YY" expiry vs now; "" for non-cards or
-// unparseable input. A card is valid through the END of its expiry month.
-func cardExpiryStatus(expiry *string) string {
-	if expiry == nil {
-		return ""
-	}
-	month, year, err := sharedformat.ParseExpiry(*expiry)
-	if err != nil {
-		return ""
-	}
-	firstAfterExpiry := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
-	now := time.Now().UTC()
-	switch {
-	case !now.Before(firstAfterExpiry):
-		return "expired"
-	case now.AddDate(0, 0, 60).After(firstAfterExpiry):
-		return "expiring_soon"
-	default:
-		return "valid"
-	}
+// billingInput is billing details as the provider takes them.
+type billingInput struct {
+	Name, Email, Phone, Line1, Line2, City, State, PostalCode, Country string
 }
 
-// chargeOutcome maps a raw payment_status to the listing's outcome vocabulary.
-func chargeOutcome(status string) string {
-	switch status {
-	case "completed":
-		return "success"
-	case "failed":
-		return "failed"
-	case "refunded":
-		return "refunded"
-	default:
-		return status
+func billingDetailsInput(d *billing.BillingDetails) billingInput {
+	var in billingInput
+	if d == nil {
+		return in
 	}
+	in.Name, in.Email, in.Phone = trimmed(d.Name), trimmed(d.Email), trimmed(d.Phone)
+	if a := d.Address; a != nil {
+		in.Line1, in.Line2, in.City, in.State = trimmed(a.Line1), trimmed(a.Line2), trimmed(a.City), trimmed(a.State)
+		in.PostalCode, in.Country = trimmed(a.PostalCode), trimmed(a.Country)
+	}
+	return in
 }
 
-func paymentMethodMetadataToAPI(metadata map[string]any) map[string]string {
-	out := map[string]string{}
-	for key, value := range metadata {
-		switch v := value.(type) {
-		case string:
-			if v := strings.TrimSpace(v); v != "" {
-				out[key] = v
-			}
+// metadata is how a card's billing details are stored.
+func (in billingInput) metadata() map[string]any {
+	out := map[string]any{}
+	for key, value := range map[string]string{
+		"name_on_card": in.Name, "billing_email": in.Email, "billing_phone": in.Phone,
+		"billing_address1": in.Line1, "billing_address2": in.Line2, "billing_city": in.City,
+		"billing_state": in.State, "postal_code": in.PostalCode, "billing_country": in.Country,
+	} {
+		if value != "" {
+			out[key] = value
 		}
 	}
 	return out
 }
 
-func paymentMethodBillingDetailsFromMetadata(metadata map[string]string) *paymentMethodBillingDetails {
-	if len(metadata) == 0 {
+func billingDetailStrings(d *billing.BillingDetails) []string {
+	in := billingDetailsInput(d)
+	return []string{in.Name, in.Email, in.Phone, in.Line1, in.Line2, in.City, in.State, in.PostalCode, in.Country}
+}
+
+func billingDetailsFromMetadata(metadata map[string]any) *billing.BillingDetails {
+	get := func(key string) *string {
+		if v, ok := metadata[key].(string); ok && strings.TrimSpace(v) != "" {
+			v = strings.TrimSpace(v)
+			return &v
+		}
 		return nil
 	}
-	details := &paymentMethodBillingDetails{
-		Name:  stringPtrFromMap(metadata, "name_on_card"),
-		Email: stringPtrFromMap(metadata, "billing_email"),
-		Phone: stringPtrFromMap(metadata, "billing_phone"),
-		Address: &paymentMethodAddress{
-			Line1:      stringPtrFromMap(metadata, "billing_address1"),
-			Line2:      stringPtrFromMap(metadata, "billing_address2"),
-			City:       stringPtrFromMap(metadata, "billing_city"),
-			State:      stringPtrFromMap(metadata, "billing_state"),
-			PostalCode: stringPtrFromMap(metadata, "postal_code"),
-			Country:    stringPtrFromMap(metadata, "billing_country"),
-		},
+	details := &billing.BillingDetails{Name: get("name_on_card"), Email: get("billing_email"), Phone: get("billing_phone")}
+	address := &billing.BillingAddress{
+		Line1: get("billing_address1"), Line2: get("billing_address2"), City: get("billing_city"),
+		State: get("billing_state"), PostalCode: get("postal_code"), Country: get("billing_country"),
 	}
-	if details.Address.Line1 == nil &&
-		details.Address.Line2 == nil &&
-		details.Address.City == nil &&
-		details.Address.State == nil &&
-		details.Address.PostalCode == nil &&
-		details.Address.Country == nil {
-		details.Address = nil
+	if *address != (billing.BillingAddress{}) {
+		details.Address = address
 	}
-	if details.Name == nil && details.Email == nil && details.Phone == nil && details.Address == nil {
+	if *details == (billing.BillingDetails{}) {
 		return nil
 	}
 	return details
 }
 
-func stringPtrFromMap(metadata map[string]string, key string) *string {
-	value := strings.TrimSpace(metadata[key])
-	if value == "" {
-		return nil
+func trimmed(s *string) string {
+	if s == nil {
+		return ""
 	}
-	return &value
-}
-
-func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]models.PaymentMethodCharge) []PaymentMethodResponse {
-	result := make([]PaymentMethodResponse, len(methods))
-	for i, pm := range methods {
-		var charge *models.PaymentMethodCharge
-		if c, ok := charges[pm.ID]; ok {
-			charge = &c
-		}
-		result[i] = paymentMethodToAPI(pm, charge)
-	}
-	return result
-}
-
-// List/profile responses read the same collection policy. No
-// subscription default or client-side "first card" inference participates.
-// Here the defaults are load-bearing (the response IS the payment methods), so
-// a loader failure is the caller's 500; the admin profile degrades instead.
-func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]PaymentMethodResponse, bool) {
-	response := paymentMethodsToAPI(methods, paymentMethodCharges(r, methods))
-	stampDefaultPaymentMethod(r, methods, response)
-	if err := applyCollectionDefaults(r, payer, methods, response); err != nil {
-		log.WithError(err).Error("failed to load collection payment method defaults")
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment method defaults")
-		return nil, false
-	}
-	return response, true
-}
-
-// applyCollectionDefaults stamps each method's collection-default currencies
-// onto its already-built API response. response must be index-aligned with
-// methods (paymentMethodsToAPI). The loader error is returned untouched so the
-// caller decides whether it is fatal.
-func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod, response []PaymentMethodResponse) error {
-	if len(methods) == 0 {
-		return nil
-	}
-	defaults, err := loadCollectionPaymentMethodDefaults(r, payer)
-	if err != nil {
-		return err
-	}
-	for i, method := range methods {
-		if currencies := defaults[method.ID]; len(currencies) > 0 {
-			response[i].CollectionDefaultCurrencies = currencies
-		}
-	}
-	return nil
-}
-
-// loadCollectionPaymentMethodDefaults is the one loader behind every list and
-// profile response. A package var so the admin profile's degrade path can be
-// exercised by failing the loader without corrupting the database.
-var loadCollectionPaymentMethodDefaults = func(r *httprequest.Request, payer identity.CustomerID) (map[uuid.UUID][]string, error) {
-	return money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(r.Request.Context(), payer)
-}
-
-// stampDefaultPaymentMethod marks the customer's default method on an
-// index-aligned response. Best-effort: a lookup failure leaves no mark.
-func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.PaymentMethod, response []PaymentMethodResponse) {
-	if r.State.PaymentMethodService == nil || len(methods) == 0 {
-		return
-	}
-	defaults := map[uuid.UUID]uuid.UUID{}
-	for i, method := range methods {
-		if method == nil {
-			continue
-		}
-		id, seen := defaults[method.CustomerID]
-		if !seen {
-			found, ok, err := r.State.PaymentMethodService.DefaultPaymentMethodID(r.Request.Context(), method.CustomerID)
-			if err != nil {
-				log.WithError(err).Warn("failed to load the default payment method")
-				return
-			}
-			if ok {
-				id = found
-			}
-			defaults[method.CustomerID] = id
-		}
-		response[i].Default = id == method.ID
-	}
-}
-
-func singlePaymentMethodToAPI(r *httprequest.Request, pm *models.PaymentMethod) PaymentMethodResponse {
-	out := []PaymentMethodResponse{paymentMethodToAPI(pm, nil)}
-	stampDefaultPaymentMethod(r, []*models.PaymentMethod{pm}, out)
-	return out[0]
-}
-
-// SetDefaultPaymentMethod makes one of the caller's usable methods the default.
-func SetDefaultPaymentMethod(r *httprequest.Request) {
-	user := r.GetUser()
-	if user == nil {
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
-		return
-	}
-	setDefaultPaymentMethodForCustomer(r, user.ID)
-}
-
-// AdminSetDefaultPaymentMethod is the merchant-scoped SetDefaultPaymentMethod.
-func AdminSetDefaultPaymentMethod(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
-	if !ok {
-		return
-	}
-	setDefaultPaymentMethodForCustomer(r, customer.String())
-}
-
-func setDefaultPaymentMethodForCustomer(r *httprequest.Request, customerID string) {
-	var body struct {
-		PaymentMethodID string `json:"payment_method_id" binding:"required"`
-	}
-	if !r.BindJSON(&body) {
-		return
-	}
-	methodID, err := billing.ParsePaymentMethodID(body.PaymentMethodID)
-	if err != nil || methodID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
-		return
-	}
-	customer := identity.CustomerIDFromString(customerID)
-	if customer.IsZero() || r.State.PaymentMethodService == nil {
-		r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-		return
-	}
-	switch err := r.State.PaymentMethodService.SetDefaultPaymentMethod(r.Request.Context(), customer.UUID(), methodID.UUID()); {
-	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
-		r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-		return
-	case errors.Is(err, paymentmethods.ErrPaymentMethodNotUsable):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentMethodNotUsable, err.Error()))
-		return
-	case err != nil:
-		r.InternalError("Failed to set the default payment method", err)
-		return
-	}
-	pm, err := r.State.PaymentMethodService.GetByID(r.Request.Context(), methodID.UUID())
-	if err != nil {
-		r.InternalError("Failed to read the payment method", err)
-		return
-	}
-	r.SuccessJSON(singlePaymentMethodToAPI(r, pm))
+	return strings.TrimSpace(*s)
 }

@@ -27,9 +27,14 @@ func engineHyperSwitchPointer(custodian string, binding charge.HyperSwitchBindin
 	return nil
 }
 
-func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
+// engineCollectionBinding checks psp, the account the charge goes through,
+// against the card and freezes a custodian card's binding.
+func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
 	var binding charge.HyperSwitchBinding
-	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: method.MerchantID, ID: method.PspID})
+	if !charge.ChargeableOn(method, psp) {
+		return binding, errors.New("engine account does not hold the card")
+	}
+	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: method.MerchantID, ID: psp})
 	if err != nil {
 		return binding, err
 	}
@@ -37,7 +42,7 @@ func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.Bil
 		return binding, errors.New("engine account is mismatched")
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
-		return collectionHyperSwitchBinding(ctx, q, method, deployment)
+		return collectionHyperSwitchBinding(ctx, q, method, psp, deployment)
 	}
 	if method.Custodian != models.CustodianPSP || method.CustodianID != nil {
 		return binding, errors.New("engine card custody is unsupported")
@@ -50,14 +55,14 @@ type recurringNMICharger interface {
 	ChargeRecurringMIT(context.Context, charge.Request) (charge.Result, *nmi.CustomerVaultError, error)
 }
 
-func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.BillingPaymentMethod, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
+func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.BillingPaymentMethod, psp uuid.UUID, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
 	if method.Custodian == models.CustodianHyperSwitch {
-		return PrepareHyperSwitchCharge(ctx, resolver, method, binding)
+		return PrepareHyperSwitchCharge(ctx, resolver, method, psp, binding)
 	}
-	if method.Rail != "nmi" || method.Custodian != models.CustodianPSP {
+	if method.Rail != "nmi" || method.Custodian != models.CustodianPSP || !charge.ChargeableOn(method, psp) {
 		return nil, errors.New("engine NMI custody unsupported")
 	}
-	client, armed, err := resolver.ResolveNMIClient(ctx, method.MerchantID, &method.PspID)
+	client, armed, err := resolver.ResolveNMIClient(ctx, method.MerchantID, &psp)
 	if err != nil {
 		return nil, err
 	}

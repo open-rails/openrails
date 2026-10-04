@@ -394,7 +394,7 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 }
 
 const listPaymentAttempts = `-- name: ListPaymentAttempts :many
-SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.checkout_id, a.checkout_target, a.subscription_id, a.payment_method_id, a.payment_id, a.rail_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.enriched_at, count(*) OVER () AS total
+SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.checkout_id, a.checkout_target, a.subscription_id, a.payment_method_id, a.payment_id, a.rail_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.enriched_at
 FROM billing.payment_attempts a
 WHERE a.merchant_id = $1::uuid
   AND ($2::text[] IS NULL OR a.kind = ANY($2::text[]))
@@ -414,8 +414,10 @@ WHERE a.merchant_id = $1::uuid
   AND ($16::uuid IS NULL OR a.cycle_id = $16::uuid)
   AND ($17::timestamptz IS NULL OR a.attempted_at >= $17::timestamptz)
   AND ($18::timestamptz IS NULL OR a.attempted_at < $18::timestamptz)
+  AND ($19::timestamptz IS NULL
+       OR (a.attempted_at, a.id) < ($19::timestamptz, $20::uuid))
 ORDER BY a.attempted_at DESC, a.id DESC
-LIMIT $20::bigint OFFSET $19::bigint
+LIMIT $21::int
 `
 
 type ListPaymentAttemptsParams struct {
@@ -437,18 +439,15 @@ type ListPaymentAttemptsParams struct {
 	CycleID        *uuid.UUID
 	Since          *time.Time
 	Until          *time.Time
-	PageOffset     int64
-	PageLimit      int64
+	AfterAt        *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
 }
 
-type ListPaymentAttemptsRow struct {
-	BillingPaymentAttempt BillingPaymentAttempt
-	Total                 int64
-}
-
-// #1116: the merchant's attempts, newest first; every filter is optional and
-// a text filter matches any of its values.
-func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemptsParams) ([]ListPaymentAttemptsRow, error) {
+// #1116: one page of the merchant's attempts, newest first, after an
+// (attempted_at, id) cursor; every filter is optional and a text filter
+// matches any of its values.
+func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemptsParams) ([]BillingPaymentAttempt, error) {
 	rows, err := q.db.Query(ctx, listPaymentAttempts,
 		arg.MerchantID,
 		arg.Kinds,
@@ -468,55 +467,55 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 		arg.CycleID,
 		arg.Since,
 		arg.Until,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListPaymentAttemptsRow
+	var items []BillingPaymentAttempt
 	for rows.Next() {
-		var i ListPaymentAttemptsRow
+		var i BillingPaymentAttempt
 		if err := rows.Scan(
-			&i.BillingPaymentAttempt.ID,
-			&i.BillingPaymentAttempt.MerchantID,
-			&i.BillingPaymentAttempt.CustomerID,
-			&i.BillingPaymentAttempt.PspID,
-			&i.BillingPaymentAttempt.Rail,
-			&i.BillingPaymentAttempt.Kind,
-			&i.BillingPaymentAttempt.Owner,
-			&i.BillingPaymentAttempt.CardEntry,
-			&i.BillingPaymentAttempt.Source,
-			&i.BillingPaymentAttempt.ObservedVia,
-			&i.BillingPaymentAttempt.Category,
-			&i.BillingPaymentAttempt.Reason,
-			&i.BillingPaymentAttempt.Action,
-			&i.BillingPaymentAttempt.ResponseCode,
-			&i.BillingPaymentAttempt.ResponseText,
-			&i.BillingPaymentAttempt.TransactionID,
-			&i.BillingPaymentAttempt.AvsResult,
-			&i.BillingPaymentAttempt.CvvResult,
-			&i.BillingPaymentAttempt.CardBrand,
-			&i.BillingPaymentAttempt.CardLast4,
-			&i.BillingPaymentAttempt.TokenType,
-			&i.BillingPaymentAttempt.Amount,
-			&i.BillingPaymentAttempt.Currency,
-			&i.BillingPaymentAttempt.AttemptedAt,
-			&i.BillingPaymentAttempt.CheckoutID,
-			&i.BillingPaymentAttempt.CheckoutTarget,
-			&i.BillingPaymentAttempt.SubscriptionID,
-			&i.BillingPaymentAttempt.PaymentMethodID,
-			&i.BillingPaymentAttempt.PaymentID,
-			&i.BillingPaymentAttempt.RailIntentID,
-			&i.BillingPaymentAttempt.Step,
-			&i.BillingPaymentAttempt.CreatedAt,
-			&i.BillingPaymentAttempt.CycleID,
-			&i.BillingPaymentAttempt.CardBin,
-			&i.BillingPaymentAttempt.IssuerCode,
-			&i.BillingPaymentAttempt.IssuerText,
-			&i.BillingPaymentAttempt.EnrichedAt,
-			&i.Total,
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.Rail,
+			&i.Kind,
+			&i.Owner,
+			&i.CardEntry,
+			&i.Source,
+			&i.ObservedVia,
+			&i.Category,
+			&i.Reason,
+			&i.Action,
+			&i.ResponseCode,
+			&i.ResponseText,
+			&i.TransactionID,
+			&i.AvsResult,
+			&i.CvvResult,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.TokenType,
+			&i.Amount,
+			&i.Currency,
+			&i.AttemptedAt,
+			&i.CheckoutID,
+			&i.CheckoutTarget,
+			&i.SubscriptionID,
+			&i.PaymentMethodID,
+			&i.PaymentID,
+			&i.RailIntentID,
+			&i.Step,
+			&i.CreatedAt,
+			&i.CycleID,
+			&i.CardBin,
+			&i.IssuerCode,
+			&i.IssuerText,
+			&i.EnrichedAt,
 		); err != nil {
 			return nil, err
 		}

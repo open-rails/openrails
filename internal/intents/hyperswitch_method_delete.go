@@ -42,7 +42,7 @@ func DecodeHyperSwitchMethodDelete(in gen.BillingRailIntent) (HyperSwitchMethodD
 	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeHyperSwitchMethodDelete || in.Rail != models.CustodianHyperSwitch || in.PspID != nil || in.SubscriptionID != nil || in.PaymentID != nil || in.PriceID != nil || (in.Origin != string(OriginUser) && in.Origin != string(OriginAdmin)) || in.CustodianID == nil || p.CustomerID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Instrument.Custodian != models.CustodianHyperSwitch || p.Instrument.CustodianID == nil || *p.Instrument.CustodianID != *in.CustodianID || p.Instrument.RailCustomerRef == "" || p.Instrument.RailMethodRef == "" || p.Environment != "test" && p.Environment != "live" || in.IdempotencyKey != TypeHyperSwitchMethodDelete+":"+p.PaymentMethodID.String() {
 		return p, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
-	if err := p.Instrument.Validate(); err != nil {
+	if err := p.Instrument.ValidateCustody(); err != nil {
 		return p, err
 	}
 	return p, p.Binding.Validate()

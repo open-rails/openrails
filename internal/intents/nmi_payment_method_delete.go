@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 // TypeNMIPaymentMethodDelete is the durable NMI customer-vault delete (#674 tail): a
@@ -257,7 +258,7 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 		if err != nil {
 			return err
 		}
-		if intent.PspID == nil || row.PspID != *intent.PspID || row.CustomerID != customer || row.Custodian != models.CustodianPSP || row.RailCustomerRef != p.RailCustomerRef || row.RailMethodRef != p.RailMethodRef || row.ParkReason != "delete:"+intent.ID.String() {
+		if intent.PspID == nil || !charge.ChargeableOn(row, *intent.PspID) || row.CustomerID != customer || row.Custodian != models.CustodianPSP || row.RailCustomerRef != p.RailCustomerRef || row.RailMethodRef != p.RailMethodRef || row.ParkReason != "delete:"+intent.ID.String() {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if err := deletionMethodUnused(ctx, q, intent.MerchantID, p.PaymentMethodID, 1); err != nil {
@@ -333,7 +334,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		if current.Status != StatusInFlight && current.Status != StatusUnknownNeedsVerify {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		if method.CustomerID != customer || method.PspID != *current.PspID || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.Rail != current.Rail || method.RailCustomerRef != p.RailCustomerRef || method.RailMethodRef != p.RailMethodRef {
+		if method.CustomerID != customer || !charge.ChargeableOn(method, *current.PspID) || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.Rail != current.Rail || method.RailCustomerRef != p.RailCustomerRef || method.RailMethodRef != p.RailMethodRef {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})
@@ -398,7 +399,7 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 		MerchantID: tid.UUID(),
 		Provider:   strings.ToLower(string(pm.Rail)),
 		IntentType: TypeNMIPaymentMethodDelete,
-		PspID:      pm.PspID,
+		PspID:      pm.HoldingPSP(),
 		Payload: NMIPaymentMethodDeletePayload{
 			UserID:          pm.CustomerID.String(),
 			PaymentMethodID: pm.ID,

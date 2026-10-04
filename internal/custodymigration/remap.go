@@ -48,11 +48,11 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.merchantID.UUID(), ID: existing.CustomerID}); err != nil {
 			return err
 		}
-		if existing.Custodian == models.CustodianPSP && existing.Rail == "nmi" {
-			if err := paymentmethods.LockNativeVault(ctx, q, p.merchantID.UUID(), existing.PspID, existing.RailCustomerRef); err != nil {
+		if existing.Custodian == models.CustodianPSP && existing.Rail == "nmi" && existing.PspID != nil {
+			if err := paymentmethods.LockNativeVault(ctx, q, p.merchantID.UUID(), *existing.PspID, existing.RailCustomerRef); err != nil {
 				return err
 			}
-			if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.merchantID.UUID(), existing.PspID, existing.RailCustomerRef, existing.RailMethodRef); err != nil {
+			if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.merchantID.UUID(), *existing.PspID, existing.RailCustomerRef, existing.RailMethodRef); err != nil {
 				return err
 			}
 		}
@@ -97,6 +97,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 			return nil
 		}
 
+		brand, last4, month, year := models.ParseCard(tk.CardType, tk.LastFour, tk.ExpiryDate).Columns()
 		rows, uerr := q.RemapPaymentMethodCustody(ctx, gen.RemapPaymentMethodCustodyParams{
 			MerchantID:         p.merchantID.UUID(),
 			ID:                 existing.ID,
@@ -109,10 +110,10 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 			NetworkTokenID:     strings.TrimSpace(tk.NetworkTokenID),
 			NetworkTokenStatus: strings.TrimSpace(tk.NetworkTokenStatus),
 			NetworkTokenPar:    strings.TrimSpace(tk.NetworkTokenPAR),
-			ToPspID:            p.targetPSPID(),
-			LastFour:           strings.TrimSpace(tk.LastFour),
-			CardType:           strings.TrimSpace(tk.CardType),
-			ExpiryDate:         strings.TrimSpace(tk.ExpiryDate),
+			CardBrand:          brand,
+			CardLast4:          last4,
+			CardExpMonth:       month,
+			CardExpYear:        year,
 		})
 		if uerr != nil {
 			return fmt.Errorf("remap instrument %s: %w", existing.ID, uerr)
@@ -134,7 +135,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 			FromCustodianID:     locked.CustodianID,
 			FromRailCustomerRef: locked.RailCustomerRef,
 			FromRailMethodRef:   locked.RailMethodRef,
-			FromPspID:           &fromPSP,
+			FromPspID:           fromPSP,
 			ToCustodian:         p.custodianKind(),
 			ToCustodianID:       p.custodian.ID,
 			ToRailMethodRef:     token,
@@ -189,6 +190,7 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, p.merchantID.UUID(), handle); err != nil {
 			return err
 		}
+		brand, last4, month, year := models.ParseCard(tk.CardType, tk.LastFour, tk.ExpiryDate).Columns()
 		if _, cerr := q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 			ID:         newID,
 			MerchantID: p.merchantID.UUID(),
@@ -199,7 +201,6 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 			// card, and it is the only link back to charges made before.
 			RailCustomerRef: strings.TrimSpace(tk.SourceRailCustomerRef),
 			RailMethodRef:   token,
-			PspID:           p.targetPSP.ID,
 
 			Custodian:          p.custodianKind(),
 			CustodianID:        &p.custodian.ID,
@@ -208,9 +209,10 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 			NetworkTokenStatus: strings.TrimSpace(tk.NetworkTokenStatus),
 			NetworkTokenPar:    strings.TrimSpace(tk.NetworkTokenPAR),
 			ChargeVia:          chargeViaFor(tk),
-			LastFour:           nilIfEmpty(tk.LastFour),
-			CardType:           nilIfEmpty(tk.CardType),
-			ExpiryDate:         nilIfEmpty(tk.ExpiryDate),
+			CardBrand:          brand,
+			CardLast4:          last4,
+			CardExpMonth:       month,
+			CardExpYear:        year,
 			CreatedAt:          p.exportedAt,
 			UpdatedAt:          p.exportedAt,
 		}); cerr != nil {

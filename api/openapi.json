@@ -10985,7 +10985,35 @@
             }
           },
           {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "period_from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period_to",
             "in": "query",
             "schema": {
               "type": "string"
@@ -11005,7 +11033,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaginatedResponseOfMerchantInvoiceDTO"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Invoice"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -11022,8 +11068,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:invoices:read",
         "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -11052,8 +11097,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Invoice"
                 }
               }
             }
@@ -11091,6 +11135,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -11100,7 +11158,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InvoicePayment"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -11117,11 +11192,13 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:invoices:read",
         "x-openrails-errors": [
+          "invalid_cursor",
           "invalid_param",
           "resource_not_found"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       },
       "post": {
@@ -11142,7 +11219,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RecordInvoicePaymentRequest"
+                "$ref": "#/components/schemas/CreateInvoicePaymentParams"
               }
             }
           }
@@ -11153,7 +11230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MerchantInvoiceDTO"
+                  "$ref": "#/components/schemas/Invoice"
                 }
               }
             }
@@ -11172,6 +11249,10 @@
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "invalid_param",
+          "invoice_action_not_allowed",
+          "invoice_payment_exceeds_due",
+          "invoice_payment_invalid",
+          "invoice_payment_reference_used",
           "resource_not_found"
         ],
         "x-openrails-error-sets": [
@@ -11195,22 +11276,13 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecordInvoicePaymentRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MerchantInvoiceDTO"
+                  "$ref": "#/components/schemas/Invoice"
                 }
               }
             }
@@ -11229,11 +11301,11 @@
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
+          "invoice_action_not_allowed",
           "resource_not_found"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       }
     },
@@ -11252,22 +11324,13 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecordInvoicePaymentRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MerchantInvoiceDTO"
+                  "$ref": "#/components/schemas/Invoice"
                 }
               }
             }
@@ -11286,11 +11349,11 @@
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
+          "invoice_action_not_allowed",
           "resource_not_found"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       }
     },
@@ -11307,14 +11370,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/RetryInvoiceCollectionParams"
               }
             }
           }
@@ -11325,7 +11394,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoiceCollectionRetryResult"
+                  "$ref": "#/components/schemas/InvoiceCollection"
                 }
               }
             }
@@ -11335,7 +11404,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoiceCollectionRetryResult"
+                  "$ref": "#/components/schemas/InvoiceCollection"
                 }
               }
             }
@@ -11353,10 +11422,17 @@
         "x-openrails-permission": "merchant:invoices:collect",
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
+          "card_declined",
+          "collection_payment_method_invalid",
+          "collection_payment_method_required",
+          "idempotency_key_reused",
           "invalid_param",
+          "invoice_not_retryable",
+          "invoice_retry_idempotency_conflict",
+          "invoice_retry_in_progress",
+          "invoice_retry_outcome_unknown",
           "payment_method_required",
-          "rebill_terms_committed",
-          "resource_conflict",
+          "payment_provider_rejected",
           "resource_not_found"
         ],
         "x-openrails-error-sets": [
@@ -11386,8 +11462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/InvoiceProfile"
                 }
               }
             }
@@ -11430,7 +11505,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InvoiceProfileDTO"
+                "$ref": "#/components/schemas/InvoiceProfile"
               }
             }
           }
@@ -11441,7 +11516,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoiceProfileDTO"
+                  "$ref": "#/components/schemas/InvoiceProfile"
                 }
               }
             }
@@ -11451,7 +11526,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoiceProfileDTO"
+                  "$ref": "#/components/schemas/InvoiceProfile"
                 }
               }
             }
@@ -11486,14 +11561,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -11507,7 +11582,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Invoice"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -11524,8 +11616,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -11554,7 +11645,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoiceDTO"
+                  "$ref": "#/components/schemas/Invoice"
                 }
               }
             }
@@ -11571,7 +11662,6 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
           "invalid_param",
           "resource_not_found"
         ],
@@ -11593,13 +11683,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PayInvoiceNowRequest"
+                "$ref": "#/components/schemas/PayInvoiceParams"
               }
             }
           }
@@ -11610,7 +11707,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoicePayNowResult"
+                  "$ref": "#/components/schemas/InvoicePayNow"
                 }
               }
             }
@@ -11620,7 +11717,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoicePayNowResult"
+                  "$ref": "#/components/schemas/InvoicePayNow"
                 }
               }
             }
@@ -11637,7 +11734,6 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
           "card_declined",
           "customer_action_required",
           "customer_payment_unsupported",
@@ -11650,8 +11746,7 @@
           "payment_provider_rejected",
           "rebill_terms_committed",
           "resource_conflict",
-          "resource_not_found",
-          "subscription_not_found"
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -11687,69 +11782,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:payments:read",
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/payments": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/PaymentSettlementStatus"
                 }
               }
             }
@@ -11793,7 +11826,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AdminOffChannelPaymentRequest"
+                "$ref": "#/components/schemas/CreateOffChannelPaymentParams"
               }
             }
           }
@@ -11804,8 +11837,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Payment"
                 }
               }
             }
@@ -11815,8 +11847,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Payment"
                 }
               }
             }
@@ -11835,7 +11866,9 @@
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "catalog_scope_mismatch",
-          "invalid_param"
+          "idempotency_key_reused",
+          "invalid_param",
+          "price_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -11850,26 +11883,10 @@
         ],
         "parameters": [
           {
-            "name": "all",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "created_after",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "created_before",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
+              "type": "string"
             }
           },
           {
@@ -11880,42 +11897,14 @@
             }
           },
           {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "max_amount",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "min_amount",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page_size",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -11936,52 +11925,10 @@
             }
           },
           {
-            "name": "refunds_only",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "sort_by",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_by",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sort_order",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "subscription_id",
             "in": "query",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "total_items",
-            "in": "query",
-            "schema": {
-              "type": "integer"
             }
           },
           {
@@ -11998,7 +11945,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfPayment"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Payment"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12015,7 +11980,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:payments:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -12095,22 +12060,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RefundRequest"
+                "$ref": "#/components/schemas/RefundPaymentParams"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Payment"
-                }
-              }
-            }
-          },
           "201": {
             "description": "Created",
             "content": {
@@ -12144,10 +12099,15 @@
         "x-openrails-permission": "merchant:payments:refund",
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
+          "idempotency_key_required",
+          "idempotency_key_reused",
           "invalid_param",
           "provider_cancel_held",
           "rebill_terms_committed",
-          "resource_conflict"
+          "refund_rail_unavailable",
+          "refund_unsupported",
+          "resource_conflict",
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -12162,6 +12122,69 @@
         ],
         "parameters": [
           {
+            "name": "avs_result",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "card_entry",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "checkout_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cvv_result",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -12169,10 +12192,66 @@
             }
           },
           {
-            "name": "offset",
+            "name": "observed_via",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "psp_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "response_code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscription_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -12182,7 +12261,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOfPaymentAttempt"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentAttempt"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12199,7 +12296,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:payments:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -12260,6 +12357,34 @@
         ],
         "parameters": [
           {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "due_since",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "due_until",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "first_outcome",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -12267,10 +12392,38 @@
             }
           },
           {
-            "name": "offset",
+            "name": "miss_reason",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "psp_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscription_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -12280,7 +12433,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOfRebillCycle"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RebillCycle"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12297,7 +12468,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:payments:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -12358,14 +12529,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -12392,7 +12563,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOfPurchaseReview"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PurchaseReview"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12409,7 +12598,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:payments:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -12602,6 +12791,20 @@
         ],
         "parameters": [
           {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -12609,14 +12812,28 @@
             }
           },
           {
-            "name": "offset",
+            "name": "price_id",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "type",
+            "name": "rail",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscription_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "transaction_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -12629,7 +12846,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfUserPaymentObject"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Payment"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12646,7 +12881,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -12667,6 +12902,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -12675,7 +12924,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOfPaymentMethod"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentMethod"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12692,10 +12959,12 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
+          "invalid_cursor",
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -12742,7 +13011,6 @@
         "x-openrails-permission": "merchant:customer-settings:update",
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
-          "authentication_required",
           "invalid_param",
           "payment_method_delete_failed",
           "payment_method_delete_unsupported",
@@ -12756,65 +13024,6 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}/default-payment-method": {
-      "put": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "Not yet typed."
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethod"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "payment_method_not_usable",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/me/collection-payment-method": {
       "put": {
         "tags": [
@@ -12824,7 +13033,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CollectionPaymentMethodRequest"
+                "$ref": "#/components/schemas/CollectionPaymentMethod"
               }
             }
           }
@@ -12835,7 +13044,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CollectionPaymentMethodResponse"
+                  "$ref": "#/components/schemas/CollectionPaymentMethod"
                 }
               }
             }
@@ -12852,57 +13061,8 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "subscription_management",
         "x-openrails-errors": [
-          "authentication_required",
+          "collection_payment_method_invalid",
           "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/default-payment-method": {
-      "put": {
-        "tags": [
-          "customer"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "Not yet typed."
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethod"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "payment_method_not_usable",
-          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -12917,28 +13077,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
             "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -12951,7 +13097,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOfPaymentMethod"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentMethod"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12968,8 +13132,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -12984,14 +13147,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreatePaymentMethodRequest"
+                "$ref": "#/components/schemas/CreatePaymentMethodParams"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "OK",
+          "201": {
+            "description": "Created",
             "content": {
               "application/json": {
                 "schema": {
@@ -13012,7 +13175,6 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
           "card_attempts_blocked",
           "card_declined",
           "card_not_saved",
@@ -13027,193 +13189,6 @@
         "x-openrails-error-sets": [
           "tier:customer",
           "request"
-        ]
-      }
-    },
-    "/v1/me/payment-methods/stripe-setup": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "Not yet typed."
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/payment-methods/stripe-setup/{id}": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
-    "/v1/me/payment-methods/stripe-setup/{id}/confirm": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
         ]
       }
     },
@@ -13243,7 +13218,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdatePaymentMethodRequest"
+                "$ref": "#/components/schemas/ReplacePaymentMethodCardParams"
               }
             }
           }
@@ -13274,7 +13249,6 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
           "card_declined",
           "card_not_saved",
           "card_requires_https",
@@ -13326,11 +13300,196 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
           "invalid_param",
           "payment_method_delete_failed",
           "payment_method_delete_unsupported",
           "rate_limit_exceeded",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
+    "/v1/me/payment-method-setups": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentMethodSetupParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-customer-scope": "billing_management",
+        "x-openrails-errors": [
+          "card_attempts_blocked",
+          "card_declined",
+          "card_not_saved",
+          "custodian_capture_unavailable",
+          "customer_session_required",
+          "idempotency_key_reused",
+          "insufficient_funds",
+          "invalid_param",
+          "payment_method_required",
+          "payment_method_stale",
+          "payment_provider_rejected",
+          "resource_access_denied",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
+    "/v1/me/payment-method-setups/{id}": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-customer-scope": "billing_management",
+        "x-openrails-errors": [
+          "card_attempts_blocked",
+          "card_declined",
+          "card_not_saved",
+          "custodian_capture_unavailable",
+          "customer_session_required",
+          "idempotency_key_reused",
+          "insufficient_funds",
+          "invalid_param",
+          "payment_method_required",
+          "payment_method_stale",
+          "payment_provider_rejected",
+          "resource_access_denied",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
+    "/v1/me/payment-method-setups/{id}/confirm": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-customer-scope": "billing_management",
+        "x-openrails-errors": [
+          "card_attempts_blocked",
+          "card_declined",
+          "card_not_saved",
+          "custodian_capture_unavailable",
+          "customer_session_required",
+          "idempotency_key_reused",
+          "insufficient_funds",
+          "invalid_param",
+          "payment_method_required",
+          "payment_method_stale",
+          "payment_provider_rejected",
+          "resource_access_denied",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -13369,7 +13528,6 @@
         "x-openrails-mounted-when": "stripe_portal",
         "x-openrails-customer-scope": "self_service",
         "x-openrails-errors": [
-          "authentication_required",
           "invalid_param",
           "resource_not_found"
         ],
@@ -16176,37 +16334,6 @@
   },
   "components": {
     "schemas": {
-      "AdminOffChannelPaymentRequest": {
-        "type": "object",
-        "properties": {
-          "price_id": {
-            "type": "string"
-          },
-          "transaction_id": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "purchased_at": {
-            "type": "string"
-          },
-          "discount_code": {
-            "type": "string"
-          },
-          "discount_reason": {
-            "type": "string"
-          },
-          "discount_metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          }
-        }
-      },
       "AdminRateOverrideRequest": {
         "type": "object",
         "properties": {
@@ -17045,41 +17172,125 @@
         "type": "object",
         "properties": {
           "line1": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "line2": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "city": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "state": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "postal_code": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "country": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "line1",
+          "line2",
+          "city",
+          "state",
+          "postal_code",
+          "country"
+        ]
       },
       "BillingDetails": {
         "type": "object",
         "properties": {
           "name": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "email": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "phone": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "address": {
-            "$ref": "#/components/schemas/BillingAddress"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BillingAddress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "name",
+          "email",
+          "phone",
+          "address"
+        ]
       },
       "BillingImportResult": {
         "type": "object",
@@ -17347,18 +17558,52 @@
         "type": "object",
         "properties": {
           "brand": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last4": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "exp_month": {
-            "type": "integer"
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "exp_year": {
-            "type": "integer"
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "brand",
+          "last4",
+          "exp_month",
+          "exp_year"
+        ]
       },
       "CardEntry": {
         "type": "object",
@@ -18558,18 +18803,7 @@
           "created_at"
         ]
       },
-      "CollectionPaymentMethodRequest": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          }
-        }
-      },
-      "CollectionPaymentMethodResponse": {
+      "CollectionPaymentMethod": {
         "type": "object",
         "properties": {
           "currency": {
@@ -18736,66 +18970,65 @@
           }
         }
       },
-      "CreatePaymentMethodRequest": {
+      "CreateInvoicePaymentParams": {
         "type": "object",
         "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "reference": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateOffChannelPaymentParams": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "purchased_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "discount_code": {
+            "type": "string"
+          },
+          "discount_reason": {
+            "type": "string"
+          },
+          "discount_metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
+      },
+      "CreatePaymentMethodParams": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
           "payment_token": {
-            "type": "string"
-          },
-          "name_on_card": {
-            "type": "string"
-          },
-          "address1": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "zip": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "phone": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "company": {
-            "type": "string"
-          },
-          "address2": {
-            "type": "string"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "last_four": {
-            "type": "string"
-          },
-          "card_type": {
-            "type": "string"
-          },
-          "expiry_date": {
             "type": "string"
           },
           "card": {
             "$ref": "#/components/schemas/CardEntry"
           },
-          "card_number": {},
-          "number": {},
-          "pan": {},
-          "primary_account_number": {},
-          "cvv": {},
-          "cvc": {},
-          "cvn": {},
-          "security_code": {},
-          "verification_value": {}
+          "billing_details": {
+            "$ref": "#/components/schemas/BillingDetails"
+          }
         }
       },
       "CreatePaymentMethodSessionRequest": {
@@ -19738,20 +19971,11 @@
           "rail_method_ref": {
             "type": "string"
           },
-          "initial_transaction_id": {
-            "type": "string"
-          },
           "recurring_transaction_id": {
             "type": "string"
           },
-          "last_four": {
-            "type": "string"
-          },
-          "card_type": {
-            "type": "string"
-          },
-          "expiry_date": {
-            "type": "string"
+          "card": {
+            "$ref": "#/components/schemas/CardDetails"
           },
           "created_at": {
             "type": "string",
@@ -20989,26 +21213,22 @@
           "rail": {
             "type": "string"
           },
-          "brand": {
-            "type": "string"
-          },
-          "last_four": {
-            "type": "string"
-          },
-          "exp_month": {
-            "type": "integer"
-          },
-          "exp_year": {
-            "type": "integer"
-          },
-          "default": {
-            "type": "boolean"
+          "card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
           "option_id",
-          "rail"
+          "rail",
+          "card"
         ]
       },
       "HostedCheckoutSession": {
@@ -21113,53 +21333,27 @@
           "expires_at"
         ]
       },
-      "InvoiceCollectionRetryResult": {
+      "Invoice": {
         "type": "object",
         "properties": {
-          "invoice": {
-            "$ref": "#/components/schemas/InvoiceDTO"
-          },
-          "attempt": {
-            "$ref": "#/components/schemas/InvoicePaymentAttemptDTO"
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "invoice",
-          "attempt",
-          "replayed"
-        ]
-      },
-      "InvoiceContactDTO": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "email"
-        ]
-      },
-      "InvoiceDTO": {
-        "type": "object",
-        "properties": {
-          "recovery": {
-            "$ref": "#/components/schemas/PaymentRecovery"
-          },
           "id": {
+            "type": "string"
+          },
+          "customer_id": {
             "type": "string"
           },
           "currency": {
             "type": "string"
           },
           "invoice_number": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "period_from": {
             "type": "string",
@@ -21210,7 +21404,7 @@
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/InvoiceLineItemDTO"
+                  "$ref": "#/components/schemas/InvoiceLineItem"
                 }
               },
               {
@@ -21219,76 +21413,219 @@
             ]
           },
           "money_movements": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "po_number": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "tax": {
-            "type": "object",
-            "additionalProperties": {}
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "billing_contacts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InvoiceContactDTO"
-            }
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InvoiceContact"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "memo": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "draft",
+              "open",
+              "paid",
+              "past_due",
+              "uncollectible",
+              "voided"
+            ]
           },
           "collection_method": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "charge_automatically",
+              "send_invoice"
+            ]
           },
           "issued_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "due_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "paid_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "voided_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "uncollectible_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "finalized_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "external_invoice_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "collection_failure_count": {
             "type": "integer"
           },
           "collection_failed_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "next_collection_attempt_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_collection_failure_code": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "collection_intent_id": {
-            "type": "string"
+          "recovery": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available_actions": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "mark_uncollectible",
+                    "record_payment",
+                    "retry_collection",
+                    "void"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -21297,7 +21634,9 @@
         },
         "required": [
           "id",
+          "customer_id",
           "currency",
+          "invoice_number",
           "period_from",
           "period_to",
           "usage_total",
@@ -21310,13 +21649,64 @@
           "amount_paid",
           "amount_due",
           "line_items",
+          "money_movements",
+          "po_number",
+          "tax",
+          "billing_contacts",
+          "memo",
           "status",
           "collection_method",
+          "issued_at",
+          "due_at",
+          "paid_at",
+          "voided_at",
+          "uncollectible_at",
+          "finalized_at",
+          "external_invoice_id",
           "collection_failure_count",
+          "collection_failed_at",
+          "next_collection_attempt_at",
+          "last_collection_failure_code",
+          "recovery",
+          "available_actions",
           "created_at"
         ]
       },
-      "InvoiceLineItemDTO": {
+      "InvoiceCollection": {
+        "type": "object",
+        "properties": {
+          "invoice": {
+            "$ref": "#/components/schemas/Invoice"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/InvoicePayment"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "invoice",
+          "payment",
+          "replayed"
+        ]
+      },
+      "InvoiceContact": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email"
+        ]
+      },
+      "InvoiceLineItem": {
         "type": "object",
         "properties": {
           "event_type": {
@@ -21330,26 +21720,34 @@
             "type": "integer"
           },
           "dimensions": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer"
-            }
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "event_type",
           "amount",
-          "count"
+          "count",
+          "dimensions"
         ]
       },
-      "InvoicePayNowResult": {
+      "InvoicePayNow": {
         "type": "object",
         "properties": {
           "invoice": {
-            "$ref": "#/components/schemas/InvoiceDTO"
+            "$ref": "#/components/schemas/Invoice"
           },
-          "attempt": {
-            "$ref": "#/components/schemas/InvoicePaymentAttemptDTO"
+          "payment": {
+            "$ref": "#/components/schemas/InvoicePayment"
           },
           "operation": {
             "$ref": "#/components/schemas/PaymentOperation"
@@ -21360,12 +21758,12 @@
         },
         "required": [
           "invoice",
-          "attempt",
+          "payment",
           "operation",
           "replayed"
         ]
       },
-      "InvoicePaymentAttemptDTO": {
+      "InvoicePayment": {
         "type": "object",
         "properties": {
           "id": {
@@ -21382,30 +21780,77 @@
             "description": "A number as a decimal string."
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "attempted",
+              "failed",
+              "settled"
+            ]
           },
           "payment_method_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rail": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "rail_payment_id": {
-            "type": "string"
+          "transaction_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "failure_code": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "failure_reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "attempted_at": {
             "type": "string",
             "format": "date-time"
           },
           "settled_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -21414,30 +21859,54 @@
           "currency",
           "amount",
           "status",
-          "attempted_at"
+          "payment_method_id",
+          "rail",
+          "transaction_id",
+          "failure_code",
+          "failure_reason",
+          "attempted_at",
+          "settled_at"
         ]
       },
-      "InvoiceProfileDTO": {
+      "InvoiceProfile": {
         "type": "object",
         "properties": {
           "net_terms_days": {
             "type": "integer"
           },
           "collection_method": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "charge_automatically",
+              "send_invoice"
+            ]
           },
           "po_number": {
             "type": "string"
           },
           "tax": {
-            "type": "object",
-            "additionalProperties": {}
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "billing_contacts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InvoiceContactDTO"
-            }
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/InvoiceContact"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "memo": {
             "type": "string"
@@ -21445,7 +21914,11 @@
         },
         "required": [
           "net_terms_days",
-          "collection_method"
+          "collection_method",
+          "po_number",
+          "tax",
+          "billing_contacts",
+          "memo"
         ]
       },
       "Matrix": {
@@ -21583,204 +22056,6 @@
           "display_name",
           "api_host",
           "settings"
-        ]
-      },
-      "MerchantInvoiceDTO": {
-        "type": "object",
-        "properties": {
-          "recovery": {
-            "$ref": "#/components/schemas/PaymentRecovery"
-          },
-          "id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "invoice_number": {
-            "type": "string"
-          },
-          "period_from": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period_to": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "usage_total": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "deposits_total": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "owed_accrued": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "owed_paid": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "closing_balance": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "subtotal_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "total_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "amount_paid": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "amount_due": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "line_items": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/InvoiceLineItemDTO"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "money_movements": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "po_number": {
-            "type": "string"
-          },
-          "tax": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "billing_contacts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InvoiceContactDTO"
-            }
-          },
-          "memo": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "collection_method": {
-            "type": "string"
-          },
-          "issued_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "due_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "paid_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "voided_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "uncollectible_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "finalized_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "external_invoice_id": {
-            "type": "string"
-          },
-          "collection_failure_count": {
-            "type": "integer"
-          },
-          "collection_failed_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "next_collection_attempt_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_collection_failure_code": {
-            "type": "string"
-          },
-          "collection_intent_id": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "unit_decimals": {
-            "type": "integer"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "available_actions": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "mark_uncollectible",
-                    "record_payment",
-                    "retry_collection",
-                    "void"
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "currency",
-          "period_from",
-          "period_to",
-          "usage_total",
-          "deposits_total",
-          "owed_accrued",
-          "owed_paid",
-          "closing_balance",
-          "subtotal_amount",
-          "total_amount",
-          "amount_paid",
-          "amount_due",
-          "line_items",
-          "status",
-          "collection_method",
-          "collection_failure_count",
-          "created_at",
-          "unit_decimals",
-          "customer_id",
-          "available_actions"
         ]
       },
       "MerchantProfileInput": {
@@ -22322,88 +22597,6 @@
           }
         }
       },
-      "PageOfPaymentAttempt": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/PaymentAttempt"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more"
-        ]
-      },
-      "PageOfPaymentMethod": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/PaymentMethod"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more"
-        ]
-      },
       "PageOfProductObject": {
         "type": "object",
         "properties": {
@@ -22486,88 +22679,6 @@
           "has_more"
         ]
       },
-      "PageOfPurchaseReview": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/PurchaseReview"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more"
-        ]
-      },
-      "PageOfRebillCycle": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/RebillCycle"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more"
-        ]
-      },
       "PageOfSubscription": {
         "type": "object",
         "properties": {
@@ -22618,39 +22729,6 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/CatalogDriftEventView"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ]
-      },
-      "PaginatedResponseOfMerchantInvoiceDTO": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/MerchantInvoiceDTO"
                 }
               },
               {
@@ -22852,51 +22930,6 @@
           "url"
         ]
       },
-      "PathPageOfPayment": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Payment"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more",
-          "url"
-        ]
-      },
       "PathPageOfPlatformMerchantItem": {
         "type": "object",
         "properties": {
@@ -22987,52 +23020,7 @@
           "url"
         ]
       },
-      "PathPageOfUserPaymentObject": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/UserPaymentObject"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more",
-          "url"
-        ]
-      },
-      "PayInvoiceNowRequest": {
+      "PayInvoiceParams": {
         "type": "object",
         "properties": {
           "payment_method_id": {
@@ -23074,11 +23062,24 @@
           "id": {
             "type": "string"
           },
-          "object": {
-            "type": "string"
+          "kind": {
+            "type": "string",
+            "enum": [
+              "charge",
+              "chargeback",
+              "dispute_reversal",
+              "refund"
+            ]
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "failed",
+              "partially_refunded",
+              "pending",
+              "refunded",
+              "succeeded"
+            ]
           },
           "amount": {
             "type": "string",
@@ -23095,50 +23096,148 @@
             "type": "string"
           },
           "subscription_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_id": {
             "type": "string"
           },
+          "price": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionPrice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "manual",
+              "rail"
+            ]
+          },
           "rail": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "psp_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "transaction_id": {
             "type": "string"
           },
-          "refunded": {
-            "type": "boolean"
+          "card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "captured": {
-            "type": "boolean"
-          },
-          "refunds": {
-            "$ref": "#/components/schemas/PaymentList"
-          },
-          "product": {
-            "$ref": "#/components/schemas/ProductSummary"
+          "failure": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "refunded_payment_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refunds": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Payment"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "price": {
-            "$ref": "#/components/schemas/PublicPrice"
           }
         },
         "required": [
           "id",
-          "object",
+          "kind",
+          "status",
           "amount",
           "amount_refunded",
           "currency",
           "customer_id",
+          "subscription_id",
+          "price_id",
+          "price",
+          "product",
+          "channel",
           "rail",
+          "psp_id",
           "transaction_id",
-          "refunded",
+          "card",
+          "failure",
+          "refunded_payment_id",
+          "reason",
+          "refunds",
           "created_at"
         ]
       },
@@ -23146,9 +23245,6 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
-          },
-          "object": {
             "type": "string"
           },
           "kind": {
@@ -23232,11 +23328,15 @@
           "cvv_result": {
             "type": "string"
           },
-          "card_brand": {
-            "type": "string"
-          },
-          "card_last4": {
-            "type": "string"
+          "card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "card_bin": {
             "type": "string"
@@ -23274,48 +23374,91 @@
             "type": "string"
           },
           "cycle_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "subscription_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "payment_method_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "payment_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "enriched_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
-          "object",
           "kind",
           "owner",
           "card_entry",
           "source",
           "observed_via",
           "category",
+          "reason",
+          "action",
+          "response_code",
+          "response_text",
+          "issuer_code",
+          "issuer_text",
+          "avs_result",
+          "cvv_result",
+          "card",
+          "card_bin",
+          "token_type",
+          "transaction_id",
           "rail",
           "psp_id",
           "customer_id",
           "amount",
-          "attempted_at"
+          "currency",
+          "attempted_at",
+          "checkout_id",
+          "checkout_target",
+          "cycle_id",
+          "subscription_id",
+          "payment_method_id",
+          "payment_id",
+          "enriched_at"
         ]
-      },
-      "PaymentCardJSON": {
-        "type": "object",
-        "properties": {
-          "brand": {
-            "type": "string"
-          },
-          "last4": {
-            "type": "string"
-          }
-        }
       },
       "PaymentFailure": {
         "type": "object",
@@ -23335,115 +23478,146 @@
           "message"
         ]
       },
-      "PaymentList": {
+      "PaymentMethod": {
         "type": "object",
         "properties": {
-          "object": {
+          "id": {
             "type": "string"
           },
-          "data": {
+          "customer_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "psp_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billing_details": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BillingDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "health": {
+            "$ref": "#/components/schemas/PaymentMethodHealth"
+          },
+          "subscriptions": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/Payment"
+                  "$ref": "#/components/schemas/PaymentMethodSubscription"
                 }
               },
               {
                 "type": "null"
               }
             ]
-          }
-        },
-        "required": [
-          "object",
-          "data"
-        ]
-      },
-      "PaymentMethod": {
-        "type": "object",
-        "properties": {
-          "psp_id": {
-            "type": "string"
           },
-          "id": {
-            "type": "string"
-          },
-          "object": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "customer": {
-            "type": "string"
-          },
-          "billing_details": {
-            "$ref": "#/components/schemas/BillingDetails"
-          },
-          "card": {
-            "$ref": "#/components/schemas/CardDetails"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
+          "collection_currencies": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "health": {
-            "$ref": "#/components/schemas/PaymentMethodHealth"
-          },
-          "subscriptions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PaymentMethodSubscription"
-            }
-          },
-          "collection_default_currencies": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "default": {
-            "type": "boolean"
           }
         },
         "required": [
-          "psp_id",
           "id",
-          "object",
-          "type",
+          "customer_id",
           "rail",
-          "created_at",
-          "default"
+          "psp_id",
+          "card",
+          "billing_details",
+          "health",
+          "subscriptions",
+          "collection_currencies",
+          "created_at"
         ]
       },
       "PaymentMethodHealth": {
         "type": "object",
         "properties": {
           "expiry_status": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "expired",
+                  "expiring_soon",
+                  "valid"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_charged_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_charge_outcome": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "failed",
+                  "succeeded"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "active": {
             "type": "boolean"
           }
         },
         "required": [
+          "expiry_status",
+          "last_charged_at",
+          "last_charge_outcome",
           "active"
         ]
       },
@@ -23461,6 +23635,17 @@
           }
         }
       },
+      "PaymentMethodSetupParams": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "consent": {
+            "type": "boolean"
+          }
+        }
+      },
       "PaymentMethodSubscription": {
         "type": "object",
         "properties": {
@@ -23468,9 +23653,6 @@
             "type": "string"
           },
           "display_name": {
-            "type": "string"
-          },
-          "description": {
             "type": "string"
           },
           "created_at": {
@@ -23481,7 +23663,6 @@
         "required": [
           "id",
           "display_name",
-          "description",
           "created_at"
         ]
       },
@@ -23549,6 +23730,17 @@
           "price_id",
           "amount",
           "currency"
+        ]
+      },
+      "PaymentSettlementStatus": {
+        "type": "object",
+        "properties": {
+          "settled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "settled"
         ]
       },
       "PendingAction": {
@@ -24690,9 +24882,6 @@
           "id": {
             "type": "string"
           },
-          "object": {
-            "type": "string"
-          },
           "status": {
             "type": "string"
           },
@@ -24742,7 +24931,6 @@
         },
         "required": [
           "id",
-          "object",
           "status",
           "product_archive_id",
           "product_id",
@@ -25014,9 +25202,6 @@
           "id": {
             "type": "string"
           },
-          "object": {
-            "type": "string"
-          },
           "subscription_id": {
             "type": "string"
           },
@@ -25050,15 +25235,29 @@
             "type": "string"
           },
           "missed_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "miss_reason": {
             "type": "string"
           },
           "collected_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recovered_by": {
             "type": "string"
@@ -25068,15 +25267,21 @@
             "format": "date-time"
           },
           "attempts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PaymentAttempt"
-            }
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PaymentAttempt"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
-          "object",
           "subscription_id",
           "customer_id",
           "psp_id",
@@ -25087,7 +25292,12 @@
           "currency",
           "first_outcome",
           "outcome",
-          "closes_at"
+          "missed_at",
+          "miss_reason",
+          "collected_at",
+          "recovered_by",
+          "closes_at",
+          "attempts"
         ]
       },
       "Recommendation": {
@@ -25111,19 +25321,7 @@
           "action"
         ]
       },
-      "RecordInvoicePaymentRequest": {
-        "type": "object",
-        "properties": {
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "reference": {
-            "type": "string"
-          }
-        }
-      },
-      "RefundRequest": {
+      "RefundPaymentParams": {
         "type": "object",
         "properties": {
           "amount": {
@@ -25146,6 +25344,20 @@
         "properties": {
           "release_reference": {
             "type": "string"
+          }
+        }
+      },
+      "ReplacePaymentMethodCardParams": {
+        "type": "object",
+        "properties": {
+          "payment_token": {
+            "type": "string"
+          },
+          "card": {
+            "$ref": "#/components/schemas/CardEntry"
+          },
+          "billing_details": {
+            "$ref": "#/components/schemas/BillingDetails"
           }
         }
       },
@@ -25422,6 +25634,14 @@
           "columns",
           "rows"
         ]
+      },
+      "RetryInvoiceCollectionParams": {
+        "type": "object",
+        "properties": {
+          "payment_method_id": {
+            "type": "string"
+          }
+        }
       },
       "RetrySubscriptionNowRequest": {
         "type": "object",
@@ -26250,7 +26470,7 @@
             "$ref": "#/components/schemas/ProductSummary"
           },
           "card": {
-            "$ref": "#/components/schemas/SubscriptionCard"
+            "$ref": "#/components/schemas/CardDetails"
           },
           "cancel_portal_url": {
             "type": "string"
@@ -26331,23 +26551,6 @@
           "entitlement",
           "start_at"
         ]
-      },
-      "SubscriptionCard": {
-        "type": "object",
-        "properties": {
-          "brand": {
-            "type": "string"
-          },
-          "last4": {
-            "type": "string"
-          },
-          "exp_month": {
-            "type": "integer"
-          },
-          "exp_year": {
-            "type": "integer"
-          }
-        }
       },
       "SubscriptionPrice": {
         "type": "object",
@@ -26772,166 +26975,6 @@
           }
         }
       },
-      "UpdatePaymentMethodRequest": {
-        "type": "object",
-        "properties": {
-          "payment_token": {
-            "type": "string"
-          },
-          "name_on_card": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "address1": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "city": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "zip": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "country": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "phone": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "email": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "company": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "address2": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "provider": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_four": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "card_type": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "expiry_date": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "card": {
-            "$ref": "#/components/schemas/CardEntry"
-          },
-          "card_number": {},
-          "number": {},
-          "pan": {},
-          "primary_account_number": {},
-          "cvv": {},
-          "cvc": {},
-          "cvn": {},
-          "security_code": {},
-          "verification_value": {}
-        }
-      },
       "UpdatePriceRequest": {
         "type": "object",
         "properties": {
@@ -27346,73 +27389,6 @@
           "event_count",
           "amount",
           "dimensions"
-        ]
-      },
-      "UserPaymentObject": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "object": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "amount_refunded": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "refunded": {
-            "type": "boolean"
-          },
-          "captured": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "price": {
-            "$ref": "#/components/schemas/PublicPrice"
-          },
-          "product": {
-            "$ref": "#/components/schemas/ProductSummary"
-          },
-          "card": {
-            "$ref": "#/components/schemas/PaymentCardJSON"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/PaymentFailure"
-          }
-        },
-        "required": [
-          "id",
-          "object",
-          "amount",
-          "amount_refunded",
-          "currency",
-          "customer_id",
-          "rail",
-          "refunded",
-          "created_at"
         ]
       },
       "VerificationPressure": {

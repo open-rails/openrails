@@ -11,7 +11,6 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -25,95 +24,6 @@ const (
 	CollectionChargeAutomatically = money.CollectionChargeAutomatically
 	CollectionSendInvoice         = money.CollectionSendInvoice
 )
-
-// InvoiceProfileDTO is a payer's enterprise invoicing profile: net-N credit
-// terms, collection method and the document fields snapshotted onto every
-// invoice at finalize.
-type InvoiceProfileDTO = billing.InvoiceProfileDTO
-
-// SetCustomerInvoiceProfile upserts a payer's invoicing profile. Operator
-// surface — a payer must not grant itself credit terms.
-func (s *Service) SetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p InvoiceProfileDTO) error {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	contacts := make([]models.InvoiceContact, 0, len(p.BillingContacts))
-	for _, c := range p.BillingContacts {
-		contacts = append(contacts, models.InvoiceContact{Name: c.Name, Email: c.Email})
-	}
-	return s.moneyService().SetCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
-		NetTermsDays:     p.NetTermsDays,
-		CollectionMethod: p.CollectionMethod,
-		PONumber:         p.PONumber,
-		Tax:              p.Tax,
-		BillingContacts:  contacts,
-		Memo:             p.Memo,
-	})
-}
-
-// EnsureCustomerInvoiceProfile inserts a payer's invoicing profile when none
-// is stored. Existing operator configuration is left unchanged. The returned
-// boolean is true only when this call committed a new profile.
-func (s *Service) EnsureCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p InvoiceProfileDTO) (bool, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return false, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return false, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return false, fmt.Errorf("payer required")
-	}
-	contacts := make([]models.InvoiceContact, 0, len(p.BillingContacts))
-	for _, c := range p.BillingContacts {
-		contacts = append(contacts, models.InvoiceContact{Name: c.Name, Email: c.Email})
-	}
-	return s.moneyService().EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
-		NetTermsDays:     p.NetTermsDays,
-		CollectionMethod: p.CollectionMethod,
-		PONumber:         p.PONumber,
-		Tax:              p.Tax,
-		BillingContacts:  contacts,
-		Memo:             p.Memo,
-	})
-}
-
-// GetCustomerInvoiceProfile returns a payer's invoicing profile (nil = none).
-func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*InvoiceProfileDTO, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	p, err := s.moneyService().GetCustomerInvoiceProfile(ctx, payer)
-	if err != nil || p == nil {
-		return nil, err
-	}
-	return &InvoiceProfileDTO{
-		NetTermsDays:     p.NetTermsDays,
-		CollectionMethod: p.CollectionMethod,
-		PONumber:         p.PONumber,
-		Tax:              p.Tax,
-		BillingContacts:  contactsToDTO(p.BillingContacts),
-		Memo:             p.Memo,
-	}, nil
-}
 
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
 type UsageMeterSpec = billing.UsageMeterSpec
@@ -392,24 +302,4 @@ func (s *Service) ChargeOutstanding(ctx context.Context, minThreshold int64) (in
 		return e
 	})
 	return n, err
-}
-
-// RecordOutOfBandInvoicePayment applies a manual remittance (wire/check) to a
-// send_invoice (or any open) receivable. reference dedups replays.
-func (s *Service) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, amount int64, reference string) (*InvoiceDTO, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	inv, err := s.moneyService().RecordOutOfBandInvoicePayment(ctx, payer, invoiceID, amount, reference)
-	if err != nil {
-		return nil, err
-	}
-	dto := invoiceToDTO(inv)
-	return &dto, nil
 }

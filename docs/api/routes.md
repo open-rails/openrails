@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (290), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (287), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -77,21 +77,20 @@ A customer acting on its own account.
 | GET | `/v1/me/balance` | customer | — | — | 200 `Balance` | scope `billing_management` |
 | GET | `/v1/me/transactions` | customer | — | — | 200 `ListPage<CreditTransaction>` | scope `billing_management` |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` | scope `billing_management` |
-| GET | `/v1/me/invoices` | customer | — | — | 200 untyped | scope `billing_management` |
-| GET | `/v1/me/invoices/{id}` | customer | — | — | 200 `InvoiceDTO` | scope `billing_management` |
-| POST | `/v1/me/invoices/{id}/pay-now` | customer | — | `PayInvoiceNowRequest` | 200 `InvoicePayNowResult`<br>202 `InvoicePayNowResult` | scope `billing_management` |
+| GET | `/v1/me/invoices` | customer | — | — | 200 `ListPage<Invoice>` | scope `billing_management` |
+| GET | `/v1/me/invoices/{id}` | customer | — | — | 200 `Invoice` | scope `billing_management` |
+| POST | `/v1/me/invoices/{id}/pay-now` | customer | — | `PayInvoiceParams` | 200 `InvoicePayNow`<br>202 `InvoicePayNow` | scope `billing_management`; `Idempotency-Key` |
 | GET | `/v1/me/payment-operations/{id}/authentication` | customer | — | — | 200 `StripeEngineAuthentication` | scope `billing_management` |
 | POST | `/v1/me/payment-operations/{id}/authentication/confirm` | customer | — | — | 200 `PaymentOperation` | scope `billing_management` |
-| GET | `/v1/me/payments` | customer | — | — | 200 `PathPageOfUserPaymentObject` | scope `billing_management` |
-| PUT | `/v1/me/collection-payment-method` | customer | — | `CollectionPaymentMethodRequest` | 200 `CollectionPaymentMethodResponse` | scope `subscription_management` |
-| PUT | `/v1/me/default-payment-method` | customer | — | untyped | 200 `PaymentMethod` | scope `billing_management` |
-| GET | `/v1/me/payment-methods` | customer | — | — | 200 `PageOfPaymentMethod` | scope `billing_management` |
-| POST | `/v1/me/payment-methods/stripe-setup` | customer | — | untyped | 200 `StripeMethodSetupResponse` | scope `billing_management`; `Idempotency-Key` |
-| GET | `/v1/me/payment-methods/stripe-setup/{id}` | customer | — | — | 200 `StripeMethodSetupResponse` | scope `billing_management` |
-| POST | `/v1/me/payment-methods/stripe-setup/{id}/confirm` | customer | — | — | 200 `StripeMethodSetupResponse` | scope `billing_management` |
-| POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodRequest` | 200 `PaymentMethod` | scope `billing_management` |
-| PUT | `/v1/me/payment-methods/{id}` | customer | — | `UpdatePaymentMethodRequest` | 200 `PaymentMethod`<br>202 — | scope `billing_management`; `Idempotency-Key` |
+| GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` | scope `billing_management` |
+| PUT | `/v1/me/collection-payment-method` | customer | — | `CollectionPaymentMethod` | 200 `CollectionPaymentMethod` | scope `subscription_management` |
+| GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` | scope `billing_management` |
+| POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | scope `billing_management` |
+| PUT | `/v1/me/payment-methods/{id}` | customer | — | `ReplacePaymentMethodCardParams` | 200 `PaymentMethod`<br>202 — | scope `billing_management`; `Idempotency-Key` |
 | DELETE | `/v1/me/payment-methods/{id}` | customer | — | — | 202 —<br>204 — | scope `billing_management` |
+| POST | `/v1/me/payment-method-setups` | customer | — | `PaymentMethodSetupParams` | 200 `StripeMethodSetupResponse` | scope `billing_management`; `Idempotency-Key` |
+| GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `StripeMethodSetupResponse` | scope `billing_management` |
+| POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `StripeMethodSetupResponse` | scope `billing_management` |
 | POST | `/v1/me/billing-portal` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
 | GET | `/v1/me/notifications` | customer | — | — | 200 `PathPageOfNotification` | scope `billing_management` |
 | GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 untyped | scope `billing_management` |
@@ -226,30 +225,28 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/provider-operations/{operation_id}/release` | merchant | `merchant:admissions:create` | `ReleaseOperationAuthorizationParams` | 200 `OperationAuthorization` |  |
 | POST | `/v1/merchant/provider-operations/{operation_id}/observations` | merchant | `merchant:admissions:create` | `ProviderBillingObservationParams` | 200 `ProviderBillingQualification` |  |
 | GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | merchant | `merchant:usage:read` | — | 200 `ProviderBillingQualification` |  |
-| GET | `/v1/merchant/invoices` | merchant | `merchant:invoices:read` | — | 200 `PaginatedResponseOfMerchantInvoiceDTO` |  |
-| GET | `/v1/merchant/invoices/{id}` | merchant | `merchant:invoices:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/invoices/{id}/void` | merchant | `merchant:invoices:update` | `RecordInvoicePaymentRequest` | 200 `MerchantInvoiceDTO` | limit `destructive` |
-| POST | `/v1/merchant/invoices/{id}/uncollectible` | merchant | `merchant:invoices:update` | `RecordInvoicePaymentRequest` | 200 `MerchantInvoiceDTO` | limit `destructive` |
-| POST | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:update` | `RecordInvoicePaymentRequest` | 200 `MerchantInvoiceDTO` | limit `off_channel` |
-| POST | `/v1/merchant/invoices/{id}/retry-collection` | merchant | `merchant:invoices:collect` | untyped | 200 `InvoiceCollectionRetryResult`<br>202 `InvoiceCollectionRetryResult` | limit `off_channel` |
-| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `merchant:customer-settings:update` | `InvoiceProfileDTO` | 200 `InvoiceProfileDTO`<br>201 `InvoiceProfileDTO` | limit `grant` |
-| GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | merchant | `merchant:payments:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/customers/{customer_id}/payments` | merchant | `merchant:payments:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | merchant | `merchant:customer-settings:update` | `AdminOffChannelPaymentRequest` | 200 untyped<br>201 untyped | limit `off_channel` |
-| GET | `/v1/merchant/payments` | merchant | `merchant:payments:read` | — | 200 `PathPageOfPayment` |  |
+| GET | `/v1/merchant/invoices` | merchant | `merchant:invoices:read` | — | 200 `ListPage<Invoice>` |  |
+| GET | `/v1/merchant/invoices/{id}` | merchant | `merchant:invoices:read` | — | 200 `Invoice` |  |
+| GET | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:read` | — | 200 `ListPage<InvoicePayment>` |  |
+| POST | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:update` | `CreateInvoicePaymentParams` | 200 `Invoice` | limit `off_channel` |
+| POST | `/v1/merchant/invoices/{id}/void` | merchant | `merchant:invoices:update` | — | 200 `Invoice` | limit `destructive` |
+| POST | `/v1/merchant/invoices/{id}/uncollectible` | merchant | `merchant:invoices:update` | — | 200 `Invoice` | limit `destructive` |
+| POST | `/v1/merchant/invoices/{id}/retry-collection` | merchant | `merchant:invoices:collect` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | limit `off_channel`; `Idempotency-Key` |
+| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `merchant:customer-settings:read` | — | 200 `InvoiceProfile` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `merchant:customer-settings:update` | `InvoiceProfile` | 200 `InvoiceProfile`<br>201 `InvoiceProfile` | limit `grant` |
+| GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | merchant | `merchant:payments:read` | — | 200 `PaymentSettlementStatus` |  |
+| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | merchant | `merchant:customer-settings:update` | `CreateOffChannelPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
+| GET | `/v1/merchant/payments` | merchant | `merchant:payments:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/merchant/payments/{id}` | merchant | `merchant:payments:read` | — | 200 `Payment` |  |
-| POST | `/v1/merchant/payments/{id}/refunds` | merchant | `merchant:payments:refund` | `RefundRequest` | 200 `Payment`<br>201 `Payment`<br>202 `Payment` | limit `destructive`; `Idempotency-Key` |
-| GET | `/v1/merchant/payment-attempts` | merchant | `merchant:payments:read` | — | 200 `PageOfPaymentAttempt` |  |
+| POST | `/v1/merchant/payments/{id}/refunds` | merchant | `merchant:payments:refund` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | limit `destructive`; `Idempotency-Key` |
+| GET | `/v1/merchant/payment-attempts` | merchant | `merchant:payments:read` | — | 200 `ListPage<PaymentAttempt>` |  |
 | GET | `/v1/merchant/payment-attempts/{id}` | merchant | `merchant:payments:read` | — | 200 `PaymentAttempt` |  |
-| GET | `/v1/merchant/rebill-cycles` | merchant | `merchant:payments:read` | — | 200 `PageOfRebillCycle` |  |
+| GET | `/v1/merchant/rebill-cycles` | merchant | `merchant:payments:read` | — | 200 `ListPage<RebillCycle>` |  |
 | GET | `/v1/merchant/rebill-cycles/{id}` | merchant | `merchant:payments:read` | — | 200 `RebillCycle` |  |
-| GET | `/v1/merchant/purchase-reviews` | merchant | `merchant:payments:read` | — | 200 `PageOfPurchaseReview` |  |
+| GET | `/v1/merchant/purchase-reviews` | merchant | `merchant:payments:read` | — | 200 `ListPage<PurchaseReview>` |  |
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | merchant | `merchant:payments:refund` | `ResolvePurchaseReviewParams` | 200 `PurchaseReview` | limit `destructive` |
-| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | merchant | `merchant:customer-settings:read` | — | 200 `PageOfPaymentMethod` |  |
+| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<PaymentMethod>` |  |
 | DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | merchant | `merchant:customer-settings:update` | — | 202 —<br>204 — | limit `destructive` |
-| PUT | `/v1/merchant/customers/{customer_id}/default-payment-method` | merchant | `merchant:customer-settings:update` | untyped | 200 `PaymentMethod` |  |
 | GET | `/v1/merchant/payment-providers` | merchant | `merchant:payment-providers:read` | — | 200 untyped |  |
 | POST | `/v1/merchant/payment-providers/routing/dry-run` | merchant | `merchant:payment-providers:read` | `CheckoutRoutingDryRunRequest` | 200 `CheckoutRoutingDryRunResponse` |  |
 | GET | `/v1/merchant/payment-providers/{provider}` | merchant | `merchant:payment-providers:read` | — | 200 untyped |  |

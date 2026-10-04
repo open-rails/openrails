@@ -20,6 +20,7 @@ import {
   loadBootstrap,
   setSelectedMerchant,
 } from "@/lib/api/client"
+import type { Invoice, Payment, PaymentMethod } from "@/lib/api/generated/wire"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import { queryKeys } from "@/lib/queries"
 
@@ -148,6 +149,43 @@ export const aPrice = (id: string, productId: string, overrides: Partial<Catalog
   ...overrides,
 })
 
+export const aPayment = (id: string, overrides: Partial<Payment> = {}): Payment => ({
+  id, kind: "charge", status: "succeeded", amount: "20000000", amount_refunded: "0",
+  currency: "USD", customer_id: "cus_1", subscription_id: null, price_id: "price_1",
+  price: null, product: null, channel: "rail", rail: "nmi", psp_id: "psp_1",
+  transaction_id: `txn_${id}`, card: null, failure: null, refunded_payment_id: null,
+  reason: null, refunds: null, created_at: WHEN,
+  ...overrides,
+})
+export const aPaymentMethod = (id: string, overrides: Partial<PaymentMethod> = {}): PaymentMethod => ({
+  id, customer_id: "cus_1", rail: "nmi", psp_id: "psp_1",
+  card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
+  billing_details: null, subscriptions: null, collection_currencies: null, created_at: WHEN,
+  health: { expiry_status: "valid", last_charged_at: null, last_charge_outcome: null, active: true },
+  ...overrides,
+})
+export const anInvoice = (id: string, overrides: Partial<Invoice> = {}): Invoice => ({
+  id, customer_id: "cus_1", currency: "USD", invoice_number: null,
+  period_from: "2026-09-01T00:00:00Z", period_to: "2026-10-01T00:00:00Z",
+  usage_total: "0", deposits_total: "0", owed_accrued: "0", owed_paid: "0", closing_balance: "0",
+  subtotal_amount: "0", total_amount: "0", amount_paid: "0", amount_due: "0",
+  line_items: [], money_movements: null, po_number: null, tax: null, billing_contacts: null,
+  memo: null, status: "open", collection_method: "charge_automatically", issued_at: null,
+  due_at: null, paid_at: null, voided_at: null, uncollectible_at: null, finalized_at: null,
+  external_invoice_id: null, collection_failure_count: 0, collection_failed_at: null,
+  next_collection_attempt_at: null, last_collection_failure_code: null, recovery: null,
+  available_actions: [], created_at: WHEN,
+  ...overrides,
+})
+
+// cursorPages serves rows as a cursor list of `size`-row pages; the cursor is
+// the next row's index.
+export const cursorPages = <T>(rows: T[], size: number) => (request: Recorded) => {
+  const start = Number(new URLSearchParams(request.query).get("cursor") ?? 0)
+  const next = start + size
+  return { data: rows.slice(start, next), next_cursor: next < rows.length ? String(next) : null }
+}
+
 // The cache keys a console screen can hold at once. Seeding all of them and
 // reading back which ones a mutation invalidated asserts the whole blast
 // radius — what it refreshed and what it left alone — in one comparison.
@@ -156,6 +194,7 @@ const CACHE_KEYS = (): Record<string, QueryKey> => ({
   "customer.rates": queryKeys.customerUsageRates("cus_1"),
   subscriptions: queryKeys.subscriptions(), subscription: queryKeys.subscription("sub_1"),
   payments: queryKeys.payments(), payment: queryKeys.payment("pay_1"),
+  attempts: queryKeys.attempts(), cycles: queryKeys.cycles(),
   catalog: queryKeys.catalog(), drift: queryKeys.catalogDrift(),
   meters: queryKeys.usageMeters(), meter: queryKeys.usageMeter("tokens"),
   settings: queryKeys.settings(), providers: [...queryKeys.settings(), "payment-providers"],

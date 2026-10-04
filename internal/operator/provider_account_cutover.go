@@ -125,11 +125,13 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID bill
 			case err == nil:
 				r.Found = true
 				r.OwnedByPayer = pm.CustomerID == sub.CustomerID
-				r.PSPID = pm.PspID
+				if pm.PspID != nil {
+					r.PSPID = *pm.PspID
+				}
 				r.Rail = models.Rail(pm.Rail)
 				r.PSPVaulted = pm.Custodian == models.CustodianPSP && pm.CustodianID == nil && strings.TrimSpace(pm.RailCustomerRef) != ""
 				r.Parked = pm.ParkedAt != nil
-				req.TargetPSPID = pm.PspID
+				req.TargetPSPID = r.PSPID
 			case errors.Is(err, pgx.ErrNoRows):
 			default:
 				return fmt.Errorf("payment method %s: %w", *q.ReplacementPaymentMethodID, err)

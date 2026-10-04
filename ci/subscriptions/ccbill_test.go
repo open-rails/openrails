@@ -188,7 +188,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
 		renewal := m.payment(txn)
 		require.NotNil(t, renewal, "the rebill is on the ledger")
-		require.Equal(t, "succeeded", renewal.Status)
+		require.Equal(t, billing.PaymentSucceeded, renewal.Status)
 		require.EqualValues(t, 9_990_000, renewal.Amount)
 		require.Equal(t, "USD", renewal.Currency)
 
@@ -230,7 +230,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		sub = w.subscription(embedded, m.sub)
 		require.Equal(t, "active", sub.Status)
 		require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
-		require.Equal(t, "succeeded", m.payment(recovered).Status)
+		require.Equal(t, billing.PaymentSucceeded, m.payment(recovered).Status)
 		retry := w.attempts(m.c.id)
 		require.Len(t, retry, 2)
 		require.Equal(t, []string{"dunning_retry", "approved"}, []string{retry[1].Kind, retry[1].Category}, "CCBill's own retry")

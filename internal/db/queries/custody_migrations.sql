@@ -68,10 +68,11 @@ UPDATE billing.payment_methods SET
     network_token_id = sqlc.arg(network_token_id)::text,
     network_token_status = sqlc.arg(network_token_status)::text,
     network_token_par = sqlc.arg(network_token_par)::text,
-    psp_id = COALESCE(sqlc.narg(to_psp_id)::uuid, psp_id),
-    last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
-    card_type = COALESCE(NULLIF(sqlc.arg(card_type)::text, ''), card_type),
-    expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
+    psp_id = NULL,
+    card_brand = COALESCE(sqlc.narg(card_brand)::text, card_brand),
+    card_last4 = COALESCE(sqlc.narg(card_last4)::text, card_last4),
+    card_exp_month = COALESCE(sqlc.narg(card_exp_month)::smallint, card_exp_month),
+    card_exp_year = COALESCE(sqlc.narg(card_exp_year)::smallint, card_exp_year),
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(id)::uuid

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -53,45 +52,6 @@ func paymentActionKey(r *httprequest.Request) (string, bool) {
 		return "", false
 	}
 	return key, true
-}
-func PayMyInvoiceNow(r *httprequest.Request) {
-	payer, ok := customerActionPayer(r)
-	if !ok {
-		return
-	}
-	key, ok := paymentActionKey(r)
-	if !ok {
-		return
-	}
-	id, err := uuid.Parse(r.Param("id"))
-	if err != nil || id == uuid.Nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid invoice id")
-		return
-	}
-	var body billing.PayInvoiceNowRequest
-	if !r.BindJSON(&body) {
-		return
-	}
-	if body.PaymentMethodID.IsZero() {
-		writePaymentMethodRequired(r)
-		return
-	}
-	body.InvoiceID, body.IdempotencyKey = id, key
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	result, err := svc.PayInvoiceNow(r.Request.Context(), payer, body)
-	if err != nil {
-		customerPaymentError(r, err)
-		return
-	}
-	status := http.StatusOK
-	if result.Operation.Unresolved() {
-		status = http.StatusAccepted
-	}
-	r.JSON(status, result)
 }
 func RetryMySubscriptionNow(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")

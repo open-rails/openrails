@@ -37,7 +37,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
       }),
     () => client.cancelSubscriptionOnChain("sub_1", async () => "sig"),
     () => client.listPaymentMethods(),
-    () => client.addPaymentMethod({ provider: "nmi", payment_token: "tok" }),
+    () => client.addPaymentMethod({ psp_id: "psp_1", payment_token: "tok" }),
     () => client.createCardSetup({ pspId: "psp_1", idempotencyKey: "k" }),
     () => client.getCardSetup("seti_1"),
     () => client.confirmCardSetup("seti_1"),
@@ -45,7 +45,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.confirmPaymentAuthentication("op_1"),
     () => client.removePaymentMethod("pm_1"),
     () =>
-      client.setDefaultPaymentMethod({
+      client.setCollectionPaymentMethod({
         currency: "USD",
         paymentMethodId: "pm_1",
       }),

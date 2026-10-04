@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"strings"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
 type PaymentMethodRepo struct {
@@ -33,12 +34,9 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	if err != nil {
 		return err
 	}
-	psp := m.PspID
-	if psp == uuid.Nil {
-		psp, err = db.RequirePSPID(ctx)
-		if err != nil {
-			return err
-		}
+	psp, err := heldBy(ctx, m)
+	if err != nil {
+		return err
 	}
 	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := r.db.NewWithPgxTx(tx)
@@ -59,6 +57,19 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	})
 }
 
+// heldBy is the PSP holding a PSP-held card: the method's own, else the
+// request's.
+func heldBy(ctx context.Context, m *models.PaymentMethod) (uuid.UUID, error) {
+	if m.PspID != nil && *m.PspID != uuid.Nil {
+		return *m.PspID, nil
+	}
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("create payment method %s/%s: %w", m.Rail, m.RailCustomerRef, err)
+	}
+	return psp, nil
+}
+
 func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod) error {
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, m.CustomerID); err != nil {
 		return err
@@ -71,40 +82,47 @@ func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod)
 	if err != nil {
 		return err
 	}
-	pspID := m.PspID
-	if pspID == uuid.Nil {
-		if pspID, err = db.RequirePSPID(ctx); err != nil {
-			return fmt.Errorf("create payment method %s/%s: %w", m.Rail, m.RailCustomerRef, err)
+	if m.Custodian == "" {
+		m.Custodian = models.CustodianPSP
+	}
+	if m.Custodian == models.CustodianPSP {
+		psp, err := heldBy(ctx, m)
+		if err != nil {
+			return err
+		}
+		m.PspID = &psp
+	} else {
+		m.PspID = nil
+		if m.CustodianID == nil {
+			if id := db.CustodianIDFromContext(ctx); id != uuid.Nil {
+				m.CustodianID = &id
+			}
 		}
 	}
-	if m.Custodian != "" && m.Custodian != models.CustodianPSP && m.CustodianID == nil {
-		if id := db.CustodianIDFromContext(ctx); id != uuid.Nil {
-			m.CustodianID = &id
-		}
-	}
+	brand, last4, month, year := m.Card.Columns()
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:              m.ID,
 		MerchantID:      tid.UUID(),
 		CustomerID:      m.CustomerID,
 		Rail:            string(m.Rail),
-		PspID:           pspID,
+		PspID:           m.PspID,
 		RailCustomerRef: m.RailCustomerRef,
 		RailMethodRef:   m.RailMethodRef,
 
-		InitialTransactionID: m.InitialTransactionID,
-		LastFour:             m.LastFour,
-		CardType:             m.CardType,
-		ExpiryDate:           m.ExpiryDate,
-		Metadata:             meta,
-		CreatedAt:            m.CreatedAt,
-		UpdatedAt:            m.UpdatedAt,
-		CustodianID:          m.CustodianID,
-		Custodian:            m.Custodian, // "" -> DB default 'psp'
-		Fingerprint:          m.Fingerprint,
-		NetworkTokenID:       m.NetworkTokenID,
-		NetworkTokenStatus:   m.NetworkTokenStatus,
-		NetworkTokenPar:      m.NetworkTokenPAR,
-		ChargeVia:            m.ChargeVia, // "" -> DB default 'pan_proxy'
+		CardBrand:          brand,
+		CardLast4:          last4,
+		CardExpMonth:       month,
+		CardExpYear:        year,
+		Metadata:           meta,
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
+		CustodianID:        m.CustodianID,
+		Custodian:          m.Custodian,
+		Fingerprint:        m.Fingerprint,
+		NetworkTokenID:     m.NetworkTokenID,
+		NetworkTokenStatus: m.NetworkTokenStatus,
+		NetworkTokenPar:    m.NetworkTokenPAR,
+		ChargeVia:          m.ChargeVia, // "" -> DB default 'pan_proxy'
 
 		StoredCredentialRecurringRef: m.StoredCredentialRecurringRef,
 	})
@@ -234,39 +252,35 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 	return models.PaymentMethodsFromGen(rows)
 }
 
-func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	tid, err := merchant.Require(ctx)
+// ListPage is one page of a customer's methods, newest first.
+func (r *PaymentMethodRepo) ListPage(ctx context.Context, customerID uuid.UUID, page billing.PageRequest) (billing.ListPage[*models.PaymentMethod], error) {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.PaymentMethod]{}, err
 	}
-	tsid, err := db.ResolveCustomerID(userID)
+	limit, err := pagination.Limit(page)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.PaymentMethod]{}, err
 	}
-	q := r.db.Gen(ctx)
-	total, err := q.CountPaymentMethodsByCustomer(ctx, gen.CountPaymentMethodsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
+	afterAt, afterID, err := pagination.After(page.Cursor)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.PaymentMethod]{}, err
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListPaymentMethodsByCustomerPaged(ctx, gen.ListPaymentMethodsByCustomerPagedParams{
-		MerchantID: tid.UUID(),
-		CustomerID: tsid,
-		PageLimit:  limit32,
-		PageOffset: offset32,
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerPage(ctx, gen.ListPaymentMethodsByCustomerPageParams{
+		MerchantID: mid.UUID(), CustomerID: customerID, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.PaymentMethod]{}, err
 	}
 	methods, err := models.PaymentMethodsFromGen(rows)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[*models.PaymentMethod]{}, err
 	}
-	if err := r.attachPaymentMethodSubscriptions(ctx, methods); err != nil {
-		return nil, 0, err
+	out := pagination.Cut(methods, limit, func(m *models.PaymentMethod) any { return pagination.TimeID{At: m.CreatedAt, ID: m.ID} })
+	if err := r.attachPaymentMethodSubscriptions(ctx, out.Items); err != nil {
+		return billing.ListPage[*models.PaymentMethod]{}, err
 	}
-	return methods, total, nil
+	return out, nil
 }
 
 // CountSharingCustomerRef reports how many OTHER payment methods share this
@@ -321,6 +335,22 @@ func (r *PaymentMethodRepo) GetByRailMethodRefForPSP(ctx context.Context, rail s
 	return models.PaymentMethodFromGen(row)
 }
 
+// GetByCustodianRef finds a custodian-held card by its custodian token.
+func (r *PaymentMethodRepo) GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetPaymentMethodByCustodianRef(ctx, gen.GetPaymentMethodByCustodianRefParams{MerchantID: mid.UUID(), CustodianID: custodianID, RailMethodRef: methodRef})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrPaymentMethodNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return models.PaymentMethodFromGen(row)
+}
+
 func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMethod) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -331,18 +361,19 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	if err != nil {
 		return err
 	}
+	brand, last4, month, year := method.Card.Columns()
 	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{MerchantID: queryMerchant.UUID(),
-		ID:                   method.ID,
-		CustomerID:           method.CustomerID,
-		Rail:                 string(method.Rail),
-		RailCustomerRef:      method.RailCustomerRef,
-		RailMethodRef:        method.RailMethodRef,
-		InitialTransactionID: method.InitialTransactionID,
-		LastFour:             method.LastFour,
-		CardType:             method.CardType,
-		ExpiryDate:           method.ExpiryDate,
-		Metadata:             meta,
-		UpdatedAt:            models.UpdateTimestamp(method.UpdatedAt),
+		ID:              method.ID,
+		CustomerID:      method.CustomerID,
+		Rail:            string(method.Rail),
+		RailCustomerRef: method.RailCustomerRef,
+		RailMethodRef:   method.RailMethodRef,
+		CardBrand:       brand,
+		CardLast4:       last4,
+		CardExpMonth:    month,
+		CardExpYear:     year,
+		Metadata:        meta,
+		UpdatedAt:       models.UpdateTimestamp(method.UpdatedAt),
 	})
 	if err != nil {
 		return err

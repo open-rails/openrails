@@ -31,8 +31,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { REFUNDABLE_RAILS } from "@/lib/api/endpoints"
+import type { Payment } from "@/lib/api/generated/wire"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
+  formatCard,
   formatNativeAmount,
   formatDate,
   nativeAmountFromInput,
@@ -54,15 +56,17 @@ export function PaymentDetailPage() {
   if (!payment)
     return <p className="text-sm text-muted-foreground">Payment not found.</p>
 
+  const railRefunds = REFUNDABLE_RAILS.includes(payment.rail ?? "")
   const refundable =
-    payment.object === "charge" &&
-    REFUNDABLE_RAILS.includes(payment.rail) &&
-    payment.status !== "refunded" &&
-    payment.status !== "failed" &&
-    payment.status !== "pending"
-  const railRefundNote = REFUNDABLE_RAILS.includes(payment.rail)
-    ? undefined
-    : `Refunds are not supported via the ${payment.rail} rail API`
+    payment.kind === "charge" &&
+    railRefunds &&
+    (payment.status === "succeeded" || payment.status === "partially_refunded")
+  const refundNote = !payment.rail
+    ? `A ${payment.channel} payment is refunded where it was taken`
+    : railRefunds
+      ? undefined
+      : `Refunds are not supported via the ${payment.rail} rail API`
+  const link = "text-xs underline-offset-2 hover:underline"
 
   return (
     <div className="flex flex-col gap-4">
@@ -80,16 +84,15 @@ export function PaymentDetailPage() {
             {payment.id} <StatusBadge status={payment.status} />
           </h2>
           <p className="text-xs text-muted-foreground">
-            {payment.rail} · txn {payment.transaction_id || "—"}
+            {payment.kind} · {payment.rail ?? payment.channel} · txn{" "}
+            {payment.transaction_id || "—"}
           </p>
         </div>
         <div className="ml-auto">
           <RefundDialog
             payment={payment}
-            customerId={payment.customer_id}
-            subscriptionId={payment.subscription_id}
             disabled={!refundable}
-            disabledNote={railRefundNote}
+            disabledNote={refundNote}
           />
         </div>
       </div>
@@ -99,22 +102,19 @@ export function PaymentDetailPage() {
           {formatNativeAmount(payment.amount, payment.currency)}
         </Fact>
         <Fact label="Refunded">
-          {payment.amount_refunded
+          {payment.amount_refunded !== "0"
             ? formatNativeAmount(payment.amount_refunded, payment.currency)
             : "—"}
         </Fact>
         <Fact label="Customer">
-          <Link
-            className="text-xs underline-offset-2 hover:underline"
-            to={`/customers/${payment.customer_id}`}
-          >
+          <Link className={link} to={`/customers/${payment.customer_id}`}>
             {shortId(payment.customer_id, 16)}
           </Link>
         </Fact>
         <Fact label="Subscription">
           {payment.subscription_id ? (
             <Link
-              className="text-xs underline-offset-2 hover:underline"
+              className={link}
               to={`/subscriptions/${payment.subscription_id}`}
             >
               {shortId(payment.subscription_id, 16)}
@@ -123,8 +123,32 @@ export function PaymentDetailPage() {
             "—"
           )}
         </Fact>
+        <Fact label="Product">
+          {payment.product?.display_name ??
+            (payment.price_id ? shortId(payment.price_id, 16) : "—")}
+        </Fact>
+        <Fact label="Card">{formatCard(payment.card)}</Fact>
+        <Fact label="Channel">
+          {payment.channel}
+          {payment.psp_id ? ` · PSP ${shortId(payment.psp_id, 13)}` : ""}
+        </Fact>
         <Fact label="Created">{formatDate(payment.created_at)}</Fact>
-        <Fact label="Type">{payment.object}</Fact>
+        {payment.refunded_payment_id ? (
+          <Fact label="Reverses">
+            <Link
+              className={link}
+              to={`/payments/${payment.refunded_payment_id}`}
+            >
+              {shortId(payment.refunded_payment_id, 16)}
+            </Link>
+          </Fact>
+        ) : null}
+        {payment.reason ? <Fact label="Reason">{payment.reason}</Fact> : null}
+        {payment.failure ? (
+          <Fact label="Failure">
+            {payment.failure.message || payment.failure.reason}
+          </Fact>
+        ) : null}
       </div>
 
       <Card>
@@ -132,7 +156,7 @@ export function PaymentDetailPage() {
           <CardTitle className="text-sm">Refunds</CardTitle>
         </CardHeader>
         <CardContent>
-          {!payment.refunds?.data?.length ? (
+          {!payment.refunds?.length ? (
             <p className="text-sm text-muted-foreground">No refunds.</p>
           ) : (
             <Table>
@@ -153,10 +177,12 @@ export function PaymentDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payment.refunds.data.map((r) => (
+                {payment.refunds.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="text-xs">
-                      {shortId(r.id, 16)}
+                      <Link className={link} to={`/payments/${r.id}`}>
+                        {shortId(r.id, 16)}
+                      </Link>
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={r.status} />
@@ -178,20 +204,10 @@ export function PaymentDetailPage() {
 
 function RefundDialog({
   payment,
-  customerId,
-  subscriptionId,
   disabled,
   disabledNote,
 }: {
-  payment: {
-    id: string
-    amount: string
-    amount_refunded: string
-    currency: string
-    rail: string
-  }
-  customerId: string
-  subscriptionId?: string
+  payment: Payment
   disabled: boolean
   disabledNote?: string
 }) {
@@ -204,8 +220,8 @@ function RefundDialog({
     adminMutations.refundPayment(
       queryClient,
       payment.id,
-      customerId,
-      subscriptionId
+      payment.customer_id,
+      payment.subscription_id ?? undefined
     )
   )
   const form = useForm({
@@ -223,12 +239,14 @@ function RefundDialog({
       )
         return
       try {
-        await refund.mutateAsync({
+        const result = await refund.mutateAsync({
           amount,
           reason: value.reason,
           revokeAccess: value.revokeAccess,
         })
-        toast.success("Refund submitted")
+        toast.success(
+          result.status === "pending" ? "Refund submitted" : "Refunded"
+        )
         handleOpenChange(false)
       } catch (err) {
         toastApiError(err, "Refund payment")

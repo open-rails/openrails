@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
-// A charge names its payment method (#1087). A customer with a default card
+// A charge names its payment method (#1087). A customer with a saved card
 // who names neither a saved method nor a new card token is refused with
 // payment_method_required and nothing is charged.
 func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
@@ -26,7 +26,6 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 			w := newWorld(t)
 			c := w.newCustomer()
 			c.saveCard("nmi", visa)
-			require.NotEmpty(t, c.requireOneDefault("a saved card is the default"))
 			sale := w.permanent("content:post")
 			member := w.membership("content:members", 9_990_000)
 			for _, offer := range []struct {
@@ -53,18 +52,18 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 	}
 }
 
-// Renewals charge the subscription's stored method, never the customer's
-// current default. With the stored method gone only the member can fix it:
+// Renewals charge the subscription's stored method, never another of the
+// customer's cards, not even the one that collects their invoices. With the stored method gone only the member can fix it:
 // the membership waits for a new card on the dunning clock, the customer is
 // asked for one, access follows the dunning access policy, and the wait ends
 // when the dunning window does. It is never held as a system stop.
-func TestRenewalNeverFallsBackToDefaultCard(t *testing.T) {
+func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
 	e := enroll(t, w, "nmi", embedded)
-	other := e.c.saveCard("nmi", mastercard)
-	e.c.setDefault(embedded, other)
+	other := e.c.saveCard("stripe", mastercard)
+	e.c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": other, "currency": "USD"})
 	subID := strings.TrimPrefix(e.sub.String(), "sub_")
 	// The FK's ON DELETE SET NULL outcome of a removed stored method.
 	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.subscriptions SET payment_method_id = NULL WHERE id = $1::uuid`), subID)
@@ -73,7 +72,7 @@ func TestRenewalNeverFallsBackToDefaultCard(t *testing.T) {
 	end := e.periodEnd()
 	e.toPeriodEnd()
 	w.runRenewals()
-	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the default card")
+	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the collection card")
 	sub := w.subscription(embedded, e.sub)
 	require.Equal(t, "awaiting_method", sub.Status)
 	window, err := collection.Window(monthHours)

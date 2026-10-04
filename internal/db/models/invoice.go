@@ -76,6 +76,7 @@ type InvoicePaymentAttempt struct {
 	FailureMessage  *string    `json:"failure_message,omitempty"`
 	AttemptedAt     time.Time  `json:"attempted_at"`
 	SettledAt       *time.Time `json:"settled_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // InvoiceContact is one billing contact on an invoice / invoice profile (#798).

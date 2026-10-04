@@ -429,7 +429,7 @@ func (w AccountUpdaterBatchWorker) submitMerchant(ctx context.Context, mid uuid.
 		}
 		instruments := make([]intents.AccountUpdaterBatchInstrument, 0, len(due))
 		for _, in := range due {
-			month, year := splitInstrumentExpiry(in.ExpiryDate)
+			month, year := instrumentExpiry(in.CardExpMonth, in.CardExpYear)
 			instruments = append(instruments, intents.AccountUpdaterBatchInstrument{
 				PaymentMethodID: in.ID,
 				Token:           in.RailMethodRef,
@@ -531,26 +531,11 @@ func (w AccountUpdaterBatchWorker) client(ctx context.Context, custodianID uuid.
 // month/year columns. An unparseable or absent expiry yields empty strings —
 // both columns are optional, and inventing one would be a fabricated hint to
 // the network (#651).
-func splitInstrumentExpiry(expiry *string) (month, year string) {
-	if expiry == nil {
+func instrumentExpiry(month, year *int16) (string, string) {
+	if month == nil || year == nil {
 		return "", ""
 	}
-	parts := strings.SplitN(strings.TrimSpace(*expiry), "/", 2)
-	if len(parts) != 2 {
-		return "", ""
-	}
-	m, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil || m < 1 || m > 12 {
-		return "", ""
-	}
-	y, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil || y < 0 {
-		return "", ""
-	}
-	if y < 100 {
-		y += 2000
-	}
-	return fmt.Sprintf("%02d", m), strconv.Itoa(y)
+	return fmt.Sprintf("%02d", *month), strconv.Itoa(int(*year))
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }

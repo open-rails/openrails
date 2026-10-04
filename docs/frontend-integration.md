@@ -70,8 +70,8 @@ GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
 GET  /v1/me/transactions?currency=USD     credit ledger, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
-GET  /v1/me/invoices[/:id]                itemized statements
-GET  /v1/me/payments                      one-off payment history
+GET  /v1/me/invoices[/:id]                itemized statements (cursor page)
+GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements/active           active entitlements
 PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
 GET  /v1/me/subscriptions[/:id]           own subscriptions: the shared Subscription shape (typed ids, price/product, scheduled change, card, access)
@@ -79,7 +79,7 @@ POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"sta
 POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202
 POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} — upgrades/downgrades
 PUT  /v1/me/subscriptions/:id/payment-method  swap the card on an NMI-backed subscription
-GET|POST /v1/me/payment-methods           list / add (tokenized NMI card)
+GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/:id     replace NMI card / provider-aware delete
 POST /v1/me/checkout                      create a checkout session
 GET  /v1/me/checkout/:id                  poll session status
@@ -123,7 +123,7 @@ catalog.
   - `tokenize` — load `config.tokenization_url`, tokenize with `config.tokenization_key`,
     POST the resulting `payment_token`.
   - `elements` — Stripe with a declared `publishable_key`: save the card in the page
-    (`POST /v1/me/payment-methods/stripe-setup`, Stripe.js `confirmSetup`, then
+    (`POST /v1/me/payment-method-setups`, Stripe.js `confirmSetup`, then
     `.../confirm`), then POST checkout with its `payment_method_id`.
   - `redirect` — nothing needed in the browser; POST checkout and follow the `url`
     (CCBill; Stripe without a publishable key).
@@ -299,11 +299,12 @@ sequenceDiagram
 
 ### Payment methods
 
-`POST /v1/me/payment-methods` takes a Collect.js `payment_token` plus billing details
-(`name_on_card`, `address1`, `city`, `state`, `zip`, `country`, optional
-`email`/`phone`) and creates an NMI vault record. `PUT /:id` replaces an NMI card and
-requires the Collect.js `payment_token`, `last_four`, `card_type`, and `expiry_date`
-returned by tokenization. Checkout with a fresh `payment_token` also persists a payment method
+`POST /v1/me/payment-methods` takes the PSP's `psp_id`, a Collect.js `payment_token`
+(or, for a PSP whose card entry is server, the `card`) and optional `billing_details`
+(`name`, `email`, `phone`, `address` with `line1`, `line2`, `city`, `state`,
+`postal_code`, `country`) and creates an NMI vault record. `PUT /:id` replaces an NMI
+card with a new `payment_token` or `card`. OpenRails reads the saved card's brand, last
+four and expiry from the PSP; the browser never states them. Checkout with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
 else's is a 403.
 

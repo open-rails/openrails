@@ -58,7 +58,7 @@ LIMIT sqlc.arg(merchant_limit)::int;
 -- stale. Parked instruments are deliberately included — a parked card is what
 -- the updater exists to recover (or#872). Never-checked first, then stalest.
 -- name: ListDueAccountUpdaterInstruments :many
-SELECT pm.id, pm.rail_method_ref, pm.expiry_date
+SELECT pm.id, pm.rail_method_ref, pm.card_exp_month, pm.card_exp_year
 FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid

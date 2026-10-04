@@ -84,7 +84,7 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
     <AccountBilling
       plansHref="/plans"
       psps={checkoutConfig.psps} // OpenRails checkout config; enables "Add card"
-      defaultCurrency="USD" // enables "Make default"
+      collectionCurrency="USD" // offers "Use for invoices"
       sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // Solana-rail cancel
     />
   </BillingProvider>

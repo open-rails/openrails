@@ -21,14 +21,14 @@ import (
 
 // untypedBudget is how many routes still accept or answer a body no Go type
 // declares. It only goes down: a lane that types a route lowers it.
-const untypedBudget = 69
+const untypedBudget = 58
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 290)
+	require.Len(t, Catalog(), 287)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()
@@ -158,7 +158,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, pass, providers)
 	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, pass)
 	require.Len(t, subscriptions, 4)
-	require.Len(t, management, 36)
+	require.Len(t, management, 35)
 	for key := range subscriptions {
 		require.Contains(t, management, key, "each scope includes the narrower ones")
 	}
@@ -200,7 +200,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 func TestDeclaredIntegerQueriesAreStrict(t *testing.T) {
 	route, ok := Lookup(GET, "/v1/merchant/payment-attempts")
 	require.True(t, ok)
-	require.Equal(t, []string{"limit", "offset"}, checkedParams(route.Query))
+	require.Equal(t, []string{"limit"}, checkedParams(route.Query))
 
 	reached := 0
 	table := &router.Table{}

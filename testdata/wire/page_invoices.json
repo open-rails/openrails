@@ -1,0 +1,63 @@
+{
+  "data": [
+    {
+      "id": "inv_99999999-9999-4999-8999-999999999999",
+      "customer_id": "22222222-2222-2222-2222-222222222222",
+      "currency": "USD",
+      "invoice_number": null,
+      "period_from": "2026-09-16T00:00:00.123456789Z",
+      "period_to": "2026-09-16T00:00:00.123456789Z",
+      "usage_total": "0",
+      "deposits_total": "0",
+      "owed_accrued": "0",
+      "owed_paid": "0",
+      "closing_balance": "0",
+      "subtotal_amount": "0",
+      "total_amount": "9223372036854775807",
+      "amount_paid": "0",
+      "amount_due": "9223372036854775807",
+      "line_items": [
+        {
+          "event_type": "tokens",
+          "amount": "9223372036854775807",
+          "count": 3,
+          "dimensions": {
+            "input": 2
+          }
+        }
+      ],
+      "money_movements": {
+        "usage": "9223372036854775807"
+      },
+      "po_number": null,
+      "tax": {},
+      "billing_contacts": [
+        {
+          "name": "Ops",
+          "email": "ops@example.test"
+        }
+      ],
+      "memo": null,
+      "status": "open",
+      "collection_method": "charge_automatically",
+      "issued_at": null,
+      "due_at": "2026-09-16T00:00:00.123456789Z",
+      "paid_at": null,
+      "voided_at": null,
+      "uncollectible_at": null,
+      "finalized_at": null,
+      "external_invoice_id": null,
+      "collection_failure_count": 0,
+      "collection_failed_at": null,
+      "next_collection_attempt_at": null,
+      "last_collection_failure_code": null,
+      "recovery": null,
+      "available_actions": [
+        "retry_collection",
+        "void"
+      ],
+      "created_at": "2026-09-16T00:00:00.123456789Z"
+    }
+  ],
+  "next_cursor": "cursor-2"
+}

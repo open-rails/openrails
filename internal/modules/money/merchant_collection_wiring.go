@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -41,7 +42,8 @@ import (
 // (nothing to charge with — the charge fails closed, there is no fallback
 // plane); err = declared but not armable (fail closed).
 type CollectionAdapterResolver interface {
-	ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod) (CollectionAdapter, bool, error)
+	// ResolveCollectionAdapter arms the adapter charging method through psp.
+	ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error)
 }
 
 // CollectionEndpoints overrides provider base URLs on store-armed collection
@@ -137,7 +139,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, 
 	return b.nmiFactory().ProxyPosture(mid, scope, settings)
 }
 
-func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod) (CollectionAdapter, bool, error) {
+func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod, psp uuid.UUID) (CollectionAdapter, bool, error) {
 	svc := b.merchants()
 	if svc == nil || b.DB == nil {
 		return nil, false, nil
@@ -148,7 +150,10 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		return nil, false, nil // rail has no store-armable collection adapter
 	}
 	mid := billing.MerchantID(method.MerchantID)
-	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, &method.PspID)
+	if !charge.ChargeableOn(method, psp) {
+		return nil, false, charge.ErrInstrumentChanged
+	}
+	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, &psp)
 	if err != nil {
 		return nil, false, err
 	}

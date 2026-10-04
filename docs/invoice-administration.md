@@ -4,10 +4,10 @@ The console's **Invoices** page and the customer **Invoice profile** section use
 
 ## Reads and permissions
 
-- `GET /v1/merchant/invoices`: requires `merchant:invoices:read`. Filters: `customer_id`, `currency`, `status`, `period_from`, and `period_to`. Period filters select invoice period starts in the half-open range `[period_from, period_to)`. `limit` is 1–100; `offset` is non-negative. Results use `{items,total,limit,offset}` with deterministic period/id ordering.
-- `GET /v1/merchant/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. Collectors also receive minimal saved-method choices for that customer.
-- `GET /v1/merchant/invoices/{id}/payments`: paginated payment/collection history, with the same read permission.
-- `GET` / `PUT /v1/merchant/customers/{customer_id}/invoice-profile`: existing customer-settings read/update permissions. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
+- `GET /v1/merchant/invoices`: requires `merchant:invoices:read`. Filters: `customer_id`, `currency`, `status`, `period_from`, and `period_to`. Period filters select invoice period starts in the half-open range `[period_from, period_to)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
+- `GET /v1/merchant/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. The customer's cards for a retry are read from `GET /v1/merchant/customers/{customer_id}/payment-methods`.
+- `GET /v1/merchant/invoices/{id}/payments`: payment/collection history, a cursor page, with the same read permission.
+- `GET` / `PUT /v1/merchant/customers/{customer_id}/invoice-profile`: existing customer-settings read/update permissions. `GET` answers `404` when the customer has none; `PUT` with `If-None-Match: *` only creates one. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
 
 The fixed viewer role reads invoices. Support also retries collection. Invoice updates (voiding, marking uncollectible, and recording external money) require the separate update permission, held by the owner wildcard by default.
 
@@ -26,7 +26,7 @@ A never-attempted open invoice is not manually retryable. Retry eligibility appl
 
 ## Amount units
 
-Invoice and ledger amounts use the currency registry's native units, exposed as `unit_decimals` on merchant invoices and payment-history entries. USD/EUR use six decimal places; JPY uses four. These are not assumed to be catalog/payment micros. Remittance input uses the invoice's same native units. Existing collection converts the unpaid native amount to the provider's minor unit at its established boundary.
+Invoice and ledger amounts use the currency registry's native units; the scale of each currency is in `GET /v1/currencies`. USD/EUR use six decimal places; JPY uses four. These are not assumed to be catalog/payment micros. Remittance input uses the invoice's same native units. Existing collection converts the unpaid native amount to the provider's minor unit at its established boundary.
 
 The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native manual payment leaves 100000; collection dispatches 10 whole-yen units to a fake charger and records 120000 total native units paid. This verifies internal arithmetic and the charger boundary, not live provider certification.
 

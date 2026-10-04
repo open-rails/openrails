@@ -4,7 +4,7 @@ A stored card has two independent owners, and OpenRails records them separately.
 
 | Axis | Question | Where it lives |
 |---|---|---|
-| **Processor** | Who *charges* the card? | `payment_methods.rail` + `payment_methods.psp_id` |
+| **Processor** | Who *charges* the card? | `payment_methods.rail`; `payment_methods.psp_id` when the PSP holds it |
 | **Custodian** | Who *holds* the card? | `payment_methods.custodian` |
 
 They are orthogonal. The card can sit inside the processor that charges it
@@ -15,6 +15,13 @@ of the gateway, so it does not belong in the rail value.
 
 `custodian` is never empty. "Stored at the processor itself" is the stated
 value `psp`, not an absence — a DB CHECK enforces the vocabulary.
+
+`psp_id` is set exactly when `custodian = 'psp'` (CHECK
+`payment_methods_psp_custody`). A card a third-party custodian holds belongs
+to no PSP: each charge routes to the one live PSP of the card's rail that
+reaches the custodian (`charge.RoutePSP`); none, or two, is `ErrNoRoute`. An
+obligation that names its PSP (a subscription, a frozen checkout instrument)
+charges through that PSP, provided it still reaches the custodian.
 
 ## The matrix
 
@@ -156,26 +163,17 @@ Custody values are a closed set (`models.Custodians()`, mirrored by the
 constant — deliberately, so an unknown custodian cannot arrive silently on a
 money path.
 
-## Default payment method
+## Choosing a card
 
-A customer with any usable stored method (not parked, not pending delete)
-has exactly one default; with none, no default. The database enforces it:
-a partial unique index allows at most one, and a deferred trigger promotes
-another card at commit whenever the default is deleted, parked or detached
-(the most recently charged card, then a non-expired one, then the newest).
-The first saved card becomes the default; an in-place card replacement keeps
-it. Payment-method reads return `default: true` on it and list it first, so
-hosts preselect it; `SetDefaultPaymentMethod` (or `PUT .../default-payment-method` with `{"payment_method_id": ...}`)
-switches it atomically. An expired card is not demoted by the passage of time;
-it stays default until another card is chosen or it is replaced.
-
-The default is for display and pre-selection only; nothing charges it
-implicitly (#1087). A checkout or pay-now names its method (`payment_method_id`
-or a new card `payment_token`); naming neither is `payment_method_required`
-(400). A renewal charges the method stored on its subscription, chosen at
-subscribe time or replaced by the customer; if that method is gone the due pass
-refuses the renewal (a `life.due_pass.refused` finding) and never falls back to
-the current default.
+There is no default card. A checkout or pay-now names its method
+(`payment_method_id` or a new card); naming neither is
+`payment_method_required` (400). A renewal charges the method stored on its
+subscription, chosen at subscribe time or replaced by the customer; if that
+method is gone the due pass refuses the renewal (a `life.due_pass.refused`
+finding) and never falls back to another card. Automatic invoice collection
+charges the card the customer chose per currency
+(`PUT /v1/me/collection-payment-method`), listed in that card's
+`collection_currencies`.
 
 Provider mirror: none is needed. OpenRails names the exact instrument on
 every charge (Stripe payment method id, NMI billing id), so Stripe's customer

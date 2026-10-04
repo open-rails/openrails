@@ -108,98 +108,67 @@ func TestPaymentActionKeyRefusesCardData(t *testing.T) {
 	}
 }
 
-// Card data never reaches OpenRails raw, and tokenized billing details round
-// trip into the vault request and back out without the provider payload.
+// A raw card number reaches OpenRails only in the card field; billing details
+// round trip into the stored metadata and back out as one shape.
 func TestPaymentMethodRequestMapping(t *testing.T) {
-	for _, field := range []string{"card_number", "number", "pan", "primary_account_number", "cvv", "cvc", "cvn", "security_code", "verification_value"} {
-		var create CreatePaymentMethodRequest
-		require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok","`+field+`":"4111111111111111"}`), &create))
-		require.ErrorContains(t, create.rejectRawCardFields(), field)
-		var update UpdatePaymentMethodRequest
-		require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok","`+field+`":"123"}`), &update))
-		require.ErrorContains(t, update.rejectRawCardFields(), field)
+	for _, field := range []string{"card_number", "number", "pan", "cvv", "cvc", "provider", "last_four", "card_type", "expiry_date", "name_on_card", "zip"} {
+		err := httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+field+`":"4111111111111111"}`), &billing.CreatePaymentMethodParams{})
+		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, field)
+		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+field+`":"x"}`), &billing.ReplacePaymentMethodCardParams{})
+		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, field)
 	}
-	var clean CreatePaymentMethodRequest
-	require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok"}`), &clean))
-	require.NoError(t, clean.rejectRawCardFields())
-
-	for _, tc := range []struct{ country, zip string }{
-		{"US", "80202"},
-		{"DE", "10115"},
-		{"JP", "100-0001"},
-		{"BR", "01001-000"},
-	} {
-		got := toCreatePaymentMethodRequest(&CreatePaymentMethodRequest{
-			PaymentToken: "opaque-provider-token", Provider: "mobius", NameOnCard: "Ada Lovelace",
-			Country: tc.country, Zip: tc.zip, Phone: "+49 30 123456", LastFour: "card-4242",
-		}, "ada@example.com")
-		require.Equal(t, []any{"opaque-provider-token", "mobius", tc.country, tc.zip, "4242", "ada@example.com", "", ""},
-			[]any{got.PaymentToken, got.Provider, got.Country, got.Zip, got.LastFour, got.Email, got.FirstName, got.LastName})
-		for key, want := range map[string]any{"name_on_card": "Ada Lovelace", "billing_country": tc.country, "postal_code": tc.zip, "billing_email": "ada@example.com", "billing_phone": "+49 30 123456"} {
-			require.Equal(t, want, got.Metadata[key], key)
+	for _, tc := range []struct{ country, zip string }{{"US", "80202"}, {"DE", "10115"}, {"JP", "100-0001"}, {"BR", "01001-000"}} {
+		name, phone := "Ada Lovelace", "+49 30 123456"
+		in := billingDetailsInput(&billing.BillingDetails{Name: &name, Phone: &phone, Address: &billing.BillingAddress{Country: &tc.country, PostalCode: &tc.zip}})
+		metadata := in.metadata()
+		for key, want := range map[string]any{"name_on_card": "Ada Lovelace", "billing_country": tc.country, "postal_code": tc.zip, "billing_phone": phone} {
+			require.Equal(t, want, metadata[key], key)
 		}
-		for _, key := range []string{"payment_token", "raw_tokenization_payload", "pan", "cvv"} {
-			require.NotContains(t, got.Metadata, key)
-		}
+		out := billingDetailsFromMetadata(metadata)
+		require.Equal(t, []any{name, phone, tc.country, tc.zip}, []any{*out.Name, *out.Phone, *out.Address.Country, *out.Address.PostalCode})
+		require.Nil(t, out.Email)
 	}
-	address := toCreatePaymentMethodRequest(&CreatePaymentMethodRequest{
-		PaymentToken: "tok", NameOnCard: "Ada Lovelace", Address1: "1 Main", Address2: "Unit 2", City: "Denver", State: "CO", Zip: "80202", Country: "US",
-	}, "")
-	require.Equal(t, []any{"Ada Lovelace", "US", "80202", "1 Main", "Unit 2", "Denver", "CO"},
-		[]any{address.NameOnCard, address.Country, address.Zip, address.Metadata["billing_address1"], address.Metadata["billing_address2"], address.Metadata["billing_city"], address.Metadata["billing_state"]})
+	require.Nil(t, billingDetailsFromMetadata(map[string]any{"e2e_run_id": "x"}), "no billing details is null")
 
-	// One name per field: the retired aliases are unknown fields.
-	for _, alias := range []string{"first_name", "last_name", "postal_code", "billing_country"} {
-		err := httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &CreatePaymentMethodRequest{})
-		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
-		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &UpdatePaymentMethodRequest{})
-		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
-	}
-	for _, alias := range []string{"first_name", "last_name"} {
-		err := httprequest.DecodeStrict([]byte(`{"price_id":"p","payment":{"`+alias+`":"x"}}`), &CheckoutSessionCreateRequest{})
-		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
-	}
-
-	last4, brand := "4242", "Visa"
-	out := paymentMethodToAPI(&models.PaymentMethod{Rail: "mobius", LastFour: &last4, CardType: &brand, Metadata: map[string]any{
-		"name_on_card": "Ada Lovelace", "billing_email": "ada@example.com", "billing_country": "JP", "postal_code": "100-0001", "billing_address1": "1 Chiyoda",
-	}}, nil)
-	require.NotNil(t, out.BillingDetails)
-	require.NotNil(t, out.BillingDetails.Address)
-	require.Equal(t, []any{"Ada Lovelace", "ada@example.com", "JP", "100-0001", "1 Chiyoda"},
-		[]any{*out.BillingDetails.Name, *out.BillingDetails.Email, *out.BillingDetails.Address.Country, *out.BillingDetails.Address.PostalCode, *out.BillingDetails.Address.Line1})
+	out := PaymentMethodToAPI(&models.PaymentMethod{Rail: "nmi", Card: models.Card{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2099}}, nil, nil, time.Now())
+	require.Equal(t, []any{"visa", "4242", 12, 2099}, []any{*out.Card.Brand, *out.Card.Last4, *out.Card.ExpMonth, *out.Card.ExpYear})
+	require.Nil(t, out.PSPID, "a method with no PSP names none")
+	require.Equal(t, []string{}, out.CollectionCurrencies)
 }
 
 // #589: a method is active unless its card expired or its last charge failed;
 // a card is valid through the end of its expiry month.
 func TestPaymentMethodHealth(t *testing.T) {
-	ptr := func(s string) *string { return &s }
-	thisMonth := time.Now().UTC().Format("01/06")
-	require.Equal(t, "", cardExpiryStatus(nil))
-	require.Equal(t, "", cardExpiryStatus(ptr("not-a-date")))
-	require.Equal(t, "expired", cardExpiryStatus(ptr("01/20")))
-	require.Equal(t, "valid", cardExpiryStatus(ptr("12/99")))
-	require.Equal(t, "expiring_soon", cardExpiryStatus(&thisMonth))
+	now := time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC)
+	status := func(c models.Card) *billing.CardExpiryStatus { return paymentMethodHealth(c, nil, now).ExpiryStatus }
+	require.Nil(t, status(models.Card{}))
+	require.Equal(t, billing.CardExpiryExpired, *status(models.Card{ExpMonth: 1, ExpYear: 2020}))
+	require.Equal(t, billing.CardExpiryExpired, *status(models.Card{ExpMonth: 5, ExpYear: 2026}))
+	require.Equal(t, billing.CardExpiryExpiringSoon, *status(models.Card{ExpMonth: 6, ExpYear: 2026}), "valid through the end of its month")
+	require.Equal(t, billing.CardExpiryValid, *status(models.Card{ExpMonth: 12, ExpYear: 2099}))
 
-	at := time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC)
+	valid := models.Card{ExpMonth: 12, ExpYear: 2099}
 	for _, tc := range []struct {
-		expiry, charge, outcome string
-		active                  bool
+		card    models.Card
+		charge  string
+		outcome billing.ChargeOutcome
+		active  bool
 	}{
-		{"12/99", "", "", true},
-		{"12/99", "completed", "success", true},
-		{"12/99", "refunded", "refunded", true},
-		{"12/99", "pending", "pending", true},
-		{"12/99", "failed", "failed", false},
-		{"01/20", "completed", "success", false},
+		{valid, "", "", true},
+		{valid, "completed", billing.ChargeSucceeded, true},
+		{valid, "failed", billing.ChargeFailed, false},
+		{models.Card{ExpMonth: 1, ExpYear: 2020}, "completed", billing.ChargeSucceeded, false},
 	} {
 		var charge *models.PaymentMethodCharge
 		if tc.charge != "" {
-			charge = &models.PaymentMethodCharge{LastChargedAt: at, Status: tc.charge}
+			charge = &models.PaymentMethodCharge{LastChargedAt: now, Status: tc.charge}
 		}
-		h := paymentMethodHealthFrom(&models.PaymentMethod{ExpiryDate: ptr(tc.expiry)}, charge)
-		require.Equal(t, []any{tc.active, tc.outcome}, []any{h.Active, h.LastChargeOutcome}, "%+v", tc)
+		h := paymentMethodHealth(tc.card, charge, now)
+		require.Equal(t, tc.active, h.Active, "%+v", tc)
 		require.Equal(t, charge != nil, h.LastChargedAt != nil)
+		if charge != nil {
+			require.Equal(t, tc.outcome, *h.LastChargeOutcome)
+		}
 	}
 }
 

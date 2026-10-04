@@ -32,13 +32,13 @@ secrets. Every response uses `Cache-Control: no-store`. Secrets are fetched from
 Stripe for the owned resource and never stored in checkout state or payment evidence.
 
 1. Display explicit consent to save a card for future agreed payments, then POST
-   `/v1/me/payment-methods/stripe-setup` with `{"psp_id":"<uuid>","consent":true}`
+   `/v1/me/payment-method-setups` with `{"psp_id":"<uuid>","consent":true}`
    and a stable `Idempotency-Key` header. The response carries an existing checkout
    session `id`, `setup_intent_id` and an ephemeral `client_secret`. Repeating the
    key preserves the accepted account/customer; changing the account conflicts.
 2. Use Stripe.js Elements with the merchant's publishable key to confirm that
    SetupIntent. Card data goes directly to Stripe. GET
-   `/v1/me/payment-methods/stripe-setup/:id` recovers the same setup; POST its
+   `/v1/me/payment-method-setups/:id` recovers the same setup; POST its
    `/confirm` endpoint reads Stripe truth and returns the local `payment_method_id`.
    Confirmation accepts no browser-supplied Stripe/customer/card identity. Setup
    grants no membership, payment or entitlement.

@@ -38,9 +38,9 @@ func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*bil
 
 func (h hostedPay) methods() []billing.PaymentMethod {
 	h.w.t.Helper()
-	page, err := h.w.client[embedded].ListPaymentMethods(h.w.t.Context(), h.c.id, billing.PageOptions{Limit: 100})
+	page, err := h.w.client[embedded].ListPaymentMethods(h.w.t.Context(), h.c.cid(), billing.PageRequest{Limit: 100})
 	require.NoError(h.w.t, err)
-	return page.Data
+	return page.Items
 }
 
 func (h hostedPay) subscriptions() []billing.Subscription {
@@ -77,7 +77,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			methods := h.methods()
 			require.Len(t, methods, 1, "the new card is saved for renewals")
 			require.NotNil(t, subs[0].PaymentMethodID)
-			require.Equal(t, methods[0].ID, subs[0].PaymentMethodID.String())
+			require.Equal(t, methods[0].ID.String(), subs[0].PaymentMethodID.String())
 			require.Len(t, w.nmi.ledger(""), 1, "one initial charge")
 
 			// A retried or double-submitted pay replays the accepted enrollment.

@@ -111,7 +111,6 @@ const (
 // PurchaseReview is a purchase an archive recorded for merchant review.
 type PurchaseReview struct {
 	ID               string     `json:"id"`
-	Object           string     `json:"object"`
 	Status           string     `json:"status"`
 	ProductArchiveID string     `json:"product_archive_id"`
 	ProductID        ProductID  `json:"product_id"`
@@ -128,9 +127,10 @@ type PurchaseReview struct {
 	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
 }
 
-// PurchaseReviewFilter selects reviews; Status defaults to open.
-type PurchaseReviewFilter struct {
-	PageOptions
+// ListPurchaseReviewsParams selects reviews, oldest first; Status defaults to
+// open.
+type ListPurchaseReviewsParams struct {
+	Page             PageRequest
 	Status           string
 	ProductArchiveID string
 }

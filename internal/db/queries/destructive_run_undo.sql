@@ -80,9 +80,11 @@ SELECT
         AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
     (SELECT count(*) FROM billing.checkout_sessions
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
-    -- payment_methods carries no soft-delete column; every row is live.
+    -- payment_methods carries no soft-delete column; every row is live. A
+    -- card a third-party custodian holds names no PSP: no PSP-scoped
+    -- operation reaches it.
     (SELECT count(*) FROM billing.payment_methods
-      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL)::bigint AS payment_methods,
+      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND custodian = 'psp')::bigint AS payment_methods,
     -- rail_intents excludes the CUSTODIAN-addressed lane (or#795's batch
     -- account updater): those rows carry no psp_id because the write goes to a
     -- custodian that backs many PSPs, so no PSP-scoped operation was ever

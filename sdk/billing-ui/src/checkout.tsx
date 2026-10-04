@@ -52,6 +52,7 @@ import {
   type CollectFieldErrors,
 } from "#orck/lib/collect"
 import {
+  billingDetailsOf,
   emptyNMIBilling,
   initialCountry,
   nmiBillingSchema,
@@ -150,10 +151,22 @@ function savedFrom(
     id: method.id,
     option_id: rail.id,
     rail: rail.rail,
-    brand: method.card?.brand ?? undefined,
-    last_four: method.card?.last4 ?? undefined,
-    exp_month: method.card?.exp_month ?? undefined,
-    exp_year: method.card?.exp_year ?? undefined,
+    card: method.card ?? null,
+  }
+}
+
+// A card just saved, labelled from what the buyer typed until the PSP's own
+// facts arrive with the next read.
+function savedWithDisplay(
+  saved: SavedPaymentMethod,
+  display: { last_four?: string; card_type?: string }
+): SavedPaymentMethod {
+  return {
+    ...saved,
+    card: saved.card ?? {
+      brand: display.card_type ?? null,
+      last4: display.last_four ?? null,
+    },
   }
 }
 
@@ -347,8 +360,7 @@ export function Checkout({
       }
     )
   }, [active, addedCards, session])
-  // Until the customer chooses, the default card (else the most recent)
-  // stands pre-selected. Paying always sends the selected card's id; nothing
+  // Until the customer chooses, the most recent card stands pre-selected. Paying always sends the selected card's id; nothing
   // is implied server-side. Derived so it applies when the session arrives
   // after first render.
   const [savedChoice, setSavedChoice] = React.useState<string>()
@@ -357,8 +369,7 @@ export function Checkout({
     (savedChoice === NEW_CARD_VALUE ||
       savedMethods.some((method) => method.id === savedChoice))
       ? savedChoice
-      : ((savedMethods.find((method) => method.default) ?? savedMethods[0])
-          ?.id ?? NEW_CARD_VALUE)
+      : (savedMethods[0]?.id ?? NEW_CARD_VALUE)
   const usingSavedMethod =
     savedMethodID !== NEW_CARD_VALUE &&
     savedMethods.some((method) => method.id === savedMethodID)
@@ -455,21 +466,16 @@ export function Checkout({
         if (!client) return { option_id: rail.id, card, ...parsed.data }
         const display = cardEntryDisplay(card)
         const method = await client.addPaymentMethod({
-          provider: rail.psp_key ?? rail.rail,
+          psp_id: rail.id,
           card,
-          ...parsed.data,
+          billing_details: billingDetailsOf(parsed.data),
         })
         billingContext?.notify({
           type: "payment_method.added",
           paymentMethodId: method.id,
         })
-        const saved = savedFrom(method, rail)
         setAddedCards((current) => [
-          {
-            ...saved,
-            brand: saved.brand ?? display.card_type,
-            last_four: saved.last_four ?? display.last_four,
-          },
+          savedWithDisplay(savedFrom(method, rail), display),
           ...current,
         ])
         setSavedChoice(method.id)
@@ -486,22 +492,16 @@ export function Checkout({
         }
       }
       const method = await client.addPaymentMethod({
-        provider: rail.psp_key ?? rail.rail,
+        psp_id: rail.id,
         payment_token: tokenized.token,
-        ...parsed.data,
-        ...display,
+        billing_details: billingDetailsOf(parsed.data),
       })
       billingContext?.notify({
         type: "payment_method.added",
         paymentMethodId: method.id,
       })
-      const saved = savedFrom(method, rail)
       setAddedCards((current) => [
-        {
-          ...saved,
-          brand: saved.brand ?? display.card_type,
-          last_four: saved.last_four ?? display.last_four,
-        },
+        savedWithDisplay(savedFrom(method, rail), display),
         ...current,
       ])
       setSavedChoice(method.id)

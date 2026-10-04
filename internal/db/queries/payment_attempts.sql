@@ -81,9 +81,10 @@ UPDATE billing.payment_attempts SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND enriched_at IS NULL;
 
 -- name: ListPaymentAttempts :many
--- #1116: the merchant's attempts, newest first; every filter is optional and
--- a text filter matches any of its values.
-SELECT sqlc.embed(a), count(*) OVER () AS total
+-- #1116: one page of the merchant's attempts, newest first, after an
+-- (attempted_at, id) cursor; every filter is optional and a text filter
+-- matches any of its values.
+SELECT a.*
 FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(kinds)::text[] IS NULL OR a.kind = ANY(sqlc.narg(kinds)::text[]))
@@ -103,8 +104,10 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(cycle_id)::uuid IS NULL OR a.cycle_id = sqlc.narg(cycle_id)::uuid)
   AND (sqlc.narg(since)::timestamptz IS NULL OR a.attempted_at >= sqlc.narg(since)::timestamptz)
   AND (sqlc.narg(until)::timestamptz IS NULL OR a.attempted_at < sqlc.narg(until)::timestamptz)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (a.attempted_at, a.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY a.attempted_at DESC, a.id DESC
-LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetPaymentAttempt :one
 SELECT * FROM billing.payment_attempts

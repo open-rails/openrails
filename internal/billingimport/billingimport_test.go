@@ -22,7 +22,7 @@ func declaredBook() DeclaredBilling {
 		Customers:  []DeclaredCustomer{{Customer: customer, Email: "payer@example.test"}},
 		PaymentMethods: []DeclaredPaymentMethod{{
 			Customer: customer, Rail: "nmi", RailCustomerRef: uuid.NewString(), RailMethodRef: uuid.NewString(),
-			InitialTransactionID: "1234567890", LastFour: "1111", CardType: "visa", ExpiryDate: "12/29",
+			Card: &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("1111"), ExpMonth: ptr(12), ExpYear: ptr(2029)},
 		}},
 		Subscriptions: []DeclaredSubscription{{
 			SourceID: "sub_" + uuid.NewString(), Customer: customer, Price: billing.PriceID(uuid.New()),
@@ -56,11 +56,9 @@ func TestDeclaredBookPANFirewall(t *testing.T) {
 	for name, mutate := range map[string]func(*DeclaredBilling){
 		"pm.rail_method_ref":          func(b *DeclaredBilling) { b.PaymentMethods[0].RailMethodRef = visa },
 		"pm.rail_customer_ref":        func(b *DeclaredBilling) { b.PaymentMethods[0].RailCustomerRef = visa },
-		"pm.initial_transaction_id":   func(b *DeclaredBilling) { b.PaymentMethods[0].InitialTransactionID = visa },
 		"pm.recurring_transaction_id": func(b *DeclaredBilling) { b.PaymentMethods[0].RecurringTransactionID = visa },
-		"pm.last_four":                func(b *DeclaredBilling) { b.PaymentMethods[0].LastFour = "4111 1111 1111 1111" },
-		"pm.card_type":                func(b *DeclaredBilling) { b.PaymentMethods[0].CardType = "visa 4111-1111-1111-1111" },
-		"pm.expiry_date":              func(b *DeclaredBilling) { b.PaymentMethods[0].ExpiryDate = visa },
+		"pm.card.last4":               func(b *DeclaredBilling) { b.PaymentMethods[0].Card.Last4 = ptr("4111 1111 1111 1111") },
+		"pm.card.brand":               func(b *DeclaredBilling) { b.PaymentMethods[0].Card.Brand = ptr("visa 4111-1111-1111-1111") },
 		"pm.psp.key":                  func(b *DeclaredBilling) { b.PaymentMethods[0].PSP.Key = visa },
 		"sub.source_id":               func(b *DeclaredBilling) { b.Subscriptions[0].SourceID = visa },
 		"sub.rail_subscription_id":    func(b *DeclaredBilling) { b.Subscriptions[0].RailSubscriptionID = visa },
@@ -185,3 +183,5 @@ func TestPSPResolution(t *testing.T) {
 		})
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

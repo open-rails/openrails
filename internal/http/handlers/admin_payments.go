@@ -9,7 +9,6 @@ import (
 	"hash/fnv"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerposture"
-	"github.com/open-rails/openrails/internal/query"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -38,16 +36,11 @@ type paymentPath struct {
 	PaymentID string `uri:"id" binding:"required"`
 }
 
-// refundRequest names either an exact native amount or the full remaining
+// RefundRequest names either an exact native amount or the full remaining
 // refundable amount; exactly one is required.
-type RefundRequest struct {
-	Amount       int64  `json:"amount,omitempty,string"`
-	Full         bool   `json:"full,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	RevokeAccess bool   `json:"revoke_access,omitempty"`
-}
+type RefundRequest = billing.RefundPaymentParams
 
-func (req RefundRequest) validate() error {
+func validateRefund(req RefundRequest) error {
 	switch {
 	case req.Full && req.Amount != 0:
 		return adminRefundHTTPError(http.StatusBadRequest, "amount and full are mutually exclusive")
@@ -68,22 +61,8 @@ func adminRefundLockKey(paymentID string) int64 {
 	return key
 }
 
-type adminOffChannelPaymentPath struct {
-	UserID string `uri:"customer_id" binding:"required"`
-}
-
-type AdminOffChannelPaymentRequest struct {
-	PriceID          string         `json:"price_id" binding:"required"`
-	TransactionID    string         `json:"transaction_id" binding:"required"`
-	Amount           *int64         `json:"amount,omitempty,string"`
-	Currency         string         `json:"currency,omitempty"`
-	PurchasedAt      string         `json:"purchased_at,omitempty"`
-	DiscountCode     *string        `json:"discount_code,omitempty"`
-	DiscountReason   *string        `json:"discount_reason,omitempty"`
-	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`
-}
-
-func AdminRefundPayment(r *httprequest.Request) {
+// RefundPayment (POST /merchant/payments/{id}/refunds) refunds a charge.
+func RefundPayment(r *httprequest.Request) {
 	var path paymentPath
 	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -99,7 +78,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if err := req.validate(); err != nil {
+	if err := validateRefund(req); err != nil {
 		writeAdminRefundError(r, err)
 		return
 	}
@@ -463,139 +442,190 @@ func adminRefundMetadata(idempotencyKey string, req RefundRequest, status string
 	return metadata
 }
 
-// adminPaymentsMaxLimit caps the admin payments list page size, mirroring
-// adminCustomersMaxLimit (#785).
-const adminPaymentsMaxLimit = 200
-
-func GetAdminPayments(r *httprequest.Request) {
-	queryOpts := query.QueryOptions[payments.GetPaymentsFilters]{Limit: 50, Offset: 0}
-	if err := r.ShouldBindQuery(&queryOpts); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+// ListPayments (GET /merchant/payments) is one page of the merchant's
+// payments, newest first.
+func ListPayments(r *httprequest.Request) {
+	params, ok := paymentListParams(r)
+	if !ok {
 		return
 	}
-	// #785: validate + clamp pagination like ListAdminCustomers. Without this a
-	// negative limit flows through to a 200 with an inconsistent
-	// {"limit":-1,"has_more":true,…} envelope.
-	if queryOpts.Limit <= 0 {
-		r.ErrorJSON(http.StatusBadRequest, "limit must be a positive integer")
-		return
+	if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
+		id, err := billing.ParseCustomerID(raw)
+		if err != nil || id.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "customer_id is invalid").WithParam("customer_id"))
+			return
+		}
+		params.CustomerID = id
 	}
-	if queryOpts.Offset < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "offset must be a non-negative integer")
-		return
-	}
-	queryOpts.Limit = min(queryOpts.Limit, adminPaymentsMaxLimit)
-	payments, total, err := r.State.PaymentService.GetPayments(r.Request.Context(), queryOpts)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	paymentObjects := make([]api.PaymentObject, len(payments))
-	for i, p := range payments {
-		paymentObjects[i] = PaymentToAPI(p, nil)
-	}
-	r.SuccessJSONPaginated(paymentObjects, total, queryOpts.Limit, queryOpts.Offset)
+	writePaymentPage(r, params)
 }
 
-func GetAdminPayment(r *httprequest.Request) {
-	var path paymentPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+// ListMyPayments (GET /me/payments) is one page of the caller's payments,
+// newest first.
+func ListMyPayments(r *httprequest.Request) {
+	customer, ok := selfAccountPayer(r)
+	if !ok {
 		return
 	}
-	typedPaymentID, err := billing.ParsePaymentID(path.PaymentID)
-	if err != nil || typedPaymentID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
+	params, ok := paymentListParams(r)
+	if !ok {
 		return
 	}
-	paymentID := typedPaymentID.UUID()
-	payment, refunds, err := r.State.PaymentService.GetByIDWithDetails(r.Request.Context(), paymentID)
+	params.CustomerID = billing.CustomerID(customer)
+	writePaymentPage(r, params)
+}
+
+// paymentListParams reads the filters both payment lists share.
+func paymentListParams(r *httprequest.Request) (billing.ListPaymentsParams, bool) {
+	page, ok := r.Page()
+	if !ok {
+		return billing.ListPaymentsParams{}, false
+	}
+	params := billing.ListPaymentsParams{Page: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
+	for name, parse := range map[string]func(string) error{
+		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
+		"price_id":        func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return },
+	} {
+		if raw := strings.TrimSpace(r.Query(name)); raw != "" {
+			if parse(raw) != nil {
+				r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
+				return billing.ListPaymentsParams{}, false
+			}
+		}
+	}
+	if kind := billing.PaymentKind(strings.TrimSpace(r.Query("kind"))); kind != "" {
+		switch kind {
+		case billing.PaymentCharge, billing.PaymentRefund, billing.PaymentChargeback, billing.PaymentDisputeReversal:
+			params.Kind = kind
+		default:
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "kind is invalid").WithParam("kind"))
+			return billing.ListPaymentsParams{}, false
+		}
+	}
+	return params, true
+}
+
+func writePaymentPage(r *httprequest.Request, params billing.ListPaymentsParams) {
+	page, err := r.State.PaymentService.ListPage(r.Request.Context(), params)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "payment not found")
+		writeRefusal(r, err, "failed to list payments")
 		return
+	}
+	charges := make([]uuid.UUID, 0, len(page.Items))
+	for _, p := range page.Items {
+		if p.Amount > 0 && p.RefundedPaymentID == nil {
+			charges = append(charges, p.ID)
+		}
+	}
+	refunded, err := r.State.PaymentService.RefundTotals(r.Request.Context(), charges)
+	if err != nil {
+		r.InternalError("failed to read payment refunds", err)
+		return
+	}
+	out := billing.ListPage[billing.Payment]{Items: make([]billing.Payment, 0, len(page.Items)), Next: page.Next}
+	for _, p := range page.Items {
+		out.Items = append(out.Items, paymentView(p, refunded[p.ID]))
+	}
+	r.SuccessJSON(out)
+}
+
+// GetPayment (GET /merchant/payments/{id}) reads one payment with its
+// refunds.
+func GetPayment(r *httprequest.Request) {
+	id, err := billing.ParsePaymentID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid payment id").WithParam("id"))
+		return
+	}
+	payment, refunds, err := r.State.PaymentService.GetByIDWithDetails(r.Request.Context(), id.UUID())
+	if err != nil {
+		r.ErrorCode(billing.CodeResourceNotFound, "payment not found")
+		return
+	}
+	if refunds == nil {
+		refunds = []*models.Payment{}
 	}
 	r.SuccessJSON(PaymentToAPI(payment, refunds))
 }
 
-func GetAdminUserPayments(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+// CreateOffChannelPayment (POST /merchant/customers/{customer_id}/payments/off-channel)
+// records a purchase paid outside any rail: 201 with the payment, 200 when the
+// same transaction_id was already recorded with the same terms, and 409
+// idempotency_key_reused when it was recorded with other terms.
+func CreateOffChannelPayment(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+	if !ok {
 		return
 	}
-	page := 1
-	pageSize := 50
-	if p := r.Query("page"); p != "" {
-		if v, err := strconv.Atoi(p); err == nil && v > 0 {
-			page = v
-		}
-	}
-	if ps := r.Query("page_size"); ps != "" {
-		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 200 {
-			pageSize = v
-		}
-	}
-	payments, total, err := r.State.PaymentService.GetPaginatedByUserID(r.Request.Context(), path.UserID, page, pageSize)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	data := make([]api.PaymentObject, len(payments))
-	for i, p := range payments {
-		data[i] = PaymentToAPI(p, nil)
-	}
-	offset := (page - 1) * pageSize
-	hasMore := offset+len(data) < total
-	r.JSON(http.StatusOK, map[string]interface{}{"object": "list", "data": data, "total": total, "limit": pageSize, "offset": offset, "has_more": hasMore})
-}
-
-func AdminCreateOffChannelPayment(r *httprequest.Request) {
-	var path adminOffChannelPaymentPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	var req AdminOffChannelPaymentRequest
+	var req billing.CreateOffChannelPaymentParams
 	if !r.BindJSON(&req) {
 		return
 	}
-	typedPriceID, err := billing.ParsePriceID(strings.TrimSpace(req.PriceID))
-	if err != nil || typedPriceID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+	if req.PriceID.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "price_id is required").WithParam("price_id"))
 		return
 	}
-	priceID := typedPriceID.UUID()
 	transactionID := strings.TrimSpace(req.TransactionID)
-	if transactionID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "transaction_id is required")
+	if transactionID == "" || len(transactionID) > 255 {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "transaction_id of 1-255 bytes is required").WithParam("transaction_id"))
 		return
 	}
 	if req.Amount != nil && *req.Amount < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must not be negative").WithParam("amount"))
 		return
 	}
 	var purchasedAt *time.Time
-	if strings.TrimSpace(req.PurchasedAt) != "" {
-		tm, err := time.Parse(time.RFC3339, strings.TrimSpace(req.PurchasedAt))
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "purchased_at must be RFC3339")
+	if req.PurchasedAt != nil {
+		at := req.PurchasedAt.UTC()
+		purchasedAt = &at
+	}
+	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
+	ctx := r.Request.Context()
+	if existing, err := r.State.PaymentService.GetByPSPTransactionID(ctx, models.Rail(models.ChannelManual), transactionID); err == nil {
+		if !offChannelTermsMatch(existing, customer.UUID(), req.PriceID.UUID(), req.Amount, currency, purchasedAt) {
+			r.ErrorCode(billing.CodeIdempotencyKeyReused, "transaction_id was already recorded with other terms")
 			return
 		}
-		tm = tm.UTC()
-		purchasedAt = &tm
-	}
-	if existing, err := r.State.PaymentService.GetByPSPTransactionID(r.Request.Context(), models.Rail(models.ChannelManual), transactionID); err == nil {
-		r.JSON(http.StatusOK, map[string]any{"payment_id": existing.ID.String(), "status": "exists"})
+		writeRecordedPayment(r, http.StatusOK, existing.ID)
 		return
 	}
-	amount := int64(0)
+	register := &payments.RegisterPurchaseRequest{UserID: customer.String(), PriceID: req.PriceID.UUID(), Rail: string(models.ChannelManual), TransactionID: transactionID,
+		Currency: currency, PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata}
 	if req.Amount != nil {
-		amount = *req.Amount
+		register.Amount, register.AmountProvided = *req.Amount, true
 	}
-	result, err := r.State.CheckoutService.RegisterPurchase(r.Request.Context(), &payments.RegisterPurchaseRequest{UserID: path.UserID, PriceID: priceID, Rail: string(models.ChannelManual), TransactionID: transactionID, Amount: amount, Currency: strings.TrimSpace(req.Currency), PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata})
+	result, err := r.State.CheckoutService.RegisterPurchase(ctx, register)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		writeRefusal(r, err, "failed to record the payment")
 		return
 	}
-	r.JSON(http.StatusCreated, map[string]any{"payment_id": result.PaymentID.String(), "entitlements": result.Entitlements, "delayed_start": result.DelayedStart, "eligibility": result.Eligibility})
+	writeRecordedPayment(r, http.StatusCreated, result.PaymentID)
+}
+
+// offChannelTermsMatch reports whether a recorded off-channel payment is the
+// one a retry describes.
+func offChannelTermsMatch(p *models.Payment, customer, price uuid.UUID, amount *int64, currency string, purchasedAt *time.Time) bool {
+	switch {
+	case p.CustomerID != customer, p.PriceID != price:
+		return false
+	case amount != nil && *amount != p.Amount:
+		return false
+	case currency != "" && currency != p.Currency:
+		return false
+	case purchasedAt != nil && !purchasedAt.Truncate(time.Microsecond).Equal(p.PurchasedAt.UTC().Truncate(time.Microsecond)):
+		return false
+	}
+	return true
+}
+
+func writeRecordedPayment(r *httprequest.Request, status int, id uuid.UUID) {
+	payment, refunds, err := r.State.PaymentService.GetByIDWithDetails(r.Request.Context(), id)
+	if err != nil {
+		r.InternalError("failed to read the recorded payment", err)
+		return
+	}
+	if refunds == nil {
+		refunds = []*models.Payment{}
+	}
+	r.JSON(status, PaymentToAPI(payment, refunds))
 }

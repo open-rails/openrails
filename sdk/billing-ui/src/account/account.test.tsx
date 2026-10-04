@@ -30,6 +30,18 @@ import { PaymentHistory } from "./payment-history"
 import { BillingStatusBadge } from "./status-badge"
 import { SubscriptionsPanel } from "./subscriptions-panel"
 
+// The price a payment bought: renewing every `hours`, or a one-time purchase.
+const price = (hours: number | null, autoRenew = true) => ({
+  id: "price_1",
+  key: "plan",
+  product_id: "prod_1",
+  unit_amount: "9990000",
+  currency: "USD",
+  auto_renew: autoRenew,
+  access_duration_hours: hours,
+  archived: false,
+})
+
 function mount(
   ui: ReactNode,
   server: FakeBilling,
@@ -51,18 +63,18 @@ describe("AccountBilling", () => {
       methods: [
         paymentMethod({
           subscriptions: [{ id: "sub_1", display_name: "Pro" }],
-          collection_default_currencies: ["USD"],
+          collection_currencies: ["USD"],
         }),
       ],
       payments: [
         payment({
           subscription_id: "sub_1",
-          price: { type: "recurring", recurring: { interval: "720h" } },
+          price: price(720),
           product: { id: "prod_1", display_name: "Pro" },
         }),
         payment({
           id: "pay_2",
-          object: "refund",
+          kind: "refund",
           status: "succeeded",
           amount: "-9990000",
         }),
@@ -80,7 +92,7 @@ describe("AccountBilling", () => {
     const card = await screen.findByTestId("payment-method-row")
     expect(card).toHaveTextContent("Visa •••• 4242 · 12/30")
     expect(card).toHaveTextContent("Used by Pro")
-    expect(card).toHaveTextContent("Default for USD")
+    expect(card).toHaveTextContent("Pays USD invoices")
 
     const rows = await screen.findAllByTestId("payment-row")
     expect(rows[0]).toHaveTextContent("Pro")
@@ -285,18 +297,14 @@ describe("PaymentHistory", () => {
     const server = fakeBilling({
       payments: [
         payment({
-          price: { type: "recurring", recurring: { interval: "168h" } },
+          price: price(168),
           product: { id: "prod_1", display_name: "Weekly pass" },
         }),
-        payment({
-          id: "pay_2",
-          subscription_id: "sub_1",
-          price: { type: "recurring", recurring: { interval: "720h" } },
-        }),
-        payment({ id: "pay_3", price: { type: "one_time" } }),
+        payment({ id: "pay_2", subscription_id: "sub_1", price: price(720) }),
+        payment({ id: "pay_3", price: price(null, false) }),
         payment({
           id: "pay_4",
-          price: { type: "one_time" },
+          price: price(null, false),
           product: { id: "prod_2", display_name: "Post purchase" },
         }),
       ],
@@ -322,12 +330,7 @@ describe("PaymentHistory", () => {
 
   it("localizes the fallback name and period", async () => {
     const server = fakeBilling({
-      payments: [
-        payment({
-          subscription_id: "sub_1",
-          price: { type: "recurring", recurring: { interval: "720h" } },
-        }),
-      ],
+      payments: [payment({ subscription_id: "sub_1", price: price(720) })],
     })
     mount(<PaymentHistory />, server, { locale: "ja-JP", messages: ja })
     const row = await screen.findByTestId("payment-row")
@@ -345,7 +348,7 @@ describe("PaymentMethodsPanel", () => {
     const server = fakeBilling({
       methods: [paymentMethod(), paymentMethod({ id: "pm_2" })],
     })
-    mount(<AccountBilling defaultCurrency="usd" />, server)
+    mount(<AccountBilling collectionCurrency="usd" />, server)
     const rows = await screen.findAllByTestId("payment-method-row")
     server.fail["DELETE /me/payment-methods/pm_1"] = apiError(
       409,
@@ -362,11 +365,11 @@ describe("PaymentMethodsPanel", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
 
     fireEvent.click(
-      within(rows[1]).getByRole("button", { name: "Make default" })
+      within(rows[1]).getByRole("button", { name: "Use for invoices" })
     )
     await waitFor(() =>
       expect(screen.getAllByTestId("payment-method-row")[1]).toHaveTextContent(
-        "Default for USD"
+        "Pays USD invoices"
       )
     )
 

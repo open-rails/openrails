@@ -384,10 +384,12 @@ describe("Checkout", () => {
               id: "pm_saved_1",
               option_id: "option_nmi",
               rail: "nmi",
-              brand: "visa",
-              last_four: "1111",
-              exp_month: 10,
-              exp_year: 2029,
+              card: {
+                brand: "visa",
+                last4: "1111",
+                exp_month: 10,
+                exp_year: 2029,
+              },
             },
           ],
         })
@@ -429,8 +431,7 @@ describe("Checkout", () => {
               id: "pm_saved_1",
               option_id: "option_nmi",
               rail: "nmi",
-              brand: "visa",
-              last_four: "1111",
+              card: { brand: "visa", last4: "1111" },
             },
           ],
         })
@@ -472,8 +473,7 @@ describe("Checkout", () => {
               id: "pm_saved_1",
               option_id: "option_nmi",
               rail: "nmi",
-              brand: "visa",
-              last_four: "1111",
+              card: { brand: "visa", last4: "1111" },
             },
           ],
         })
@@ -1089,13 +1089,14 @@ describe("one card panel", () => {
     expect(calls).toEqual([
       {
         path: "/billing/v1/me/payment-methods",
-        body: expect.objectContaining({
-          provider: "nmi",
+        body: {
+          psp_id: "option_nmi",
           payment_token: "preview_payment_token",
-          last_four: "4242",
-          card_type: "visa",
-          expiry_date: "12/27",
-        }),
+          billing_details: {
+            name: "Pat Reader",
+            address: { postal_code: "94107", country: expect.any(String) },
+          },
+        },
       },
     ])
   })
@@ -1259,11 +1260,12 @@ describe("server card entry", () => {
       {
         path: "/billing/v1/me/payment-methods",
         body: {
-          provider: "nmi",
-          name_on_card: "Pat Reader",
-          country: expect.any(String),
-          zip: "94107",
+          psp_id: "option_nmi",
           card,
+          billing_details: {
+            name: "Pat Reader",
+            address: { postal_code: "94107", country: expect.any(String) },
+          },
         },
       },
     ])

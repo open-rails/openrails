@@ -143,11 +143,8 @@ func ValidateValues(p Profile, values []*string) error {
 			if !uuidPattern.MatchString(v) {
 				return bad()
 			}
-		case "bigint", "integer":
-			bits := 64
-			if c.Type == "integer" {
-				bits = 32
-			}
+		case "bigint", "integer", "smallint":
+			bits := map[string]int{"bigint": 64, "integer": 32, "smallint": 16}[c.Type]
 			x, err := strconv.ParseInt(v, 10, bits)
 			if err != nil || strconv.FormatInt(x, 10) != v {
 				return bad()

@@ -128,10 +128,10 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
 | GET | `/v1/me/usage` | The caller's usage (`Usage`), one row per `group_by` key (`event_type` default, `invoker`, `resource`, `function`, `tier`). Query: `currency`, `from`, `to` (default: the last month) |
 | GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 invalid_query`. The delegations a customer granted are the merchant's `GET /v1/merchant/customers/{customer_id}/spend-delegations` |
-| GET | `/v1/me/invoices` | List the subject's invoices |
+| GET | `/v1/me/invoices` | The subject's invoices, a cursor page. Query: `limit`, `cursor` |
 | GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
 | POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
-| GET | `/v1/me/payments` | Payment and refund history; each row embeds `product` (`id`, `key`, `display_name`, ...). Query: `type` (rail filter), `limit`, `offset` |
+| GET | `/v1/me/payments` | Payment and refund history, newest first, a cursor page; each row embeds the `price` and `product` it bought. Query: `limit`, `cursor`, `kind`, `rail`, `price_id`, `subscription_id`, `transaction_id` |
 | GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
 | GET | `/v1/me/products` | Products relevant to the subject |
@@ -149,9 +149,9 @@ responses are non-cacheable. Confirmation verifies the existing provider object.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/me/payment-methods/stripe-setup` | Accept recurring consent and create/replay saved-card setup for a selected PSP; requires Idempotency-Key |
-| GET | `/v1/me/payment-methods/stripe-setup/{id}` | Read the caller's setup action and client secret |
-| POST | `/v1/me/payment-methods/stripe-setup/{id}/confirm` | Verify successful setup and link the caller's reusable payment method |
+| POST | `/v1/me/payment-method-setups` | Accept recurring consent and create/replay saved-card setup for a selected PSP; requires Idempotency-Key |
+| GET | `/v1/me/payment-method-setups/{id}` | Read the caller's setup action and client secret |
+| POST | `/v1/me/payment-method-setups/{id}/confirm` | Verify successful setup and link the caller's reusable payment method |
 | GET | `/v1/me/payment-operations/{id}/authentication` | Read the original accepted Stripe payment's authentication action |
 | POST | `/v1/me/payment-operations/{id}/authentication/confirm` | Verify the original payment after authentication; never create a replacement charge |
 
@@ -234,19 +234,20 @@ for an unresolved sale.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/payment-methods` | List stored methods with currency-qualified collection defaults; `default: true` marks the customer's default, listed first. Query: `limit`, `offset` |
-| PUT | `/v1/me/default-payment-method` | Body `{"payment_method_id": ...}`. Make a usable method the default (the previous default stops being one atomically); `409 payment_method_not_usable` for a parked or pending-delete method |
-| POST | `/v1/me/payment-methods` | Store an NMI card. Body: `payment_token` (Collect.js) + billing details |
-| PUT | `/v1/me/payment-methods/{id}` | Durably replace an NMI card. Requires tokenization's `payment_token`, `last_four` and `expiry_date` (`card_type` optional); billing fields are optional. Returns the updated method when confirmed, `202` with no body while converging, `409 payment_method_update_retry_required` when a fresh token is required, or `502 payment_method_update_failed` for a terminal provider conflict. |
+| GET | `/v1/me/payment-methods` | Stored cards, newest first, a cursor page. Query: `limit`, `cursor` |
+| POST | `/v1/me/payment-methods` | Save a card with the PSP `psp_id`: a `payment_token` from the PSP's card fields, or `card` for a PSP whose card entry is server. Optional `billing_details`. OpenRails reads the card's brand, last four and expiry from the PSP. `201` with the method |
+| PUT | `/v1/me/payment-methods/{id}` | Durably replace an NMI card with a new `payment_token` or `card`; `billing_details` present replace the saved ones. Returns the updated method when confirmed, `202` with no body while converging, `409 payment_method_update_retry_required` when a fresh token is required, or `502 payment_method_update_failed` for a terminal provider conflict. |
 | DELETE | `/v1/me/payment-methods/{id}` | Delete an NMI method through the durable provider-aware workflow. Returns `204` when complete, `202` while provider convergence continues, and an error when refused/failed. Stripe cards are managed through Stripe Billing Portal. |
 
-Saved-method lists and merchant customer profiles include
-`collection_default_currencies` on each method that is the current invoice
-collection choice for those billing currencies (for example, `["EUR", "USD"]`).
-An absent or empty list indicates no collection-default badge for that method.
-Only the explicit choice set through `PUT /v1/me/collection-payment-method`
-counts; no other saved method is inferred. It does not change provider-managed
-subscription defaults or select a checkout method.
+A payment method is `{id, customer_id, rail, psp_id, card, billing_details,
+health, subscriptions, collection_currencies, created_at}`. `card` is the one
+card shape of the API, `{brand, last4, exp_month, exp_year}`, each null when
+the provider did not report it. `psp_id` is null for a card a third-party
+custodian holds: each charge routes to the one live PSP of its rail that
+reaches the custodian. There is no default card: a charge names its card, and
+`collection_currencies` lists the currencies whose invoices the card collects
+(the explicit choice set through `PUT /v1/me/collection-payment-method`; no
+other saved method is inferred).
 
 The admin payment-method card labels each currency separately. Refresh payment
 methods invalidates both the customer profile and saved-method query caches.
@@ -348,16 +349,15 @@ for those routes.
 | GET | `/v1/merchant/customers` | `merchant:customer-settings:read` | Customers, newest first (`ListPage<Customer>`). Query: `q` (id prefix or email substring), `limit`, `cursor` |
 | GET | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:read` | One `Customer`; 404 `customer_not_found` |
 | GET | `/v1/merchant/customers/{customer_id}/billing-profile` | `merchant:customer-settings:read` | Billing at a glance: `customer`, `balances`, entitlements, subscriptions of every status (newest 100, with `status`), history, redacted payment-method metadata. Sections degrade independently: a failed collection-defaults read logs and returns the methods without `collection_default_currencies` instead of failing the profile |
-| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | Redacted saved-method metadata (admins can never create/update/delete customer methods) |
+| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | The customer's saved cards, a cursor page (`limit`, `cursor`); admins can never create or update them |
 | DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | `merchant:customer-settings:update` | Shared customer ownership and provider deletion; 204 completed or 202 pending reconciliation |
-| GET | `/v1/merchant/customers/{customer_id}/payments` | `merchant:payments:read` | One customer's payment history |
-| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path |
+| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path: `201` with the `Payment`; the same `transaction_id` with the same terms answers it again (`200`), with other terms `409 idempotency_key_reused` |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger): `hours` (at most 2562047) or `end_at`; neither (no end) also needs `merchant:access:grant-permanent` |
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access; without `ends_at` (no end) also needs `merchant:access:grant-permanent` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
-| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo |
-| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:update` | Replace the profile used for future invoice snapshots |
+| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo; `404` when the customer has none |
+| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:update` | Replace the profile used for future invoice snapshots (`201` created, `200` replaced); with `If-None-Match: *` only create it, answering an existing one unchanged |
 | GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | `merchant:customer-settings:read` | List the payer's negotiated meter rate cards |
 | PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | `merchant:customer-settings:update` | Set the payer's negotiated rate and optional included allowance |
 | DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | `merchant:customer-settings:update` | Restore the merchant-default rate for future usage |
@@ -366,18 +366,17 @@ for those routes.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments (money that moved; declines are payment attempts) with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
-| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; payments and refunds embed the `product` summary; `Client.GetPayment` |
+| GET | `/v1/merchant/payments` | `merchant:payments:read` | Payments (money that moved; declines are payment attempts), newest first, a cursor page. Filters `customer_id`, `subscription_id`, `price_id`, `rail`, `kind` (`charge`, `refund`, `chargeback`, `dispute_reversal`), `transaction_id`; `Client.ListPayments` |
+| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with its `refunds`; payments embed the `price` and `product` they bought; `Client.GetPayment` |
 | POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail. `Idempotency-Key` required; body `{amount}` or `{full:true}`, optional `reason`, `revoke_access` (explicit; on an NMI-billed subscription it also cancels the membership and deletes its NMI schedule, and is refused `409 provider_cancel_held` while destructive actions are disarmed). 201 settled, 202 pending; `refund_rail_unavailable`/`refund_unsupported` refusals. `Client.RefundPayment` |
-| GET | `/v1/merchant/payment-attempts` | `merchant:payments:read` | Every authorization a PSP answered (verifications, sales, rebills, retries), newest first. Filters `kind`, `owner`, `category`, `reason`, `response_code`, `card_entry`, `source`, `observed_via`, `avs_result`, `cvv_result`, `psp_id`, `customer_id`, `checkout_id`, `subscription_id`, `cycle_id`, `since`/`until` (RFC3339); a text filter takes a comma-separated list (`kind=verify,initial`). `Client.ListPaymentAttempts` |
+| GET | `/v1/merchant/payment-attempts` | `merchant:payments:read` | Every authorization a PSP answered (verifications, sales, rebills, retries), newest first, a cursor page. Filters `kind`, `owner`, `category`, `reason`, `response_code`, `card_entry`, `source`, `observed_via`, `avs_result`, `cvv_result`, `psp_id`, `customer_id`, `checkout_id`, `subscription_id`, `cycle_id`, `since`/`until` (RFC3339); a text filter takes a comma-separated list (`kind=verify,initial`). `Client.ListPaymentAttempts` |
 | GET | `/v1/merchant/payment-attempts/{id}` | `merchant:payments:read` | One attempt (`att_…`). `Client.GetPaymentAttempt` |
-| GET | `/v1/merchant/rebill-cycles` | `merchant:payments:read` | Rebill cycles (paid periods that came due), latest due first, with `first_outcome`, `outcome` (`collected`, `lost`, `open`), `recovered_by`. Filters `owner`, `first_outcome`, `miss_reason`, `outcome`, `psp_id`, `subscription_id`, `due_since`/`due_until`; a text filter takes a comma-separated list. `Client.ListRebillCycles` |
+| GET | `/v1/merchant/rebill-cycles` | `merchant:payments:read` | Rebill cycles (paid periods that came due), latest due first, a cursor page, with `first_outcome`, `outcome` (`collected`, `lost`, `open`), `recovered_by`. Filters `owner`, `first_outcome`, `miss_reason`, `outcome`, `psp_id`, `subscription_id`, `due_since`/`due_until`; a text filter takes a comma-separated list. `Client.ListRebillCycles` |
 | GET | `/v1/merchant/rebill-cycles/{id}` | `merchant:payments:read` | One cycle (`cyc_…`) with its attempts, oldest first. `Client.GetRebillCycle` |
-| GET | `/v1/merchant/purchase-reviews` | `merchant:payments:read` | Purchases a product archive recorded for review (`status=open\|refunded\|dismissed`, `product_archive_id`); `Client.ListPurchaseReviews` |
+| GET | `/v1/merchant/purchase-reviews` | `merchant:payments:read` | Purchases a product archive recorded for review, a cursor page (`status=open\|refunded\|dismissed`, `product_archive_id`); `Client.ListPurchaseReviews` |
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | `merchant:payments:refund` | `{decision: refund\|dismiss, notes}`; refund returns the remaining amount and ends the purchase's access; `Client.ResolvePurchaseReview` |
 | GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
-| PUT | `/v1/merchant/customers/{customer_id}/default-payment-method` | `merchant:customer-settings:update` | Body `{"payment_method_id": ...}`. Make a customer's usable method the default (`Client.SetDefaultPaymentMethod`) |
 | POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately. An NMI-billed cancel while the destructive switch is off answers `409 provider_cancel_held` and raises `life.provider_cancel.held`; `account_deletion: true` cancels locally and holds the NMI delete instead |
 | POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier` | `merchant:subscriptions:update` | Apply a same-group tier change. Body `{ "price_id": "..." }` |
@@ -392,9 +391,9 @@ Full request and state-transition details are in
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/invoices` | `merchant:invoices:read` | List invoices with customer, currency, status and period filters |
+| GET | `/v1/merchant/invoices` | `merchant:invoices:read` | Invoices, a cursor page; filters `customer_id`, `currency`, `status`, `period_from`, `period_to` |
 | GET | `/v1/merchant/invoices/{id}` | `merchant:invoices:read` | Read one invoice and its available actions |
-| GET | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:read` | List collection and remittance history |
+| GET | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:read` | Collection and remittance history, a cursor page |
 | POST | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:update` | Record an idempotent external remittance; does not charge a provider |
 | POST | `/v1/merchant/invoices/{id}/retry-collection` | `merchant:invoices:collect` | Start or replay one durable collection operation with an explicit saved method and idempotency key (202 while unresolved) |
 | POST | `/v1/merchant/invoices/{id}/uncollectible` | `merchant:invoices:update` | Stop collection while retaining the debt |
@@ -669,7 +668,7 @@ pending rows survive retention. Hosts should filter by event type so one
 consumer's pending work cannot starve another type.
 
 `GET /v1/merchant/customers/{customer_id}/payment-settlement-status?price_id=...`
-backs `Client.HasSettledPayment` and requires `merchant:payments:read`. It reads
+backs `Client.GetPaymentSettlementStatus` and requires `merchant:payments:read`. It reads
 the durable payment records: a positive completed or refunded original rail
 payment establishes the historical fact for that merchant, customer and price.
 Acknowledging or pruning its host event does not erase that fact.

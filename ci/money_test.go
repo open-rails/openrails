@@ -93,18 +93,16 @@ func TestMoneyJSONPreservesInt64(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &read))
 			require.Equal(t, amount, read.UnitAmount)
 
-			response := billing.Payment{Amount: amount, AmountRefunded: amount, Price: &billing.PublicPrice{UnitAmount: amount}}
+			response := billing.Payment{Amount: amount, AmountRefunded: amount}
 			raw, err = json.Marshal(response)
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(raw, &wire))
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["amount"])
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["amount_refunded"])
-			require.Equal(t, strconv.FormatInt(amount, 10), wire["price"].(map[string]any)["unit_amount"])
 			var payment billing.Payment
 			require.NoError(t, json.Unmarshal(raw, &payment))
 			require.Equal(t, amount, payment.Amount)
 			require.Equal(t, amount, payment.AmountRefunded)
-			require.Equal(t, amount, payment.Price.UnitAmount)
 		})
 	}
 	for _, value := range []string{`9007199254740993`, `"1.5"`, `"1e3"`, `"9223372036854775808"`, `"-9223372036854775809"`} {

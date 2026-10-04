@@ -100,9 +100,7 @@ type LocalPaymentMethod struct {
 	// RailMethodRef names one card within a multi-card vault (NMI billing
 	// id); empty when the rail has one instrument per customer ref.
 	RailMethodRef string
-	LastFour      string
-	CardType      string
-	ExpiryDate    string
+	Card          models.Card
 }
 
 // LocalPrice is the slice of billing.prices the PS-1 materializer consumes:
@@ -259,15 +257,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			RailCustomerRef: row.RailCustomerRef,
 			RailMethodRef:   row.RailMethodRef,
 		}
-		if row.LastFour != nil {
-			pm.LastFour = *row.LastFour
-		}
-		if row.CardType != nil {
-			pm.CardType = *row.CardType
-		}
-		if row.ExpiryDate != nil {
-			pm.ExpiryDate = *row.ExpiryDate
-		}
+		pm.Card = models.CardFromColumns(row.CardBrand, row.CardLast4, row.CardExpMonth, row.CardExpYear)
 		state.PaymentMethods = append(state.PaymentMethods, pm)
 	}
 

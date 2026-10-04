@@ -68,13 +68,13 @@ func TestHostedCheckoutPlanStampsRegistryScale(t *testing.T) {
 
 func TestInvoiceMoneyWireIsLossless(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, 0, 9007199254740993, math.MaxInt64} {
-		invoice := billing.InvoiceDTO{AmountDue: amount, TotalAmount: amount, MoneyMovements: billing.AmountMap{"deposit": amount}, LineItems: []billing.InvoiceLineItemDTO{{Amount: amount}}}
+		invoice := billing.Invoice{AmountDue: amount, TotalAmount: amount, MoneyMovements: billing.AmountMap{"deposit": amount}, LineItems: []billing.InvoiceLineItem{{Amount: amount}}}
 		raw, err := json.Marshal(invoice)
 		require.NoError(t, err)
 		var browser map[string]any
 		require.NoError(t, json.Unmarshal(raw, &browser))
 		require.IsType(t, "", browser["amount_due"])
-		var read billing.InvoiceDTO
+		var read billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &read))
 		require.Equal(t, invoice.AmountDue, read.AmountDue)
 		require.Equal(t, invoice.TotalAmount, read.TotalAmount)

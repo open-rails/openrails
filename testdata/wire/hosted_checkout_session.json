@@ -58,10 +58,12 @@
       "id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "option_id": "option_card",
       "rail": "nmi",
-      "brand": "visa",
-      "last_four": "4242",
-      "exp_month": 12,
-      "exp_year": 2030
+      "card": {
+        "brand": "visa",
+        "last4": "4242",
+        "exp_month": 12,
+        "exp_year": 2030
+      }
     }
   ],
   "payment_id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",

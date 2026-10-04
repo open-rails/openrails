@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -46,58 +48,37 @@ type InvoiceCollectionRetryResult struct {
 	Operation gen.BillingRailIntent
 }
 
-// ListInvoicePaymentAttempts returns one payer-owned invoice's collection
-// history, newest attempt first.
-func (s *MoneyService) ListInvoicePaymentAttempts(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, limit, offset int) ([]models.InvoicePaymentAttempt, int, error) {
-	if s == nil || s.db == nil {
-		return nil, 0, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, 0, fmt.Errorf("payer required")
-	}
-	if invoiceID == uuid.Nil {
-		return nil, 0, fmt.Errorf("invoice_id required")
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+// ListInvoicePayments is one page of a payer's invoice's payments, newest
+// first.
+func (s *MoneyService) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, page billing.PageRequest) (billing.ListPage[models.InvoicePaymentAttempt], error) {
+	var out billing.ListPage[models.InvoicePaymentAttempt]
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
-
-	// Distinguish an existing invoice with no attempts from an inaccessible ID.
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return out, err
+	}
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return out, err
+	}
+	// Distinguish an existing invoice with no payments from an inaccessible id.
 	if _, err := s.GetInvoiceByID(ctx, payer, invoiceID); err != nil {
-		return nil, 0, fmt.Errorf("load invoice: %w", err)
+		return out, fmt.Errorf("load invoice: %w", err)
 	}
-
-	q := s.db.Gen(ctx)
-	total, err := q.CountInvoicePaymentAttemptsByPayer(ctx, gen.CountInvoicePaymentAttemptsByPayerParams{
-		MerchantID: tid.UUID(),
-		CustomerID: payer.UUID(),
-		InvoiceID:  invoiceID,
+	rows, err := s.db.Gen(ctx).ListInvoicePaymentsPage(ctx, gen.ListInvoicePaymentsPageParams{
+		MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("count invoice payment attempts: %w", err)
-	}
-	rows, err := q.ListInvoicePaymentAttemptsByPayer(ctx, gen.ListInvoicePaymentAttemptsByPayerParams{
-		MerchantID: tid.UUID(),
-		CustomerID: payer.UUID(),
-		InvoiceID:  invoiceID,
-		Limit:      int64(limit),
-		Offset:     int64(offset),
-	})
-	if err != nil {
-		return nil, 0, fmt.Errorf("list invoice payment attempts: %w", err)
+		return out, fmt.Errorf("list invoice payments: %w", err)
 	}
 	attempts := make([]models.InvoicePaymentAttempt, 0, len(rows))
 	for _, row := range rows {
 		attempts = append(attempts, invoicePaymentAttemptFromGen(row))
 	}
-	return attempts, int(total), nil
+	return pagination.Cut(attempts, limit, func(a models.InvoicePaymentAttempt) any { return pagination.TimeID{At: a.CreatedAt, ID: a.ID} }), nil
 }
 
 // collectionPaymentMethodID selects the explicit invoice collection method.
@@ -438,9 +419,15 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err != nil || method == nil {
 			return err
 		}
+		// The account the charge goes through: the card's own PSP, or the one
+		// PSP of its rail that reaches its custodian.
+		psp, err := charge.RoutePSP(ctx, q, *method)
+		if err != nil {
+			return fmt.Errorf("route invoice %s collection: %w", invoice.ID, err)
+		}
 		var custody *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {
-			binding, err := collectionHyperSwitchBinding(ctx, q, *method, s.hyperSwitchDeployment)
+			binding, err := collectionHyperSwitchBinding(ctx, q, *method, psp, s.hyperSwitchDeployment)
 			if err != nil {
 				return err
 			}
@@ -452,7 +439,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		providerCustomerRef := ""
 		if normalizeRail(method.Rail) == "stripe" {
-			providerCustomerRef, err = q.GetRailCustomerAccountIDForPSP(ctx, gen.GetRailCustomerAccountIDForPSPParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Rail: "stripe", PspID: method.PspID})
+			providerCustomerRef, err = q.GetRailCustomerAccountIDForPSP(ctx, gen.GetRailCustomerAccountIDForPSPParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Rail: "stripe", PspID: psp})
 			if err != nil {
 				return fmt.Errorf("freeze Stripe customer on accepted account: %w", err)
 			}
@@ -474,10 +461,10 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		attemptID := uuidutil.NewV7()
 		intent, err := intents.NewStore(s.db.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
-			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: method.PspID, IntentType: TypeInvoiceCollection,
+			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: psp, IntentType: TypeInvoiceCollection,
 			Payload: intents.InvoiceCollectionPayload{
 				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID, Initiator: opts.initiator,
-				Rail: normalizeRail(method.Rail), Instrument: charge.FreezeInstrument(*method),
+				Rail: normalizeRail(method.Rail), Instrument: charge.FreezeInstrument(*method, psp),
 				HyperSwitch: custody,
 				Currency:    invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
 				ProviderCustomerRef: providerCustomerRef,
@@ -509,7 +496,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
 			Currency: invoice.Currency, Amount: chargedAmount, Status: "attempted",
 			AttemptedAt: now, CreatedAt: now, UpdatedAt: now,
-			PaymentMethodID: &method.ID, IdempotencyKey: &key, PspID: &method.PspID,
+			PaymentMethodID: &method.ID, IdempotencyKey: &key, PspID: &psp,
 		}); err != nil {
 			return fmt.Errorf("record invoice collection attempt: %w", err)
 		}

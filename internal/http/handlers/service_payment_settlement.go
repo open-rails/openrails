@@ -1,33 +1,34 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/service"
 )
 
-func ServicePaymentSettlementStatus(r *httprequest.Request) {
+// GetPaymentSettlementStatus (GET /merchant/customers/{customer_id}/payment-settlement-status?price_id=)
+// reports whether the customer ever paid for the price through a rail.
+func GetPaymentSettlementStatus(r *httprequest.Request) {
 	customerID, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || customerID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "customer id is required")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "customer_id is invalid").WithParam("customer_id"))
 		return
 	}
 	priceID, err := billing.ParsePriceID(r.Query("price_id"))
 	if err != nil || priceID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "price id is required")
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "price_id is required").WithParam("price_id"))
 		return
 	}
 	svc, err := service.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment settlement status unavailable")
+		r.InternalError("payment settlement status unavailable", err)
 		return
 	}
 	settled, err := svc.HasSettledPayment(r.Request.Context(), customerID.UUID(), priceID.UUID())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment settlement status unavailable")
+		r.InternalError("payment settlement status unavailable", err)
 		return
 	}
-	r.JSON(http.StatusOK, map[string]bool{"settled": settled})
+	r.SuccessJSON(billing.PaymentSettlementStatus{Settled: settled})
 }

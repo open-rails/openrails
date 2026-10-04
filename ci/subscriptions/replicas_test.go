@@ -507,9 +507,9 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 		require.NoError(t, r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionRequest{Reason: "member left"}))
 	}
 	refund := func(t *testing.T, f *fleet, r *world, e *engineCase) {
-		page, err := r.client[remote].ListPayments(t.Context(), billing.PaymentFilter{CustomerID: e.c.id, PageOptions: billing.PageOptions{Limit: 10}})
+		page, err := r.client[remote].ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 10}})
 		require.NoError(t, err)
-		paid := completed(page.Data)
+		paid := completed(page.Items)
 		require.Len(t, paid, 1)
 		_, err = r.client[remote].RefundPayment(t.Context(), paid[0].ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + paid[0].ID.String()})
 		require.NoError(t, err)
@@ -551,10 +551,10 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				}
 				require.Len(t, f.charges(e), want)
 				require.Equal(t, want, f.submissions(e), "nothing is sent after the cancel")
-				page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentFilter{CustomerID: e.c.id, PageOptions: billing.PageOptions{Limit: 10}})
+				page, err := f.any().client[embedded].ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 10}})
 				require.NoError(t, err)
 				charged := 0
-				for _, p := range completed(page.Data) {
+				for _, p := range completed(page.Items) {
 					if p.Amount > 0 {
 						charged++
 					}

@@ -121,8 +121,9 @@ func TestNMIClientForExistingSubscription(t *testing.T) {
 func TestPaymentMethodProviderAccountBoundary(t *testing.T) {
 	psp := uuid.New()
 	s := &models.Subscription{PspID: psp}
-	require.NoError(t, ValidatePaymentMethodProviderAccount(&models.PaymentMethod{PspID: psp}, s))
-	err := ValidatePaymentMethodProviderAccount(&models.PaymentMethod{PspID: uuid.New()}, s)
+	other := uuid.New()
+	require.NoError(t, ValidatePaymentMethodProviderAccount(&models.PaymentMethod{Custodian: models.CustodianPSP, PspID: &psp}, s))
+	err := ValidatePaymentMethodProviderAccount(&models.PaymentMethod{Custodian: models.CustodianPSP, PspID: &other}, s)
 	require.ErrorIs(t, err, ErrPaymentMethodProviderAccountMismatch)
 	require.ErrorContains(t, err, "card re-entry")
 	require.Error(t, ValidatePaymentMethodProviderAccount(nil, s))

@@ -38,8 +38,7 @@ test("seeded customer lists and manages their own billing", async ({
   expect((methods.body as Page<unknown>).data).toEqual([
     expect.objectContaining({
       id: expect.stringMatching(/^pm_/),
-      type: "card",
-      card: { brand: "visa", last4: "4242" },
+      card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
     }),
   ])
 
@@ -47,11 +46,15 @@ test("seeded customer lists and manages their own billing", async ({
   expect(payments.status, JSON.stringify(payments.body)).toBe(200)
   expect((payments.body as Page<unknown>).data).toEqual([
     expect.objectContaining({
+      kind: "charge",
       status: "succeeded",
       amount: "9990000",
       currency: "USD",
       subscription_id: sub.id,
-      price: expect.objectContaining({ recurring: { interval: "720h" } }),
+      price: expect.objectContaining({
+        auto_renew: true,
+        access_duration_hours: 720,
+      }),
       product: expect.objectContaining({ display_name: "Membership" }),
     }),
   ])

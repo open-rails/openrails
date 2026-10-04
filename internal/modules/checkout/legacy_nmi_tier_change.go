@@ -197,7 +197,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if methodRow.CustomerID != customerID || methodRow.PspID != sub.PspID || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == "" || methodRow.ParkReason != "" {
+	if methodRow.CustomerID != customerID || !charge.ChargeableOn(methodRow, sub.PspID) || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == "" || methodRow.ParkReason != "" {
 		return nil, ErrPaymentMethodStale
 	}
 	email := ""
@@ -206,7 +206,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	}
 	payload := subscriptions.NMIUpgradePayload{Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
-		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: charge.FreezeInstrument(methodRow), PaymentMethodID: methodRow.ID,
+		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: charge.FreezeInstrument(methodRow, sub.PspID), PaymentMethodID: methodRow.ID,
 		RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"

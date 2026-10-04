@@ -59,7 +59,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		l.railCust = "cus_legacy" + uuid.NewString()[:8]
 		method := "pm_legacy" + uuid.NewString()[:8]
 		l.railSub = w.stripe.legacySubscription(l.railCust, method, links["stripe"]["price_id"], 999, start, end)
-		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
+		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method, Card: declaredCard(visa)}}
 		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "stripe", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
 			PaymentMethod: &billing.PaymentMethodRef{Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method}}}
 		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.latestCharge(l.railSub), Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
@@ -67,7 +67,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		vault := w.nmi.AddVault(visa)
 		l.railCust = vault
 		l.railSub = w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: links["nmi"]["plan_id"], Amount: "9.99", NextBilling: end})
-		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
+		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, Card: declaredCard(visa)}}
 		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
 			PaymentMethod: &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}}
 		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
@@ -76,7 +76,6 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		apply(&book)
 	}
 	if rail == "nmi" {
-		book.PaymentMethods[0].InitialTransactionID = book.Transactions[0].TransactionID
 		if book.Subscriptions[0].Dunning != nil {
 			w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) {
 				s.NextBilling = book.Subscriptions[0].PaidThrough.Add(monthHours * time.Hour)

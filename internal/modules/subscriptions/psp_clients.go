@@ -62,15 +62,14 @@ func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSou
 	return client, strings.ToLower(string(sub.Rail)), true, nil
 }
 
-// PaymentMethodMatchesSubscriptionProvider reports whether the instrument was
-// vaulted by the same PSP that owns the subscription. or#893: both sides are
-// always attributed, so this is a real comparison — it no longer waves through
-// an unattributed row.
+// PaymentMethodMatchesSubscriptionProvider reports whether the subscription's
+// PSP can charge the instrument: the PSP holding a PSP-held card, or any PSP
+// for one a custodian holds.
 func PaymentMethodMatchesSubscriptionProvider(pm *models.PaymentMethod, sub *models.Subscription) bool {
 	if pm == nil || sub == nil {
 		return true
 	}
-	return pm.PspID == sub.PspID
+	return pm.ChargeableOn(sub.PspID)
 }
 
 // ValidatePaymentMethodProviderAccount enforces the provider-account boundary
@@ -81,7 +80,7 @@ func ValidatePaymentMethodProviderAccount(pm *models.PaymentMethod, sub *models.
 		return errors.New("payment method and subscription are required")
 	}
 	if !PaymentMethodMatchesSubscriptionProvider(pm, sub) {
-		return fmt.Errorf("%w: source=%s target=%s; card re-entry on the active provider is required", ErrPaymentMethodProviderAccountMismatch, sub.PspID, pm.PspID)
+		return fmt.Errorf("%w: source=%s target=%s; card re-entry on the active provider is required", ErrPaymentMethodProviderAccountMismatch, sub.PspID, pm.HoldingPSP())
 	}
 	return nil
 }

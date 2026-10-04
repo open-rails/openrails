@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -71,28 +70,23 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 	if s.RailPaymentMethodService == nil {
 		return "", "", nil, false, errors.New("payment method service unavailable")
 	}
+	if target.Scope == nil {
+		return "", "", nil, false, errors.New("payment provider identity is unavailable")
+	}
 
 	pmNew, err := s.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
-		PaymentToken: req.PaymentToken,
-		Card:         req.Card,
-		NameOnCard:   req.NameOnCard,
-		Provider:     target.PSP,
-		FirstName:    ResolveCheckoutFirstName(req, user),
-		LastName:     ResolveCheckoutLastName(req),
-		Address1:     req.Address1,
-		City:         req.City,
-		State:        req.State,
-		Zip:          req.Zip,
-		Country:      req.Country,
-		Email:        req.Email,
-		LastFour: func() string {
-			if len(req.LastFour) > 4 {
-				return req.LastFour[len(req.LastFour)-4:]
-			}
-			return req.LastFour
-		}(),
-		CardType:      req.CardType,
-		ExpiryDate:    req.ExpiryDate,
+		PaymentToken:  req.PaymentToken,
+		Card:          req.Card,
+		NameOnCard:    req.NameOnCard,
+		PSPID:         target.Scope.ID,
+		FirstName:     ResolveCheckoutFirstName(req, user),
+		LastName:      ResolveCheckoutLastName(req),
+		Address1:      req.Address1,
+		City:          req.City,
+		State:         req.State,
+		Zip:           req.Zip,
+		Country:       req.Country,
+		Email:         req.Email,
 		AttemptTarget: req.attempt.target,
 		AttemptOwner:  req.attempt.owner,
 		Metadata: func() map[string]any {
@@ -119,7 +113,7 @@ func paymentMethodMatchesTargetPSP(pm *models.PaymentMethod, target railTarget) 
 	if target.Scope == nil {
 		return errors.New("payment provider identity is unavailable")
 	}
-	if pm.PspID == uuid.Nil || pm.PspID != target.Scope.ID {
+	if !pm.ChargeableOn(target.Scope.ID) {
 		return fmt.Errorf("%w: payment method belongs to a different payment provider account", ErrPaymentMethodStale)
 	}
 	return nil

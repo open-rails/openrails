@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 
 import type { SendSolanaTransaction, SolanaCancelStage } from "../client/client"
 import { toBillingError, type BillingError } from "../client/errors"
@@ -264,7 +264,7 @@ export function useProducts(options: { limit?: number } = {}): ProductsState {
   }
 }
 
-export type PaymentMethodAction = "remove" | "default"
+export type PaymentMethodAction = "remove" | "collection"
 
 export interface PaymentMethodsState {
   methods: PaymentMethod[] | null
@@ -275,8 +275,8 @@ export interface PaymentMethodsState {
   adding: boolean
   add: (card: NewCard) => ActionResult
   remove: (paymentMethodId: string) => ActionResult
-  /** Default collector for one currency's invoices. */
-  setDefault: (paymentMethodId: string, currency: string) => ActionResult
+  /** Makes the card the one that collects one currency's invoices. */
+  setCollection: (paymentMethodId: string, currency: string) => ActionResult
 }
 
 export function usePaymentMethods(): PaymentMethodsState {
@@ -325,26 +325,31 @@ export function usePaymentMethods(): PaymentMethodsState {
     [client, mark, notify, replace]
   )
 
-  const setDefault = useCallback(
+  const setCollection = useCallback(
     async (id: string, currency: string): ActionResult => {
-      mark(id, "default")
+      mark(id, "collection")
       try {
-        await client.setDefaultPaymentMethod({ currency, paymentMethodId: id })
+        await client.setCollectionPaymentMethod({
+          currency,
+          paymentMethodId: id,
+        })
         const code = currency.toUpperCase()
         replace((page) => ({
           ...page,
           data: page.data.map((m) => {
-            const others = (m.collection_default_currencies ?? []).filter(
+            const others = (m.collection_currencies ?? []).filter(
               (c) => c !== code
             )
             return {
               ...m,
-              collection_default_currencies:
-                m.id === id ? [...others, code] : others,
+              collection_currencies: m.id === id ? [...others, code] : others,
             }
           }),
         }))
-        notify({ type: "payment_method.default_changed", paymentMethodId: id })
+        notify({
+          type: "payment_method.collection_changed",
+          paymentMethodId: id,
+        })
         return null
       } catch (err) {
         return toBillingError(err)
@@ -364,7 +369,7 @@ export function usePaymentMethods(): PaymentMethodsState {
     adding,
     add,
     remove,
-    setDefault,
+    setCollection,
   }
 }
 
@@ -379,7 +384,6 @@ export interface PaymentsState {
   /** Zero-based. */
   page: number
   hasMore: boolean
-  total: number | null
   loading: boolean
   error: BillingError | null
   next: () => void
@@ -390,33 +394,42 @@ export interface PaymentsState {
 export function usePayments(options: PaymentsOptions = {}): PaymentsState {
   const { client, version } = useBillingContext()
   const pageSize = options.pageSize ?? 20
-  const [page, setPage] = useState(0)
-  const remote = useRemote(
-    `${pageSize}|${options.rail ?? ""}|${page}|${version}`,
-    (signal) =>
-      client.listPayments({
-        limit: pageSize,
-        offset: page * pageSize,
-        rail: options.rail,
-        signal,
-      })
+  // cursors[i] reads page i of this filter; page 0 is the newest payments.
+  const filter = `${pageSize}|${options.rail ?? ""}`
+  const [state, setState] = useState({
+    filter,
+    cursors: [null] as (string | null)[],
+  })
+  const cursors = useMemo(
+    () => (state.filter === filter ? state.cursors : [null]),
+    [state, filter]
+  )
+  const page = cursors.length - 1
+  const cursor = cursors[page]
+  const remote = useRemote(`${filter}|${cursor ?? ""}|${version}`, (signal) =>
+    client.listPayments({
+      limit: pageSize,
+      cursor,
+      rail: options.rail,
+      signal,
+    })
   )
   const data = remote.data
-  const total = data?.total ?? null
-  const hasMore =
-    data?.has_more ??
-    (total !== null
-      ? (page + 1) * pageSize < total
-      : data?.data.length === pageSize)
+  const nextCursor = data?.next_cursor ?? null
   return {
     payments: data?.data ?? null,
     page,
-    hasMore: !!hasMore,
-    total,
+    hasMore: nextCursor !== null,
     loading: remote.loading,
     error: remote.error,
-    next: useCallback(() => setPage((p) => p + 1), []),
-    previous: useCallback(() => setPage((p) => Math.max(0, p - 1)), []),
+    next: useCallback(() => {
+      if (nextCursor !== null)
+        setState({ filter, cursors: [...cursors, nextCursor] })
+    }, [filter, cursors, nextCursor]),
+    previous: useCallback(() => {
+      if (cursors.length > 1)
+        setState({ filter, cursors: cursors.slice(0, -1) })
+    }, [filter, cursors]),
     refetch: remote.refetch,
   }
 }

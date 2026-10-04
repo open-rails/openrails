@@ -104,78 +104,6 @@ func (q *Queries) CompleteRefundReservation(ctx context.Context, arg CompleteRef
 	return result.RowsAffected(), nil
 }
 
-const countPaymentsByCustomer = `-- name: CountPaymentsByCustomer :one
-SELECT count(*) FROM billing.payments purch
-WHERE purch.merchant_id = $1::uuid
-  AND purch.customer_id = $2::uuid
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL
-`
-
-type CountPaymentsByCustomerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-func (q *Queries) CountPaymentsByCustomer(ctx context.Context, arg CountPaymentsByCustomerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPaymentsByCustomer, arg.MerchantID, arg.CustomerID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countPaymentsFiltered = `-- name: CountPaymentsFiltered :one
-SELECT count(*) FROM billing.payments purch
-WHERE purch.merchant_id = $1::uuid AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND ($2::uuid IS NULL OR purch.customer_id = $2::uuid)
-  AND ($3::uuid IS NULL OR purch.price_id = $3::uuid)
-  AND ($4::uuid IS NULL OR purch.subscription_id = $4::uuid)
-  AND ($5::text IS NULL OR purch.rail::text = $5::text)
-  AND ($6::text IS NULL OR purch.transaction_id = $6::text)
-  AND ($7::timestamptz IS NULL OR purch.purchased_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR purch.purchased_at <= $8::timestamptz)
-  AND ($9::bigint IS NULL OR purch.amount >= $9::bigint)
-  AND ($10::bigint IS NULL OR purch.amount <= $10::bigint)
-  AND ($11::text IS NULL OR purch.status::text = $11::text)
-  AND (NOT $12::boolean OR purch.refunded_payment_id IS NOT NULL)
-  AND purch.deleted_at IS NULL
-`
-
-type CountPaymentsFilteredParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      *uuid.UUID
-	PriceID         *uuid.UUID
-	SubscriptionID  *uuid.UUID
-	Rail            *string
-	TransactionID   *string
-	PurchasedAfter  *time.Time
-	PurchasedBefore *time.Time
-	MinAmount       *int64
-	MaxAmount       *int64
-	Status          *string
-	RefundsOnly     bool
-}
-
-func (q *Queries) CountPaymentsFiltered(ctx context.Context, arg CountPaymentsFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPaymentsFiltered,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.PriceID,
-		arg.SubscriptionID,
-		arg.Rail,
-		arg.TransactionID,
-		arg.PurchasedAfter,
-		arg.PurchasedBefore,
-		arg.MinAmount,
-		arg.MaxAmount,
-		arg.Status,
-		arg.RefundsOnly,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createPayment = `-- name: CreatePayment :execrows
 
 INSERT INTO billing.payments (
@@ -390,53 +318,6 @@ func (q *Queries) DeletePayment(ctx context.Context, arg DeletePaymentParams) (i
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getCustomerPaymentRefundTotals = `-- name: GetCustomerPaymentRefundTotals :many
-SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
-FROM billing.payments original
-JOIN billing.payments refund ON refund.refunded_payment_id = original.id
-    AND refund.merchant_id = $1::uuid
-WHERE original.merchant_id = $1::uuid
-    AND original.customer_id = $2::uuid
-    AND original.id = ANY($3::uuid[])
-    AND original.amount > 0 AND original.refunded_payment_id IS NULL
-    AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
-    AND refund.status = 'completed'
-GROUP BY original.id
-`
-
-type GetCustomerPaymentRefundTotalsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	PaymentIds []uuid.UUID
-}
-
-type GetCustomerPaymentRefundTotalsRow struct {
-	PaymentID      uuid.UUID
-	AmountRefunded int64
-}
-
-// Customer history needs completed display totals, not pending refund reservations.
-// Scope ownership through the original charge before aggregating linked refunds.
-func (q *Queries) GetCustomerPaymentRefundTotals(ctx context.Context, arg GetCustomerPaymentRefundTotalsParams) ([]GetCustomerPaymentRefundTotalsRow, error) {
-	rows, err := q.db.Query(ctx, getCustomerPaymentRefundTotals, arg.MerchantID, arg.CustomerID, arg.PaymentIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetCustomerPaymentRefundTotalsRow
-	for rows.Next() {
-		var i GetCustomerPaymentRefundTotalsRow
-		if err := rows.Scan(&i.PaymentID, &i.AmountRefunded); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getLatestChargeBySubscriptionID = `-- name: GetLatestChargeBySubscriptionID :one
@@ -679,6 +560,53 @@ func (q *Queries) GetPaymentByPSPTransactionID(ctx context.Context, arg GetPayme
 		&i.MoneyMovement,
 	)
 	return i, err
+}
+
+const getPaymentRefundTotals = `-- name: GetPaymentRefundTotals :many
+SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
+FROM billing.payments original
+JOIN billing.payments refund ON refund.refunded_payment_id = original.id
+    AND refund.merchant_id = $1::uuid
+WHERE original.merchant_id = $1::uuid
+    AND original.id = ANY($2::uuid[])
+    AND original.amount > 0 AND original.refunded_payment_id IS NULL
+    AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
+    AND refund.status = 'completed'
+GROUP BY original.id
+`
+
+type GetPaymentRefundTotalsParams struct {
+	MerchantID uuid.UUID
+	PaymentIds []uuid.UUID
+}
+
+type GetPaymentRefundTotalsRow struct {
+	PaymentID      uuid.UUID
+	AmountRefunded int64
+}
+
+// Customer history needs completed display totals, not pending refund reservations.
+// Scope ownership through the original charge before aggregating linked refunds.
+// Completed refunds against each listed charge, including refunds outside the
+// page the charges came from.
+func (q *Queries) GetPaymentRefundTotals(ctx context.Context, arg GetPaymentRefundTotalsParams) ([]GetPaymentRefundTotalsRow, error) {
+	rows, err := q.db.Query(ctx, getPaymentRefundTotals, arg.MerchantID, arg.PaymentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPaymentRefundTotalsRow
+	for rows.Next() {
+		var i GetPaymentRefundTotalsRow
+		if err := rows.Scan(&i.PaymentID, &i.AmountRefunded); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
@@ -1025,144 +953,51 @@ func (q *Queries) ListPaymentsByCustomer(ctx context.Context, arg ListPaymentsBy
 	return items, nil
 }
 
-const listPaymentsByCustomerPaged = `-- name: ListPaymentsByCustomerPaged :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM billing.payments purch
-WHERE purch.merchant_id = $1::uuid
-  AND purch.customer_id = $2::uuid
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL
-ORDER BY purch.purchased_at DESC
-LIMIT $4::int OFFSET $3::int
+const listPaymentsPage = `-- name: ListPaymentsPage :many
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM billing.payments p
+WHERE p.merchant_id = $1::uuid
+  AND COALESCE(p.metadata ->> 'nmi_subscription_order_id', '') = ''
+  AND p.deleted_at IS NULL
+  AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
+  AND ($3::uuid IS NULL OR p.subscription_id = $3::uuid)
+  AND ($4::uuid IS NULL OR p.price_id = $4::uuid)
+  AND ($5::text IS NULL OR p.rail = $5::text)
+  AND ($6::text IS NULL OR p.transaction_id = $6::text)
+  AND ($7::text IS NULL OR COALESCE(p.reversal_kind,
+        CASE WHEN p.refunded_payment_id IS NOT NULL OR p.amount < 0 THEN 'refund' ELSE 'charge' END) = $7::text)
+  AND ($8::timestamptz IS NULL
+       OR (p.created_at, p.id) < ($8::timestamptz, $9::uuid))
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT $10::int
 `
 
-type ListPaymentsByCustomerPagedParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	PageOffset int32
-	PageLimit  int32
+type ListPaymentsPageParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     *uuid.UUID
+	SubscriptionID *uuid.UUID
+	PriceID        *uuid.UUID
+	Rail           *string
+	TransactionID  *string
+	Kind           *string
+	AfterAt        *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
 }
 
-func (q *Queries) ListPaymentsByCustomerPaged(ctx context.Context, arg ListPaymentsByCustomerPagedParams) ([]BillingPayment, error) {
-	rows, err := q.db.Query(ctx, listPaymentsByCustomerPaged,
+// One page of payments, newest first, after a (created_at, id) cursor; every
+// filter is optional. kind is charge, refund, chargeback or dispute_reversal.
+func (q *Queries) ListPaymentsPage(ctx context.Context, arg ListPaymentsPageParams) ([]BillingPayment, error) {
+	rows, err := q.db.Query(ctx, listPaymentsPage,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.PageOffset,
-		arg.PageLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPayment
-	for rows.Next() {
-		var i BillingPayment
-		if err := rows.Scan(
-			&i.ID,
-			&i.PriceID,
-			&i.Rail,
-			&i.TransactionID,
-			&i.Amount,
-			&i.ListAmount,
-			&i.Currency,
-			&i.Status,
-			&i.SubscriptionID,
-			&i.RefundedPaymentID,
-			&i.DiscountCode,
-			&i.DiscountReason,
-			&i.DiscountMetadata,
-			&i.EntitlementsSpecSnapshot,
-			&i.Metadata,
-			&i.PurchasedAt,
-			&i.CreatedAt,
-			&i.CardBrand,
-			&i.CardLast4,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.PspID,
-			&i.AttemptKind,
-			&i.FailureCode,
-			&i.FailureReason,
-			&i.ReversalKind,
-			&i.TokenType,
-			&i.DeletedAt,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.MoneyMovement,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPaymentsFiltered = `-- name: ListPaymentsFiltered :many
-SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM billing.payments purch
-WHERE purch.merchant_id = $1::uuid AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND ($2::uuid IS NULL OR purch.customer_id = $2::uuid)
-  AND ($3::uuid IS NULL OR purch.price_id = $3::uuid)
-  AND ($4::uuid IS NULL OR purch.subscription_id = $4::uuid)
-  AND ($5::text IS NULL OR purch.rail::text = $5::text)
-  AND ($6::text IS NULL OR purch.transaction_id = $6::text)
-  AND ($7::timestamptz IS NULL OR purch.purchased_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR purch.purchased_at <= $8::timestamptz)
-  AND ($9::bigint IS NULL OR purch.amount >= $9::bigint)
-  AND ($10::bigint IS NULL OR purch.amount <= $10::bigint)
-  AND ($11::text IS NULL OR purch.status::text = $11::text)
-  AND (NOT $12::boolean OR purch.refunded_payment_id IS NOT NULL)
-  AND purch.deleted_at IS NULL
-ORDER BY
-    CASE WHEN $13::text = 'amount'       AND NOT $14::boolean THEN purch.amount END ASC,
-    CASE WHEN $13::text = 'amount'       AND $14::boolean     THEN purch.amount END DESC,
-    CASE WHEN $13::text = 'purchased_at' AND NOT $14::boolean THEN purch.purchased_at END ASC,
-    CASE WHEN $13::text = 'purchased_at' AND $14::boolean     THEN purch.purchased_at END DESC,
-    CASE WHEN $13::text = 'created_at'   AND NOT $14::boolean THEN purch.created_at END ASC,
-    CASE WHEN $13::text = 'created_at'   AND $14::boolean     THEN purch.created_at END DESC
-LIMIT $16::int OFFSET $15::int
-`
-
-type ListPaymentsFilteredParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      *uuid.UUID
-	PriceID         *uuid.UUID
-	SubscriptionID  *uuid.UUID
-	Rail            *string
-	TransactionID   *string
-	PurchasedAfter  *time.Time
-	PurchasedBefore *time.Time
-	MinAmount       *int64
-	MaxAmount       *int64
-	Status          *string
-	RefundsOnly     bool
-	SortBy          string
-	SortDesc        bool
-	PageOffset      int32
-	PageLimit       int32
-}
-
-// Sorting is static SQL over a validated (sort_by, sort_desc) pair via the
-// CASE pattern — no identifier interpolation (#334 escape-hatch rule).
-func (q *Queries) ListPaymentsFiltered(ctx context.Context, arg ListPaymentsFilteredParams) ([]BillingPayment, error) {
-	rows, err := q.db.Query(ctx, listPaymentsFiltered,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.PriceID,
 		arg.SubscriptionID,
+		arg.PriceID,
 		arg.Rail,
 		arg.TransactionID,
-		arg.PurchasedAfter,
-		arg.PurchasedBefore,
-		arg.MinAmount,
-		arg.MaxAmount,
-		arg.Status,
-		arg.RefundsOnly,
-		arg.SortBy,
-		arg.SortDesc,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.Kind,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -1366,7 +1201,7 @@ SELECT p.id AS payment_id,
        (p.amount / 10000)::bigint AS amount_cents,
        p.currency AS currency,
        p.purchased_at AS purchased_at,
-       COALESCE(pm.last_four, '')::text AS card_last4
+       COALESCE(pm.card_last4, '')::text AS card_last4
 FROM billing.payments p
 LEFT JOIN billing.subscriptions sub ON sub.id = p.subscription_id
   AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
@@ -1376,7 +1211,7 @@ LEFT JOIN LATERAL (
   SELECT cpm.id FROM billing.payment_methods cpm
   WHERE p.subscription_id IS NULL
     AND cpm.merchant_id = p.merchant_id AND cpm.customer_id = p.customer_id AND cpm.psp_id = p.psp_id
-    AND RIGHT(regexp_replace(COALESCE(cpm.last_four, ''), '[^0-9]', '', 'g'), 4) = $1::text
+    AND cpm.card_last4 = $1::text
   LIMIT 1) customer_card ON true
 WHERE p.merchant_id = $2::uuid AND p.psp_id = $3::uuid
   AND (p.subscription_id IS NULL OR sub.id IS NOT NULL)
@@ -1385,7 +1220,7 @@ WHERE p.merchant_id = $2::uuid AND p.psp_id = $3::uuid
   AND p.rail = $4
   AND p.amount > 0
   AND p.amount = $5::bigint * 10000
-  AND (RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = $1::text
+  AND (pm.card_last4 = $1::text
     OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = $1::text
     OR customer_card.id IS NOT NULL)
   AND p.purchased_at >= $6::timestamptz

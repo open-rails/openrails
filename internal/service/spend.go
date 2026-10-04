@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-rails/openrails/billing"
-
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/billing"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -111,187 +111,6 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	return out, nil
 }
 
-// InvoiceLineItemDTO is one statement line on an invoice: a per-event_type usage
-// rollup (total amount, event count, summed dimensions) or an adjustment line
-// (event_type identifies the billed usage). It mirrors
-// models.InvoiceLineItem on the public facade so HTTP/library callers don't
-// import the internal models/credits packages.
-type InvoiceLineItemDTO = billing.InvoiceLineItemDTO
-
-// InvoiceDTO is the public view of a finalized monthly itemized invoice (issue
-// #303), served by the customer-facing GET /v1/me/invoices[/:id] routes. It is
-// a public projection of models.Invoice so callers don't import internal types.
-type InvoiceDTO = billing.InvoiceDTO
-
-// InvoicePaymentAttemptDTO is one automatic collection attempt for an invoice.
-type InvoicePaymentAttemptDTO = billing.InvoicePaymentAttemptDTO
-
-type InvoiceCollectionRetryRequest = billing.InvoiceCollectionRetryRequest
-
-type InvoiceCollectionRetryResult = billing.InvoiceCollectionRetryResult
-
-// InvoiceContactDTO is one billing contact on an invoice document (#798).
-type InvoiceContactDTO = billing.InvoiceContactDTO
-
-func contactsToDTO(contacts []models.InvoiceContact) []InvoiceContactDTO {
-	if len(contacts) == 0 {
-		return nil
-	}
-	out := make([]InvoiceContactDTO, 0, len(contacts))
-	for _, c := range contacts {
-		out = append(out, InvoiceContactDTO{Name: c.Name, Email: c.Email})
-	}
-	return out
-}
-
-// invoiceToDTO projects an internal models.Invoice onto the public InvoiceDTO.
-func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
-	items := make([]InvoiceLineItemDTO, 0, len(inv.LineItems))
-	for _, li := range inv.LineItems {
-		items = append(items, InvoiceLineItemDTO{
-			EventType:  li.EventType,
-			Amount:     li.Amount,
-			Count:      li.Count,
-			Dimensions: li.Dimensions,
-		})
-	}
-	return InvoiceDTO{
-		ID:                        inv.ID,
-		Currency:                  inv.Currency,
-		InvoiceNumber:             inv.InvoiceNumber,
-		PeriodFrom:                inv.PeriodFrom,
-		PeriodTo:                  inv.PeriodTo,
-		UsageTotal:                inv.UsageTotal,
-		DepositsTotal:             inv.DepositsTotal,
-		OwedAccrued:               inv.OwedAccrued,
-		OwedPaid:                  inv.OwedPaid,
-		ClosingBalance:            inv.ClosingBalance,
-		SubtotalAmount:            inv.SubtotalAmount,
-		TotalAmount:               inv.TotalAmount,
-		AmountPaid:                inv.AmountPaid,
-		AmountDue:                 inv.AmountDue,
-		LineItems:                 items,
-		MoneyMovements:            inv.MoneyMovements,
-		PONumber:                  inv.PONumber,
-		Tax:                       inv.Tax,
-		BillingContacts:           contactsToDTO(inv.BillingContacts),
-		Memo:                      inv.Memo,
-		Status:                    inv.Status,
-		CollectionMethod:          inv.CollectionMethod,
-		IssuedAt:                  inv.IssuedAt,
-		DueAt:                     inv.DueAt,
-		PaidAt:                    inv.PaidAt,
-		VoidedAt:                  inv.VoidedAt,
-		UncollectibleAt:           inv.UncollectibleAt,
-		FinalizedAt:               inv.FinalizedAt,
-		ExternalInvoiceID:         inv.ExternalInvoiceID,
-		CollectionFailureCount:    inv.CollectionFailureCount,
-		CollectionFailedAt:        inv.CollectionFailedAt,
-		NextCollectionAttemptAt:   inv.NextCollectionAttemptAt,
-		LastCollectionFailureCode: inv.LastCollectionFailureCode,
-		CollectionIntentID:        inv.CollectionIntentID,
-		CreatedAt:                 inv.CreatedAt,
-	}
-}
-
-func invoicePaymentAttemptToDTO(attempt models.InvoicePaymentAttempt) InvoicePaymentAttemptDTO {
-	return InvoicePaymentAttemptDTO{
-		ID:              attempt.ID,
-		InvoiceID:       attempt.InvoiceID,
-		Currency:        attempt.Currency,
-		Amount:          attempt.Amount,
-		Status:          attempt.Status,
-		PaymentMethodID: (*billing.PaymentMethodID)(attempt.PaymentMethodID),
-		Rail:            attempt.Rail,
-		RailPaymentID:   attempt.RailPaymentID,
-		FailureCode:     attempt.FailureCode,
-		FailureReason:   attempt.FailureReason,
-		AttemptedAt:     attempt.AttemptedAt,
-		SettledAt:       attempt.SettledAt,
-	}
-}
-
-// ListInvoices lists an payer's finalized invoices, newest period first,
-// paginated (issue #303). Like GetUsage it pins a merchant-scoped connection so
-// the read runs on the merchant's session (#227); RunInMerchantConn reuses the
-// request's already-pinned connection when one is set. Returns the page of
-// public DTOs plus the total count for pagination.
-func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, limit, offset int) ([]InvoiceDTO, int, error) {
-	if payer.IsZero() {
-		return nil, 0, fmt.Errorf("payer required")
-	}
-	var out []InvoiceDTO
-	var total int
-	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, t, err := s.moneyService().ListInvoices(ctx, payer, limit, offset)
-		if err != nil {
-			return err
-		}
-		total = t
-		out = make([]InvoiceDTO, 0, len(rows))
-		for i := range rows {
-			out = append(out, invoiceToDTO(&rows[i]))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	return out, total, nil
-}
-
-// GetInvoice returns one finalized invoice (with its line items) for an payer
-// by id (issue #303). Merchant-scoped like ListInvoices; an invoice belonging
-// to another payer/merchant is unreachable (fail closed). Returns a public DTO.
-func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*InvoiceDTO, error) {
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	var out *InvoiceDTO
-	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		inv, err := s.moneyService().GetInvoiceByID(ctx, payer, id)
-		if err != nil {
-			return err
-		}
-		dto := invoiceToDTO(inv)
-		out = &dto
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// ListInvoicePaymentAttempts returns one payer-owned invoice's collection
-// history, newest attempt first, plus the total count for pagination.
-func (s *Service) ListInvoicePaymentAttempts(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, limit, offset int) ([]InvoicePaymentAttemptDTO, int, error) {
-	if s == nil || s.rt == nil {
-		return nil, 0, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, 0, fmt.Errorf("payer required")
-	}
-	var out []InvoicePaymentAttemptDTO
-	var total int
-	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		attempts, count, err := s.moneyService().ListInvoicePaymentAttempts(ctx, payer, invoiceID, limit, offset)
-		if err != nil {
-			return err
-		}
-		total = count
-		out = make([]InvoicePaymentAttemptDTO, 0, len(attempts))
-		for _, attempt := range attempts {
-			out = append(out, invoicePaymentAttemptToDTO(attempt))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	return out, total, nil
-}
-
 // SetInvoiceCollectionPaymentMethod selects the payer-owned saved method used
 // for automatic invoice collection in one billing currency.
 func (s *Service) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer identity.CustomerID, currency string, paymentMethodID uuid.UUID) error {
@@ -304,36 +123,6 @@ func (s *Service) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer i
 	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return s.moneyService().SetInvoiceCollectionPaymentMethod(ctx, payer, currency, paymentMethodID)
 	})
-}
-
-// RetryInvoiceCollectionIdempotent retries collection with a durable client
-// key and an explicitly bound payer-owned saved method through the
-// invoice_collection intent machine.
-func (s *Service) RetryInvoiceCollectionIdempotent(ctx context.Context, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	if rt.MoneyCharger == nil {
-		return nil, fmt.Errorf("invoice collection charger not configured")
-	}
-	var out *InvoiceCollectionRetryResult
-	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		result, err := s.moneyService().RetryInvoiceCollection(ctx, rt.IntentRunner(), payer, money.InvoiceCollectionRetryRequest{
-			InvoiceID: request.InvoiceID, IdempotencyKey: request.IdempotencyKey, PaymentMethodID: request.PaymentMethodID.UUID(),
-		})
-		if err != nil {
-			return err
-		}
-		out = &InvoiceCollectionRetryResult{
-			Invoice: invoiceToDTO(result.Invoice), Attempt: invoicePaymentAttemptToDTO(result.Attempt), Replayed: result.Replayed,
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235

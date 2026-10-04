@@ -207,12 +207,14 @@ func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Conte
 		}
 		return fmt.Errorf("basistheory token.updated: fetch token: %w", err)
 	}
+	brand, last4, month, year := btCard(token.Card).Columns()
 	_, err = s.gen(ctx).RefreshCustodianCardMetadata(ctx, gen.RefreshCustodianCardMetadataParams{MerchantID: mid, CustodianID: cid,
 		Custodian:     models.CustodianBasisTheory,
 		RailMethodRef: token.ID,
-		LastFour:      cardLast4(token.Card),
-		CardType:      cardBrand(token.Card),
-		ExpiryDate:    cardExpiry(token.Card),
+		CardBrand:     brand,
+		CardLast4:     last4,
+		CardExpMonth:  month,
+		CardExpYear:   year,
 		Fingerprint:   token.Fingerprint,
 	})
 	if err != nil {
@@ -409,14 +411,16 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, jobRef strin
 				// In-place update (dedup): metadata refresh only, same token id.
 				newRef = row.Token
 			}
+			brand, last4, month, year := models.ParseCard(row.NewBrand, row.NewLast4, auExpiry(row.NewExpirationMonth, row.NewExpirationYear)).Columns()
 			rotated, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{MerchantID: mid, CustodianID: cid,
 				Custodian:      models.CustodianBasisTheory,
 				OldMethodRef:   row.Token,
 				NewMethodRef:   newRef,
 				NewFingerprint: row.NewFingerprint,
-				NewLastFour:    row.NewLast4,
-				NewCardType:    row.NewBrand,
-				NewExpiryDate:  auExpiry(row.NewExpirationMonth, row.NewExpirationYear),
+				CardBrand:      brand,
+				CardLast4:      last4,
+				CardExpMonth:   month,
+				CardExpYear:    year,
 			})
 			if err != nil {
 				return stats, fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
@@ -486,28 +490,19 @@ func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string
 	return nil
 }
 
-func cardLast4(c *basistheory.CardDetails) string {
+// btCard is a Basis Theory token's card as a stored method's display facts.
+func btCard(c *basistheory.CardDetails) models.Card {
 	if c == nil {
-		return ""
+		return models.Card{}
 	}
-	return c.Last4
+	card := models.ParseCard(c.Brand, c.Last4, "")
+	if c.ExpirationMonth >= 1 && c.ExpirationMonth <= 12 && c.ExpirationYear >= 2000 {
+		card.ExpMonth, card.ExpYear = c.ExpirationMonth, c.ExpirationYear
+	}
+	return card
 }
 
-func cardBrand(c *basistheory.CardDetails) string {
-	if c == nil {
-		return ""
-	}
-	return c.Brand
-}
-
-func cardExpiry(c *basistheory.CardDetails) string {
-	if c == nil || c.ExpirationMonth == 0 || c.ExpirationYear == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%02d/%02d", c.ExpirationMonth, c.ExpirationYear%100)
-}
-
-// auExpiry renders the AU CSV month/year strings as the instrument MM/YY shape.
+// auExpiry renders the AU CSV month/year strings as MM/YY.
 func auExpiry(month, year string) string {
 	month, year = strings.TrimSpace(month), strings.TrimSpace(year)
 	if month == "" || year == "" {

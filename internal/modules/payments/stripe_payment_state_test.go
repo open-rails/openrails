@@ -66,7 +66,7 @@ func TestStripePaymentStateDefaultPrecedence(t *testing.T) {
 	require.Equal(t, "sub_own", state.Subscriptions[0].SubscriptionID)
 	require.Equal(t, "1111", state.Subscriptions[0].PaymentMethod.Card.Last4)
 	require.Equal(t, "pm_customer", state.Subscriptions[1].PaymentMethod.ID)
-	require.Equal(t, "Visa", state.Subscriptions[1].PaymentMethod.Card.Brand)
+	require.Equal(t, "visa", state.Subscriptions[1].PaymentMethod.Card.Brand)
 	require.Nil(t, state.Subscriptions[2].PaymentMethod, "a foreign customer's method is never selected")
 	require.Nil(t, state.Subscriptions[3].PaymentMethod, "a deleted method reads as none")
 

@@ -3,65 +3,64 @@ package money
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
-type MerchantInvoiceFilter = billing.MerchantInvoiceFilter
-
-func (s *MoneyService) ListMerchantInvoices(ctx context.Context, filter MerchantInvoiceFilter, limit, offset int) ([]models.Invoice, int64, error) {
-	if limit < 1 || limit > 100 || offset < 0 || offset > 2147483647 {
-		return nil, 0, fmt.Errorf("invalid invoice pagination")
-	}
+// ListInvoices is one page of invoices, newest period first.
+func (s *MoneyService) ListInvoices(ctx context.Context, p billing.ListInvoicesParams) (billing.ListPage[models.Invoice], error) {
+	var out billing.ListPage[models.Invoice]
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
-	var invoices []models.Invoice
-	var total int64
-	var customerID *uuid.UUID
-	if filter.CustomerID != "" {
-		id, err := uuid.Parse(filter.CustomerID)
-		if err != nil || id == uuid.Nil {
-			return nil, 0, fmt.Errorf("invalid customer_id")
-		}
-		customerID = &id
+	limit, err := pagination.Limit(p.Page)
+	if err != nil {
+		return out, err
+	}
+	afterAt, afterID, err := pagination.After(p.Page.Cursor)
+	if err != nil {
+		return out, err
+	}
+	params := gen.ListInvoicesPageParams{MerchantID: mid.UUID(), PeriodFrom: p.PeriodFrom, PeriodTo: p.PeriodTo, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)}
+	if !p.CustomerID.IsZero() {
+		id := p.CustomerID.UUID()
+		params.CustomerID = &id
+	}
+	if p.Currency != "" {
+		params.Currency = &p.Currency
+	}
+	if p.Status != "" {
+		status := string(p.Status)
+		params.Status = &status
 	}
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		var err error
-		total, err = q.CountMerchantInvoices(ctx, gen.CountMerchantInvoicesParams{MerchantID: mid.UUID(), CustomerID: customerID, Currency: filter.Currency, Status: filter.Status, PeriodFrom: filter.PeriodFrom, PeriodTo: filter.PeriodTo})
+		rows, err := s.db.Gen(ctx).ListInvoicesPage(ctx, params)
 		if err != nil {
 			return err
 		}
-		rows, err := q.ListMerchantInvoices(ctx, gen.ListMerchantInvoicesParams{MerchantID: mid.UUID(), CustomerID: customerID, Currency: filter.Currency, Status: filter.Status, PeriodFrom: filter.PeriodFrom, PeriodTo: filter.PeriodTo, PageLimit: limit32, PageOffset: offset32})
-		if err != nil {
-			return err
-		}
-		invoices = make([]models.Invoice, 0, len(rows))
+		invoices := make([]models.Invoice, 0, len(rows))
 		for _, row := range rows {
-			invoice, e := invoiceFromGen(row)
-			if e != nil {
-				return e
+			inv, err := invoiceFromGen(row)
+			if err != nil {
+				return err
 			}
-			invoices = append(invoices, *invoice)
+			invoices = append(invoices, *inv)
 		}
+		out = pagination.Cut(invoices, limit, func(inv models.Invoice) any { return pagination.TimeID{At: inv.PeriodFrom, ID: inv.ID} })
 		return nil
 	})
-	return invoices, total, err
+	return out, err
 }
 
 func (s *MoneyService) GetMerchantInvoice(ctx context.Context, id uuid.UUID) (*models.Invoice, error) {
@@ -81,15 +80,6 @@ func (s *MoneyService) GetMerchantInvoice(ctx context.Context, id uuid.UUID) (*m
 	return invoice, err
 }
 
-type InvoiceAdminAction = billing.InvoiceAdminAction
-
-const (
-	InvoiceAdminVoid            InvoiceAdminAction = "void"
-	InvoiceAdminUncollectible   InvoiceAdminAction = "mark_uncollectible"
-	InvoiceAdminRecordPayment   InvoiceAdminAction = "record_payment"
-	InvoiceAdminRetryCollection InvoiceAdminAction = "retry_collection"
-)
-
 var (
 	ErrInvoiceActionNotAllowed     = errors.New("invoice action is not allowed in its current state")
 	ErrInvoicePaymentReferenceUsed = errors.New("manual payment reference already applied")
@@ -99,8 +89,8 @@ var (
 
 // InvoiceAdminActions describes support operations without granting permission.
 // Unknown/in-flight collections require reconciliation before any support mutation.
-func InvoiceAdminActions(invoice *models.Invoice) []InvoiceAdminAction {
-	actions := make([]InvoiceAdminAction, 0, 4)
+func InvoiceActions(invoice *models.Invoice) []billing.InvoiceAction {
+	actions := make([]billing.InvoiceAction, 0, 4)
 	if invoice == nil {
 		return actions
 	}
@@ -108,19 +98,19 @@ func InvoiceAdminActions(invoice *models.Invoice) []InvoiceAdminAction {
 		return actions
 	}
 	if invoiceCollectionRetryable(invoice) {
-		actions = append(actions, InvoiceAdminRetryCollection)
+		actions = append(actions, billing.InvoiceActionRetryCollection)
 	}
 	switch invoice.Status {
 	case "draft":
-		actions = append(actions, InvoiceAdminVoid)
+		actions = append(actions, billing.InvoiceActionVoid)
 	case "open", "past_due":
-		actions = append(actions, InvoiceAdminVoid, InvoiceAdminUncollectible, InvoiceAdminRecordPayment)
+		actions = append(actions, billing.InvoiceActionVoid, billing.InvoiceActionUncollectible, billing.InvoiceActionRecordPayment)
 	}
 	return actions
 }
 
 type InvoiceAdminMutation struct {
-	Action    InvoiceAdminAction
+	Action    billing.InvoiceAction
 	Amount    int64
 	Reference string
 }
@@ -146,20 +136,20 @@ func (s *MoneyService) ApplyInvoiceAdminMutation(ctx context.Context, payer iden
 		if current.CollectionIntentID != nil {
 			return ErrInvoiceActionNotAllowed
 		}
-		if (in.Action == InvoiceAdminVoid && current.Status == "voided") || (in.Action == InvoiceAdminUncollectible && current.Status == "uncollectible") {
+		if (in.Action == billing.InvoiceActionVoid && current.Status == "voided") || (in.Action == billing.InvoiceActionUncollectible && current.Status == "uncollectible") {
 			out = current
 			return nil
 		}
-		if !slices.Contains(InvoiceAdminActions(current), in.Action) || in.Action == InvoiceAdminRetryCollection {
+		if !slices.Contains(InvoiceActions(current), in.Action) || in.Action == billing.InvoiceActionRetryCollection {
 			return ErrInvoiceActionNotAllowed
 		}
 		local := NewMoneyService(s.db.NewWithPgxTx(tx), s.Clock())
 		switch in.Action {
-		case InvoiceAdminVoid:
+		case billing.InvoiceActionVoid:
 			out, e = local.VoidInvoice(ctx, payer, id)
-		case InvoiceAdminUncollectible:
+		case billing.InvoiceActionUncollectible:
 			out, e = local.MarkInvoiceUncollectible(ctx, payer, id)
-		case InvoiceAdminRecordPayment:
+		case billing.InvoiceActionRecordPayment:
 			if in.Amount <= 0 || strings.TrimSpace(in.Reference) == "" {
 				return ErrInvoicePaymentInvalid
 			}

@@ -1416,20 +1416,17 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 					"payment_method_id": billing.PaymentMethodID(pm.ID).String(),
 					"customer_id":       pm.CustomerID.String(),
 					"vault_id":          pm.RailCustomerRef,
-					"last_four":         pm.LastFour,
-					"expiry_date":       pm.ExpiryDate,
+					"card":              pm.Card.Details(),
 				},
 				RemoteEvidence:    map[string]any{"absent_from_vault": true},
 				RecommendedAction: "stored payment method no longer exists in the rail vault; future charges with it will fail — re-collect the card or remove the method (manual)",
 			})
 			continue
 		}
-		remoteLast4 := strings.TrimSpace(remote.CardLast4)
-		remoteExp := normalizeExpiry(remote.CardExpiry)
-		localExp := normalizeExpiry(pm.ExpiryDate)
-		last4Differs := remoteLast4 != "" && pm.LastFour != "" && remoteLast4 != pm.LastFour
-		expDiffers := remoteExp != "" && localExp != "" && remoteExp != localExp
-		missingLocal := (pm.LastFour == "" && remoteLast4 != "") || (localExp == "" && remoteExp != "")
+		remoteCard := models.ParseCard("", remote.CardLast4, remote.CardExpiry)
+		last4Differs := remoteCard.Last4 != "" && pm.Card.Last4 != "" && remoteCard.Last4 != pm.Card.Last4
+		expDiffers := remoteCard.ExpYear != 0 && pm.Card.ExpYear != 0 && (remoteCard.ExpMonth != pm.Card.ExpMonth || remoteCard.ExpYear != pm.Card.ExpYear)
+		missingLocal := (pm.Card.Last4 == "" && remoteCard.Last4 != "") || (pm.Card.ExpYear == 0 && remoteCard.ExpYear != 0)
 		if !last4Differs && !expDiffers && !missingLocal {
 			continue
 		}
@@ -1443,8 +1440,7 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 				"payment_method_id": billing.PaymentMethodID(pm.ID).String(),
 				"customer_id":       pm.CustomerID.String(),
 				"vault_id":          pm.RailCustomerRef,
-				"last_four":         pm.LastFour,
-				"expiry_date":       pm.ExpiryDate,
+				"card":              pm.Card.Details(),
 			},
 			RemoteEvidence: map[string]any{
 				"card_last4":  remote.CardLast4,
@@ -1454,23 +1450,11 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 			RecommendedAction: "stored card metadata disagrees with the rail vault (likely an account-updater change); enforce adopts the rail record",
 			Apply: &ApplyAction{AdoptPaymentMethod: &AdoptPaymentMethodAction{
 				PaymentMethodID: pm.ID,
-				LastFour:        remoteLast4,
-				ExpiryDate:      remote.CardExpiry,
+				Card:            remoteCard,
 			}},
 		})
 	}
 	return findings
-}
-
-// normalizeExpiry reduces "10/27", "1027", "10-27" to "1027" for comparison.
-func normalizeExpiry(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 // checkoutSessionRef spells a purchase memo's local id, a checkout session

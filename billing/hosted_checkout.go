@@ -89,15 +89,10 @@ type HostedCheckoutRail struct {
 
 // HostedCheckoutSavedMethod is a stored card the buyer may reuse, display data only.
 type HostedCheckoutSavedMethod struct {
-	ID       string `json:"id"`
-	OptionID string `json:"option_id"`
-	Rail     string `json:"rail"`
-	Brand    string `json:"brand,omitempty"`
-	LastFour string `json:"last_four,omitempty"`
-	ExpMonth *int   `json:"exp_month,omitempty"`
-	ExpYear  *int   `json:"exp_year,omitempty"`
-	// Default pre-selects this card; paying still sends its id explicitly.
-	Default bool `json:"default,omitempty"`
+	ID       string       `json:"id"`
+	OptionID string       `json:"option_id"`
+	Rail     string       `json:"rail"`
+	Card     *CardDetails `json:"card"`
 }
 
 // HostedCheckoutPayRequest is the browser's POST .../pay body.

@@ -25,10 +25,8 @@ type ProductObject struct {
 
 // These aliases share the public Client wire types.
 type (
-	PriceObject        = billing.PublicPrice
-	RecurringInfo      = billing.PriceRecurrence
-	PaymentObject      = billing.Payment
-	PaymentRefundsList = billing.PaymentList
+	PriceObject   = billing.PublicPrice
+	RecurringInfo = billing.PriceRecurrence
 )
 
 // List is a Stripe-style list response with offset/limit pagination. It mirrors

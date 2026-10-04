@@ -286,7 +286,7 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 	w.settle()
 	got, err := w.client[embedded].GetPayment(t.Context(), payment.ID)
 	require.NoError(t, err)
-	require.False(t, got.Refunded)
+	require.Zero(t, got.AmountRefunded)
 	require.Equal(t, "active", w.subscription(embedded, victim.sub).Status)
 	for _, entry := range victim.providerLedger() {
 		require.Zero(t, entry.Refunded)

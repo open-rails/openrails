@@ -3,16 +3,19 @@ import { Button } from "@/components/ui/button"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useSearchParams } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
+import { CursorPager } from "@/components/cursor-pager"
 import { DataTable } from "@/components/data-table"
 import { StatusBadge } from "@/components/status-badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { invoiceQueries } from "@/lib/invoice-queries"
-import type { InvoiceFilters, MerchantInvoice } from "@/lib/api/invoice-types"
-import { formatDate, formatUnits, shortId } from "@/lib/format"
+import type { Invoice } from "@/lib/api/generated/wire"
+import type { InvoiceFilters } from "@/lib/api/invoice-endpoints"
+import { useUrlCursor } from "@/hooks/use-cursor-paging"
+import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
 
 const PAGE = 25
-const columns: ColumnDef<MerchantInvoice, unknown>[] = [
+const columns: ColumnDef<Invoice, unknown>[] = [
   {
     header: "Invoice",
     cell: ({ row }) => (
@@ -45,20 +48,12 @@ const columns: ColumnDef<MerchantInvoice, unknown>[] = [
   {
     header: "Total",
     cell: ({ row }) =>
-      formatUnits(
-        row.original.total_amount,
-        row.original.currency,
-        row.original.unit_decimals
-      ),
+      formatNativeAmount(row.original.total_amount, row.original.currency),
   },
   {
     header: "Unpaid",
     cell: ({ row }) =>
-      formatUnits(
-        row.original.amount_due,
-        row.original.currency,
-        row.original.unit_decimals
-      ),
+      formatNativeAmount(row.original.amount_due, row.original.currency),
   },
   { header: "Due", cell: ({ row }) => formatDate(row.original.due_at) },
 ]
@@ -69,11 +64,9 @@ export function InvoicesPage() {
       (key) => (params.get(key) ? [[key, params.get(key)!]] : [])
     )
   )
-  const parsedOffset = Number(params.get("offset") ?? 0),
-    offset =
-      Number.isSafeInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0
-  const { data, isPending, error } = useQuery(
-    invoiceQueries.list(filters, PAGE, offset)
+  const paging = useUrlCursor()
+  const { data, isPending, isFetching, error } = useQuery(
+    invoiceQueries.list(filters, PAGE, paging.cursor)
   )
 
   return (
@@ -100,20 +93,19 @@ export function InvoicesPage() {
           {error.message}
         </p>
       ) : (
-        <DataTable
-          columns={columns}
-          data={data?.items ?? []}
-          loading={isPending}
-          total={data?.total ?? 0}
-          limit={PAGE}
-          offset={offset}
-          onPageChange={(next) => {
-            const p = new URLSearchParams(params)
-            p.set("offset", String(next))
-            setParams(p)
-          }}
-          emptyMessage="No invoices match these filters."
-        />
+        <>
+          <DataTable
+            columns={columns}
+            data={data?.data ?? []}
+            loading={isPending}
+            emptyMessage="No invoices match these filters."
+          />
+          <CursorPager
+            pages={paging}
+            nextCursor={data?.next_cursor}
+            busy={isFetching}
+          />
+        </>
       )}
     </div>
   )

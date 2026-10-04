@@ -37,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -883,7 +884,7 @@ const initialMembershipQuoteKey = "initial_membership_quote"
 
 func quoteInitialMembership(ctx context.Context, session *models.CheckoutSession, price *models.Price, product *models.Product, method gen.BillingPaymentMethod, now time.Time) error {
 	mid, err := merchant.Require(ctx)
-	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutSessionModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || method.PspID != session.PspID || !((method.Custodian == models.CustodianHyperSwitch && method.CustodianID != nil && method.Rail == "nmi") || (method.Custodian == models.CustodianPSP && method.CustodianID == nil)) || method.RailCustomerRef == "" || method.RailMethodRef == "" || method.ParkReason != "" || method.Rail != string(session.Rail) {
+	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutSessionModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || !charge.ChargeableOn(method, session.PspID) || !((method.Custodian == models.CustodianHyperSwitch && method.CustodianID != nil && method.Rail == "nmi") || (method.Custodian == models.CustodianPSP && method.CustodianID == nil)) || method.RailCustomerRef == "" || method.RailMethodRef == "" || method.ParkReason != "" || method.Rail != string(session.Rail) {
 		return ErrCheckoutSessionConflict
 	}
 	if _, exists := session.RailState[initialMembershipQuoteKey]; exists {

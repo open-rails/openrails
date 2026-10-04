@@ -1,15 +1,12 @@
 package handlers
 
 import (
-	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // GetMyUsage reports the customer's own usage.
@@ -19,53 +16,6 @@ func GetMyUsage(r *httprequest.Request) {
 		return
 	}
 	getUsage(r, payer)
-}
-
-func GetMyInvoices(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
-	if !ok {
-		return
-	}
-	limit, offset := selfLimitOffset(r, 50)
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	items, total, err := svc.ListInvoices(r.Request.Context(), payer, limit, offset)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	r.SuccessJSON(map[string]any{"invoices": items, "total": total, "limit": limit, "offset": offset})
-}
-
-func GetMyInvoice(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
-	if !ok {
-		return
-	}
-	id, err := uuid.Parse(r.Param("id"))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid invoice id")
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	inv, err := svc.GetInvoice(r.Request.Context(), payer, id)
-	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, err.Error())
-		return
-	}
-	inv.Recovery, err = svc.InvoiceRecovery(r.Request.Context(), payer, id)
-	if err != nil {
-		r.InternalError("invoice recovery unavailable", err)
-		return
-	}
-	r.SuccessJSON(inv)
 }
 
 func selfLimitOffset(r *httprequest.Request, def int) (int, int) {

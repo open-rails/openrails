@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -402,16 +403,6 @@ func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Cont
 		}
 		return nil
 	})
-}
-
-// GetAllPurchases retrieves all purchases with filtering (admin)
-func (s *AdminSubscriptionService) GetAllPurchases(ctx context.Context, queryOpts *query.QueryOptions[payments.GetPaymentsFilters]) ([]*models.Payment, int64, error) {
-	purchases, total, err := s.PaymentService.GetPayments(ctx, *queryOpts)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get purchases: %w", err)
-	}
-
-	return purchases, total, nil
 }
 
 // GetAllNotifications retrieves all notifications with filtering (admin)

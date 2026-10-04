@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -15,25 +13,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/query"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
-
-type PaymentFilters struct {
-	CustomerID     string                 `form:"customer_id"`
-	PriceID        billing.PriceID        `form:"price_id"`
-	SubscriptionID billing.SubscriptionID `form:"subscription_id"`
-	Rail           string                 `form:"rail"`
-	TransactionID  string                 `form:"transaction_id"`
-	StartDate      *time.Time             `form:"created_after" time_format:"2006-01-02"`
-	EndDate        *time.Time             `form:"created_before" time_format:"2006-01-02"`
-	MinAmount      *int64                 `form:"min_amount"`
-	MaxAmount      *int64                 `form:"max_amount"`
-	Status         string                 `form:"status"` // pending|completed|failed|refunded (#733 deep-link)
-	RefundsOnly    bool                   `form:"refunds_only"`
-	SortBy         string                 `form:"sort_by"`    // created_at (default), amount, purchased_at
-	SortOrder      string                 `form:"sort_order"` // asc, desc (default)
-}
 
 type PaymentRepo struct {
 	db *db.DB
@@ -356,12 +338,10 @@ func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID u
 
 // GetCustomerPaymentRefundTotals returns completed display totals for a bounded
 // page of original charges. Reservation totals have a different contract.
-func (r *PaymentRepo) GetCustomerPaymentRefundTotals(ctx context.Context, userID string, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+// RefundTotals reports the completed refunds against each listed charge,
+// including refunds outside the page the charges came from.
+func (r *PaymentRepo) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	customer, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -369,9 +349,7 @@ func (r *PaymentRepo) GetCustomerPaymentRefundTotals(ctx context.Context, userID
 	if len(paymentIDs) == 0 {
 		return totals, nil
 	}
-	rows, err := r.db.Gen(ctx).GetCustomerPaymentRefundTotals(ctx, gen.GetCustomerPaymentRefundTotalsParams{
-		MerchantID: mid.UUID(), CustomerID: customer, PaymentIds: paymentIDs,
-	})
+	rows, err := r.db.Gen(ctx).GetPaymentRefundTotals(ctx, gen.GetPaymentRefundTotalsParams{MerchantID: mid.UUID(), PaymentIds: paymentIDs})
 	if err != nil {
 		return nil, err
 	}
@@ -534,128 +512,54 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 	return nil
 }
 
-func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	tid, err := merchant.Require(ctx)
+// ListPage is one page of payments, newest first.
+func (r *PaymentRepo) ListPage(ctx context.Context, p billing.ListPaymentsParams) (billing.ListPage[*models.Payment], error) {
+	var out billing.ListPage[*models.Payment]
+	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
-	tsid, err := db.ResolveCustomerID(userID)
+	limit, err := pagination.Limit(p.Page)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
-	q := r.db.Gen(ctx)
-	count, err := q.CountPaymentsByCustomer(ctx, gen.CountPaymentsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
+	afterAt, afterID, err := pagination.After(p.Page.Cursor)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
-	pageSize32, _ := safecast.Convert[int32](pageSize)
-	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
-	rows, err := q.ListPaymentsByCustomerPaged(ctx, gen.ListPaymentsByCustomerPagedParams{
-		MerchantID: tid.UUID(),
-		CustomerID: tsid,
-		PageLimit:  pageSize32,
-		PageOffset: pageOffset32,
-	})
+	params := gen.ListPaymentsPageParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)}
+	if !p.CustomerID.IsZero() {
+		id := p.CustomerID.UUID()
+		params.CustomerID = &id
+	}
+	if !p.SubscriptionID.IsZero() {
+		id := p.SubscriptionID.UUID()
+		params.SubscriptionID = &id
+	}
+	if !p.PriceID.IsZero() {
+		id := p.PriceID.UUID()
+		params.PriceID = &id
+	}
+	if p.Rail != "" {
+		params.Rail = &p.Rail
+	}
+	if p.TransactionID != "" {
+		params.TransactionID = &p.TransactionID
+	}
+	if p.Kind != "" {
+		kind := string(p.Kind)
+		params.Kind = &kind
+	}
+	rows, err := r.db.Gen(ctx).ListPaymentsPage(ctx, params)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
 	payments, err := models.PaymentsFromGen(rows)
 	if err != nil {
-		return nil, 0, err
+		return out, err
 	}
-	return payments, int(count), nil
-}
-
-func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[PaymentFilters]) ([]*models.Payment, int64, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, 0, queryScopeErr
-	}
-
-	f := opts.Filters
-
-	var tsid *uuid.UUID
-	if f.CustomerID != "" {
-		id, err := db.ResolveCustomerID(f.CustomerID)
-		if err != nil {
-			return nil, 0, err
-		}
-		tsid = &id
-	}
-	var priceID, subID *uuid.UUID
-	if !f.PriceID.IsZero() {
-		id := f.PriceID.UUID()
-		priceID = &id
-	}
-	if !f.SubscriptionID.IsZero() {
-		id := f.SubscriptionID.UUID()
-		subID = &id
-	}
-	var rail, transactionID, status *string
-	if f.Rail != "" {
-		rail = &f.Rail
-	}
-	if f.Status != "" {
-		status = &f.Status
-	}
-	if f.TransactionID != "" {
-		transactionID = &f.TransactionID
-	}
-
-	q := r.db.Gen(ctx)
-	total, err := q.CountPaymentsFiltered(ctx, gen.CountPaymentsFilteredParams{MerchantID: queryMerchant.UUID(),
-		CustomerID:      tsid,
-		PriceID:         priceID,
-		SubscriptionID:  subID,
-		Rail:            rail,
-		TransactionID:   transactionID,
-		PurchasedAfter:  f.StartDate,
-		PurchasedBefore: f.EndDate,
-		MinAmount:       f.MinAmount,
-		MaxAmount:       f.MaxAmount,
-		Status:          status,
-		RefundsOnly:     f.RefundsOnly,
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-
-	sortBy := f.SortBy
-	switch sortBy {
-	case "amount", "purchased_at":
-	default:
-		sortBy = "created_at"
-	}
-	optsLimit32, _ := safecast.Convert[int32](opts.GetLimit())
-	optsOffset32, _ := safecast.Convert[int32](opts.GetOffset())
-	rows, err := q.ListPaymentsFiltered(ctx, gen.ListPaymentsFilteredParams{MerchantID: queryMerchant.UUID(),
-		CustomerID:      tsid,
-		PriceID:         priceID,
-		SubscriptionID:  subID,
-		Rail:            rail,
-		TransactionID:   transactionID,
-		PurchasedAfter:  f.StartDate,
-		PurchasedBefore: f.EndDate,
-		MinAmount:       f.MinAmount,
-		MaxAmount:       f.MaxAmount,
-		Status:          status,
-		RefundsOnly:     f.RefundsOnly,
-		SortBy:          sortBy,
-		SortDesc:        f.SortOrder != "asc",
-		PageLimit:       optsLimit32,
-		PageOffset:      optsOffset32,
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	payments, err := models.PaymentsFromGen(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	if err := r.attachPaymentRelations(ctx, payments); err != nil {
-		return nil, 0, err
-	}
-	return payments, total, nil
+	out = pagination.Cut(payments, limit, func(p *models.Payment) any { return pagination.TimeID{At: p.CreatedAt, ID: p.ID} })
+	return out, r.attachPaymentRelations(ctx, out.Items)
 }
 
 // attachPaymentRelations stitches Price (+Product) and Subscription onto the

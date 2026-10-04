@@ -690,7 +690,7 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 			return err
 		}
 		if p.HyperSwitch != nil {
-			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, h.Checkout.Config.HyperSwitch.APIBaseURL)
+			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, p.Instrument.PSPID, h.Checkout.Config.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}

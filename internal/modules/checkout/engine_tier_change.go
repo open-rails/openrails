@@ -108,7 +108,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != terms.CustomerID || method.PspID != terms.PSPID || method.Rail != string(existingSub.Rail) || method.ParkReason != "" {
+		if method.CustomerID != terms.CustomerID || !charge.ChargeableOn(method, terms.PSPID) || method.Rail != string(existingSub.Rail) || method.ParkReason != "" {
 			return charge.ErrInstrumentChanged
 		}
 		var binding *charge.HyperSwitchBinding
@@ -116,13 +116,13 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 			if s.Config.HyperSwitch == nil {
 				return errors.New("engine HyperSwitch custody is not configured")
 			}
-			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, s.Config.HyperSwitch.APIBaseURL)
+			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, terms.PSPID, s.Config.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}
 			binding = &frozen
 		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), binding, false); err != nil {
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, terms.PSPID), binding, false); err != nil {
 			return err
 		}
 		psp, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: terms.PSPID})
@@ -140,7 +140,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		if user.Email != nil {
 			email = strings.TrimSpace(*user.Email)
 		}
-		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: charge.FreezeInstrument(method), RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: email, RequestedPrice: requested}
+		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: charge.FreezeInstrument(method, terms.PSPID), RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: email, RequestedPrice: requested}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &existingSub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: intents.OriginUser, Actor: terms.CustomerID.String(), OriginReason: "customer tier upgrade"})
 		return err
 	})

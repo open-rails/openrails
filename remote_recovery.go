@@ -134,32 +134,14 @@ func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, key 
 	return &out, nil
 }
 
-// ListPaymentMethods returns one page of a customer's saved payment methods.
-func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options billing.PageOptions, requestOptions ...RequestOption) (*billing.Page[billing.PaymentMethod], error) {
-	path, err := customerPath(customerID)
+// ListPaymentMethods is one page of a customer's saved cards, newest first.
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error) {
+	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
 	}
-	var out billing.Page[billing.PaymentMethod]
-	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+pageQuery(options).Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SetDefaultPaymentMethod makes one of the customer's usable methods its
-// default; the previous default stops being one in the same transaction.
-func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethod, error) {
-	path, err := customerPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	method, err := requireTypedID("payment_method_id", methodID)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.PaymentMethod
-	if err := c.do(ctx, http.MethodPut, path+"/default-payment-method", map[string]string{"payment_method_id": method}, &out, requestOptions...); err != nil {
+	var out billing.ListPage[billing.PaymentMethod]
+	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -168,8 +150,8 @@ func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string,
 // DeletePaymentMethod removes a saved payment method. The result says
 // whether it is deleted or awaits the provider; pending is never reported
 // deleted.
-func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethodDeletion, error) {
-	path, err := customerPath(customerID)
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethodDeletion, error) {
+	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
 	}

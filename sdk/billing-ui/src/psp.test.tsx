@@ -93,7 +93,7 @@ describe("PSP flows", () => {
           { id: "pm_3", psp_id: "psp_nmi", health: { active: false } },
         ],
         rails
-      ).map((m) => [m.id, m.last_four])
+      ).map((m) => [m.id, m.card?.last4])
     ).toEqual([["pm_1", "1111"]])
   })
 
@@ -183,7 +183,7 @@ describe("PSP flows", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith("pm_9"))
     expect(calls).toEqual([
       {
-        path: "/billing/v1/me/payment-methods/stripe-setup",
+        path: "/billing/v1/me/payment-method-setups",
         key: expect.any(String),
         body: { psp_id: "psp_stripe", consent: true },
       },
@@ -243,10 +243,11 @@ describe("PSP flows", () => {
       {
         path: "/billing/v1/me/payment-methods",
         body: {
-          provider: "nmi",
-          name_on_card: "Pat Reader",
-          country: "US",
-          zip: "94107",
+          psp_id: "psp_nmi",
+          billing_details: {
+            name: "Pat Reader",
+            address: { postal_code: "94107", country: "US" },
+          },
           card: {
             number: "4111111111111111",
             exp_month: 10,

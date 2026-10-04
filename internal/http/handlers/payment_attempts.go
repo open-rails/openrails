@@ -10,9 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
@@ -40,23 +43,18 @@ func ListPaymentAttempts(r *httprequest.Request) {
 			return id.UUID(), err
 		}), Since: q.time("since"), Until: q.time("until"),
 	}
-	params.PageLimit, params.PageOffset = q.page()
-	if q.err != nil {
-		r.ErrorJSON(http.StatusBadRequest, q.err.Error())
+	limit, ok := q.keyset(&params.AfterAt, &params.AfterID)
+	if !ok {
 		return
 	}
+	params.RowLimit = pagination.Fetch(limit)
 	rows, err := r.State.DB.Gen(r.Request.Context()).ListPaymentAttempts(r.Request.Context(), params)
 	if err != nil {
 		r.InternalError("payment attempts could not be listed", err)
 		return
 	}
-	out := billing.Page[billing.PaymentAttempt]{Object: "list", Data: make([]billing.PaymentAttempt, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
-	for _, row := range rows {
-		out.Data = append(out.Data, paymentAttemptToAPI(row.BillingPaymentAttempt))
-		out.Total = row.Total
-	}
-	out.HasMore = int64(out.Offset+len(out.Data)) < out.Total
-	r.JSON(http.StatusOK, out)
+	page := pagination.Cut(rows, limit, func(a gen.BillingPaymentAttempt) any { return pagination.TimeID{At: a.AttemptedAt, ID: a.ID} })
+	r.SuccessJSON(pagination.Map(page, paymentAttemptToAPI))
 }
 
 // GetPaymentAttempt reads one payment attempt.
@@ -69,12 +67,12 @@ func GetPaymentAttempt(r *httprequest.Request) {
 	}
 	id, err := billing.ParsePaymentAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payment attempt id")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid payment attempt id").WithParam("id"))
 		return
 	}
 	row, err := r.State.DB.Gen(r.Request.Context()).GetPaymentAttempt(r.Request.Context(), gen.GetPaymentAttemptParams{MerchantID: mid, ID: id.UUID()})
 	if errors.Is(err, pgx.ErrNoRows) {
-		r.ErrorJSON(http.StatusNotFound, "payment attempt not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "payment attempt not found")
 		return
 	}
 	if err != nil {
@@ -99,7 +97,7 @@ func ListRebillCycles(r *httprequest.Request) {
 	outcomes := q.list("outcome")
 	for _, o := range outcomes {
 		if o != "collected" && o != "lost" && o != "open" {
-			r.ErrorJSON(http.StatusBadRequest, `outcome must be "collected", "lost" or "open"`)
+			r.APIError(api.Coded(billing.CodeInvalidQuery, `outcome must be "collected", "lost" or "open"`).WithParam("outcome"))
 			return
 		}
 	}
@@ -111,23 +109,18 @@ func ListRebillCycles(r *httprequest.Request) {
 			return id.UUID(), err
 		}), DueSince: q.time("due_since"), DueUntil: q.time("due_until"),
 	}
-	params.PageLimit, params.PageOffset = q.page()
-	if q.err != nil {
-		r.ErrorJSON(http.StatusBadRequest, q.err.Error())
+	limit, ok := q.keyset(&params.AfterAt, &params.AfterID)
+	if !ok {
 		return
 	}
+	params.RowLimit = pagination.Fetch(limit)
 	rows, err := r.State.DB.Gen(r.Request.Context()).ListRebillCycles(r.Request.Context(), params)
 	if err != nil {
 		r.InternalError("rebill cycles could not be listed", err)
 		return
 	}
-	out := billing.Page[billing.RebillCycle]{Object: "list", Data: make([]billing.RebillCycle, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
-	for _, row := range rows {
-		out.Data = append(out.Data, rebillCycleToAPI(row, now))
-		out.Total = row.Total
-	}
-	out.HasMore = int64(out.Offset+len(out.Data)) < out.Total
-	r.JSON(http.StatusOK, out)
+	page := pagination.Cut(rows, limit, func(c gen.ListRebillCyclesRow) any { return pagination.TimeID{At: c.DueAt, ID: c.ID} })
+	r.SuccessJSON(pagination.Map(page, func(c gen.ListRebillCyclesRow) billing.RebillCycle { return rebillCycleToAPI(c, now) }))
 }
 
 // GetRebillCycle reads one rebill cycle with its attempts, oldest first.
@@ -140,20 +133,20 @@ func GetRebillCycle(r *httprequest.Request) {
 	}
 	id, err := billing.ParseRebillCycleID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid rebill cycle id")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid rebill cycle id").WithParam("id"))
 		return
 	}
 	ctx := r.Request.Context()
 	q := r.State.DB.Gen(ctx)
 	now := r.Clock.Now()
 	cycleID := id.UUID()
-	rows, err := q.ListRebillCycles(ctx, gen.ListRebillCyclesParams{MerchantID: mid, ID: &cycleID, Now: now, PageLimit: 1})
+	rows, err := q.ListRebillCycles(ctx, gen.ListRebillCyclesParams{MerchantID: mid, ID: &cycleID, Now: now, RowLimit: 1})
 	if err != nil {
 		r.InternalError("rebill cycle could not be read", err)
 		return
 	}
 	if len(rows) == 0 {
-		r.ErrorJSON(http.StatusNotFound, "rebill cycle not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "rebill cycle not found")
 		return
 	}
 	attempts, err := q.ListCycleAttempts(ctx, gen.ListCycleAttemptsParams{MerchantID: mid, CycleID: id.UUID()})
@@ -162,6 +155,7 @@ func GetRebillCycle(r *httprequest.Request) {
 		return
 	}
 	out := rebillCycleToAPI(rows[0], now)
+	out.Attempts = make([]billing.PaymentAttempt, 0, len(attempts))
 	for _, a := range attempts {
 		out.Attempts = append(out.Attempts, paymentAttemptToAPI(a))
 	}
@@ -183,13 +177,13 @@ func readScope(r *httprequest.Request) (uuid.UUID, bool) {
 
 func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 	out := billing.PaymentAttempt{
-		ID: billing.PaymentAttemptID(a.ID), Object: "payment_attempt", Kind: a.Kind, Owner: a.Owner, CardEntry: a.CardEntry,
+		ID: billing.PaymentAttemptID(a.ID), Kind: a.Kind, Owner: a.Owner, CardEntry: a.CardEntry,
 		Source: a.Source, ObservedVia: a.ObservedVia, Category: a.Category, Reason: billing.DeclineReason(normalize.FromPtr(a.Reason)),
 		Action: normalize.FromPtr(a.Action), ResponseCode: normalize.FromPtr(a.ResponseCode), ResponseText: normalize.FromPtr(a.ResponseText),
 		IssuerCode: normalize.FromPtr(a.IssuerCode), IssuerText: normalize.FromPtr(a.IssuerText), AVSResult: normalize.FromPtr(a.AvsResult),
-		CVVResult: normalize.FromPtr(a.CvvResult), CardBrand: normalize.FromPtr(a.CardBrand), CardLast4: normalize.FromPtr(a.CardLast4),
+		CVVResult: normalize.FromPtr(a.CvvResult), Card: models.CardFromColumns(a.CardBrand, a.CardLast4, nil, nil).Details(),
 		CardBIN: normalize.FromPtr(a.CardBin), TokenType: normalize.FromPtr(a.TokenType), TransactionID: normalize.FromPtr(a.TransactionID),
-		Rail: a.Rail, PSPID: a.PspID.String(), CustomerID: a.CustomerID.String(), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
+		Rail: a.Rail, PSPID: a.PspID.String(), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
 		AttemptedAt: a.AttemptedAt, CheckoutTarget: normalize.FromPtr(a.CheckoutTarget), EnrichedAt: a.EnrichedAt,
 	}
 	if a.CheckoutID != nil {
@@ -216,8 +210,8 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 
 func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.RebillCycle {
 	out := billing.RebillCycle{
-		ID: billing.RebillCycleID(c.ID), Object: "rebill_cycle", SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
-		CustomerID: c.CustomerID.String(), PSPID: c.PspID.String(), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
+		ID: billing.RebillCycleID(c.ID), SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
+		CustomerID: billing.CustomerID(c.CustomerID), PSPID: c.PspID.String(), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
 		Currency: c.Currency, FirstOutcome: c.FirstOutcome, MissedAt: c.MissedAt, MissReason: normalize.FromPtr(c.MissReason),
 		CollectedAt: c.WonAt, RecoveredBy: c.RecoveredBy, ClosesAt: c.ClosedAt,
 	}
@@ -279,8 +273,23 @@ func (q *queryReader) time(key string) *time.Time {
 	return &t
 }
 
-func (q *queryReader) page() (int64, int64) {
-	return int64(min(max(parseIntDefault(q.r.Query("limit"), 50), 1), 200)), int64(max(parseIntDefault(q.r.Query("offset"), 0), 0))
+// keyset reads the page after the filters, writing the first refusal: the
+// limit, and the (time, id) cursor into the query's nullable arguments.
+func (q *queryReader) keyset(afterAt **time.Time, afterID **uuid.UUID) (int, bool) {
+	if q.err != nil {
+		q.r.APIError(api.Coded(billing.CodeInvalidQuery, q.err.Error()))
+		return 0, false
+	}
+	page, ok := q.r.Page()
+	if !ok {
+		return 0, false
+	}
+	var err error
+	if *afterAt, *afterID, err = pagination.After(page.Cursor); err != nil {
+		writeRefusal(q.r, err, "invalid cursor")
+		return 0, false
+	}
+	return page.Limit, true
 }
 
 func (q *queryReader) fail(err error) {

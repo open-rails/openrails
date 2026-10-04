@@ -1,6 +1,24 @@
-// Per-endpoint client functions for /v1/merchant/*. Shapes match the Go
-// handlers exactly — see src/lib/api/types.ts.
-import { api, type ItemsEnvelope, type ListEnvelope } from "./client"
+// Per-endpoint client functions for /v1/merchant/*. Shapes are the generated
+// wire types where the route has them, else src/lib/api/types.ts.
+import {
+  api,
+  apiResponse,
+  type ItemsEnvelope,
+  type ListEnvelope,
+  type PageRequest,
+} from "./client"
+import type {
+  CreateOffChannelPaymentParams,
+  CreditLimit,
+  Customer,
+  ListPage,
+  Payment,
+  PaymentAttempt,
+  PaymentMethod,
+  RebillCycle,
+  RefundPaymentParams,
+  TrustLevel,
+} from "./generated/wire"
 import type {
   AdminSubscription,
   CatalogDriftEvent,
@@ -17,14 +35,10 @@ import type {
   MerchantSettings,
   MerchantWebhook,
   MintedAPIKey,
-  PaymentAttempt,
-  PaymentMethodResponse,
-  PaymentObject,
   PaymentProviderConfig,
   PaymentProviderDefinition,
   PriceKeyHistoryEntry,
   RawEntitlement,
-  RebillCycle,
   RepairAlert,
   RepriceBatch,
   RepriceBatchResult,
@@ -44,12 +58,6 @@ import type {
   WebhookFormat,
   WorkerHealth,
 } from "./types"
-import type {
-  CreditLimit,
-  Customer,
-  ListPage,
-  TrustLevel,
-} from "./generated/wire"
 
 // --- Customers ---
 
@@ -70,13 +78,14 @@ export const getCustomerProfile = (customerId: string, signal?: AbortSignal) =>
     { signal }
   )
 
-export const getCustomerPaymentMethods = (
+export const listCustomerPaymentMethods = (
   customerId: string,
+  page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<{ object: "list"; data: PaymentMethodResponse[] }>(
+  api<ListPage<PaymentMethod>>(
     `/merchant/customers/${customerId}/payment-methods`,
-    { signal }
+    { query: { ...page }, signal }
   )
 
 export interface CustomerUsageRateOverrideRequest {
@@ -150,24 +159,19 @@ export const revokeProductAccess = (customerId: string, grantId: string) =>
     }
   )
 
-export interface OffChannelPaymentRequest {
-  price_id: string
-  transaction_id: string
-  amount?: string
-  currency?: string
-  purchased_at?: string
-  discount_code?: string
-  discount_reason?: string
-}
-
-export const createOffChannelPayment = (
+// createOffChannelPayment records a payment taken outside any rail. The
+// transaction id is its identity: recorded is false when it was already
+// recorded with the same terms (200 instead of 201).
+export const createOffChannelPayment = async (
   customerId: string,
-  body: OffChannelPaymentRequest
-) =>
-  api<{ payment_id: string; status?: string; entitlements?: string[] }>(
+  body: CreateOffChannelPaymentParams
+) => {
+  const { status, body: payment } = await apiResponse<Payment>(
     `/merchant/customers/${customerId}/payments/off-channel`,
     { method: "POST", body }
   )
+  return { payment, recorded: status === 201 }
+}
 
 // --- Subscriptions ---
 
@@ -243,47 +247,56 @@ export const changeSubscriptionTier = (
 
 // --- Payments ---
 
+// Payments are listed newest first.
 export interface PaymentFilters {
   customer_id?: string
-  rail?: string
   subscription_id?: string
+  price_id?: string
+  rail?: string
+  kind?: Payment["kind"]
   transaction_id?: string
-  refunds_only?: boolean
-  sort_by?: string
-  sort_order?: string
 }
 
 export const listPayments = (
   filters: PaymentFilters,
-  limit: number,
-  offset: number,
+  page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListEnvelope<PaymentObject>>("/merchant/payments", {
-    query: { ...filters, limit, offset },
+  api<ListPage<Payment>>("/merchant/payments", {
+    query: { ...filters, ...page },
     signal,
   })
 
 export const getPayment = (id: string, signal?: AbortSignal) =>
-  api<PaymentObject>(`/merchant/payments/${id}`, { signal })
+  api<Payment>(`/merchant/payments/${id}`, { signal })
 
+// refundPayment answers the refund: succeeded, or pending (202) while the
+// rail settles it.
 export const refundPayment = (
   id: string,
   amount: string,
   reason: string,
   revokeAccess: boolean
-) =>
-  api<PaymentObject>(`/merchant/payments/${id}/refunds`, {
+) => {
+  const body: RefundPaymentParams = {
+    amount,
+    reason: reason || undefined,
+    revoke_access: revokeAccess,
+  }
+  return api<Payment>(`/merchant/payments/${id}/refunds`, {
     method: "POST",
     headers: { "Idempotency-Key": crypto.randomUUID() },
-    body: { amount, reason: reason || undefined, revoke_access: revokeAccess },
+    body,
   })
+}
 
 // --- Payment attempts and rebill cycles (#1116) ---
 // Filters are the API's query parameters verbatim; a text filter is one value
 // or a comma-separated list, so a console URL carries them unchanged.
 
-export type AttemptFilters = Partial<Record<(typeof ATTEMPT_FILTERS)[number], string>>
+export type AttemptFilters = Partial<
+  Record<(typeof ATTEMPT_FILTERS)[number], string>
+>
 export const ATTEMPT_FILTERS = [
   "kind",
   "owner",
@@ -304,7 +317,9 @@ export const ATTEMPT_FILTERS = [
   "until",
 ] as const
 
-export type CycleFilters = Partial<Record<(typeof CYCLE_FILTERS)[number], string>>
+export type CycleFilters = Partial<
+  Record<(typeof CYCLE_FILTERS)[number], string>
+>
 export const CYCLE_FILTERS = [
   "owner",
   "first_outcome",
@@ -331,12 +346,11 @@ export function filtersFrom<K extends string>(
 
 export const listPaymentAttempts = (
   filters: AttemptFilters,
-  limit: number,
-  offset: number,
+  page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListEnvelope<PaymentAttempt>>("/merchant/payment-attempts", {
-    query: { ...filters, limit, offset },
+  api<ListPage<PaymentAttempt>>("/merchant/payment-attempts", {
+    query: { ...filters, ...page },
     signal,
   })
 
@@ -345,19 +359,19 @@ export const getPaymentAttempt = (id: string, signal?: AbortSignal) =>
 
 export const listRebillCycles = (
   filters: CycleFilters,
-  limit: number,
-  offset: number,
+  page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListEnvelope<RebillCycle>>("/merchant/rebill-cycles", {
-    query: { ...filters, limit, offset },
+  api<ListPage<RebillCycle>>("/merchant/rebill-cycles", {
+    query: { ...filters, ...page },
     signal,
   })
 
 export const getRebillCycle = (id: string, signal?: AbortSignal) =>
   api<RebillCycle>(`/merchant/rebill-cycles/${id}`, { signal })
 
-// Rails whose refunds route through a provider API today (admin_payments.go).
+// Rails whose refunds route through a provider API today (admin_payments.go);
+// off-rail payments are refunded where they were taken.
 export const REFUNDABLE_RAILS = ["nmi", "stripe"]
 
 // --- Catalog ---

@@ -3,11 +3,10 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { PaymentMethodResponse } from "@/lib/api/types"
 import { creditCustomerKey, creditMutations, creditQueries } from "@/lib/credit-queries"
 import { adminQueries, queryKeys } from "@/lib/queries"
 import {
-  calls, client, exec, MAX_INT64, render, selectMerchant, server,
+  aPaymentMethod, calls, client, cursorPages, exec, MAX_INT64, render, selectMerchant, server,
   type Recorded, type Reply,
 } from "@/test/harness"
 import { CollectionDefaultBadges } from "./collection-default-badges"
@@ -164,17 +163,15 @@ describe("collection defaults", () => {
   })
 
   it("refreshes the profile and saved-method views together", async () => {
-    const method: PaymentMethodResponse = {
-      id: "pm_a", object: "payment_method", type: "card", rail: "nmi",
-      created_at: "2026-09-16T00:00:00Z", collection_default_currencies: ["USD"],
-    }
-    let methods = [method]
+    const method = aPaymentMethod("pm_a", { collection_currencies: ["USD"] })
+    let methods = [method, aPaymentMethod("pm_b")]
     routes["/merchant/customers/cus_a/billing-profile"] = () => ({
       customer: { id: "cus_a", email: null, created_at: "2026-09-16T00:00:00Z", last_seen_at: "2026-09-16T00:00:00Z" },
       balances: [], subscriptions: [], entitlements: [], payments: [],
       payment_methods: methods, product_access: [],
     })
-    routes["/merchant/customers/cus_a/payment-methods"] = () => ({ object: "list", data: methods })
+    // One method per page: the picker list walks every page.
+    routes["/merchant/customers/cus_a/payment-methods"] = (request) => cursorPages(methods, 1)(request)
     const queries = client()
     const profile = adminQueries.customer("cus_a")
     const saved = adminQueries.customerPaymentMethods("cus_a")
@@ -182,12 +179,15 @@ describe("collection defaults", () => {
     await load()
 
     // The same customer subtree the Refresh payment methods action invalidates.
-    methods = [{ ...method, collection_default_currencies: [] }]
+    methods = [{ ...method, collection_currencies: [] }, aPaymentMethod("pm_b")]
     await queries.invalidateQueries({ queryKey: queryKeys.customer("cus_a") })
     await load()
 
-    expect(queries.getQueryData(profile.queryKey)!.payment_methods[0].collection_default_currencies).toEqual([])
-    expect(queries.getQueryData(saved.queryKey)!.data[0].collection_default_currencies).toEqual([])
+    expect(queries.getQueryData(profile.queryKey)!.payment_methods![0].collection_currencies).toEqual([])
+    expect(queries.getQueryData(saved.queryKey)!.map((m) => [m.id, m.collection_currencies])).toEqual([["pm_a", []], ["pm_b", null]])
+    expect(requests.filter((r) => r.path.endsWith("/payment-methods")).map((r) => r.query)).toEqual([
+      "limit=100", "limit=100&cursor=1", "limit=100", "limit=100&cursor=1",
+    ])
     queries.clear()
   })
 })

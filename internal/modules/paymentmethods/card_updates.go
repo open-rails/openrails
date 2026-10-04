@@ -27,11 +27,13 @@ const (
 	ContactCustomer CardUpdateKind = "contact_customer"
 )
 
-// CardUpdate is one change to a stored card's standing.
+// CardUpdate is one change to a stored card's standing. PSPID is the PSP
+// holding a PSP-held card, nil for a custodian-held one.
 type CardUpdate struct {
-	MerchantID, PaymentMethodID, CustomerID, PSPID uuid.UUID
-	Source                                         CardUpdateSource
-	Kind                                           CardUpdateKind
+	MerchantID, PaymentMethodID, CustomerID uuid.UUID
+	PSPID                                   *uuid.UUID
+	Source                                  CardUpdateSource
+	Kind                                    CardUpdateKind
 	// EventRef names the notice or operation; a replay records nothing.
 	EventRef string
 	// At is when the change was learned; zero is the database's now.
