@@ -1,14 +1,69 @@
 package contractaudit
 
 import (
+	"errors"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+// The public interface is these packages (#1121): the Client, its nouns, the
+// catalog model and the router adapters. Everything else is internal/ or main.
+var publicPackages = []string{".", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "web/admin"}
+
+func TestPublicPackages(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	err = filepath.WalkDir(root, func(dir string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(root, dir)
+		rel = filepath.ToSlash(rel)
+		if rel != "." {
+			if base := entry.Name(); base == "internal" || base == "testdata" || walkDir(os.DirFS(root), rel, base) != nil {
+				return fs.SkipDir
+			}
+		}
+		pkg, err := build.Default.ImportDir(dir, 0)
+		var none *build.NoGoError
+		switch {
+		case errors.As(err, &none):
+			return nil
+		case err != nil:
+			return err
+		}
+		// Test-only packages cannot be imported.
+		if pkg.Name != "main" && len(pkg.GoFiles)+len(pkg.CgoFiles) > 0 {
+			found = append(found, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range found {
+		if !slices.Contains(publicPackages, rel) {
+			t.Errorf("%s is an importable package outside the public interface; move it under internal/", rel)
+		}
+	}
+	for _, rel := range publicPackages {
+		if !slices.Contains(found, rel) {
+			t.Errorf("public package %s is missing; update publicPackages", rel)
+		}
+	}
+}
 
 // The root package is the client; it will construct the engine, so nothing
 // under internal/ may import it. Shared nouns live in package billing (#1121).

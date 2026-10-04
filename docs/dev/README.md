@@ -83,15 +83,21 @@ a fresh build of the new one).
 
 ## Repo layout
 
-- `client.go`, `remote.go`, `errors.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `New` over the in-process transport); `Config`/`Deps` named from `internal/config`
+- `client.go`, `remote.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `New` over the in-process transport); `Config`/`Deps` named from `internal/config`
+- `billing/` — the API vocabulary: request/response types, IDs, errors and codes, permission names
+- `catalog/` — catalog-as-code manifests and the charge-model pricing engine
+- `adapters/{http,gin,fiber}/` — router adapters for `client.Routes()`
 - `internal/engine/` — the in-process engine behind `openrails.New` (lifecycle, routes, River, the opt-in control plane)
 - `cmd/openrails/` — the binary: server + CLI (catalog/merchant-config/bootstrap apply, reconcile)
-- `pkg/` — importable packages (api, billingauth, catalog, merchant, adminconsole, query, …)
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/`, `controlplane/`
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
 - `ci/` — focused public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
 - `scripts/` — Task-target implementations
 - `web/admin/` — admin console SPA source; `embed.go` embeds its `dist/` build
+
+The root, `billing`, `catalog`, the adapters and `web/admin` are the only
+importable non-`main` packages; `internal/contractaudit` `TestPublicPackages`
+fails on any other.
 
 ## Releases
 
