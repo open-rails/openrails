@@ -5,14 +5,18 @@ public port under the `/v1` prefix (plus unprefixed health probes and the `/auth
 control-plane mount). Embedded hosts mount a subset of the same route groups —
 `GET /v1/capabilities` reports which groups a deployment actually serves.
 
-All requests and responses are JSON unless noted. Non-2xx responses use the
-Stripe-shaped error envelope from `internal/api`:
+Every route, with its tier, permission and types, is in [routes.md](routes.md)
+and `api/openapi.json`, generated from the route catalog.
+
+All requests and responses are JSON unless noted. A request body may hold only
+the fields its route declares. Non-2xx responses use the error envelope of
+[errors.md](errors.md):
 
 ```json
 {
   "error": {
     "type": "invalid_request_error",
-    "code": "invalid_parameter",
+    "code": "invalid_param",
     "message": "Human readable description",
     "param": "optional_param_name"
   }
@@ -24,6 +28,9 @@ List endpoints use a Stripe-like list envelope:
 ```json
 { "object": "list", "data": [], "total": 0, "limit": 20, "offset": 0, "has_more": false }
 ```
+
+Cursor lists answer `{"data": [...], "next_cursor": "..."}`; `next_cursor` is
+null on the last page and is passed back as `?cursor=`.
 
 ## Authentication overview
 
