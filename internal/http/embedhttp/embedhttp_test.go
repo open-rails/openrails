@@ -97,7 +97,6 @@ func TestHTTPConfigValidation(t *testing.T) {
 		{"customer without any authenticator", customer(config.CustomerRoutesConfig{Merchant: "store"}), nil, false},
 		{"native customer without merchant", customer(config.CustomerRoutesConfig{}), authn, false},
 		{"native customer", customer(config.CustomerRoutesConfig{Merchant: "store"}), authn, true},
-		{"treasury off the canonical mount", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenant/me", Treasury: true, Delegated: true}), nil, false},
 		{"unknown scope", customer(config.CustomerRoutesConfig{Scope: 9, Delegated: true}), nil, false},
 		{"parameterized prefix", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenants/{tenant}/me", Delegated: true}), nil, true},
 	} {

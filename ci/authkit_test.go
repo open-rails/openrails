@@ -178,7 +178,7 @@ merchants:
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, http.StatusUnauthorized, send("DPoP "+token, first).Code, "a proof is spent once")
 	require.Equal(t, http.StatusUnauthorized, send("Bearer "+token, "").Code, "a bound token needs its proof")
-	outside := delegated(billing.CustomerBalanceRead)
+	outside := delegated(billing.RootMerchantsRead)
 	require.Equal(t, http.StatusUnauthorized, send("DPoP "+outside, proof(http.MethodGet, path, outside)).Code, "a delegation beyond the stored grant is refused")
 	var customers int
 	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1", mid.UUID()).Scan(&customers))

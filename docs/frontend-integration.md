@@ -326,27 +326,6 @@ removal are confirmed, or `202 Accepted` with no body while the durable delete i
 still converging. Keep the method visible after `202` and refresh the list later.
 Stripe cards remain provider-owned and must be managed through Stripe Billing Portal.
 
-### Shared-customer treasury: `/v1/customers/:customer_id/*`
-
-`/v1/me/*` needs no grants. Acting on a *shared* customer balance (an org/team wallet
-the user co-manages) uses `/v1/customers/:customer_id/...` — same handlers, but each
-route requires an explicit `customer:*` permission carried by the delegated token.
-`:customer_id` must name the caller's own payable subject (or#916); the merchant's
-own slug/id addresses the merchant's treasury and additionally requires `merchant:*`:
-
-| Permission | Allows |
-|---|---|
-| none | `/v1/me/*` as the token's own subject |
-| `customer:balance:read` | read balance, transactions, usage, payments, invoices |
-| `customer:billing:update` | choose the invoice collection method (`PUT .../collection-payment-method`) |
-| `customer:payment-methods:update` | manage payment methods + billing portal |
-| `customer:checkout:create` | pre-pay / load credits (`POST .../checkout`) |
-| `customer:spend-delegations:read` | read the spend-delegation policy |
-| `customer:spend-delegations:update` | replace/upsert/revoke the spend-delegation policy |
-
-Over-claimed tokens are rejected: your issuer's registered authority bounds what
-permissions a delegated JWT may carry.
-
 ### Errors and rate limits
 
 Errors use a Stripe-style envelope:
@@ -360,7 +339,7 @@ Handle in the frontend:
 - **401** — delegated token expired/invalid. Re-fetch from your exchange endpoint and
   retry once (the helper above does this). Embedded: your normal session-expiry flow.
 - **403** — acting on a resource that isn't yours (foreign checkout session, someone
-  else's `payment_method_id`, missing `customer:*` grant).
+  else's `payment_method_id`).
 - **409** — `idempotency_key_reuse` (same key, different body) or
   `idempotency_in_progress` (retry landed while the original is still running).
 - **410** — checkout session expired; create a new one.

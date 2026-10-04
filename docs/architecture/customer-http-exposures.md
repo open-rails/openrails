@@ -37,7 +37,7 @@ The default customer scope uses the full library self-service surface. The
 subscription-management scope exposes exactly cancellation, resumption,
 subscription payment-method changes and invoice collection-method selection.
 Both profiles reuse the same route registration and payer ownership checks.
-Neither exposes merchant administration, credentials, treasury or callbacks.
+Neither exposes merchant administration, credentials or callbacks.
 
 An ordinary native audience uses `Deps.Authenticate` and the declared merchant. A `Delegated` audience is authenticated by `Deps.AuthenticateCustomer`. The authenticator verifies the
 actual credential and derives its merchant and payer from trusted host policy;
@@ -67,11 +67,3 @@ merchant ownership, return that captured hosted merchant UUID as the canonical
 payer, and bind the principal to the PLATFORM billing merchant. A stale owner or
 an unrelated hosted merchant must fail before any of the four mutations.
 
-Native treasury can be declared in the same customer entry with `Treasury: true`.
-It uses constructor `Options.Auth` plus the merchant slug, so the application need
-not obtain a merchant UUID before constructing authentication. The canonical
-personal payer needs no role lookup. Selecting the fixed merchant as payer by
-UUID or its captured slug requires live authorization for the exact `customer:*`
-route permission with `Scope: CustomerScope` and both immutable merchant and
-payer UUIDs. Sibling customer IDs remain denied. Explicit delegated treasury
-continues to enforce its existing credential ceilings and payer constraints.

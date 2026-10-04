@@ -39,7 +39,7 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"checkout without auth":     {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}} }), config.Deps{}, "Checkout requires"},
 		"customer without merchant": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}} }), config.Deps{Authenticate: authenticate}, "explicit merchant slug"},
 		"customer without verifier": {with(sandbox, func(c *config.Config) {
-			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true}}}
+			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}}
 		}), config.Deps{}, "requires its own authenticator"},
 		"delegated customer without hook": {with(sandbox, func(c *config.Config) {
 			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/portal", Delegated: true}}}

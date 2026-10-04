@@ -37,9 +37,6 @@ const (
 	Checkout Group = "checkout"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
-	// Treasury is a customer acting on an account it co-manages
-	// (/v1/customers/{customer_id}).
-	Treasury Group = "customer_treasury"
 	// Merchant is the merchant API: staff, machines and the Go client alike,
 	// each route gated by its merchant permission.
 	Merchant Group = "merchant"
@@ -68,8 +65,6 @@ const (
 	AuthUser Tier = "user"
 	// AuthCustomer: a customer principal, delegated or native.
 	AuthCustomer Tier = "customer"
-	// AuthCustomerGrant: a customer principal holding Perm, a customer: grant.
-	AuthCustomerGrant Tier = "customer_grant"
 	// AuthMerchant: a credential holding Perm, a merchant: permission, on the
 	// request's merchant (API key, service JWT, delegated token or user
 	// session).
@@ -256,8 +251,7 @@ type Route struct {
 	// Auth is the tier the route enforces before its handler runs.
 	Auth Tier
 	// Perm is the permission Auth checks: a merchant: permission
-	// (AuthMerchant), a customer: grant (AuthCustomerGrant) or a root: grant
-	// (AuthOperator).
+	// (AuthMerchant) or a root: grant (AuthOperator).
 	Perm string
 	// Also is a second merchant permission the route needs.
 	Also string
@@ -367,15 +361,12 @@ func TierErrors(tier Tier) []string {
 	switch tier {
 	case AuthUser:
 		own = []string{billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired}
-	case AuthCustomer, AuthCustomerGrant:
+	case AuthCustomer:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
 			billing.CodeDelegatedTokenInvalid, billing.CodeDelegatedTokenExpired, billing.CodeDelegatedTokenRevoked, billing.CodeDelegatedPrincipalInvalid,
 			billing.CodeDelegatedMerchantUnresolved, billing.CodeDelegatedVerificationUnavailable, billing.CodeInvokerScopedPrincipal,
 		}, selectorErrors...)
-		if tier == AuthCustomerGrant {
-			own = append(own, billing.CodePermissionRequired, billing.CodeCustomerScopeMismatch, billing.CodeStepUpRequired, billing.CodeStepUpUnavailable, billing.CodeAuthorizationUnavailable)
-		}
 	case AuthMerchant:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeCredentialIdentityMismatch,

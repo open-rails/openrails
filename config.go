@@ -150,11 +150,9 @@ type (
 	Requirement = billingauth.Requirement
 	// Authority is the AuthKit group and permission Deps.AuthorityFor names.
 	Authority = billingauth.Authority
-	// Target is Requirement.Target: the merchant and customer an operation
-	// acts on.
+	// Target is Requirement.Target: the merchant an operation acts on.
 	Target = billingauth.Target
-	// Scope is Requirement.Scope: MerchantScope, CustomerScope or
-	// PlatformScope.
+	// Scope is Requirement.Scope: MerchantScope or PlatformScope.
 	Scope = billingauth.Scope
 	// DelegatedPrincipal is what Deps.AuthenticateCustomer returns: an
 	// explicit merchant and paying customer.
@@ -222,8 +220,6 @@ const (
 
 	// MerchantScope is an operation on a merchant.
 	MerchantScope = billingauth.MerchantScope
-	// CustomerScope is an operation on one customer of a merchant.
-	CustomerScope = billingauth.CustomerScope
 	// PlatformScope is an operation across merchants.
 	PlatformScope = billingauth.PlatformScope
 )

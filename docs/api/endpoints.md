@@ -37,7 +37,7 @@ null on the last page and is passed back as `?cursor=`.
 | Caller class | Credential |
 |---|---|
 | Public (catalog, health, capabilities, solana pricing) | none |
-| Self-service `/v1/me/*`, customer treasury `/v1/customers/*` | `Authorization: DPoP <delegated JWT>` plus per-request `DPoP` proof (native: Bearer plus matching TLS client certificate) — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
+| Self-service `/v1/me/*` | `Authorization: DPoP <delegated JWT>` plus per-request `DPoP` proof (native: Bearer plus matching TLS client certificate) — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
 | Checkout `/v1/checkout` | any authenticated user bearer |
 | Merchant `/v1/merchant/*`, `/v1/import/*` | `Authorization: Bearer <API key (openrails_st_…) | service JWT | user access token>` — every route is gated on a `merchant:*` permission, not on credential type |
 | Platform `/v1/platform/*` | human operator session checked against root-group grants (standalone only) |
@@ -85,8 +85,8 @@ There is no `/health` route — probes are `/health/live` and `/health/ready`.
 ## 2. Checkout + rail-specific public routes
 
 Top-level checkout requires an authenticated user bearer. The same three
-handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
-`/v1/customers/{customer_id}/checkout/*` (customer grant) — see section 3.
+handlers are also mounted under `/v1/me/checkout/*` (delegated token) — see
+section 3.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -116,7 +116,7 @@ changes are NOT supported here — if the user already has an active subscriptio
 in the price's tier group the response is `{ "status": "blocked" }` pointing at
 `POST /v1/me/subscriptions/{id}/change-tier`.
 
-## 3. Self-service (`/v1/me/*`) and customer treasury (`/v1/customers/*`)
+## 3. Self-service (`/v1/me/*`)
 
 All `/v1/me/*` routes require a delegated customer principal; every operation is
 scoped to the token's subject — no `:user_id` appears in any path.
@@ -128,7 +128,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
 | GET | `/v1/me/status` | Aggregated premium status (`billing.BillingStatus`): `has_active_subscription`, `subscription` (the shared `Subscription` shape), `access` (the standing grant, from the subscription or a one-off entitlement), `next_renewal_at`, `entitlements` (`EntitlementRecord[]`) |
 | GET | `/v1/me/usage` | Usage breakdown for the token's subject |
-| GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
+| GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The delegations a customer granted are the merchant's `GET /v1/merchant/customers/{customer_id}/spend-delegations` |
 | GET | `/v1/me/invoices` | List the subject's invoices |
 | GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
 | POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
@@ -265,41 +265,6 @@ buyer.
 | GET | `/v1/me/checkout/{id}` | Retrieve the caller's checkout session |
 | POST | `/v1/me/checkout/{id}/confirm` | Confirm the caller's Solana checkout session |
 | POST | `/v1/me/checkout/sessions` | Mint a [hosted checkout](commerce.md#hosted-checkout) session: `{price_key \| price_id, success_url?}` → `201 {id, url?, expires_at}` |
-
-### Customer treasury (`/v1/customers/{customer_id}/*`)
-
-The customer-as-payer surface: a customer (any payer, possibly a shared/company
-balance) acting on its OWN treasury, addressed by customer id. Handlers are
-shared with `/v1/me/*`; the delegated principal must additionally hold the
-listed `customer:*` grant for that customer (balances can be shared resources).
-
-Scope (or#916): `{customer_id}` must name the caller's OWN payable subject —
-its subject id or durable customer id. The merchant's own coordinates (slug or
-merchant id) address the MERCHANT's treasury account and bind only for a
-merchant-admin principal (`merchant:*`) on top of the `customer:*` grants.
-
-| Method | Path | Permission |
-|---|---|---|
-| GET | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:read` |
-| PUT | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:update` — replace the full payer-owned delegation policy |
-| PUT | `/v1/customers/{customer_id}/spend-delegations:upsert` | `customer:spend-delegations:update` — upsert one delegation |
-| DELETE | `/v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `customer:spend-delegations:update` — revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
-| GET | `/v1/customers/{customer_id}/balance` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/transactions` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/usage` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/payments` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/invoices` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/invoices/{id}` | `customer:balance:read` |
-| PUT | `/v1/customers/{customer_id}/collection-payment-method` | `customer:billing:update` — invoice collection method per currency |
-| GET/POST | `/v1/customers/{customer_id}/payment-methods` | `customer:payment-methods:update` |
-| PUT/DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | `customer:payment-methods:update` |
-| POST | `/v1/customers/{customer_id}/billing-portal` | `customer:payment-methods:update` (Stripe rail only) |
-| POST | `/v1/customers/{customer_id}/checkout` | `customer:checkout:create` — pre-pay / load credits |
-| GET | `/v1/customers/{customer_id}/checkout/{id}` | `customer:checkout:create` |
-| POST | `/v1/customers/{customer_id}/checkout/{id}/confirm` | `customer:checkout:create` |
-
-`/status` is deliberately not mounted here — it reports consumer concepts a
-payer does not own.
 
 ## 4. Merchant machine surface (`/v1/merchant/*`, `/v1/import/*`)
 

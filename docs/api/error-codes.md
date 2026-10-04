@@ -67,7 +67,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `customer_action_required` | 403 | `authorization_error` | Only the verified customer may perform this payment action. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
-| `customer_scope_mismatch` | 403 | `authorization_error` | The credential may not act on the addressed customer. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
 | `dashboard_invalid` | 400 | `invalid_request_error` | The dashboard is invalid; metadata.errors lists why. |
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |

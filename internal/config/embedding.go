@@ -73,8 +73,6 @@ type CustomerRoutesConfig struct {
 	// Merchant is the merchant slug native customers buy from; default
 	// Config.Merchant.Slug.
 	Merchant string
-	// Treasury adds the separately permission-gated /v1/customers group.
-	Treasury bool
 	// Scope selects the profile's routes. Zero is CustomerSelfService.
 	Scope CustomerHTTPScope
 	// Delegated authenticates this profile with Deps.AuthenticateCustomer,

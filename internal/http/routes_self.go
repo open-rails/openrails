@@ -10,9 +10,8 @@ import (
 )
 
 // registerSelfServiceRoutes mounts the browser-direct self-service billing
-// surface on the PUBLIC API mux under /v1/me/* (+ the customer treasury under
-// /v1/customers/:customer_id/*), authenticated by a delegated customer
-// principal.
+// surface on the PUBLIC API mux under /v1/me/*, authenticated by a delegated
+// customer principal.
 //
 // A merchant's host frontend mints a short-lived AuthKit delegated access token
 // (aud=openrails, merchant issuer, delegated_sub) for the logged-in end-user;
@@ -27,21 +26,15 @@ func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	delegatedMW := s.delegatedMiddleware()
 	providerRoutes := embedhttp.ProviderRoutesForRuntime(s.runtime, nil)
 
-	// Browser tier (#765): self-service + customer-treasury are the delegated
-	// browser-direct surfaces, so their patterns feed browserTierRoutes for the
-	// static permissive CORS policy.
+	// Browser tier (#765): self-service is the delegated browser-direct
+	// surface, so its patterns feed browserTierRoutes for the static
+	// permissive CORS policy.
 	httproutes.RegisterSelfServiceRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
 		s.runtime, delegatedMW, providerRoutes)
 
-	httproutes.RegisterCustomerTreasuryRoutes(
-		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.CustomerRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, delegatedMW, providerRoutes)
-
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")
-	log.WithField("prefix", StandaloneV1Prefix+httproutes.CustomerRoutePrefix).
-		Info("delegated customer-treasury API routes registered on public handler")
 }
 
 // delegatedMiddleware picks the delegated-identity middleware for the

@@ -2,9 +2,9 @@
 
 # Routes
 
-Every route of the HTTP API (309), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (290), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `customer_grant` (a customer holding the permission), `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
 **Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `catalog write` a route mounted only where the deployment allows catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
@@ -97,32 +97,6 @@ A customer acting on its own account.
 | GET | `/v1/me/notifications` | customer | — | — | 200 `PathPageOfNotification` | scope `billing_management` |
 | GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 untyped | scope `billing_management` |
 | POST | `/v1/me/notifications/{id}/read` | customer | — | — | 200 `Message` | scope `billing_management` |
-
-## Customer treasury (`/v1/customers/{customer_id}`)
-
-A customer acting on an account it co-manages; each route needs a `customer:` grant.
-
-| Method | Path | Tier | Permission | Request | Response | Notes |
-|---|---|---|---|---|---|---|
-| POST | `/v1/customers/{customer_id}/checkout` | customer_grant | `customer:checkout:create` | `CheckoutSessionCreateRequest` | 200 `CheckoutSessionResponse` | `Idempotency-Key` |
-| GET | `/v1/customers/{customer_id}/checkout/{id}` | customer_grant | `customer:checkout:create` | — | 200 `CheckoutSessionResponse` |  |
-| POST | `/v1/customers/{customer_id}/checkout/{id}/confirm` | customer_grant | `customer:checkout:create` | `CheckoutSessionConfirmRequest` | 200 `CheckoutSessionResponse`<br>202 `CheckoutSessionResponse` |  |
-| GET | `/v1/customers/{customer_id}/spend-delegations` | customer_grant | `customer:spend-delegations:read` | — | 200 `CustomerSpendDelegationsDocument` |  |
-| PUT | `/v1/customers/{customer_id}/spend-delegations` | customer_grant | `customer:spend-delegations:update` | `CustomerSpendDelegationsDocument` | 200 `CustomerSpendDelegationsDocument` |  |
-| PUT | `/v1/customers/{customer_id}/spend-delegations:upsert` | customer_grant | `customer:spend-delegations:update` | `CustomerSpendDelegation` | 200 `CustomerSpendDelegation` |  |
-| DELETE | `/v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | customer_grant | `customer:spend-delegations:update` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/balance` | customer_grant | `customer:balance:read` | — | 200 `SelfBalanceResponse` |  |
-| GET | `/v1/customers/{customer_id}/transactions` | customer_grant | `customer:balance:read` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/usage` | customer_grant | `customer:balance:read` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/invoices` | customer_grant | `customer:balance:read` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/invoices/{id}` | customer_grant | `customer:balance:read` | — | 200 `InvoiceDTO` |  |
-| GET | `/v1/customers/{customer_id}/payments` | customer_grant | `customer:balance:read` | — | 200 `PathPageOfUserPaymentObject` |  |
-| PUT | `/v1/customers/{customer_id}/collection-payment-method` | customer_grant | `customer:billing:update` | `CollectionPaymentMethodRequest` | 200 `CollectionPaymentMethodResponse` |  |
-| GET | `/v1/customers/{customer_id}/payment-methods` | customer_grant | `customer:payment-methods:update` | — | 200 `PageOfPaymentMethod` |  |
-| POST | `/v1/customers/{customer_id}/payment-methods` | customer_grant | `customer:payment-methods:update` | `CreatePaymentMethodRequest` | 200 `PaymentMethod` |  |
-| PUT | `/v1/customers/{customer_id}/payment-methods/{id}` | customer_grant | `customer:payment-methods:update` | `UpdatePaymentMethodRequest` | 200 `PaymentMethod`<br>202 — | `Idempotency-Key` |
-| DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | customer_grant | `customer:payment-methods:update` | — | 202 —<br>204 — |  |
-| POST | `/v1/customers/{customer_id}/billing-portal` | customer_grant | `customer:payment-methods:update` | — | 200 `PortalResponse` | when `stripe_portal` |
 
 ## Merchant
 

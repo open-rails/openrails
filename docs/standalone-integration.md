@@ -268,7 +268,7 @@ merchant-scoped route: a token minted for merchant A is rejected on merchant
 B's host even though it verifies.
 
 **CORS (#765)** is a fixed, engine-wide policy — not configurable, no origin
-registration: browser-facing tiers (checkout, `/v1/me/*`, `/v1/customers/*`)
+registration: browser-facing tiers (checkout, `/v1/me/*`)
 answer `Access-Control-Allow-Origin: *` (never with credentials — OpenRails
 issues no cookies; every browser call is an explicit bearer token), and every
 other surface (merchant API, webhooks, admin) emits no CORS headers at all.

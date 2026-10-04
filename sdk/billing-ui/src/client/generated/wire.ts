@@ -30,13 +30,6 @@ export type BillingStatus = {
   entitlements?: EntitlementRecord[]
 }
 
-export type BudgetWindowInput = {
-  key: string
-  window_seconds: number
-  limit: string
-  currency?: string
-}
-
 export type CancelSubscriptionRequest = {
   feedback?: string
 }
@@ -242,18 +235,6 @@ export type CustodianCaptureReference = {
   custodian_id?: string
   session_id?: string
   token?: string
-}
-
-export type CustomerSpendDelegation = {
-  scope: string
-  scope_key?: string
-  windows: BudgetWindowInput[] | null
-  provenance?: string
-}
-
-export type CustomerSpendDelegationsDocument = {
-  customer_id?: string
-  delegations: CustomerSpendDelegation[] | null
 }
 
 export type EffectiveTierBody = {

@@ -1,6 +1,5 @@
 # Refusals that answer a status generic code (ErrorJSON/AbortJSON), per file.
 # A count only goes down: new refusals name a registered code.
-internal/http/embedhttp/native_treasury.go 1
 internal/http/handlers/admin_catalog.go 17
 internal/http/handlers/admin_change_tier.go 11
 internal/http/handlers/admin_credit_grants.go 13
@@ -27,7 +26,7 @@ internal/http/handlers/checkout_config.go 5
 internal/http/handlers/checkout_session.go 17
 internal/http/handlers/customer_billing_policy.go 2
 internal/http/handlers/customer_payment.go 3
-internal/http/handlers/customer_spend_delegations.go 14
+internal/http/handlers/customer_spend_delegations.go 8
 internal/http/handlers/entitlement_features.go 8
 internal/http/handlers/entitlements.go 31
 internal/http/handlers/hosted_checkout.go 1

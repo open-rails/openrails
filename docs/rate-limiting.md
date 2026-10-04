@@ -44,8 +44,8 @@ A bucket with no configured limit falls back to the `default` entry; a configure
 means 60 rpm.
 
 > The `checkout` bucket covers POSTs under the public `/v1/checkout` and
-> `/v1/checkout-sessions`, self-service `/v1/me/checkout`, and customer-treasury
-> `/v1/customers/{id}/checkout` route families. Read-only GETs remain in `default`.
+> `/v1/checkout-sessions` and self-service `/v1/me/checkout` route families.
+> Read-only GETs remain in `default`.
 > A hosted checkout session is also limited per session id, whatever address
 > presents it: 120 reads and 10 pays a minute.
 

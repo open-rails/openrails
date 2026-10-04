@@ -355,7 +355,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 |---|---|
 | (always) | Capability discovery and signature-checked provider callbacks |
 | `Checkout` | Products, prices, checkout config and [hosted checkout](api/commerce.md#hosted-checkout) sessions; requires `Authenticate`. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page |
-| `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`); `Treasury` adds `/v1/customers` |
+| `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`) |
 | `Merchant` | The merchant API (`/v1/merchant/*`, `/v1/import/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`

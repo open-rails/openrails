@@ -1,7 +1,6 @@
 pkg openrails, const CredentialAutomation billingauth.CredentialClass = "automation"
 pkg openrails, const CredentialUserSession billingauth.CredentialClass = "user_session"
 pkg openrails, const CustomerBillingManagement config.CustomerHTTPScope = 2
-pkg openrails, const CustomerScope billingauth.Scope = "customer"
 pkg openrails, const CustomerSelfService config.CustomerHTTPScope = 0
 pkg openrails, const CustomerSubscriptionManagement config.CustomerHTTPScope = 1
 pkg openrails, const Delegated billingauth.PrincipalKind = "delegated"
@@ -377,7 +376,6 @@ pkg openrails, type CustomerRoutesConfig struct, Delegated bool
 pkg openrails, type CustomerRoutesConfig struct, Merchant string
 pkg openrails, type CustomerRoutesConfig struct, Prefix string
 pkg openrails, type CustomerRoutesConfig struct, Scope config.CustomerHTTPScope
-pkg openrails, type CustomerRoutesConfig struct, Treasury bool
 pkg openrails, type DBConfig = config.DBConfig
 pkg openrails, type DBConfig struct
 pkg openrails, type DBConfig struct, Database string
@@ -598,7 +596,6 @@ pkg openrails, type SendGridConfig struct, APIKey string
 pkg openrails, type Target = billingauth.Target
 pkg openrails, type Target struct
 pkg openrails, type Target struct, AuthorityGroupID string
-pkg openrails, type Target struct, CustomerID string
 pkg openrails, type Target struct, MerchantID billing.MerchantID
 pkg openrails, type Target struct, MerchantSlug string
 pkg openrails, type VaultConfig = config.VaultConfig
@@ -647,7 +644,6 @@ pkg openrails/billing, const CodeCollectionPaymentMethodRequired untyped string 
 pkg openrails/billing, const CodeCredentialExpired untyped string = "credential_expired"
 pkg openrails/billing, const CodeCredentialIdentityMismatch untyped string = "credential_identity_mismatch"
 pkg openrails/billing, const CodeCredentialRevoked untyped string = "credential_revoked"
-pkg openrails/billing, const CodeCustomerScopeMismatch untyped string = "customer_scope_mismatch"
 pkg openrails/billing, const CodeDelegatedMerchantUnresolved untyped string = "delegated_merchant_unresolved"
 pkg openrails/billing, const CodeDelegatedPrincipalInvalid untyped string = "delegated_principal_invalid"
 pkg openrails/billing, const CodeDelegatedTokenExpired untyped string = "delegated_token_expired"
@@ -726,14 +722,7 @@ pkg openrails/billing, const CodeTierChangeRenewalDue untyped string = "tier_cha
 pkg openrails/billing, const CodeTierChangeRequiresLinkedPlan untyped string = "tier_change_requires_linked_plan"
 pkg openrails/billing, const CodeUnknownField untyped string = "unknown_field"
 pkg openrails/billing, const CodeUnsupportedMediaType untyped string = "unsupported_media_type"
-pkg openrails/billing, const CustomerAll untyped string = "customer:*"
-pkg openrails/billing, const CustomerBalanceRead untyped string = "customer:balance:read"
-pkg openrails/billing, const CustomerBillingUpdate untyped string = "customer:billing:update"
-pkg openrails/billing, const CustomerCheckoutCreate untyped string = "customer:checkout:create"
 pkg openrails/billing, const CustomerGroupPersona untyped string = "customer"
-pkg openrails/billing, const CustomerPaymentMethodsUpdate untyped string = "customer:payment-methods:update"
-pkg openrails/billing, const CustomerSpendDelegationsRead untyped string = "customer:spend-delegations:read"
-pkg openrails/billing, const CustomerSpendDelegationsUpdate untyped string = "customer:spend-delegations:update"
 pkg openrails/billing, const DeclineAuthenticationRequired DeclineReason = "authentication_required"
 pkg openrails/billing, const DeclineBlockedByPSP DeclineReason = "blocked_by_psp"
 pkg openrails/billing, const DeclineCallIssuer DeclineReason = "call_issuer"
@@ -917,7 +906,6 @@ pkg openrails/billing, func ParseProductID(string) (ProductID, error)
 pkg openrails/billing, func ParseRebillCycleID(string) (RebillCycleID, error)
 pkg openrails/billing, func ParseSubscriptionID(string) (SubscriptionID, error)
 pkg openrails/billing, func PaymentFailureFrom(error) (*PaymentFailure, bool)
-pkg openrails/billing, func PermissionsForRoles(...string) []string
 pkg openrails/billing, func RequiresRecentSignIn(string) bool
 pkg openrails/billing, func SourceRef(string, string) string
 pkg openrails/billing, func ValidateMerchantSlug(string) error
@@ -2791,9 +2779,6 @@ pkg openrails/billing, var ErrRefundUnsupported error
 pkg openrails/billing, var ErrRequestBodyTooLarge error
 pkg openrails/billing, var ErrUnauthorized error
 pkg openrails/billing, var ErrUnreachable error
-pkg openrails/billing, var PresetMemberPermissions []string
-pkg openrails/billing, var PresetOwnerPermissions []string
-pkg openrails/billing, var PresetReadOnlyPermissions []string
 pkg openrails/billing, var ReservedMerchantSlugs []string
 pkg openrails/catalog, const AggregationCount untyped string = "count"
 pkg openrails/catalog, const AggregationLatest untyped string = "latest"

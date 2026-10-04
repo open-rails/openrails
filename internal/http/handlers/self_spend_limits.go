@@ -29,8 +29,8 @@ type SelfSpendLimitsDocument struct {
 // invoker — come from the resolved principal, never from the request. There is
 // no addressing on this route, and naming another subject is refused rather than
 // ignored (a silently-ignored parameter reads to the caller as a successful
-// cross-read). The payer's admin view of every delegation it has granted stays
-// on the treasury route, gated on customer:spend-delegations:read.
+// cross-read). The delegations a customer has granted are the merchant's
+// /v1/merchant/customers/{customer_id}/spend-delegations.
 func GetMySpendLimits(r *httprequest.Request) {
 	if addressed := addressedSpendScope(r); addressed != "" {
 		r.ErrorJSON(http.StatusBadRequest, "spend_scope_not_addressable: "+addressed+

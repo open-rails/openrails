@@ -27,9 +27,6 @@ func validateCustomerRoutes(exposures []config.CustomerRoutesConfig, auth *billi
 		if !e.Delegated && strings.TrimSpace(e.Merchant) == "" {
 			return fmt.Errorf("openrails HTTP: native customer routes require an explicit merchant slug")
 		}
-		if e.Treasury && e.Prefix != "/v1/me" {
-			return fmt.Errorf("openrails HTTP: customer treasury requires the canonical customer mount")
-		}
 		if e.Scope != config.CustomerSelfService && e.Scope != config.CustomerSubscriptionManagement && e.Scope != config.CustomerBillingManagement {
 			return fmt.Errorf("openrails HTTP: invalid customer scope %d", e.Scope)
 		}
@@ -86,8 +83,7 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutesConfig, au
 				return authenticate(r, profile)
 			})
 		}
-		native := authn == nil
-		if native {
+		if authn == nil {
 			target, err := merchanttarget.Resolve(context.Background(), nil, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), e.Merchant)
 			if err != nil {
 				return nil, fmt.Errorf("customer merchant %q: %w", e.Merchant, err)
@@ -104,13 +100,6 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutesConfig, au
 			httproutes.RegisterCustomerBillingManagementRoutes(rr, a.Runtime, delegated, providers)
 		default:
 			httproutes.RegisterSelfServiceRoutes(rr, a.Runtime, delegated, providers)
-		}
-		if e.Treasury {
-			treasury := delegated
-			if native {
-				treasury = nativeTreasury(delegated, auth)
-			}
-			httproutes.RegisterCustomerTreasuryRoutes(router.NewMux(table, "/v1/customers", a.Runtime), a.Runtime, treasury, providers)
 		}
 		wrapped := wrapCustomerRoutes(a.Runtime, table, host, e.Prefix)
 		out.Entries = append(out.Entries, wrapped.Entries...)

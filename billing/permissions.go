@@ -2,8 +2,8 @@ package billing
 
 import "strings"
 
-// Permission names: the merchant:* (seller), customer:* (buyer/treasury) and
-// root:* (platform operator) strings OpenRails routes gate on. Hosts use these
+// Permission names: the merchant:* (seller) and root:* (platform operator)
+// strings OpenRails routes gate on. Hosts use these
 // instead of literals when they stamp delegated principals or grant roles.
 // /v1/me self-service needs no grant. The strings are a stable public contract.
 
@@ -121,106 +121,6 @@ const (
 	RootAdminRateLimitsUnlock = "root:admin-rate-limits:unlock"
 )
 
-// Customer (buyer/treasury) permissions.
-const (
-	CustomerBalanceRead            = "customer:balance:read"
-	CustomerBillingUpdate          = "customer:billing:update"
-	CustomerPaymentMethodsUpdate   = "customer:payment-methods:update"
-	CustomerCheckoutCreate         = "customer:checkout:create"
-	CustomerSpendDelegationsRead   = "customer:spend-delegations:read"
-	CustomerSpendDelegationsUpdate = "customer:spend-delegations:update"
-)
-
-// Owner-role globs. The merchant/customer group `owner` auto-holds its whole
-// namespace; a host grants these to a full-authority principal (merchant admin,
-// or a payer acting on its own customer balance).
-const (
-	MerchantAll = "merchant:*"
-	CustomerAll = "customer:*"
-)
-
-// Canonical role→permission preset (#913).
-//
-// Every AuthKit-embedding host used to hand-roll the mapping from its own
-// role vocabulary onto this catalog, and both observed attempts were bugs:
-// host-four's map emitted exactly two invented permission strings and pinned
-// the WRONG merchant, 403ing its whole /customers/* subtree (upstream#1765);
-// host-three wrote no bridge at all, so its entire self-service surface
-// silently 404'd (upstream#269). This preset is the documented DEFAULT for the
-// common AuthKit-host role shapes; a host with a different vocabulary
-// supplies its own mapping instead — the preset is a default, never a
-// constraint.
-//
-// The tiers:
-//
-//   - owner, admin       → PresetOwnerPermissions: the full wildcard tier,
-//     merchant:* AND customer:*. Both globs on purpose: the self-service /
-//     treasury surface gates on customer:* strings, so merchant:* alone would
-//     403 an owner reading its own organization's balance — the upstream#1765
-//     failure shape.
-//   - member             → PresetMemberPermissions: the customer self-service
-//     set (balance read, billing update, spend-delegations read/update,
-//     checkout create, payment-methods update).
-//   - read-only, readonly, viewer → PresetReadOnlyPermissions: the :read
-//     subset of the member set.
-//
-// Unknown roles contribute nothing (fail closed); matching is trimmed and
-// case-insensitive. Wildcards compose with billingauth.NewDelegatedGate —
-// billingauth.HasPermission expands "merchant:*"/"customer:*" prefix grants.
-var (
-	PresetOwnerPermissions = []string{MerchantAll, CustomerAll}
-
-	PresetMemberPermissions = []string{
-		CustomerBalanceRead,
-		CustomerBillingUpdate,
-		CustomerSpendDelegationsRead,
-		CustomerSpendDelegationsUpdate,
-		CustomerCheckoutCreate,
-		CustomerPaymentMethodsUpdate,
-	}
-
-	PresetReadOnlyPermissions = []string{
-		CustomerBalanceRead,
-		CustomerSpendDelegationsRead,
-	}
-)
-
-// PermissionsForRoles maps a principal's host roles onto the catalog via the
-// canonical preset documented above: the union of each recognized role's tier,
-// deduped, in tier order (owner/admin, then member, then read-only). Unrecognized
-// roles are ignored; no roles (or only unrecognized ones) yields nil, which
-// still authenticates for the grant-free /v1/me self-service surface but
-// passes no permission gate.
-func PermissionsForRoles(roles ...string) []string {
-	var owner, member, readOnly bool
-	for _, role := range roles {
-		switch strings.ToLower(strings.TrimSpace(role)) {
-		case "owner", "admin":
-			owner = true
-		case "member":
-			member = true
-		case "read-only", "readonly", "viewer":
-			readOnly = true
-		}
-	}
-	var out []string
-	seen := map[string]bool{}
-	add := func(perms []string) {
-		for _, p := range perms {
-			if !seen[p] {
-				seen[p] = true
-				out = append(out, p)
-			}
-		}
-	}
-	if owner {
-		add(PresetOwnerPermissions)
-	}
-	if member {
-		add(PresetMemberPermissions)
-	}
-	if readOnly {
-		add(PresetReadOnlyPermissions)
-	}
-	return out
-}
+// MerchantAll is the merchant owner's glob: the merchant group's owner holds
+// the whole namespace.
+const MerchantAll = "merchant:*"

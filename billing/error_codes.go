@@ -82,7 +82,6 @@ const (
 	CodeHostMerchantMismatch                  = "host_merchant_mismatch"
 	CodeMerchantContextMismatch               = "merchant_context_mismatch"
 	CodeInvokerScopedPrincipal                = "invoker_scoped_principal"
-	CodeCustomerScopeMismatch                 = "customer_scope_mismatch"
 	CodeCatalogOwnerRequired                  = "catalog_owner_required"
 	CodeStepUpRequired                        = "step_up_required"
 	CodeStepUpUnavailable                     = "step_up_unavailable"
@@ -163,7 +162,6 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeDelegatedMerchantUnresolved, 403, authz, "The delegated token's issuer resolves to no merchant."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
-	{CodeCustomerScopeMismatch, 403, authz, "The credential may not act on the addressed customer."},
 	{CodeCatalogOwnerRequired, 403, authz, "The catalog owner could not be established from the credential or selector."},
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},

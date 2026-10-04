@@ -70,7 +70,7 @@ type External struct {
 type Env struct {
 	Options
 	Runtime *app.Runtime
-	// Customer authenticates AuthCustomer and AuthCustomerGrant routes.
+	// Customer authenticates AuthCustomer routes.
 	Customer router.Middleware
 	// Root and Unlocker serve the platform tier.
 	Root     RootPermissionChecker
@@ -208,9 +208,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		if !route.InvokerScoped {
 			mw = append(mw, middleware.PayerScopedRequired())
 		}
-	case AuthCustomerGrant:
-		mw = append([]router.Middleware{e.Customer, middleware.PayerScopedRequired(), middleware.CustomerScopeRequired()}, conn...)
-		mw = append(mw, middleware.RequirePermission(route.Perm))
 	case AuthMerchant:
 		if route.CatalogWrite {
 			mw = append(mw, catalogWriteGuardMW(e.config()))
@@ -438,11 +435,6 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // and the credential profile lives on the resolved Principal.
 const SelfRoutePrefix = "/me"
 
-// CustomerRoutePrefix is the canonical customer-treasury surface (#567): a
-// customer (any payer) acting over its OWN co-managed/shared balance, addressed
-// by the customer's id — not merchant/seller administration.
-const CustomerRoutePrefix = "/customers"
-
 var scopeRank = map[CustomerScope]int{ScopeSelfService: 0, ScopeBillingManagement: 1, ScopeSubscriptionManagement: 2}
 
 // serves reports whether an exposure of scope serves a Customer route.
@@ -474,14 +466,4 @@ func RegisterCustomerBillingManagementRoutes(rr router.Router, rt *app.Runtime, 
 // cancellation, resumption and payment-method selection.
 func RegisterCustomerSubscriptionManagementRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware) {
 	customerEnv(rt, delegatedMW, routesurface.ProviderRoutes{}).mount(rr, "/v1/me", in(Customer, serves(ScopeSubscriptionManagement)))
-}
-
-// RegisterCustomerTreasuryRoutes mounts the customer-as-PAYER treasury surface
-// (#567), deliberately separate from `/me` (the caller's OWN balance) and
-// `/merchant` (seller operations). Handlers are shared with `/v1/me/*`:
-// CustomerScopeRequired confirms the {customer_id} scope and rebinds the
-// acting payer. Every route is gated by a `customer:*` permission because the
-// balance may be a shared resource.
-func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes) {
-	customerEnv(rt, delegatedMW, providerRoutes).mount(rr, "/v1/customers", in(Treasury))
 }

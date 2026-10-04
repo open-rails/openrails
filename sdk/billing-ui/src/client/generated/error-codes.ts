@@ -62,7 +62,6 @@ export type OpenRailsErrorCode =
   | "customer_action_required"
   | "customer_not_found"
   | "customer_payment_unsupported"
-  | "customer_scope_mismatch"
   | "customer_session_required"
   | "dashboard_invalid"
   | "database_busy"
@@ -304,7 +303,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   customer_action_required: { status: 403, type: "authorization_error", meaning: "Only the verified customer may perform this payment action." },
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },
-  customer_scope_mismatch: { status: 403, type: "authorization_error", meaning: "The credential may not act on the addressed customer." },
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
   dashboard_invalid: { status: 400, type: "invalid_request_error", meaning: "The dashboard is invalid; metadata.errors lists why." },
   database_busy: { status: 503, type: "api_error", meaning: "No database connection is available; retry shortly." },

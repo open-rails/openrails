@@ -27,11 +27,11 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Webhooks | Signed Stripe completion/replay/stale expiry, provider-owned subscription notices, CCBill posts through a trusted proxy with foreign source IPs refused | Forged signatures, wrong account, thin-event URL validation, Solana notifications |
 | Multi-replica exactly-once rebilling | 2–3 embedded replicas (own connections, River client, clock, HTTP) over one database: concurrent due passes, barrier-forced admission race, crash at every renewal point, leader crash, ±30s clock skew, notice during finalize, retry-slot races, cancel/refund racing renewal, provider-owned schedules, rolling restart | Tier change racing renewal; skew beyond the lost-submission settle delay |
 | River jobs | Real shared fleet, scheduled renewal, operation recovery, interrupted rescue-worker recovery and restart after completed rescue work | Host/managed ownership permutations, arbitrary schema migration concurrency, stalled queue health |
-| Embedded/HTTP client parity | Subscription scenarios run embedded and remote clients against mounted HTTP routes | Full catalog, treasury, configuration and archive parity; standalone executable boot |
+| Embedded/HTTP client parity | Subscription scenarios run embedded and remote clients against mounted HTTP routes | Full catalog, configuration and archive parity; standalone executable boot |
 | PostgreSQL initialization | Fresh schema, public migration entry point, replay and runtime startup | Concurrent bootstrap, one-connection pool, privilege grants, drift refusal and restored databases |
 | Saved payment methods and custody | NMI/Stripe setup and subscription card changes | Vault deletion with active agreements, Basis Theory/HyperSwitch custody, credential rotation |
 | Provider safety/configuration | Engine write-mode holds and explicit embedded write mode; fake sandbox posture | Live-key rejection for all providers, read-only enforcement on every mutation, secret/public configuration isolation |
-| Treasury/credit ledger | No focused database scenario yet | Deposit replay, balanced append-only transfers, insufficient funds, holds/capture/release, lot expiry, concurrent spending |
+| Credit ledger | No focused database scenario yet | Deposit replay, balanced append-only transfers, insufficient funds, holds/capture/release, lot expiry, concurrent spending |
 | Usage metering and billing policies | No focused database scenario yet | Rate cards, usage aggregation, catalog vs host pricing authority, limits, delegation and wasted-spend caps |
 | Invoices and receivables | No focused database scenario yet | Finalization, rounding, collections, partial payment, pay-now, arrears and delinquency |
 | Provider/custodian account migration | No focused scenario yet | Freeze source/target identity, paused destination, exact cancellation receipts, no double billing |
@@ -40,7 +40,7 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Other rails | NMI/Mobius and Stripe modeled; imported CCBill memberships: renewal/replay, decline then recovery, cancellation (incl. failedRB), expiration, refund/chargeback reversals, refused new sale | CCBill Void/Upgrade/BillingDateChange/UserReactivation, Solana transfer/signature/recurring paths, external vault adapters |
 | Self-service, administration and reporting | Subscription and payment reads used as assertions | `/me` pagination, notifications, billing portal, analytics, metrics/copilot, readiness, rate limits, CLI and browser UX |
 
-The highest-value additions after both NMI ownership paths are treasury/ledger
+The highest-value additions after both NMI ownership paths are credit ledger
 atomicity, uncertain one-time payments/refunds, authorization denials and schema
 concurrency. Cheap pure tests should cover arithmetic boundaries directly;
 database workflows should assert financial effects and provider request counts.

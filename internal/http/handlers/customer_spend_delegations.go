@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -60,91 +59,6 @@ func (e wireKeyError) Error() string                 { return string(e) }
 func (e wireKeyError) ClientSafeBindMessage() string { return string(e) }
 
 var _ httprequest.ClientSafeBindError = wireKeyError("")
-
-// GetCustomerSpendDelegations returns the customer policy for sharing the
-// customer's own payable balance. The payer is the typed treasury payer bound
-// by CustomerScopeRequired (or#916); the request never accepts a body
-// customer_id (it is taken from the :customer_id path scope). Every customer
-// can delegate spend of its balance.
-func GetCustomerSpendDelegations(r *httprequest.Request) {
-	payer, ok := requireCustomerTreasuryPayer(r)
-	if !ok {
-		return
-	}
-
-	store, ok := customerTreasuryStore(r)
-	if !ok {
-		return
-	}
-	rows, err := store.LoadAll(r.Request.Context(), payer.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "spend delegation lookup failed")
-		return
-	}
-	r.SuccessJSON(CustomerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromRows(rows)})
-}
-
-// PutCustomerSpendDelegations replaces the customer policy document.
-func PutCustomerSpendDelegations(r *httprequest.Request) {
-	payer, ok := requireCustomerTreasuryPayer(r)
-	if !ok {
-		return
-	}
-
-	var doc CustomerSpendDelegationsDocument
-	if !r.BindJSON(&doc) {
-		return
-	}
-	if strings.TrimSpace(doc.CustomerID) != "" {
-		r.ErrorJSON(http.StatusBadRequest, "customer_id is not allowed in the body; it is taken from the path scope")
-		return
-	}
-	next, err := validateCustomerSpendDelegations(doc.Delegations)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-
-	svc, ok := customerSpendDelegationService(r)
-	if !ok {
-		return
-	}
-	if err := svc.ReplaceInvokerSpendLimits(r.Request.Context(), payer.CustomerID, next); err != nil {
-		customerSpendDelegationWriteError(r, err, "spend delegation replace failed")
-		return
-	}
-
-	r.SuccessJSON(CustomerSpendDelegationsDocument{Delegations: customerSpendDelegationsFromInputs(next)})
-}
-
-// PutCustomerSpendDelegation atomically upserts one addressed delegation and
-// leaves every unrelated payer-owned delegation untouched.
-func PutCustomerSpendDelegation(r *httprequest.Request) {
-	payer, ok := requireCustomerTreasuryPayer(r)
-	if !ok {
-		return
-	}
-
-	var delegation CustomerSpendDelegation
-	if !r.BindJSON(&delegation) {
-		return
-	}
-	next, err := validateCustomerSpendDelegations([]CustomerSpendDelegation{delegation})
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-
-	svc, ok := customerSpendDelegationService(r)
-	if !ok {
-		return
-	}
-	if err := svc.SetInvokerSpendLimits(r.Request.Context(), payer.CustomerID, next[0]); err != nil {
-		customerSpendDelegationWriteError(r, err, "spend delegation upsert failed")
-		return
-	}
-	r.SuccessJSON(CustomerSpendDelegation(next[0]))
-}
 
 // ServicePutCustomerSpendDelegations is the merchant-machine counterpart of
 // PutCustomerSpendDelegations. Route authentication pins the merchant; the
@@ -195,23 +109,6 @@ func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(CustomerSpendDelegation(next[0]))
-}
-
-// DeleteCustomerSpendDelegation revokes exactly ONE addressed delegation
-// (or#911) and leaves every sibling untouched — the single-grant delete the
-// zero-limit-window workaround existed to approximate. 404 when nothing exists
-// at (scope, scope_key): already revoked or never granted, a real answer the
-// caller can act on.
-func DeleteCustomerSpendDelegation(r *httprequest.Request) {
-	payer, ok := requireCustomerTreasuryPayer(r)
-	if !ok {
-		return
-	}
-	svc, ok := customerSpendDelegationService(r)
-	if !ok {
-		return
-	}
-	deleteCustomerSpendDelegation(r, svc, payer.CustomerID)
 }
 
 // ServiceDeleteCustomerSpendDelegation is the merchant-machine counterpart of
@@ -271,27 +168,6 @@ func customerSpendDelegationWriteError(r *httprequest.Request, err error, intern
 		return
 	}
 	r.ErrorJSON(http.StatusInternalServerError, internalMessage)
-}
-
-// requireCustomerTreasuryPayer returns the typed payer bound by
-// middleware.CustomerScopeRequired (or#916). The scope match already happened
-// there; a missing binding means the route was mounted without the scope
-// middleware, so fail closed.
-func requireCustomerTreasuryPayer(r *httprequest.Request) (*middleware.TreasuryPayer, bool) {
-	payer, ok := middleware.TreasuryPayerFromRequest(r)
-	if !ok || payer.CustomerID.IsZero() {
-		r.ErrorJSON(http.StatusUnauthorized, "treasury payer not bound")
-		return nil, false
-	}
-	return payer, true
-}
-
-func customerTreasuryStore(r *httprequest.Request) (*admission.InvokerSpendLimitStore, bool) {
-	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return nil, false
-	}
-	return admission.NewInvokerSpendLimitStore(r.State.DB), true
 }
 
 func validateCustomerSpendDelegations(in []CustomerSpendDelegation) ([]billingservice.InvokerSpendLimitInput, error) {

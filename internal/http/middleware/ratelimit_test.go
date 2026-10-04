@@ -103,18 +103,13 @@ func TestClassifyBucket(t *testing.T) {
 		{"GET", "/billing/v1/captcha/client.js", "captcha"},
 		{"POST", "/v1/checkout", "checkout"},
 		{"POST", "/v1/checkout/checkout_123/confirm", "checkout"},
-		{"POST", "/v1/customers/customer_123/checkout", "checkout"},
-		{"POST", "/billing/v1/customers/customer_123/checkout/checkout_123/confirm", "checkout"},
 		{"GET", "/v1/me/checkout/checkout_123", "default"},
 		{"POST", "/v1/me/checkout/sessions", "checkout"},
 		{"POST", "/billing/v1/checkout-sessions/ocs_1/pay", "checkout"},
 		{"GET", "/v1/checkout-sessions/ocs_1", "default"},
 		{"POST", "/v1/checkout-config", "default"},
-		{"POST", "/v1/customers/customer_123/checkout-settings", "default"},
-		{"POST", "/v1/customers//checkout", "default"},
 		{"POST", "/v1/me/payment-methods", "payment-methods"},
-		{"PUT", "/billing/v1/customers/customer_123/payment-methods/pm_123", "payment-methods"},
-		{"POST", "/v1/customers/customer_123/payment-methods-export", "default"},
+		{"POST", "/v1/customers/customer_123/checkout", "default"},
 		{"POST", "/v1/me/subscriptions/sub_123/cancel", "subscriptions"},
 		{"delete", "/billing/v1/me/subscriptions/sub_123", "subscriptions"},
 		{"GET", "/v1/me/subscriptions/sub_123", "default"},
@@ -338,7 +333,7 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 		canonical, actual, bucket, limit string
 		captcha                          bool
 	}{
-		{"/billing/v1/customers/{customer_id}/checkout", "/api/pay/v1/customers/a%2Fb/checkout?x=1", "checkout", "checkout", true},
+		{"/billing/v1/me/checkout", "/api/pay/v1/tenants/a%2Fb/me/checkout?x=1", "checkout", "checkout", true},
 		{"/billing/v1/me/payment-methods", "/api/pay/v1/me/payment-methods", "payment-methods", "payment", true},
 		{"/billing/v1/webhooks/{provider}/{account_id}", "/api/pay/v1/webhooks/stripe/acct_test", "webhook", "webhook", false},
 		{"/billing/v1/captcha/status", "/api/pay/v1/captcha/status", "captcha", "", false},

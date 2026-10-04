@@ -38,6 +38,4 @@ var meteringRoutes = []Route{
 		Request: handlers.ServiceEndpointRevenueRequest{}, Responses: []Reply{{200, billing.ResourceRevenueResponse{}}}, Errors: codes("currency_unsupported", "invalid_param"), Handler: h(handlers.ServiceResourceRevenue)},
 	{Method: GET, Path: "/v1/me/usage", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
 		Query: params(text("currency"), text("from"), text("to")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("authentication_required", "currency_unsupported", "invalid_param"), Handler: h(handlers.GetMyUsage)},
-	{Method: GET, Path: "/v1/customers/{customer_id}/usage", Group: Treasury, Auth: AuthCustomerGrant, Perm: billing.CustomerBalanceRead,
-		Query: params(text("currency"), text("from"), text("to")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("authentication_required", "currency_unsupported", "invalid_param"), Handler: h(handlers.GetMyUsage)},
 }

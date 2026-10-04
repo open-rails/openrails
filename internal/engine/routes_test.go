@@ -77,7 +77,7 @@ func TestHTTPConfigurationIsCopiedAndRoutesMemoized(t *testing.T) {
 	require.ErrorContains(t, err, "HTTP is disabled")
 
 	sandbox := config.Config{TestMode: config.CredentialPostureSandbox}
-	sandbox.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true}}}
+	sandbox.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}}
 	_, err = httpConfig(sandbox, nil)
 	require.ErrorContains(t, err, "requires")
 	policy := &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/portal", Delegated: true}}}
@@ -122,7 +122,7 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 	}
 
 	full := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, Merchant: true,
-		CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}
+		CustomerRoutes: []config.CustomerRoutesConfig{{Delegated: true}}}
 	rt := httpRuntime(full, true)
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
 	mux := mountAt(t, rt, "/api/pay")
@@ -164,40 +164,40 @@ func TestHTTPCatalogMutationsOmittedWhenDisabled(t *testing.T) {
 // Delegated verifiers may check signatures over the exact request, so the
 // adapter must hand them the original URI, raw path and unread body.
 func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
-	const target = "/api/pay/v1/customers/a%2Fb/invoices/invoice-1?view=raw"
+	const target = "/api/pay/v1/tenants/a%2Fb/me/invoices/invoice-1?view=raw"
 	const body = "{ \"signed\" : \"unaltered\" }\n"
 	calls := 0
 	verifier := func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error) {
 		calls++
-		require.Equal(t, "/v1/me", profile)
+		require.Equal(t, "/v1/tenants/{tenant}/me", profile)
 		require.Equal(t, target, r.RequestURI)
-		require.Equal(t, "/api/pay/v1/customers/a%2Fb/invoices/invoice-1", r.URL.RawPath)
-		require.Equal(t, "a/b", r.PathValue("customer_id"))
+		require.Equal(t, "/api/pay/v1/tenants/a%2Fb/me/invoices/invoice-1", r.URL.RawPath)
+		require.Equal(t, "a/b", r.PathValue("tenant"))
 		require.Equal(t, "invoice-1", r.PathValue("id"))
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, body, string(raw))
 		return nil, billingauth.ErrUnauthenticated
 	}
-	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}, false, verifier), "/api/pay")
+	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/v1/tenants/{tenant}/me", Delegated: true}}}, false, verifier), "/api/pay")
 	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, target, body, "Authorization", "Bearer signed").Code)
 	require.Equal(t, 1, calls)
 
 	// Routers that accept a trailing slash without redirecting still bind values.
-	bound := routebundle.BindPathValues("/v1/customers/{customer_id}/invoices/{id}", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "acme", r.PathValue("customer_id"))
+	bound := routebundle.BindPathValues("/v1/tenants/{tenant}/me/invoices/{id}", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "acme", r.PathValue("tenant"))
 		require.Equal(t, "invoice-1", r.PathValue("id"))
-		require.Equal(t, "/api/pay/v1/customers/acme/invoices/invoice-1/", r.URL.Path)
+		require.Equal(t, "/api/pay/v1/tenants/acme/me/invoices/invoice-1/", r.URL.Path)
 		calls++
 	}))
-	serve(bound, http.MethodGet, "/api/pay/v1/customers/acme/invoices/invoice-1/", "")
+	serve(bound, http.MethodGet, "/api/pay/v1/tenants/acme/me/invoices/invoice-1/", "")
 	require.Equal(t, 2, calls)
 }
 
 // One limiter per runtime: a second host mount or a sibling route in the same
 // bucket must not reset the counters.
 func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
-	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}, false)
+	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Delegated: true}}}, false)
 	rt.App.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
 	first, second := mountAt(t, rt, "/first"), mountAt(t, rt, "/second")
 	for i, tc := range []struct {
@@ -206,7 +206,7 @@ func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 	}{
 		{first, "/first/v1/me/checkout"},
 		{second, "/second/v1/me/checkout"},
-		{first, "/first/v1/customers/customer-1/checkout"},
+		{first, "/first/v1/me/checkout/sessions"},
 	} {
 		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader("{}"))
 		req.RemoteAddr = "203.0.113.94:1234"
@@ -258,7 +258,7 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 		require.Equal(t, tc.status, rec.Code, rec.Body.String())
 	}
 	require.Equal(t, map[string]int{"portal": 2, "platform": 2}, calls)
-	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/customers/x/balance", "/billing/v1/merchant/payment-providers", platform + "/checkout", platform + "/payment-methods"} {
+	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/merchant/payment-providers", platform + "/checkout", platform + "/payment-methods"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay"+path, "").Code, path)
 	}
 	routes, err := rt.Routes()

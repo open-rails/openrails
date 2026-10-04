@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -75,7 +73,6 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 	}
 	invoker := delegated()
 	invoker.Invoker = "bot-7"
-	settings := RequirePermission(billing.MerchantCustomerSettingsRead)
 	for _, tc := range []struct {
 		name, authz string
 		mw          mws
@@ -98,13 +95,8 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 		{"host: unauthenticated", "", mws{host(nil, billingauth.ErrUnauthenticated)}, 401, "authentication required"},
 		{"host: non-uuid subject", "", mws{host(&billingauth.DelegatedPrincipal{MerchantID: testMerchant.String(), SubjectID: "user-123"}, nil)}, 401, "delegated_principal_invalid"},
 		{"host: no merchant", "", mws{host(&billingauth.DelegatedPrincipal{SubjectID: payerID.String()}, nil)}, 401, "delegated_principal_invalid"},
-		{"no principal", "", mws{settings}, 401, "bearer principal required"},
 		{"no principal, payer gate", "", mws{PayerScopedRequired()}, 401, "bearer principal required"},
-		{"missing permission", "Bearer x", mws{self(delegated(), nil), settings}, 403, "permission_required"},
-		{"foreign apex glob", "Bearer x", mws{self(delegated("root:*", "*"), nil), settings}, 403, "permission_required"},
 		{"invoker on payer surface", "Bearer x", mws{self(invoker, nil), PayerScopedRequired()}, 403, "invoker_scoped_principal"},
-		{"merchant treasury without merchant admin", "Bearer x", mws{self(delegated(billing.CustomerAll), nil), CustomerScopeRequired()}, 403, "customer_scope_mismatch"},
-		{"treasury without principal", "", mws{CustomerScopeRequired()}, 401, "delegated principal required"},
 	} {
 		w, seen := serveNeutral(t, "/v1/customers/acme", func(r *http.Request) { r.Header.Set("Authorization", tc.authz) }, tc.mw...)
 		require.Equal(t, tc.status, w.Code, tc.name)
@@ -115,19 +107,23 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 	require.Contains(t, w.Header().Get("WWW-Authenticate"), `DPoP error="invalid_dpop_proof"`)
 
 	for _, mw := range []mws{
-		{self(delegated(billing.MerchantAll), nil), RequirePermission(" " + billing.MerchantCustomerSettingsRead + " ")},
-		{self(delegated(billing.MerchantCustomerSettingsRead), nil), settings},
 		{self(delegated(), nil), PayerScopedRequired()},
 	} {
 		w, _ := serveNeutral(t, "/v1/customers/x", nil, mw...)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	}
-	w, seen := serveNeutral(t, "/v1/customers/x", nil, host(&billingauth.DelegatedPrincipal{MerchantID: testMerchant.String(), SubjectID: payerID.String(), Invoker: " bot-7 ", Permissions: []string{"customer:*"}}, nil))
+	w, seen := serveNeutral(t, "/v1/customers/x", nil, host(&billingauth.DelegatedPrincipal{MerchantID: testMerchant.String(), SubjectID: payerID.String(), Invoker: " bot-7 ", Permissions: []string{billing.MerchantAll}}, nil))
 	require.Equal(t, http.StatusOK, w.Code)
 	p, _ := PrincipalFromRequest(seen)
 	require.Equal(t, CredentialHostDelegatedUser, p.CredentialType)
 	require.True(t, p.InvokerScoped())
-	require.True(t, p.Can(context.Background(), billing.CustomerAll))
+	require.True(t, p.Can(context.Background(), billing.MerchantCustomerSettingsRead))
+
+	// Permissions are namespace-anchored: a foreign apex glob grants nothing.
+	w, seen = serveNeutral(t, "/v1/customers/x", nil, self(delegated("root:*", "*"), nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	p, _ = PrincipalFromRequest(seen)
+	require.False(t, p.Can(context.Background(), billing.MerchantCustomerSettingsRead))
 }
 
 func TestDelegatedBinding(t *testing.T) {
@@ -160,83 +156,5 @@ func TestDelegatedBinding(t *testing.T) {
 			*r = *r.WithContext(merchant.WithID(r.Context(), tc.bound))
 		}, DelegatedSelfRequired(fakeResolver{resolved: delegated()}))
 		require.Equal(t, tc.want, w.Code, "%s: %s", tc.header, w.Body.String())
-	}
-}
-
-// or#916: :customer_id binds the principal's own payable subject, or the
-// merchant's treasury only for a merchant-admin principal.
-func TestResolveTreasuryPayer(t *testing.T) {
-	uuidSubject := delegated()
-	uuidSubject.CustomerID, uuidSubject.DelegatedSubject = uuid.Nil, payerID.String()
-	opaqueSubject := delegated()
-	opaqueSubject.CustomerID = uuid.Nil
-	zeroMerchant := delegated(billing.MerchantAll)
-	zeroMerchant.MerchantID = billing.MerchantID{}
-	merchantPayer := &TreasuryPayer{Subject: "user-123", CustomerID: identity.CustomerID(testMerchant.UUID()), MerchantPayer: true}
-	subjectPayer := &TreasuryPayer{Subject: "user-123", CustomerID: identity.CustomerID(payerID)}
-	admin := delegated(billing.MerchantAll)
-
-	for _, tc := range []struct {
-		customerID string
-		resolved   *credential.ResolvedDelegated
-		want       *TreasuryPayer
-	}{
-		{" user-123 ", delegated(), subjectPayer},
-		{payerID.String(), delegated(), subjectPayer},
-		{payerID.String(), uuidSubject, &TreasuryPayer{Subject: payerID.String(), CustomerID: identity.CustomerID(payerID)}},
-		{"user-123", opaqueSubject, nil},
-		{uuid.NewString(), admin, nil},
-		{"acme", delegated(billing.CustomerAll), nil},
-		{"acme", admin, merchantPayer},
-		{testMerchant.String(), admin, merchantPayer},
-		{" ", admin, nil},
-		{"acme", nil, nil},
-		{"acme", zeroMerchant, nil},
-	} {
-		got, ok := ResolveTreasuryPayer(tc.customerID, tc.resolved)
-		require.Equal(t, tc.want != nil, ok, tc.customerID)
-		require.Equal(t, tc.want, got, tc.customerID)
-	}
-
-	w, seen := serveNeutral(t, "/v1/customers/acme", nil, DelegatedSelfRequired(fakeResolver{resolved: admin}), CustomerScopeRequired())
-	require.Equal(t, http.StatusOK, w.Code)
-	payer, _ := TreasuryPayerFromRequest(seen)
-	require.Equal(t, merchantPayer, payer)
-	uc, _ := seen.UserContext()
-	require.Equal(t, billingauth.UserContext{UserID: testMerchant.String(), Merchant: "acme", Username: "acme"}, uc, "the merchant payer carries no end-user contact data")
-}
-
-// A native session owns its personal account outright; any other target needs
-// a live, exact-target authorization decision.
-func TestNativeTreasuryAuthority(t *testing.T) {
-	personal := payerID.String()
-	for _, tc := range []struct {
-		customerID string
-		authorize  func(context.Context, string, billingauth.Target) error
-		status     int
-	}{
-		{personal, nil, 200},
-		{"acme", nil, 403},
-		{testMerchant.String(), func(_ context.Context, perm string, target billingauth.Target) error {
-			if perm != billing.CustomerAll || target.CustomerID != testMerchant.String() {
-				return errors.New("wrong decision request")
-			}
-			return nil
-		}, 200},
-		{"acme", func(context.Context, string, billingauth.Target) error {
-			return billingauth.GateError{Status: 409, Message: "no"}
-		}, 409},
-		{"acme", func(context.Context, string, billingauth.Target) error { return errors.New("down") }, 503},
-		{uuid.NewString(), nil, 403},
-	} {
-		native := func(next router.Handler) router.Handler {
-			return func(r *request.Request) {
-				SetNativeTreasuryAuthority(r, NativeTreasuryAuthority{CustomerID: personal, Target: billingauth.Target{MerchantID: testMerchant, MerchantSlug: "acme"}, Authorize: tc.authorize})
-				next(r)
-			}
-		}
-		w, _ := serveNeutral(t, "/v1/customers/"+tc.customerID, nil,
-			DelegatedSelfRequired(fakeResolver{resolved: delegated()}), native, CustomerScopeRequired(), RequirePermission(billing.CustomerAll))
-		require.Equal(t, tc.status, w.Code, "%s: %s", tc.customerID, w.Body.String())
 	}
 }
