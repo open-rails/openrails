@@ -224,7 +224,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	}
 	cursor := cursorRow.CursorMerchantID
 
-	dueWork := func(after *uuid.UUID, limit int32) ([]*uuid.UUID, error) {
+	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
 			Now:                    now,
 			NotificationCutoff:     now.Add(-config.NotificationUnseenRetention),
@@ -254,7 +254,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			return nil, result, fmt.Errorf("cleanup expired data: list merchants with retention work (ring wrap): %w", herr)
 		}
 		for _, mid := range head {
-			if mid != nil && bytes.Compare(mid[:], cursor[:]) <= 0 {
+			if bytes.Compare(mid[:], cursor[:]) <= 0 {
 				merchantIDs = append(merchantIDs, mid)
 			}
 		}
@@ -265,15 +265,12 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	// the next pass starts fresh.
 	var nextCursor *uuid.UUID
 	if len(merchantIDs) == batch {
-		nextCursor = merchantIDs[len(merchantIDs)-1]
+		last := merchantIDs[len(merchantIDs)-1]
+		nextCursor = &last
 	}
 
 	visited := make([]uuid.UUID, 0, len(merchantIDs))
-	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		merchantID := *mid
+	for _, merchantID := range merchantIDs {
 		visited = append(visited, merchantID)
 		progress.Mark(ctx, "cleanup merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "cleanup expired data", func(mctx context.Context) error {

@@ -151,11 +151,10 @@ func (q *Queries) ListCustodiansForMerchant(ctx context.Context, merchantID uuid
 
 const resolveCustodianOwnerByIdentity = `-- name: ResolveCustodianOwnerByIdentity :one
 SELECT id, merchant_id, key, kind, environment, account_id
-FROM billing.custodian_owner_by_identity(
-    lower($1::text),
-    COALESCE($2::text, 'live'),
-    $3::text
-)
+FROM billing.custodians
+WHERE kind = lower($1::text)
+  AND environment = COALESCE($2::text, 'live')
+  AND account_id = $3::text
 `
 
 type ResolveCustodianOwnerByIdentityParams struct {
@@ -165,18 +164,17 @@ type ResolveCustodianOwnerByIdentityParams struct {
 }
 
 type ResolveCustodianOwnerByIdentityRow struct {
-	ID          *uuid.UUID
-	MerchantID  *uuid.UUID
-	Key         *string
-	Kind        *string
-	Environment *string
-	AccountID   *string
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Key         string
+	Kind        string
+	Environment string
+	AccountID   string
 }
 
-// CROSS-MERCHANT: a custodian sends its own instrument events carrying ITS
-// tenant id and no merchant context — the same problem as an account-routed
-// rail webhook, and the same SECURITY DEFINER answer (migration 0053). It
-// resolves the CUSTODIAN, never "the" PSP: one custodian may back several.
+// CROSS-MERCHANT: a custodian's own instrument events carry its tenant id and
+// no merchant context. This resolves the CUSTODIAN, never "the" PSP: one
+// custodian may back several.
 func (q *Queries) ResolveCustodianOwnerByIdentity(ctx context.Context, arg ResolveCustodianOwnerByIdentityParams) (ResolveCustodianOwnerByIdentityRow, error) {
 	row := q.db.QueryRow(ctx, resolveCustodianOwnerByIdentity, arg.Kind, arg.Environment, arg.AccountID)
 	var i ResolveCustodianOwnerByIdentityRow

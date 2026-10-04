@@ -78,52 +78,23 @@ func (q *Queries) DeleteRebillCyclesBefore(ctx context.Context, arg DeleteRebill
 	return result.RowsAffected(), nil
 }
 
-const getRebillCycle = `-- name: GetRebillCycle :one
-SELECT merchant_id, id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, missed_at, miss_reason, created_at, first_category, first_reason, first_at, won_attempt_id, won_kind, won_source, won_at, won_ordinal, first_failed, first_outcome, closed_at, recovered_by FROM billing.rebill_cycle_facts
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-`
-
-type GetRebillCycleParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) GetRebillCycle(ctx context.Context, arg GetRebillCycleParams) (BillingRebillCycleFact, error) {
-	row := q.db.QueryRow(ctx, getRebillCycle, arg.MerchantID, arg.ID)
-	var i BillingRebillCycleFact
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ID,
-		&i.SubscriptionID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.Rail,
-		&i.Owner,
-		&i.DueAt,
-		&i.Amount,
-		&i.Currency,
-		&i.MissedAt,
-		&i.MissReason,
-		&i.CreatedAt,
-		&i.FirstCategory,
-		&i.FirstReason,
-		&i.FirstAt,
-		&i.WonAttemptID,
-		&i.WonKind,
-		&i.WonSource,
-		&i.WonAt,
-		&i.WonOrdinal,
-		&i.FirstFailed,
-		&i.FirstOutcome,
-		&i.ClosedAt,
-		&i.RecoveredBy,
-	)
-	return i, err
-}
-
 const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
-SELECT merchant_id FROM billing.overdue_rebill_merchant_ids(
-    $1::timestamptz, $2::timestamptz, $3::int)
+SELECT s.merchant_id
+FROM billing.subscriptions s
+WHERE s.status IN ('active', 'unverified', 'awaiting_method') AND s.deleted_at IS NULL
+  AND ((s.collection_policy = 'engine' AND s.current_period_ends_at <= $1::timestamptz)
+       OR (s.collection_policy = 'nmi_schedule' AND s.current_period_ends_at <= $2::timestamptz))
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.rebill_cycles c
+       WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
+         AND c.missed_at IS NOT NULL)
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.rebill_cycles c
+        JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
+       WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
+GROUP BY s.merchant_id
+ORDER BY MIN(s.current_period_ends_at), s.merchant_id
+LIMIT $3::int
 `
 
 type ListOverdueRebillMerchantsParams struct {
@@ -132,15 +103,17 @@ type ListOverdueRebillMerchantsParams struct {
 	MerchantLimit int32
 }
 
-func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants holding a subscription whose period ended before its
+// owner's deadline with neither an attempt nor a recorded miss for that cycle.
+func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebillMerchants, arg.EngineCutoff, arg.NmiCutoff, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
@@ -244,26 +217,51 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 }
 
 const listRebillCycles = `-- name: ListRebillCycles :many
-SELECT cf.merchant_id, cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.created_at, cf.first_category, cf.first_reason, cf.first_at, cf.won_attempt_id, cf.won_kind, cf.won_source, cf.won_at, cf.won_ordinal, cf.first_failed, cf.first_outcome, cf.closed_at, cf.recovered_by, count(*) OVER () AS total
-FROM billing.rebill_cycle_facts cf
-WHERE cf.merchant_id = $1::uuid
-  AND ($2::text[] IS NULL OR cf.owner = ANY($2::text[]))
-  AND ($3::text[] IS NULL OR cf.first_outcome = ANY($3::text[]))
-  AND ($4::text[] IS NULL OR cf.miss_reason = ANY($4::text[]))
-  AND ($5::uuid IS NULL OR cf.psp_id = $5::uuid)
-  AND ($6::uuid IS NULL OR cf.subscription_id = $6::uuid)
-  AND ($7::timestamptz IS NULL OR cf.due_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR cf.due_at < $8::timestamptz)
-  AND ($9::text[] IS NULL OR CASE
+WITH cf AS (
+    SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
+           c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
+           CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
+                WHEN f.category IS NULL THEN 'pending'
+                WHEN f.category = 'approved' THEN 'approved'
+                WHEN f.category = 'system_error' THEN 'error'
+                ELSE 'declined' END::text AS first_outcome,
+           LEAST(w.attempted_at, CASE WHEN s.cancelled_at IS NOT NULL THEN GREATEST(s.cancelled_at, c.due_at) END,
+                 c.due_at + interval '15 days')::timestamptz AS closed_at,
+           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
+                WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
+                WHEN EXISTS (SELECT 1 FROM billing.payment_method_updates u
+                              WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id AND u.kind = 'updated'
+                                AND u.at >= COALESCE(c.missed_at, f.attempted_at) AND u.at <= w.attempted_at) THEN 'updated_card'
+                WHEN w.kind = 'customer_retry' THEN 'customer_retry'
+                ELSE 'dunning_retry' END::text AS recovered_by
+      FROM billing.rebill_cycles c
+      LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
+                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
+      LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
+                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
+                          ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
+      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id
+     WHERE c.merchant_id = $12::uuid
+       AND ($13::uuid IS NULL OR c.id = $13::uuid)
+)
+SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by, count(*) OVER () AS total
+FROM cf
+WHERE ($1::text[] IS NULL OR cf.owner = ANY($1::text[]))
+  AND ($2::text[] IS NULL OR cf.first_outcome = ANY($2::text[]))
+  AND ($3::text[] IS NULL OR cf.miss_reason = ANY($3::text[]))
+  AND ($4::uuid IS NULL OR cf.psp_id = $4::uuid)
+  AND ($5::uuid IS NULL OR cf.subscription_id = $5::uuid)
+  AND ($6::timestamptz IS NULL OR cf.due_at >= $6::timestamptz)
+  AND ($7::timestamptz IS NULL OR cf.due_at < $7::timestamptz)
+  AND ($8::text[] IS NULL OR CASE
         WHEN cf.won_at IS NOT NULL THEN 'collected'
-        WHEN cf.closed_at <= $10::timestamptz THEN 'lost'
-        ELSE 'open' END = ANY($9::text[]))
+        WHEN cf.closed_at <= $9::timestamptz THEN 'lost'
+        ELSE 'open' END = ANY($8::text[]))
 ORDER BY cf.due_at DESC, cf.id DESC
-LIMIT $12::bigint OFFSET $11::bigint
+LIMIT $11::bigint OFFSET $10::bigint
 `
 
 type ListRebillCyclesParams struct {
-	MerchantID     uuid.UUID
 	Owners         []string
 	FirstOutcomes  []string
 	MissReasons    []string
@@ -275,19 +273,37 @@ type ListRebillCyclesParams struct {
 	Now            time.Time
 	PageOffset     int64
 	PageLimit      int64
+	MerchantID     uuid.UUID
+	ID             *uuid.UUID
 }
 
 type ListRebillCyclesRow struct {
-	BillingRebillCycleFact BillingRebillCycleFact
-	Total                  int64
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Owner          string
+	DueAt          time.Time
+	Amount         int64
+	Currency       string
+	MissedAt       *time.Time
+	MissReason     *string
+	WonAt          *time.Time
+	FirstOutcome   string
+	ClosedAt       time.Time
+	RecoveredBy    string
+	Total          int64
 }
 
-// #1116: the merchant's rebill cycles as rebill_cycle_facts derives them,
-// latest due first. Outcome is collected, lost (closed by now without a
-// collection) or open; a text filter matches any of its values.
+// The merchant's rebill cycles, latest due first, each with its first attempt,
+// the attempt that collected it and when it closes: collected, the subscription
+// cancelled, or 15 days past due (the dunning window is at most 14), whichever
+// is first. Outcome is collected, lost (closed by now uncollected) or open; a
+// text filter matches any of its values. The metrics rebill_cycles family
+// derives the same facts.
 func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesParams) ([]ListRebillCyclesRow, error) {
 	rows, err := q.db.Query(ctx, listRebillCycles,
-		arg.MerchantID,
 		arg.Owners,
 		arg.FirstOutcomes,
 		arg.MissReasons,
@@ -299,6 +315,8 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 		arg.Now,
 		arg.PageOffset,
 		arg.PageLimit,
+		arg.MerchantID,
+		arg.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -308,31 +326,21 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 	for rows.Next() {
 		var i ListRebillCyclesRow
 		if err := rows.Scan(
-			&i.BillingRebillCycleFact.MerchantID,
-			&i.BillingRebillCycleFact.ID,
-			&i.BillingRebillCycleFact.SubscriptionID,
-			&i.BillingRebillCycleFact.CustomerID,
-			&i.BillingRebillCycleFact.PspID,
-			&i.BillingRebillCycleFact.Rail,
-			&i.BillingRebillCycleFact.Owner,
-			&i.BillingRebillCycleFact.DueAt,
-			&i.BillingRebillCycleFact.Amount,
-			&i.BillingRebillCycleFact.Currency,
-			&i.BillingRebillCycleFact.MissedAt,
-			&i.BillingRebillCycleFact.MissReason,
-			&i.BillingRebillCycleFact.CreatedAt,
-			&i.BillingRebillCycleFact.FirstCategory,
-			&i.BillingRebillCycleFact.FirstReason,
-			&i.BillingRebillCycleFact.FirstAt,
-			&i.BillingRebillCycleFact.WonAttemptID,
-			&i.BillingRebillCycleFact.WonKind,
-			&i.BillingRebillCycleFact.WonSource,
-			&i.BillingRebillCycleFact.WonAt,
-			&i.BillingRebillCycleFact.WonOrdinal,
-			&i.BillingRebillCycleFact.FirstFailed,
-			&i.BillingRebillCycleFact.FirstOutcome,
-			&i.BillingRebillCycleFact.ClosedAt,
-			&i.BillingRebillCycleFact.RecoveredBy,
+			&i.ID,
+			&i.SubscriptionID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.Rail,
+			&i.Owner,
+			&i.DueAt,
+			&i.Amount,
+			&i.Currency,
+			&i.MissedAt,
+			&i.MissReason,
+			&i.WonAt,
+			&i.FirstOutcome,
+			&i.ClosedAt,
+			&i.RecoveredBy,
 			&i.Total,
 		); err != nil {
 			return nil, err

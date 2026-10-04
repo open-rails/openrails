@@ -113,22 +113,6 @@ type BillingCatalogApplication struct {
 	AppliedAt       time.Time
 }
 
-type BillingCatalogDriftEvent struct {
-	ID                    uuid.UUID
-	PspID                 *uuid.UUID
-	Rail                  string
-	Kind                  string
-	OpenrailsResourceType string
-	OpenrailsResourceID   *string
-	ExternalResourceID    *string
-	Field                 *string
-	OpenrailsValue        *string
-	ExternalValue         *string
-	DetectedAt            time.Time
-	ResolvedAt            *time.Time
-	MerchantID            uuid.UUID
-}
-
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
 type BillingCatalogMeter struct {
 	MerchantID uuid.UUID
@@ -354,21 +338,6 @@ type BillingEntitlement struct {
 	GrantID             *uuid.UUID
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-}
-
-// Episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
-type BillingFreeloaderEpisode struct {
-	MerchantID    uuid.UUID
-	CustomerID    uuid.UUID
-	EntitlementID uuid.UUID
-	Entitlement   string
-	SourceType    string
-	SourceID      uuid.UUID
-	Cause         string
-	StartedAt     interface{}
-	EndedAt       interface{}
-	Open          bool
-	Days          float64
 }
 
 // Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.
@@ -831,19 +800,6 @@ type BillingOperationAuthorization struct {
 	SettlementBodyDigest []byte
 }
 
-// Episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
-type BillingOrphanedEpisode struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	SourceType string
-	SourceID   uuid.UUID
-	ProductID  uuid.UUID
-	StartedAt  interface{}
-	EndedAt    interface{}
-	Open       bool
-	Days       float64
-}
-
 // Records of all payment transactions (formerly purchases table)
 type BillingPayment struct {
 	ID            uuid.UUID
@@ -1249,35 +1205,6 @@ type BillingRebillCycle struct {
 	// When the cycle passed its owner's deadline with no attempt; a later attempt still attaches to the cycle.
 	MissedAt   *time.Time
 	MissReason *string
-}
-
-// Each rebill cycle with its first attempt, the attempt that collected it and when it closes (collected, cancelled, or 15 days past due). A cycle is open until closed_at, lost when closed uncollected.
-type BillingRebillCycleFact struct {
-	MerchantID     uuid.UUID
-	ID             uuid.UUID
-	SubscriptionID uuid.UUID
-	CustomerID     uuid.UUID
-	PspID          uuid.UUID
-	Rail           string
-	Owner          string
-	DueAt          time.Time
-	Amount         int64
-	Currency       string
-	MissedAt       *time.Time
-	MissReason     *string
-	CreatedAt      time.Time
-	FirstCategory  *string
-	FirstReason    *string
-	FirstAt        *time.Time
-	WonAttemptID   *uuid.UUID
-	WonKind        *string
-	WonSource      *string
-	WonAt          *time.Time
-	WonOrdinal     *int64
-	FirstFailed    bool
-	FirstOutcome   string
-	ClosedAt       time.Time
-	RecoveredBy    string
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.

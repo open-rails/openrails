@@ -12,8 +12,15 @@ import (
 )
 
 const listPendingMerchantSecretCleanups = `-- name: ListPendingMerchantSecretCleanups :many
-SELECT merchant_id,run_id FROM billing.pending_merchant_secret_cleanups(
- $1::uuid,$2::int)
+SELECT r.merchant_id, r.id AS run_id
+FROM billing.maintenance_runs r
+JOIN billing.merchants m ON m.id = r.merchant_id
+WHERE r.kind = 'merchant_purge' AND r.status IN ('running', 'failed')
+  AND r.affected->>'database_purged' = 'true' AND r.coverage ? 'secret_cleanup'
+  AND m.deleted_at IS NOT NULL
+  AND ($1::uuid IS NULL OR r.id > $1::uuid)
+ORDER BY r.id
+LIMIT $2::int
 `
 
 type ListPendingMerchantSecretCleanupsParams struct {
@@ -22,8 +29,8 @@ type ListPendingMerchantSecretCleanupsParams struct {
 }
 
 type ListPendingMerchantSecretCleanupsRow struct {
-	MerchantID *uuid.UUID
-	RunID      *uuid.UUID
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
 }
 
 // CROSS-MERCHANT: committed tombstoned purge runs only. Per-run rows and cleanup

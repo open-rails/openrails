@@ -21,8 +21,16 @@ ON CONFLICT (merchant_id, request_id) DO NOTHING
 RETURNING *;
 
 -- name: GetFinancialHeldAmount :one
-SELECT billing.financial_held_amount(sqlc.arg(merchant_id)::uuid, sqlc.arg(payer_id)::uuid,
-    sqlc.arg(currency)::text, sqlc.arg(as_of)::timestamptz)::bigint AS held;
+-- The one financial hold total: open operation authorizations plus open,
+-- unexpired admission reservations. GetAdmissionCapacity computes the same sum.
+SELECT (COALESCE((SELECT SUM(oa.authorized_usd_micros)
+              FROM billing.operation_authorizations oa
+              JOIN billing.ledger_accounts la ON la.merchant_id = oa.merchant_id AND la.id = oa.ledger_account_id
+             WHERE oa.merchant_id = sqlc.arg(merchant_id)::uuid AND la.customer_id = sqlc.arg(payer_id)::uuid AND la.currency = sqlc.arg(currency)::text AND oa.state = 'open'), 0)
+     + COALESCE((SELECT SUM(ao.estimated_amount)
+              FROM billing.admission_operations ao
+             WHERE ao.merchant_id = sqlc.arg(merchant_id)::uuid AND ao.payer_id = sqlc.arg(payer_id)::uuid AND ao.currency = sqlc.arg(currency)::text AND ao.state = 'open'
+               AND (ao.expires_at IS NULL OR ao.expires_at > sqlc.arg(as_of)::timestamptz)), 0))::bigint AS held;
 
 -- name: AdmissionWindowUsage :one
 SELECT

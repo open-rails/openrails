@@ -15,7 +15,15 @@ import (
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    billing.financial_held_amount(a.merchant_id, a.customer_id, a.currency, $1::timestamptz)::bigint AS held,
+    -- Same hold total as GetFinancialHeldAmount.
+    (COALESCE((SELECT SUM(oa.authorized_usd_micros)
+              FROM billing.operation_authorizations oa
+              JOIN billing.ledger_accounts la ON la.merchant_id = oa.merchant_id AND la.id = oa.ledger_account_id
+             WHERE oa.merchant_id = a.merchant_id AND la.customer_id = a.customer_id AND la.currency = a.currency AND oa.state = 'open'), 0)
+     + COALESCE((SELECT SUM(ao.estimated_amount)
+              FROM billing.admission_operations ao
+             WHERE ao.merchant_id = a.merchant_id AND ao.payer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
+               AND (ao.expires_at IS NULL OR ao.expires_at > $1::timestamptz)), 0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
@@ -55,7 +63,7 @@ type GetAdmissionCapacityRow struct {
 }
 
 // Hot-path affordability snapshot for service admit. The customer_balance account
-// carries Phase-H O(1) counters; money_settings is optional (missing = prepaid,
+// carries O(1) counters; money_settings is optional (missing = prepaid,
 // no credit line). Redis request-admission holds are subtracted by spendgate;
 // durable operation authorizations are financial reservations and therefore
 // travel in this Postgres snapshot.

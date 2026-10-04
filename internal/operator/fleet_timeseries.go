@@ -9,7 +9,7 @@ import (
 )
 
 // FleetTimeseries returns the weekly fleet trend series (openrails-saas #38)
-// through the same 0022 SECURITY DEFINER aggregates — the FleetAnalytics
+// as aggregates only — the FleetAnalytics
 // snapshot's trend companion, under the same SearchMerchants (#226) doctrine: the CALLER
 // gates it behind platform-superadmin authority and audits every request.
 // exclude removes one merchant from every series (a hosted platform passes its

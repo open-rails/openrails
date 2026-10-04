@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
@@ -244,7 +246,13 @@ func TestCadenceMetrics(t *testing.T) {
 		require.Equal(t, norm, byCycle[row.label], "%dh is %s with its normalised MRR: %v", row.hours, row.label, byCycle)
 
 		var fleet int64
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT monthly_amount FROM billing.fleet_mrr_by_currency(NULL) WHERE currency = 'USD'`)).Scan(&fleet))
+		fleetRows, err := gen.New(db.RewriteDBTX(w.pool, w.schema)).FleetMRRByCurrency(t.Context(), nil)
+		require.NoError(t, err)
+		for _, fr := range fleetRows {
+			if fr.Currency == "USD" {
+				fleet = fr.MonthlyAmount
+			}
+		}
 		require.Equal(t, expected, dashboard, "dashboard MRR after %dh", row.hours)
 		require.Equal(t, dashboard, fleet, "fleet MRR equals dashboard MRR after %dh", row.hours)
 	}

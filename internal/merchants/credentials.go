@@ -783,13 +783,8 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 // provider payload or route carries account_id and the merchant should be derived
 // from the account row.
 //
-// #824: this is a genuinely cross-merchant read — inbound webhooks have no
-// merchant context yet, which is the whole point. It used to run
-// GetPSPByRailIdentity on the base pool, where the since-removed RLS made it
-// return zero rows and no error, and EVERY account-routed CCBill/Basis
-// Theory/Stripe-account webhook answered 404 "Unknown PSP". It now
-// goes through the explicit SECURITY DEFINER directory function (migration
-// 0016).
+// This is a genuinely cross-merchant read — inbound webhooks have no
+// merchant context yet — by the global (rail, environment, account_id) key.
 func (s *Service) ResolvePSPByIdentity(ctx context.Context, rail, environment, accountID string) (PSPIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
 		return PSPIdentity{}, false, nil
@@ -821,23 +816,13 @@ func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail, environment, acc
 	if err != nil {
 		return PSPIdentity{}, false, err
 	}
-	if row.ID == nil || row.MerchantID == nil {
-		return PSPIdentity{}, false, nil
-	}
 	return PSPIdentity{
-		ID:          *row.ID,
-		MerchantID:  billing.MerchantID(*row.MerchantID),
-		Rail:        derefString(row.Rail),
-		Environment: derefString(row.Environment),
-		AccountID:   derefString(row.AccountID),
+		ID:          row.ID,
+		MerchantID:  billing.MerchantID(row.MerchantID),
+		Rail:        row.Rail,
+		Environment: row.Environment,
+		AccountID:   row.AccountID,
 	}, true, nil
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // LiveRailPresence is the TRI-state answer to "does a live PSP exist on this

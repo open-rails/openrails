@@ -408,40 +408,31 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- =====================================================================
 -- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
 -- =====================================================================
--- The durable rail_intents ledger IS the counter (#674): every destructive
--- user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
--- created_at is the burst gauge. Counts by CREATION (created_at), not execution:
--- the ceiling stops the burst at the producer chokepoint, before the write-ahead
--- intent is even created. Both readers are migration 0021/0028 SECURITY DEFINER
--- functions that take their scope as an argument (or#824/or#860).
+-- The durable rail_intents ledger is the counter: every destructive user/admin
+-- operation posts a row before it executes, so a rolling-window count over
+-- created_at is the burst gauge, stopping a burst at the producer.
 
--- Destructive user/admin intents THIS actor created in the rolling window.
--- Deliberately CROSS-MERCHANT and unchanged by or#866: one stolen credential
--- operating across merchants is exactly the shape this leg must see, and an
--- actor is not a tenant, so there is no cross-tenant budget to share here.
+-- Destructive user/admin intents this actor created in the window, across
+-- merchants: one stolen credential operating across merchants is the shape
+-- this leg must see.
 -- name: CountDestructiveIntentsByActorSince :one
-SELECT billing.count_destructive_intents_by_actor_since(
-    sqlc.arg(actor)::text,
-    sqlc.arg(intent_types)::text[],
-    sqlc.arg(since)::timestamptz);
+SELECT count(*)::bigint
+FROM billing.rail_intents
+WHERE actor = sqlc.arg(actor)::text
+  AND origin IN ('user', 'admin')
+  AND intent_type = ANY(sqlc.arg(intent_types)::text[])
+  AND created_at >= sqlc.arg(since)::timestamptz;
 
--- ONE merchant's destructive intents in the rolling window, for a caller-supplied
--- origin set. Both walls of the ceiling are this same count (migration 0028):
---   * origins {user,admin} — the anti-theft wall. It used to be DEPLOYMENT-wide,
---     which made one merchant's ordinary customer cancellations refuse every
---     other merchant's (or#866, cross-tenant DoS). A forged-identity burst is
---     still walled at 15/h inside the merchant it targets.
---   * origins {system} — the automation wall (or#842): a runaway convergence or
---     poisoned roster inside ONE merchant, never a fleet-wide number that a
---     thousand merchants converging their own books would legitimately exceed.
--- System origin must never burn the anti-theft budget and vice versa: they are
--- separate windows over disjoint origin sets, counted separately.
+-- ONE merchant's destructive intents in the window, for a caller-supplied
+-- origin set. {user,admin} is the anti-theft wall; {system} the automation
+-- wall. They are separate windows over disjoint origin sets.
 -- name: CountDestructiveIntentsForMerchantSince :one
-SELECT billing.count_destructive_intents_for_merchant_since(
-    sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(origins)::text[],
-    sqlc.arg(intent_types)::text[],
-    sqlc.arg(since)::timestamptz);
+SELECT count(*)::bigint
+FROM billing.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND origin = ANY(sqlc.arg(origins)::text[])
+  AND intent_type = ANY(sqlc.arg(intent_types)::text[])
+  AND created_at >= sqlc.arg(since)::timestamptz;
 
 -- name: GetRailIntentByIdempotencyKey :one
 SELECT * FROM billing.rail_intents

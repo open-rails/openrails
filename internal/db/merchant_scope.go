@@ -24,7 +24,7 @@ func (e *ErrUnscopedMerchantWork) Error() string {
 			"db: %s runs UNSCOPED — the connection carries no %s, so SQL scoped by current_merchant_id() "+
 				"matches nothing or refuses with 42501. There is no privileged "+
 				"pool: wrap the work in RunInMerchantConn/MerchantTx for merchant %s, or route a genuinely "+
-				"cross-merchant read through the SECURITY DEFINER helpers (migrations 0016/0021/0022) (or#868)",
+				"cross-merchant read through a GenDirectory work-queue query that returns ids or aggregates only",
 			e.Op, MerchantGUC, e.Want)
 	}
 	return fmt.Sprintf(

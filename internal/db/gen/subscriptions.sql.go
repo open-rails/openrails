@@ -1399,39 +1399,69 @@ func (q *Queries) ListActiveSubscriptionsForPSP(ctx context.Context, arg ListAct
 }
 
 const listDueDunningMerchants = `-- name: ListDueDunningMerchants :many
-SELECT merchant_id FROM billing.due_dunning_merchant_ids(
-    $1::text[],
-    $2::timestamptz,
-    $3::int, $4::boolean)
+SELECT d.merchant_id
+FROM (
+    SELECT s.merchant_id, s.next_retry_at AS due_at
+      FROM billing.subscriptions s
+     WHERE s.status = 'past_due' AND s.next_retry_at IS NOT NULL
+       AND s.next_retry_at <= $1::timestamptz
+       AND s.rail = 'nmi' AND s.rail = ANY($2::text[])
+       AND s.collection_policy <> 'engine'
+       AND s.deleted_at IS NULL
+    UNION ALL
+    SELECT s.merchant_id, s.grace_ends_at
+      FROM billing.subscriptions s
+     WHERE s.grace_ends_at IS NOT NULL
+       AND s.grace_ends_at <= $1::timestamptz
+       AND s.status = 'awaiting_method'
+       AND s.rail = ANY($2::text[])
+       AND (($3::boolean AND s.collection_policy = 'engine')
+            OR (s.collection_policy = 'nmi_schedule' AND s.rail = 'nmi'))
+       AND s.deleted_at IS NULL
+    UNION ALL
+    SELECT s.merchant_id, CASE WHEN s.status = 'active' THEN s.current_period_ends_at ELSE s.next_retry_at END
+      FROM billing.subscriptions s
+     WHERE $3::boolean
+       AND s.collection_policy = 'engine' AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL
+       AND s.current_period_ends_at <= $1::timestamptz
+       AND (s.status = 'active' OR s.next_retry_at <= $1::timestamptz)
+       AND s.rail = ANY($2::text[])
+       AND NOT EXISTS (
+             SELECT 1 FROM billing.rail_intents i
+              WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+                AND i.intent_type = 'subscription_collection'
+                AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+) d
+GROUP BY d.merchant_id
+ORDER BY MIN(d.due_at), d.merchant_id
+LIMIT $4::int
 `
 
 type ListDueDunningMerchantsParams struct {
-	Rails         []string
 	Now           time.Time
-	MerchantLimit int32
+	Rails         []string
 	IncludeEngine bool
+	MerchantLimit int32
 }
 
-// CROSS-MERCHANT: merchants holding a due past_due subscription on the named
-// rails, through migration 0023's SECURITY DEFINER work queue (or#877 B5). The
-// dunning worker used to run ListDueDunningSubscriptions on the bare job
-// context; under the since-removed RLS the scan returned an empty slice and
-// scheduled dunning had never retried, parked or terminated anything. Ids only
-// — the due rows and every charge run per-merchant under RunInMerchantScope.
-func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunningMerchantsParams) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants with due dunning work on the named rails. Three
+// legs, each served by its own partial index so a pass reads only due rows:
+// provider-billed NMI retries, expired awaiting_method grace, and engine
+// collections due. Ids only; due rows and charges run per merchant.
+func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunningMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listDueDunningMerchants,
-		arg.Rails,
 		arg.Now,
-		arg.MerchantLimit,
+		arg.Rails,
 		arg.IncludeEngine,
+		arg.MerchantLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

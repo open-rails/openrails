@@ -26,8 +26,9 @@ Postgres specifics worth knowing:
   `merchant_id` (or `psp_id`) predicate on every tenant query, backed by
   composite foreign keys, so it does not depend on the login's flags. Run
   migrations and the server as the same role: it owns what it creates. The
-  cross-merchant directory functions (webhook routing by PSP, the hosted
-  portal's merchant list) are `SECURITY DEFINER`.
+  few cross-merchant reads (webhook routing by PSP, the hosted portal's
+  merchant list, fleet aggregates) are ordinary sqlc queries that return ids
+  or aggregates only.
 - Security defaults are independent of payment posture. Managed database secrets
   always require encryption. Local issuer/signing/sender exceptions are explicit
   Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is

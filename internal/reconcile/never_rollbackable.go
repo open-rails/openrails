@@ -22,7 +22,7 @@ import "fmt"
 // DESTROYED; it can never retract value wrongly GRANTED. Retraction is a revoke
 // event plus a compensating transfer plus an operator-authorised refund.
 var NeverRollbackableTables = map[string]string{
-	"ledger_transfers": "money. Reversal is a compensating transfer, never a deletion — and any row-level write bypassing the SECURITY DEFINER trigger silently corrupts every balance read (LED-5)",
+	"ledger_transfers": "money. Reversal is a compensating transfer, never a deletion — and any row-level write bypassing the counter trigger silently corrupts every balance read",
 	"ledger_accounts":  "trigger-maintained balance projection; restoring a row desynchronises it from its transfers",
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",

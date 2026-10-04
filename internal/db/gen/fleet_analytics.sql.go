@@ -13,8 +13,14 @@ import (
 )
 
 const fleetMRRByCurrency = `-- name: FleetMRRByCurrency :many
-SELECT currency::text AS currency, subscriptions::bigint AS subscriptions, monthly_amount::bigint AS monthly_amount
-FROM billing.fleet_mrr_by_currency($1::uuid)
+SELECT pr.currency::text AS currency, count(*)::bigint AS subscriptions,
+       COALESCE(sum(billing.monthly_normalized_amount(pr.amount, pr.access_duration_hours)), 0)::bigint AS monthly_amount
+FROM billing.subscriptions s
+JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
+WHERE s.status = 'active' AND pr.auto_renew AND pr.access_duration_hours > 0
+  AND ($1::uuid IS NULL OR s.merchant_id <> $1::uuid)
+GROUP BY pr.currency
+ORDER BY pr.currency
 `
 
 type FleetMRRByCurrencyRow struct {
@@ -23,6 +29,7 @@ type FleetMRRByCurrencyRow struct {
 	MonthlyAmount int64
 }
 
+// Fleet MRR per currency, using the dashboard mrr normalization.
 func (q *Queries) FleetMRRByCurrency(ctx context.Context, excludeMerchantID *uuid.UUID) ([]FleetMRRByCurrencyRow, error) {
 	rows, err := q.db.Query(ctx, fleetMRRByCurrency, excludeMerchantID)
 	if err != nil {
@@ -45,13 +52,27 @@ func (q *Queries) FleetMRRByCurrency(ctx context.Context, excludeMerchantID *uui
 
 const fleetMerchantFunnel = `-- name: FleetMerchantFunnel :one
 
-SELECT total::bigint AS total, armed::bigint AS armed, first_revenue::bigint AS first_revenue, active_revenue::bigint AS active_revenue
-FROM billing.fleet_merchant_funnel($1::uuid, $2::timestamptz)
+SELECT count(*)::bigint AS total,
+       (count(*) FILTER (WHERE EXISTS (
+           SELECT 1 FROM billing.psps p
+            WHERE p.merchant_id = m.id AND p.replaced_at IS NULL)))::bigint AS armed,
+       (count(*) FILTER (WHERE EXISTS (
+           SELECT 1 FROM billing.payments pay
+            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
+              AND pay.reversal_kind IS NULL)))::bigint AS first_revenue,
+       (count(*) FILTER (WHERE EXISTS (
+           SELECT 1 FROM billing.payments pay
+            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
+              AND pay.reversal_kind IS NULL
+              AND pay.purchased_at >= $1::timestamptz)))::bigint AS active_revenue
+FROM billing.merchants m
+WHERE m.deleted_at IS NULL AND m.status = 'active'
+  AND ($2::uuid IS NULL OR m.id <> $2::uuid)
 `
 
 type FleetMerchantFunnelParams struct {
-	ExcludeMerchantID *uuid.UUID
 	Since             time.Time
+	ExcludeMerchantID *uuid.UUID
 }
 
 type FleetMerchantFunnelRow struct {
@@ -61,10 +82,10 @@ type FleetMerchantFunnelRow struct {
 	ActiveRevenue int64
 }
 
-// Fleet dashboard: cross-merchant AGGREGATES only, through the SECURITY DEFINER
-// readers (or#861). A NULL exclude_merchant_id excludes nothing.
+// Fleet dashboard: cross-merchant aggregates only, never merchant rows. A NULL
+// exclude_merchant_id excludes nothing.
 func (q *Queries) FleetMerchantFunnel(ctx context.Context, arg FleetMerchantFunnelParams) (FleetMerchantFunnelRow, error) {
-	row := q.db.QueryRow(ctx, fleetMerchantFunnel, arg.ExcludeMerchantID, arg.Since)
+	row := q.db.QueryRow(ctx, fleetMerchantFunnel, arg.Since, arg.ExcludeMerchantID)
 	var i FleetMerchantFunnelRow
 	err := row.Scan(
 		&i.Total,
@@ -76,13 +97,31 @@ func (q *Queries) FleetMerchantFunnel(ctx context.Context, arg FleetMerchantFunn
 }
 
 const fleetRailHealth = `-- name: FleetRailHealth :many
-SELECT rail::text AS rail, succeeded::bigint AS succeeded, failed::bigint AS failed, chargebacks::bigint AS chargebacks
-FROM billing.fleet_rail_health($1::uuid, $2::timestamptz)
+WITH charges AS (
+    SELECT a.rail AS r,
+           count(*) FILTER (WHERE a.category = 'approved') AS ok,
+           count(*) FILTER (WHERE a.category <> 'approved') AS refused
+      FROM billing.payment_attempts a
+     WHERE a.attempted_at >= $1::timestamptz AND a.kind <> 'verify'
+       AND ($2::uuid IS NULL OR a.merchant_id <> $2::uuid)
+     GROUP BY a.rail
+), disputes AS (
+    SELECT p.rail AS r, count(*) AS n
+      FROM billing.payments p
+     WHERE p.purchased_at >= $1::timestamptz AND p.reversal_kind = 'chargeback' AND p.status = 'completed'
+       AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
+     GROUP BY p.rail
+)
+SELECT COALESCE(c.r, d.r)::text AS rail, COALESCE(c.ok, 0)::bigint AS succeeded,
+       COALESCE(c.refused, 0)::bigint AS failed, COALESCE(d.n, 0)::bigint AS chargebacks
+FROM charges c
+FULL JOIN disputes d ON d.r = c.r
+ORDER BY 1
 `
 
 type FleetRailHealthParams struct {
-	ExcludeMerchantID *uuid.UUID
 	Since             time.Time
+	ExcludeMerchantID *uuid.UUID
 }
 
 type FleetRailHealthRow struct {
@@ -92,8 +131,9 @@ type FleetRailHealthRow struct {
 	Chargebacks int64
 }
 
+// Per-rail approved and declined charge attempts and chargebacks in the window.
 func (q *Queries) FleetRailHealth(ctx context.Context, arg FleetRailHealthParams) ([]FleetRailHealthRow, error) {
-	rows, err := q.db.Query(ctx, fleetRailHealth, arg.ExcludeMerchantID, arg.Since)
+	rows, err := q.db.Query(ctx, fleetRailHealth, arg.Since, arg.ExcludeMerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,13 +158,18 @@ func (q *Queries) FleetRailHealth(ctx context.Context, arg FleetRailHealthParams
 }
 
 const fleetRevenueByCurrency = `-- name: FleetRevenueByCurrency :many
-SELECT currency::text AS currency, payments::bigint AS payments, settled_amount::bigint AS settled_amount
-FROM billing.fleet_revenue_by_currency($1::uuid, $2::timestamptz)
+SELECT p.currency::text AS currency, count(*)::bigint AS payments, COALESCE(sum(p.amount), 0)::bigint AS settled_amount
+FROM billing.payments p
+WHERE p.status = 'completed' AND p.reversal_kind IS NULL
+  AND p.purchased_at >= $1::timestamptz
+  AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
+GROUP BY p.currency
+ORDER BY p.currency
 `
 
 type FleetRevenueByCurrencyParams struct {
-	ExcludeMerchantID *uuid.UUID
 	Since             time.Time
+	ExcludeMerchantID *uuid.UUID
 }
 
 type FleetRevenueByCurrencyRow struct {
@@ -133,8 +178,10 @@ type FleetRevenueByCurrencyRow struct {
 	SettledAmount int64
 }
 
+// Settled sale volume per currency in the window. Sale rows only: reversal
+// mirror rows share status=completed and must never count.
 func (q *Queries) FleetRevenueByCurrency(ctx context.Context, arg FleetRevenueByCurrencyParams) ([]FleetRevenueByCurrencyRow, error) {
-	rows, err := q.db.Query(ctx, fleetRevenueByCurrency, arg.ExcludeMerchantID, arg.Since)
+	rows, err := q.db.Query(ctx, fleetRevenueByCurrency, arg.Since, arg.ExcludeMerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,13 +201,17 @@ func (q *Queries) FleetRevenueByCurrency(ctx context.Context, arg FleetRevenueBy
 }
 
 const fleetWeeklyActiveMerchants = `-- name: FleetWeeklyActiveMerchants :many
-SELECT week_start::timestamptz AS week_start, merchants::bigint AS merchants
-FROM billing.fleet_weekly_active_merchants($1::uuid, $2::timestamptz)
+SELECT date_trunc('week', p.purchased_at)::timestamptz AS week_start, count(DISTINCT p.merchant_id)::bigint AS merchants
+FROM billing.payments p
+WHERE p.status = 'completed' AND p.reversal_kind IS NULL
+  AND p.purchased_at >= date_trunc('week', $1::timestamptz)
+  AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
+GROUP BY 1
 `
 
 type FleetWeeklyActiveMerchantsParams struct {
-	ExcludeMerchantID *uuid.UUID
 	Since             time.Time
+	ExcludeMerchantID *uuid.UUID
 }
 
 type FleetWeeklyActiveMerchantsRow struct {
@@ -168,8 +219,9 @@ type FleetWeeklyActiveMerchantsRow struct {
 	Merchants int64
 }
 
+// Weekly count of distinct merchants with a settled sale; a count, never the list.
 func (q *Queries) FleetWeeklyActiveMerchants(ctx context.Context, arg FleetWeeklyActiveMerchantsParams) ([]FleetWeeklyActiveMerchantsRow, error) {
-	rows, err := q.db.Query(ctx, fleetWeeklyActiveMerchants, arg.ExcludeMerchantID, arg.Since)
+	rows, err := q.db.Query(ctx, fleetWeeklyActiveMerchants, arg.Since, arg.ExcludeMerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -189,13 +241,17 @@ func (q *Queries) FleetWeeklyActiveMerchants(ctx context.Context, arg FleetWeekl
 }
 
 const fleetWeeklyCancelledSubscriptions = `-- name: FleetWeeklyCancelledSubscriptions :many
-SELECT week_start::timestamptz AS week_start, cancellations::bigint AS cancellations
-FROM billing.fleet_weekly_cancelled_subscriptions($1::uuid, $2::timestamptz)
+SELECT date_trunc('week', s.cancelled_at)::timestamptz AS week_start, count(*)::bigint AS cancellations
+FROM billing.subscriptions s
+WHERE s.cancelled_at IS NOT NULL
+  AND s.cancelled_at >= date_trunc('week', $1::timestamptz)
+  AND ($2::uuid IS NULL OR s.merchant_id <> $2::uuid)
+GROUP BY 1
 `
 
 type FleetWeeklyCancelledSubscriptionsParams struct {
-	ExcludeMerchantID *uuid.UUID
 	Since             time.Time
+	ExcludeMerchantID *uuid.UUID
 }
 
 type FleetWeeklyCancelledSubscriptionsRow struct {
@@ -203,8 +259,9 @@ type FleetWeeklyCancelledSubscriptionsRow struct {
 	Cancellations int64
 }
 
+// Weekly subscription cancellations: the churn proxy on the fleet trend chart.
 func (q *Queries) FleetWeeklyCancelledSubscriptions(ctx context.Context, arg FleetWeeklyCancelledSubscriptionsParams) ([]FleetWeeklyCancelledSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, fleetWeeklyCancelledSubscriptions, arg.ExcludeMerchantID, arg.Since)
+	rows, err := q.db.Query(ctx, fleetWeeklyCancelledSubscriptions, arg.Since, arg.ExcludeMerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,13 +320,19 @@ func (q *Queries) FleetWeeklyNewMerchants(ctx context.Context, arg FleetWeeklyNe
 }
 
 const fleetWeeklyVolume = `-- name: FleetWeeklyVolume :many
-SELECT week_start::timestamptz AS week_start, currency::text AS currency, payments::bigint AS payments, settled_amount::bigint AS settled_amount
-FROM billing.fleet_weekly_volume($1::uuid, $2::timestamptz)
+SELECT date_trunc('week', p.purchased_at)::timestamptz AS week_start, p.currency::text AS currency,
+       count(*)::bigint AS payments, COALESCE(sum(p.amount), 0)::bigint AS settled_amount
+FROM billing.payments p
+WHERE p.status = 'completed' AND p.reversal_kind IS NULL
+  AND p.purchased_at >= date_trunc('week', $1::timestamptz)
+  AND ($2::uuid IS NULL OR p.merchant_id <> $2::uuid)
+GROUP BY 1, 2
+ORDER BY 1, 2
 `
 
 type FleetWeeklyVolumeParams struct {
-	ExcludeMerchantID *uuid.UUID
 	Since             time.Time
+	ExcludeMerchantID *uuid.UUID
 }
 
 type FleetWeeklyVolumeRow struct {
@@ -279,8 +342,9 @@ type FleetWeeklyVolumeRow struct {
 	SettledAmount int64
 }
 
+// Weekly settled sale volume per currency. Sale rows only.
 func (q *Queries) FleetWeeklyVolume(ctx context.Context, arg FleetWeeklyVolumeParams) ([]FleetWeeklyVolumeRow, error) {
-	rows, err := q.db.Query(ctx, fleetWeeklyVolume, arg.ExcludeMerchantID, arg.Since)
+	rows, err := q.db.Query(ctx, fleetWeeklyVolume, arg.Since, arg.ExcludeMerchantID)
 	if err != nil {
 		return nil, err
 	}

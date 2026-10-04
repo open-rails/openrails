@@ -14,8 +14,8 @@ import (
 )
 
 // Fleet timeseries (openrails-saas #38): the trend companion to FleetAnalytics
-// — weekly buckets over the same truth tables, through the same 0022
-// SECURITY DEFINER aggregates, under the same SearchMerchants (#226) doctrine: the
+// — weekly buckets over the same truth tables, aggregates only, under the
+// same SearchMerchants (#226) doctrine: the
 // CALLER gates (platform superadmin) and audits every request. Buckets are
 // ISO weeks (Postgres date_trunc('week', ...), Monday-start, UTC), computed on
 // request — no rollup storage at current fleet scale.
@@ -66,11 +66,8 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude billing.Merc
 		excludeArg = &id
 	}
 
-	// or#861: the aggregates over merchant-owned tables (payments, subscriptions)
-	// go through migration 0022's SECURITY DEFINER readers — read on the base
-	// pool they were silently empty under the since-removed RLS.
-	// The week list and the new-merchant series stay ordinary queries:
-	// generate_series touches no table, and billing.merchants is the
+	// The aggregates over merchant-owned tables (payments, subscriptions) return
+	// counts only. The week list touches no table, and billing.merchants is the
 	// global directory.
 	//
 	// Canonical week list from Postgres so bucket alignment can never drift

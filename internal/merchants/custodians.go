@@ -299,7 +299,7 @@ func AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid
 	if err != nil {
 		return err
 	}
-	if row.MerchantID == nil || *row.MerchantID == merchantID {
+	if row.MerchantID == merchantID {
 		return nil
 	}
 	return fmt.Errorf("custodian %s tenant %s (%s): %w", kind, accountID, environment, ErrCustodianOwnedByAnotherMerchant)
@@ -309,10 +309,8 @@ func AssertCustodianUnowned(ctx context.Context, q *gen.Queries, merchantID uuid
 // identity belongs to (or#880). Custody is not a rail, so a Basis Theory
 // webhook cannot route through the rail directory — but the problem is
 // identical (an inbound event with a global provider-side id and no merchant
-// context) and so is the answer: the SECURITY DEFINER directory function,
-// which raises rather than returning empty when it cannot read across
-// merchants. It resolves the CUSTODIAN, never "the" PSP: one custodian may
-// back several, so that was never a well-defined question.
+// context) and so is the answer: a lookup by the global identity key. It
+// resolves the CUSTODIAN, never "the" PSP: one custodian may back several.
 func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, environment, accountID string) (CustodianIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
 		return CustodianIdentity{}, false, nil
@@ -334,15 +332,12 @@ func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, environm
 	if err != nil {
 		return CustodianIdentity{}, false, err
 	}
-	if row.ID == nil || row.MerchantID == nil {
-		return CustodianIdentity{}, false, nil
-	}
 	return CustodianIdentity{
-		ID:          *row.ID,
-		MerchantID:  billing.MerchantID(*row.MerchantID),
-		Key:         derefString(row.Key),
-		Kind:        derefString(row.Kind),
-		Environment: derefString(row.Environment),
-		AccountID:   derefString(row.AccountID),
+		ID:          row.ID,
+		MerchantID:  billing.MerchantID(row.MerchantID),
+		Key:         row.Key,
+		Kind:        row.Kind,
+		Environment: row.Environment,
+		AccountID:   row.AccountID,
 	}, true, nil
 }

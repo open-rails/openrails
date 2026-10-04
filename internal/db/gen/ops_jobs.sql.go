@@ -13,10 +13,10 @@ import (
 )
 
 const countOpenCatalogDriftByKind = `-- name: CountOpenCatalogDriftByKind :many
-SELECT rail, kind, count(*)::bigint AS n
-FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
-GROUP BY rail, kind
+SELECT rail, substr(finding_type, 9)::text AS kind, count(*)::bigint AS n
+FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
+GROUP BY rail, finding_type
 `
 
 type CountOpenCatalogDriftByKindRow struct {
@@ -46,10 +46,10 @@ func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenC
 }
 
 const countOpenCatalogDriftFiltered = `-- name: CountOpenCatalogDriftFiltered :one
-SELECT count(*) FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
+SELECT count(*) FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
   AND ($1::text IS NULL OR rail = $1::text)
-  AND ($2::text IS NULL OR kind = $2::text)
+  AND ($2::text IS NULL OR finding_type = 'catalog.' || $2::text)
   AND ($3::text IS NULL OR openrails_resource_type = $3::text)
 `
 
@@ -68,35 +68,52 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 
 const listOpenCatalogDriftEvents = `-- name: ListOpenCatalogDriftEvents :many
 
-SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
 `
 
 // Operational job state: catalog drift events (reconciliation). Manual rebill
 // attempts were folded into billing.rail_intents (#358 phase C).
-func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingCatalogDriftEvent, error) {
+// Catalog drift events are the catalog.* reconciliation findings; kind is the
+// finding type without its "catalog." prefix.
+func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftEvents)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingCatalogDriftEvent
+	var items []BillingReconciliationFinding
 	for rows.Next() {
-		var i BillingCatalogDriftEvent
+		var i BillingReconciliationFinding
 		if err := rows.Scan(
 			&i.ID,
-			&i.PspID,
+			&i.MerchantID,
+			&i.FindingType,
 			&i.Rail,
-			&i.Kind,
+			&i.PspID,
 			&i.OpenrailsResourceType,
 			&i.OpenrailsResourceID,
 			&i.ExternalResourceID,
 			&i.Field,
 			&i.OpenrailsValue,
 			&i.ExternalValue,
-			&i.DetectedAt,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
 			&i.ResolvedAt,
-			&i.MerchantID,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
 		); err != nil {
 			return nil, err
 		}
@@ -109,12 +126,12 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingCata
 }
 
 const listOpenCatalogDriftFiltered = `-- name: ListOpenCatalogDriftFiltered :many
-SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM billing.catalog_drift_events
-WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
   AND ($3::text IS NULL OR rail = $3::text)
-  AND ($4::text IS NULL OR kind = $4::text)
+  AND ($4::text IS NULL OR finding_type = 'catalog.' || $4::text)
   AND ($5::text IS NULL OR openrails_resource_type = $5::text)
-ORDER BY detected_at DESC
+ORDER BY created_at DESC
 LIMIT $1::int OFFSET $2::int
 `
 
@@ -126,7 +143,7 @@ type ListOpenCatalogDriftFilteredParams struct {
 	ResourceType *string
 }
 
-func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]BillingCatalogDriftEvent, error) {
+func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]BillingReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftFiltered,
 		arg.Column1,
 		arg.Column2,
@@ -138,23 +155,38 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingCatalogDriftEvent
+	var items []BillingReconciliationFinding
 	for rows.Next() {
-		var i BillingCatalogDriftEvent
+		var i BillingReconciliationFinding
 		if err := rows.Scan(
 			&i.ID,
-			&i.PspID,
+			&i.MerchantID,
+			&i.FindingType,
 			&i.Rail,
-			&i.Kind,
+			&i.PspID,
 			&i.OpenrailsResourceType,
 			&i.OpenrailsResourceID,
 			&i.ExternalResourceID,
 			&i.Field,
 			&i.OpenrailsValue,
 			&i.ExternalValue,
-			&i.DetectedAt,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
 			&i.ResolvedAt,
-			&i.MerchantID,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
 		); err != nil {
 			return nil, err
 		}

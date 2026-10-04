@@ -155,20 +155,25 @@ func (q *Queries) GetAccountUpdaterBatch(ctx context.Context, arg GetAccountUpda
 }
 
 const listAccountUpdaterOpenBatchMerchants = `-- name: ListAccountUpdaterOpenBatchMerchants :many
-SELECT merchant_id FROM billing.account_updater_open_batch_merchant_ids(
-    $1::int)
+SELECT b.merchant_id
+FROM billing.account_updater_batches b
+WHERE b.status IN ('pending', 'submitted')
+GROUP BY b.merchant_id
+ORDER BY MIN(b.created_at)
+LIMIT $1::int
 `
 
-// CROSS-MERCHANT: merchants with a batch the custodian still owes results for.
-func (q *Queries) ListAccountUpdaterOpenBatchMerchants(ctx context.Context, merchantLimit int32) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants with a batch the custodian still owes results for,
+// oldest open batch first so the longest-waiting merchant is served at the cap.
+func (q *Queries) ListAccountUpdaterOpenBatchMerchants(ctx context.Context, merchantLimit int32) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listAccountUpdaterOpenBatchMerchants, merchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
@@ -182,48 +187,75 @@ func (q *Queries) ListAccountUpdaterOpenBatchMerchants(ctx context.Context, merc
 
 const listAccountUpdaterWorkMerchants = `-- name: ListAccountUpdaterWorkMerchants :many
 
-SELECT merchant_id FROM billing.account_updater_work_merchant_ids(
-    $1::text,
-    $2::text,
-    $3::timestamptz,
-    $4::int,
-    $5::uuid,
-    $6::int)
+SELECT c.merchant_id
+FROM billing.custodians c
+CROSS JOIN LATERAL (
+    -- The custodian's own declared lookahead, else the caller's default.
+    SELECT make_interval(days => COALESCE(
+        CASE WHEN c.settings ->> 'account_updater_lookahead_days' ~ '^[0-9]+$'
+             THEN (c.settings ->> 'account_updater_lookahead_days')::int END,
+        $1::int)) AS lookahead
+) w
+WHERE c.kind = lower($2::text)
+  AND c.environment = $3::text
+  AND NOT c.archived
+  AND COALESCE(c.settings ->> 'account_updater', 'false') IN ('true', 't', '1')
+  AND ($4::uuid IS NULL OR c.merchant_id > $4::uuid)
+  -- One open batch per custodian: a waiting merchant has results to ingest, not new work.
+  AND NOT EXISTS (
+        SELECT 1 FROM billing.account_updater_batches b
+         WHERE b.merchant_id = c.merchant_id AND b.custodian_id = c.id
+           AND b.status IN ('pending', 'submitted'))
+  AND EXISTS (
+        SELECT 1 FROM billing.payment_methods pm
+         WHERE pm.merchant_id = c.merchant_id
+           AND pm.custodian = c.kind AND pm.custodian_id = c.id
+           AND pm.rail_method_ref <> ''
+           AND (pm.account_updater_checked_at IS NULL
+                OR pm.account_updater_checked_at < $5::timestamptz - w.lookahead)
+           AND EXISTS (
+                 SELECT 1 FROM billing.subscriptions s
+                  WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
+                    AND s.deleted_at IS NULL
+                    AND s.status IN ('active', 'past_due')
+                    AND s.current_period_ends_at IS NOT NULL
+                    AND s.current_period_ends_at <= $5::timestamptz + w.lookahead))
+ORDER BY c.merchant_id
+LIMIT $6::int
 `
 
 type ListAccountUpdaterWorkMerchantsParams struct {
+	DefaultLookaheadDays int32
 	Custodian            string
 	Environment          string
-	Now                  time.Time
-	DefaultLookaheadDays int32
 	After                *uuid.UUID
+	Now                  time.Time
 	MerchantLimit        int32
 }
 
-// or#795 batch Account Updater: due-work discovery, the durable batch (job
-// ref), and the per-instrument watermark. Migration 0076.
-//
-// The two CROSS-MERCHANT readers are migration 0076's SECURITY DEFINER work
-// queues (the or#837 shape). They return ids only; the instrument reads, the
-// provider calls and every write run per-merchant under RunInMerchantScope.
-// CROSS-MERCHANT: merchants whose ARMED custodian holds an instrument due for
-// a refresh ahead of its renewal. Capped and cursored.
-func (q *Queries) ListAccountUpdaterWorkMerchants(ctx context.Context, arg ListAccountUpdaterWorkMerchantsParams) ([]*uuid.UUID, error) {
+// Batch account updater: due-work discovery, the durable batch (job ref) and
+// the per-instrument watermark. The two cross-merchant readers return ids only;
+// instrument reads, provider calls and writes run per merchant.
+// CROSS-MERCHANT: merchants whose armed custodian holds an instrument backing a
+// subscription that renews inside the custodian's lookahead and was not
+// refreshed since. Starts at the custodian registry, so a merchant without the
+// add-on costs one index probe. Capped and cursored.
+func (q *Queries) ListAccountUpdaterWorkMerchants(ctx context.Context, arg ListAccountUpdaterWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listAccountUpdaterWorkMerchants,
+		arg.DefaultLookaheadDays,
 		arg.Custodian,
 		arg.Environment,
-		arg.Now,
-		arg.DefaultLookaheadDays,
 		arg.After,
+		arg.Now,
 		arg.MerchantLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

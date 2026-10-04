@@ -176,8 +176,8 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// never executed because the loop it lived in never had a row. Scheduled
 	// dunning — retries, #839 staleness parking, #840 terminal handling — had
 	// therefore never run at all. Enumerate the merchants with due work through
-	// migration 0023's SECURITY DEFINER work queue (ids only), then scan and
-	// charge inside each merchant's own scope. Use w.now() instead of SQL NOW()
+	// the dunning work queue (ids only), then scan and charge inside each
+	// merchant's own scope. Use w.now() instead of SQL NOW()
 	// to support time mocking in tests.
 	nmiRails := []string{string(models.RailNMI)}
 	if w.EngineCollections != nil {
@@ -212,10 +212,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	var workErr error
 
 	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
-		}
-		merchantID := billing.MerchantID(*mid)
+		merchantID := billing.MerchantID(mid)
 		progress.Mark(ctx, "dunning merchant "+merchantID.String())
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's app.merchant_id, exactly as a request would.

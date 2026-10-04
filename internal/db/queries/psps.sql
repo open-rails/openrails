@@ -89,30 +89,29 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live');
 
--- #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
--- account_id) natural key, for webhook routing and the uniqueness preflight —
--- both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
--- above needs the merchant; the SECURITY DEFINER directory function
--- (migration 0016) is the sanctioned way to make that read.
+-- CROSS-MERCHANT: PSP ownership by the global (rail, environment, account_id)
+-- natural key, for webhook routing and the uniqueness preflight, both of which
+-- run before any merchant context exists.
 -- name: ResolvePSPOwnerByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id
-FROM billing.psp_owner_by_identity(
-    lower(sqlc.arg(rail)::text),
-    COALESCE(sqlc.narg(environment)::text, 'live'),
-    sqlc.arg(account_id)::text
-);
+FROM billing.psps
+WHERE rail = lower(sqlc.arg(rail)::text)
+  AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
+  AND account_id = sqlc.arg(account_id)::text;
 
--- CROSS-MERCHANT: merchants armed on one of the named rails, through migration
--- 0023's SECURITY DEFINER work queue (or#877 B6). The Stripe webhook reconciler
--- used to JOIN merchants to psps on the base pool; under the since-removed RLS
--- the join yielded nothing and the managed endpoint was never registered or
--- version-bumped. Ids only — each merchant's PSP rows are read inside its own
--- scope.
+-- CROSS-MERCHANT: an ordered page of merchants after the cursor, armed on at
+-- least one of the named rails (live PSP, undeleted merchant). Ids only; each
+-- merchant's PSP rows are read inside its own scope.
 -- name: ListRailArmedMerchants :many
-SELECT merchant_id FROM billing.psp_rail_merchant_ids(
-    sqlc.arg(rails)::text[],
-    sqlc.arg(merchant_limit)::int,
-    sqlc.narg(after_merchant_id)::uuid);
+SELECT DISTINCT p.merchant_id
+FROM billing.psps p
+JOIN billing.merchants m ON m.id = p.merchant_id
+WHERE p.rail = ANY(sqlc.arg(rails)::text[])
+  AND p.archived = false
+  AND m.deleted_at IS NULL
+  AND (sqlc.narg(after_merchant_id)::uuid IS NULL OR p.merchant_id > sqlc.narg(after_merchant_id)::uuid)
+ORDER BY p.merchant_id
+LIMIT sqlc.arg(merchant_limit)::int;
 
 -- One merchant's live PSPs on a rail, read inside that merchant's scope (the
 -- second leg of the ListRailArmedMerchants fan-out).

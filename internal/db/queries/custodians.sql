@@ -56,14 +56,12 @@ SELECT * FROM billing.custodians
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY kind, key, id;
 
--- CROSS-MERCHANT: a custodian sends its own instrument events carrying ITS
--- tenant id and no merchant context — the same problem as an account-routed
--- rail webhook, and the same SECURITY DEFINER answer (migration 0053). It
--- resolves the CUSTODIAN, never "the" PSP: one custodian may back several.
+-- CROSS-MERCHANT: a custodian's own instrument events carry its tenant id and
+-- no merchant context. This resolves the CUSTODIAN, never "the" PSP: one
+-- custodian may back several.
 -- name: ResolveCustodianOwnerByIdentity :one
 SELECT id, merchant_id, key, kind, environment, account_id
-FROM billing.custodian_owner_by_identity(
-    lower(sqlc.arg(kind)::text),
-    COALESCE(sqlc.narg(environment)::text, 'live'),
-    sqlc.arg(account_id)::text
-);
+FROM billing.custodians
+WHERE kind = lower(sqlc.arg(kind)::text)
+  AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
+  AND account_id = sqlc.arg(account_id)::text;

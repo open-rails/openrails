@@ -17,7 +17,7 @@ import (
 //     sum means money was created or destroyed inside one ledger.
 //
 //  2. COUNTER DRIFT — ledger_accounts.{credits,debits}_posted is a MAINTAINED
-//     PROJECTION written by the SECURITY DEFINER insert trigger, not a derived
+//     PROJECTION written by the transfer insert trigger, not a derived
 //     view. Bypass the trigger (superuser session, COPY, restore, a migration
 //     that disables triggers) and the counters diverge from ledger_transfers
 //     with no error anywhere — every balance read is then silently wrong.

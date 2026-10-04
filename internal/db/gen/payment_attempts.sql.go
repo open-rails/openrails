@@ -529,8 +529,13 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 }
 
 const listUnenrichedAttemptMerchants = `-- name: ListUnenrichedAttemptMerchants :many
-SELECT merchant_id FROM billing.unenriched_attempt_merchant_ids(
-    $1::timestamptz, $2::timestamptz, $3::int)
+SELECT a.merchant_id
+FROM billing.payment_attempts a
+WHERE a.enriched_at IS NULL AND a.rail = 'nmi' AND a.transaction_id IS NOT NULL
+  AND a.attempted_at >= $1::timestamptz AND a.attempted_at < $2::timestamptz
+GROUP BY a.merchant_id
+ORDER BY MIN(a.attempted_at), a.merchant_id
+LIMIT $3::int
 `
 
 type ListUnenrichedAttemptMerchantsParams struct {
@@ -539,15 +544,16 @@ type ListUnenrichedAttemptMerchantsParams struct {
 	MerchantLimit int32
 }
 
-func (q *Queries) ListUnenrichedAttemptMerchants(ctx context.Context, arg ListUnenrichedAttemptMerchantsParams) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants holding NMI attempts in [since, before) not yet enriched.
+func (q *Queries) ListUnenrichedAttemptMerchants(ctx context.Context, arg ListUnenrichedAttemptMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listUnenrichedAttemptMerchants, arg.Since, arg.Before, arg.MerchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}

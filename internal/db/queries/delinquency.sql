@@ -1,15 +1,25 @@
 -- or#878 arrears delinquency: the state projection, its due-work scans, and the
 -- durable host-lifecycle signal feed.
 
--- CROSS-MERCHANT: merchants with delinquency work, through migration 0037's
--- SECURITY DEFINER work queue. Ids only — states and signals are computed
--- per-merchant under RunInMerchantScope. Both legs of the union are indexed on
--- the work itself (overdue receivables / already-non-current payers), so a pass
--- costs activity, never the size of the customer table.
+-- CROSS-MERCHANT: merchants with delinquency work, an overdue open receivable
+-- (the enter leg) or a payer already non-current (the exit leg). Ids only;
+-- states and signals are computed per merchant. Both legs are indexed on the
+-- work itself, so a pass costs activity, never the size of the customer table.
 -- name: ListDelinquencyWorkMerchants :many
-SELECT merchant_id FROM billing.delinquency_work_merchant_ids(
-    sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
+SELECT q.merchant_id
+FROM (
+    SELECT i.merchant_id
+      FROM billing.invoices i
+     WHERE i.status IN ('open', 'past_due')
+       AND i.amount_due > 0
+       AND i.due_at IS NOT NULL
+       AND i.due_at < sqlc.arg(now)::timestamptz
+    UNION
+    SELECT d.merchant_id
+      FROM billing.customer_delinquency d
+     WHERE d.state <> 'current'
+) q
+LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListOverdueInvoiceAggregates :many
 -- The ENTER leg of the evaluation: per (payer, currency), how much is overdue

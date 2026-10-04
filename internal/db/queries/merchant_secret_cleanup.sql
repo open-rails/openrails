@@ -28,5 +28,12 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 -- CROSS-MERCHANT: committed tombstoned purge runs only. Per-run rows and cleanup
 -- are handled under the captured merchant's scope.
 -- name: ListPendingMerchantSecretCleanups :many
-SELECT merchant_id,run_id FROM billing.pending_merchant_secret_cleanups(
- sqlc.narg(after_run_id)::uuid,sqlc.arg(page_limit)::int);
+SELECT r.merchant_id, r.id AS run_id
+FROM billing.maintenance_runs r
+JOIN billing.merchants m ON m.id = r.merchant_id
+WHERE r.kind = 'merchant_purge' AND r.status IN ('running', 'failed')
+  AND r.affected->>'database_purged' = 'true' AND r.coverage ? 'secret_cleanup'
+  AND m.deleted_at IS NOT NULL
+  AND (sqlc.narg(after_run_id)::uuid IS NULL OR r.id > sqlc.narg(after_run_id)::uuid)
+ORDER BY r.id
+LIMIT sqlc.arg(page_limit)::int;

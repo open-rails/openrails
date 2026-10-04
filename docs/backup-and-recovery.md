@@ -79,8 +79,8 @@ system that cannot arm any rail.
 
 ## What must never be rolled back
 
-Some tables are append-only by role privilege: the application role holds only `SELECT, INSERT`,
-and counters move solely through a `SECURITY DEFINER` trigger.
+Some tables are append-only: their triggers refuse UPDATE and DELETE, and ledger counters move
+solely through the transfer insert trigger.
 
 - `ledger_transfers`, `ledger_accounts` — the double-entry ledger
 - `grants` — the grant log entitlements are derived from

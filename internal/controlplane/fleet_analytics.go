@@ -16,9 +16,8 @@ import (
 // the engine's truth tables. Like SearchMerchants (#226) this is a sensitive
 // cross-merchant read — no per-merchant scope could compute a fleet view —
 // and the CALLER is responsible for gating (platform superadmin) and auditing
-// each request. It reaches across merchants the ONE sanctioned way: migration
-// 0022's SECURITY DEFINER aggregates. The control-plane pool is not privileged;
-// it is the same role and the same DSN as the app's (or#861).
+// each request. Its queries return aggregates only, never merchant rows. The
+// control-plane pool is not privileged; it is the same role and DSN as the app's.
 
 // FleetMerchantFunnel counts merchants by lifecycle stage: provisioned (total),
 // armed (a live PSP declared), first-revenue (any completed payment ever), and
@@ -84,12 +83,9 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude billing.Merch
 	}
 
 	// or#861: every aggregate below reads merchant-owned tables (payments,
-	// subscriptions, prices, psps). Read on the base pool under the
-	// since-removed RLS they returned ZERO ROWS AND NO ERROR, so this dashboard
-	// reported all zeros. A fleet dashboard IS a genuinely cross-merchant read,
-	// so it goes through migration 0022's SECURITY DEFINER aggregates: they
-	// return AGGREGATES ONLY — counts and sums grouped by
-	// currency/rail — never a merchant-owned row.
+	// subscriptions, prices, psps). A fleet dashboard is a genuinely
+	// cross-merchant read; its queries return aggregates only — counts and sums
+	// grouped by currency/rail — never a merchant-owned row.
 	out := &FleetAnalytics{WindowDays: windowDays}
 	q := gen.New(c.pool)
 	funnel, err := q.FleetMerchantFunnel(ctx, gen.FleetMerchantFunnelParams{ExcludeMerchantID: excludeArg, Since: since})

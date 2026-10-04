@@ -217,17 +217,7 @@ func (r *RepriceRepo) ListMigratableSubscriptionsByPriceID(ctx context.Context, 
 // ListRedrivableBlockedPlanChanges under a pinned connection.
 func (r *RepriceRepo) ListRedrivableMerchants(ctx context.Context, limit int) ([]uuid.UUID, error) {
 	limit32, _ := safecast.Convert[int32](limit)
-	rows, err := r.db.GenDirectory().ListRedrivablePlanChangeMerchants(ctx, limit32)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]uuid.UUID, 0, len(rows))
-	for _, id := range rows {
-		if id != nil {
-			out = append(out, *id)
-		}
-	}
-	return out, nil
+	return r.db.GenDirectory().ListRedrivablePlanChangeMerchants(ctx, limit32)
 }
 
 // ListRedrivableBlockedPlanChanges (#816) reads ONE merchant's re-drivable

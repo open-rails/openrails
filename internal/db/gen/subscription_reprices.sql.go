@@ -367,24 +367,25 @@ func (q *Queries) ListRedrivableBlockedPlanChangeReprices(ctx context.Context, a
 }
 
 const listRedrivablePlanChangeMerchants = `-- name: ListRedrivablePlanChangeMerchants :many
-SELECT merchant_id FROM billing.redrivable_plan_change_merchant_ids(
-    $1::int)
+SELECT DISTINCT r.merchant_id
+FROM billing.subscription_reprices r
+WHERE r.kind = 'plan_change'
+  AND r.status = 'blocked'
+  AND r.blocked_reason LIKE 'rail_push_failed:%'
+LIMIT $1::int
 `
 
-// CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
-// through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
-// used to read the ROWS themselves off GenGlobal(); under the since-removed
-// RLS it enumerated nothing and never re-drove. A definer must not vend
-// whole merchant rows, so it vends ids and the rows are read per-merchant.
-func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchantLimit int32) ([]*uuid.UUID, error) {
+// CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice.
+// Ids only; the re-driver reads the rows per merchant.
+func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchantLimit int32) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listRedrivablePlanChangeMerchants, merchantLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []*uuid.UUID
+	var items []uuid.UUID
 	for rows.Next() {
-		var merchant_id *uuid.UUID
+		var merchant_id uuid.UUID
 		if err := rows.Scan(&merchant_id); err != nil {
 			return nil, err
 		}
