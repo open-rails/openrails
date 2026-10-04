@@ -11,16 +11,16 @@ undeclared providers. Use explicit metadata applications for deliberate updates:
 [merchant configuration applications](merchant-configuration-applications.md).
 
 Credential custody, authorization and external HTTP publication are independent.
-`merchant_config_http` selects standalone configuration HTTP; embedded hosts select
-`MerchantConfig` in their HTTP route configuration. Authorized local Client metadata
-operations remain available when external configuration HTTP is off. Credential
+The standalone server publishes the configuration routes with the merchant API;
+embedded hosts select `HTTP.Merchant`. Each route is gated by its permission, and
+authorized local Client metadata operations need no HTTP. Credential
 writes require a writable managed backend.
 
 ## The three files
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`, `merchant_config_http`, `allow_catalog_updates`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
+| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`, `allow_catalog_updates`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server and worker boot, every boot; embedded hosts pass the same shape to `Options.Merchant.Config` |
 | catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `Config.Catalog`, applied by `openrails.New` (embedded hosts) |
 

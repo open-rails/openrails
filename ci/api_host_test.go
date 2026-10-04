@@ -108,7 +108,6 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	ctx := t.Context()
 	dns := newTXTServer(t)
 	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
-		cfg.MerchantConfigHTTP = true
 		cfg.PublicBillingBaseURL = "https://" + shared
 		cfg.DashboardBaseURL = "https://" + console
 		deps.DNSResolver = dns.resolver()

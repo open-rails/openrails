@@ -9,7 +9,6 @@ provider_write_mode: full # full | limited | readonly; REQUIRED: boot refuses it
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED: the credential posture is never inherited by omission
 
 secret_backend: snapshot # immutable host values; alternatively vault or encrypted db
-merchant_config_http: false # standalone configuration routes; local Client stays available
 credential_read_only: false # may restrict a managed backend; cannot grant storage privileges
 allow_catalog_updates: false # publish catalog mutation routes over HTTP; independent of credential custody
 # Trusted local operator catalog application remains available when false.

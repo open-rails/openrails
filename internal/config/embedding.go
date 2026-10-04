@@ -26,12 +26,10 @@ type HTTPConfig struct {
 	// checkout session routes (the mint route needs a CustomerSelfService
 	// profile); nil publishes none.
 	Checkout *CheckoutConfig
-	// MerchantAdmin, Catalog, MerchantConfig and MerchantAPI publish the staff
-	// and machine surfaces; they require Deps.Authenticate and Deps.Authorize.
-	MerchantAdmin  bool
-	Catalog        bool
-	MerchantConfig bool
-	MerchantAPI    bool
+	// Merchant publishes the merchant API (/v1/merchant/*, /v1/import/* and
+	// creator-owned /v1/catalog/*), each route gated by its merchant
+	// permission; it requires Deps.Authenticate and Deps.Authorize.
+	Merchant bool
 	// CookieOrigin admits cookie-authenticated requests from this exact origin
 	// (https, or http on loopback); unsafe ones must carry it as Origin.
 	// Empty strips ambient cookies: credentials are explicit headers.

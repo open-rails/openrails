@@ -12,45 +12,45 @@ import (
 // outbound webhooks, portable archive and bulk import, and, on the standalone
 // server, its name, API keys, team and the signed-in user's merchants.
 var merchantRoutes = []Route{
-	{Method: GET, Path: "/v1/merchant/configuration", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead, NoConn: true,
+	{Method: GET, Path: "/v1/merchant/configuration", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead, NoConn: true,
 		Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Handler: h(handlers.GetMerchantConfiguration)},
-	{Method: POST, Path: "/v1/merchant/configuration/applications", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, NoConn: true,
+	{Method: POST, Path: "/v1/merchant/configuration/applications", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, NoConn: true,
 		Request: billing.MerchantConfigurationApplyParams{}, Responses: []Reply{{200, billing.MerchantConfigurationReceipt{}}}, Errors: codes("api_host_requires_proof", "invalid_param", "merchant_configuration_application_conflict", "merchant_configuration_revision_conflict"), Handler: h(handlers.ApplyMerchantConfiguration)},
-	{Method: GET, Path: "/v1/merchant/settings", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead,
+	{Method: GET, Path: "/v1/merchant/settings", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead,
 		Responses: []Reply{{200, billing.MerchantSettings{}}}, Handler: h(handlers.ServiceGetMerchantSettings)},
-	{Method: PUT, Path: "/v1/merchant/settings", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
+	{Method: PUT, Path: "/v1/merchant/settings", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
 		Request: billing.MerchantSettings{}, Responses: []Reply{{200, Message{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceSetMerchantSettings)},
 
 	// A merchant's own API host (#734): claimed, proven by DNS, then served.
-	{Method: GET, Path: "/v1/merchant/api-host", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead, When: FeatureMerchantDirectory, NoConn: true,
+	{Method: GET, Path: "/v1/merchant/api-host", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead, When: FeatureMerchantDirectory, NoConn: true,
 		Responses: []Reply{{200, Untyped{}}}, Errors: codes("merchant_unresolved", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetMerchantAPIHost)},
-	{Method: PUT, Path: "/v1/merchant/api-host", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, When: FeatureMerchantDirectory, NoConn: true,
+	{Method: PUT, Path: "/v1/merchant/api-host", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, When: FeatureMerchantDirectory, NoConn: true,
 		Request: Untyped{}, Responses: []Reply{{200, Untyped{}}, {202, Untyped{}}}, Errors: codes("api_host_reserved", "api_host_taken", "invalid_api_host", "merchant_unresolved", "resource_not_found", "service_unavailable"), Handler: h(handlers.PutMerchantAPIHost)},
-	{Method: POST, Path: "/v1/merchant/api-host/verify", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, When: FeatureMerchantDirectory, NoConn: true,
+	{Method: POST, Path: "/v1/merchant/api-host/verify", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, When: FeatureMerchantDirectory, NoConn: true,
 		Responses: []Reply{{200, Untyped{}}}, Errors: codes("api_host_claim_missing", "api_host_taken", "api_host_unproven", "merchant_unresolved", "resource_not_found", "service_unavailable"), Handler: h(handlers.VerifyMerchantAPIHost)},
 
 	// Outbound notification destinations.
-	{Method: GET, Path: "/v1/merchant/webhooks", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead,
+	{Method: GET, Path: "/v1/merchant/webhooks", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead,
 		Responses: []Reply{{200, Untyped{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListMerchantWebhooks)},
-	{Method: POST, Path: "/v1/merchant/webhooks", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
+	{Method: POST, Path: "/v1/merchant/webhooks", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
 		Request: alerting.CreateWebhookInput{}, Responses: []Reply{{201, alerting.Webhook{}}}, Errors: codes("resource_not_found", "service_unavailable", "webhook_invalid"), Handler: h(handlers.CreateMerchantWebhook)},
-	{Method: DELETE, Path: "/v1/merchant/webhooks/{id}", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
+	{Method: DELETE, Path: "/v1/merchant/webhooks/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
 		Responses: []Reply{{200, Untyped{}}}, Errors: codes("resource_not_found", "service_unavailable"), Handler: h(handlers.DeleteMerchantWebhook)},
-	{Method: PUT, Path: "/v1/merchant/webhooks/{id}/url", Group: MerchantConfig, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
+	{Method: PUT, Path: "/v1/merchant/webhooks/{id}/url", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate,
 		Request: alerting.RotateWebhookURLInput{}, Responses: []Reply{{200, alerting.Webhook{}}}, Errors: codes("resource_conflict", "resource_not_found", "service_unavailable", "webhook_invalid"), Handler: h(handlers.RotateMerchantWebhookURL)},
 
 	// The portable billing archive. Archives own their snapshot/restore
 	// transaction and its merchant pin; no outer merchant connection is held
 	// while transferring the artifact.
-	{Method: GET, Path: "/v1/merchant/billing-archive", Group: MerchantAPI, Auth: AuthMerchant, Perm: billing.MerchantBillingExport, NoConn: true,
+	{Method: GET, Path: "/v1/merchant/billing-archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantBillingExport, NoConn: true,
 		Responses: []Reply{{200, Stream{"application/x-ndjson"}}}, Errors: codes("billing_archive_unavailable", "billing_archive_unsupported_state"), Handler: h(handlers.ExportMerchantBilling)},
-	{Method: POST, Path: "/v1/merchant/billing-archive", Group: MerchantAPI, Auth: AuthMerchant, Perm: billing.MerchantBillingImport, NoConn: true,
+	{Method: POST, Path: "/v1/merchant/billing-archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantBillingImport, NoConn: true,
 		Request: Stream{"application/x-ndjson"}, Responses: []Reply{{200, billing.MerchantBillingImportResult{}}},
 		Errors: codes("billing_archive_integrity", "billing_archive_invalid_artifact", "billing_archive_merchant_mismatch", "billing_archive_not_empty", "billing_archive_unavailable", "billing_archive_unsupported_state", "request_body_too_large"), Handler: h(handlers.ImportMerchantBilling)},
 	// #737: the DeclaredBilling import door. A bulk book import rewrites
 	// subscriptions, payments and payment methods wholesale, so it has its own
 	// owner-level grant; the import pins its own merchant connection.
-	{Method: POST, Path: "/v1/import/billing", Group: MerchantAdmin, Auth: AuthMerchant, Perm: billing.MerchantBillingImport, NoConn: true,
+	{Method: POST, Path: "/v1/import/billing", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantBillingImport, NoConn: true,
 		Request: billingimport.DeclaredBilling{}, Responses: []Reply{{200, billingimport.Result{}}}, Errors: codes("as_of_required", "invalid_param", "invalid_psp_reference", "resource_conflict"), Handler: h(handlers.ImportDeclaredBilling)},
 
 	// The standalone control plane. Its handlers reach AuthKit, which the

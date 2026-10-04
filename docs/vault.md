@@ -26,10 +26,10 @@ Credential custody is independent of merchant metadata and HTTP publication:
   references. Set `vault.enabled` and the server-owned connection/auth settings.
 
 `credential_read_only: true` narrows a managed backend to reads. Vault policy
-can narrow it further. External merchant configuration routes are a separate
-choice: embedded `Options.HTTP.MerchantConfig`, or standalone
-`merchant_config_http`. Authorized local Client operations do not require those
-HTTP routes. Remote Clients connect to the remote server and need no local Vault
+can narrow it further. The merchant configuration routes are part of the
+merchant API (embedded `HTTP.Merchant`; always on the standalone server), each
+gated by its permission. Authorized local Client operations do not require
+those HTTP routes. Remote Clients connect to the remote server and need no local Vault
 or database configuration.
 
 There is no backend auto-fallback. Changing backend configuration does not move

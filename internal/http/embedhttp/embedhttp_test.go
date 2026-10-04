@@ -69,10 +69,10 @@ func TestCapabilities(t *testing.T) {
 		require.True(t, caps.RouteGroups[RouteSetCustomer])
 		require.Equal(t, tc.portal, caps.Features["stripe_billing_portal"], tc.scope)
 		require.Equal(t, tc.solana, caps.Features["solana_subscription_management"], tc.scope)
-		require.False(t, caps.Features["provider_credential_writes"], "credential writes need merchant_config")
+		require.False(t, caps.Features["provider_credential_writes"], "credential writes need the merchant group")
 	}
 
-	require.Equal(t, EmbeddedDefaultRouteSets, ResolveRouteSets(nil))
+	require.Equal(t, AllRouteSets, ResolveRouteSets(nil))
 	require.Equal(t, []RouteSet{RouteSetCheckout, RouteSetWebhooks}, ResolveRouteSets([]RouteSet{RouteSetCheckout, "", RouteSetCheckout, RouteSetWebhooks}))
 }
 
@@ -92,9 +92,8 @@ func TestHTTPConfigValidation(t *testing.T) {
 		{"no HTTP", nil, nil, true},
 		{"checkout without authentication", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, nil, false},
 		{"checkout", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, authn, true},
-		{"management without authorization", &config.HTTPConfig{MerchantAdmin: true}, authn, false},
-		{"merchant API without authorization", &config.HTTPConfig{MerchantAPI: true}, authn, false},
-		{"management", &config.HTTPConfig{MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}, full, true},
+		{"merchant without authorization", &config.HTTPConfig{Merchant: true}, authn, false},
+		{"merchant", &config.HTTPConfig{Merchant: true}, full, true},
 		{"customer without any authenticator", customer(config.CustomerRoutesConfig{Merchant: "store"}), nil, false},
 		{"native customer without merchant", customer(config.CustomerRoutesConfig{}), authn, false},
 		{"native customer", customer(config.CustomerRoutesConfig{Merchant: "store"}), authn, true},
@@ -114,7 +113,7 @@ func TestHTTPConfigValidation(t *testing.T) {
 func TestNewRoutes(t *testing.T) {
 	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout}}) })
 	require.Panics(t, func() {
-		(&Assembler{Authenticator: billingauth.AuthenticatorFunc(nil)}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchantAdmin}})
+		(&Assembler{Authenticator: billingauth.AuthenticatorFunc(nil)}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchant}})
 	})
 
 	gate := billingauth.Gate(IntegrationGate(&app.Runtime{}))
@@ -122,14 +121,14 @@ func TestNewRoutes(t *testing.T) {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}), Gate: gate}
 	noWebhooks := routesurface.ProviderRoutes{}
-	table := asm.NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout, RouteSetMerchantAdmin, RouteSetWebhooks}, ProviderRoutes: &noWebhooks})
+	table := asm.NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout, RouteSetMerchant, RouteSetWebhooks}, ProviderRoutes: &noWebhooks})
 	var keys []string
 	for _, e := range table.Entries {
 		key := e.Method + " " + e.Path
 		keys = append(keys, key)
 		require.Equal(t, strings.HasPrefix(e.Path, "/billing/v1/checkout") || strings.HasPrefix(e.Path, "/billing/v1/captcha") ||
 			slices.Contains([]string{"/billing/v1/products", "/billing/v1/prices", "/billing/v1/checkout-config", "/billing/v1/currencies"}, e.Path), e.Browser, key)
-		require.NotContains(t, e.Path, "/webhooks/", "callbacks need a webhook-capable rail")
+		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/capabilities")
 	require.Contains(t, keys, "OPTIONS /billing/v1/checkout")

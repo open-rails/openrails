@@ -37,7 +37,7 @@ func httpRuntime(cfg *config.HTTPConfig, managementAuth bool, customer ...custom
 			}),
 		}
 	}
-	c := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
+	c := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true}
 	authenticate := customerAuth(rejectDelegated)
 	if len(customer) > 0 {
 		authenticate = customer[0]
@@ -84,7 +84,7 @@ func TestHTTPConfigurationIsCopiedAndRoutesMemoized(t *testing.T) {
 	sandbox.HTTP = policy
 	copied, err := httpConfig(sandbox, nil)
 	require.NoError(t, err)
-	policy.Catalog = true
+	policy.Merchant = true
 	policy.CustomerRoutes[0].Prefix = "/mutated"
 
 	rt := httpRuntime(copied, false)
@@ -92,7 +92,7 @@ func TestHTTPConfigurationIsCopiedAndRoutesMemoized(t *testing.T) {
 	require.NoError(t, err)
 	var portal bool
 	for _, route := range routes {
-		require.NotContains(t, route.Path, "catalog")
+		require.NotContains(t, route.Path, "/merchant/")
 		require.NotContains(t, route.Path, "/mutated")
 		portal = portal || strings.HasPrefix(route.Path, "/portal/")
 	}
@@ -121,7 +121,7 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 		}
 	}
 
-	full := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true,
+	full := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, Merchant: true,
 		CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}}}
 	rt := httpRuntime(full, true)
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
@@ -142,7 +142,7 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 }
 
 func TestHTTPCatalogMutationsOmittedWhenDisabled(t *testing.T) {
-	rt := httpRuntime(&config.HTTPConfig{Catalog: true, MerchantAdmin: true}, true)
+	rt := httpRuntime(&config.HTTPConfig{Merchant: true}, true)
 	rt.App.Config.AllowCatalogUpdates = false
 	routes, err := rt.Routes()
 	require.NoError(t, err)

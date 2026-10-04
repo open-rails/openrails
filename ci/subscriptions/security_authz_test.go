@@ -196,7 +196,7 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 		Schema: w.schema, River: openrails.RiverHostOwned,
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
 		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		HTTP:     &openrails.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []openrails.CustomerRoutesConfig{routes}},
+		HTTP:     &openrails.HTTPConfig{Merchant: true, CustomerRoutes: []openrails.CustomerRoutesConfig{routes}},
 		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},
 	}, deps)
 	require.NoError(t, err)

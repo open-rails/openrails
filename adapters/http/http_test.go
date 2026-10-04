@@ -67,7 +67,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: deny}}
 	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Delegated: true}},
-		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
+		Merchant: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
 	for i := range table.Entries {

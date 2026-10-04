@@ -131,10 +131,6 @@ type Config struct {
 	// AlertSecretBackend selects vault or db custody for outbound webhook
 	// credentials, independently of SecretBackend.
 	AlertSecretBackend string
-	// MerchantConfigHTTP publishes the standalone merchant settings and PSP
-	// routes. Embedded hosts select HTTP.MerchantConfig instead. Neither flag
-	// affects in-process Client operations or credential custody.
-	MerchantConfigHTTP bool
 	// AllowCatalogUpdates enables the product, price, catalog and metering
 	// mutation routes. An in-process Client applies its own catalog without
 	// it; a declared Catalog still refuses the merchant's own catalog.

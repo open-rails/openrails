@@ -25,8 +25,8 @@ func ValidateHTTPConfig(cfg *config.HTTPConfig, auth *billingauth.Integration) e
 	if cfg.Checkout != nil && (auth == nil || auth.Authentication == nil) {
 		return fmt.Errorf("openrails HTTP: Checkout requires Deps.AuthKit or Deps.Authenticate")
 	}
-	if (cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
-		return fmt.Errorf("openrails HTTP: management surfaces require Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
+	if cfg.Merchant && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
+		return fmt.Errorf("openrails HTTP: the merchant surface requires Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
 	}
 	return nil
 }
@@ -38,8 +38,7 @@ func routeSets(cfg config.HTTPConfig) []RouteSet {
 		set     RouteSet
 	}{
 		{cfg.Checkout != nil, RouteSetCheckout},
-		{cfg.MerchantAdmin, RouteSetMerchantAdmin}, {cfg.Catalog, RouteSetCatalog},
-		{cfg.MerchantConfig, RouteSetMerchantConfig}, {cfg.MerchantAPI, RouteSetMerchantAPI},
+		{cfg.Merchant, RouteSetMerchant},
 	} {
 		if v.enabled {
 			sets = append(sets, v.set)

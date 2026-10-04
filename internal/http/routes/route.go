@@ -40,14 +40,9 @@ const (
 	// Treasury is a customer acting on an account it co-manages
 	// (/v1/customers/{customer_id}).
 	Treasury Group = "customer_treasury"
-	// MerchantAPI is the host's machine billing API.
-	MerchantAPI Group = "merchant_api"
-	// MerchantAdmin is merchant staff: support and money operations.
-	MerchantAdmin Group = "merchant_admin"
-	// MerchantConfig is merchant settings, PSPs and outbound webhooks.
-	MerchantConfig Group = "merchant_config"
-	// CatalogAdmin is the merchant's catalog administration.
-	CatalogAdmin Group = "catalog"
+	// Merchant is the merchant API: staff, machines and the Go client alike,
+	// each route gated by its merchant permission.
+	Merchant Group = "merchant"
 	// CatalogOwned is a creator managing its own catalog (/v1/catalog).
 	CatalogOwned Group = "catalog_owned"
 	// ControlPlane is the standalone server's merchant accounts, team and

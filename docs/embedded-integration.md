@@ -95,7 +95,7 @@ explicit:
 | `River`, `RiverSchema` | default managed | Who runs the job fleet (section 4). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Catalog`, delegated credentials). The in-process Client writes its own catalog without it. A declared `Catalog` stays read-only either way. |
+| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Merchant`, delegated credentials). The in-process Client writes its own catalog without it. A declared `Catalog` stays read-only either way. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
 
 | Deps field | Meaning |
@@ -224,8 +224,8 @@ during setup.
 
 `SecretBackend` selects only credential custody. Snapshot values stay in memory;
 managed provider credentials are published through `Client.PaymentProviders` with
-an operation ID and expected account revision. `HTTP.MerchantConfig` opts into
-the settings/provider route family, with normal authentication and authorization.
+an operation ID and expected account revision. `HTTP.Merchant` publishes
+these routes with the rest of the merchant API, each gated by its permission.
 
 **Declared catalog**: a host whose `catalog.yaml` is the truth sets
 `Config.Catalog` (`billing.ParseCatalogApplicationYAML` of the file). `New`
@@ -285,7 +285,7 @@ raw provider bindings, provider selection, meters or bulk publishing. The engine
 selects applicable configured providers for creator prices. It does not create
 separate merchants, provider accounts, payout policies or checkout authority.
 
-HTTP hosts mount these endpoints by configuring `HTTP.Catalog: true`, under
+HTTP hosts mount these endpoints by configuring `HTTP.Merchant: true`, under
 `/v1/catalog`. Native personal operations use the explicitly mapped canonical
 `Identity.CustomerID` as the owner key. Explicitly selecting a different owner
 requires the existing live catalog administrator check. Advanced delegated gates
@@ -318,7 +318,7 @@ OpenRails derives everything from it and the host writes no mapping:
 - Authorization is checked live through AuthKit, per operation.
   `Deps.AuthorityFor` names the AuthKit group and permission that authorize a
   staff operation; only the host knows which group holds its billing staff, so
-  the staff and machine route groups require it. Native JWT roles never confer
+  the merchant route group requires it. Native JWT roles never confer
   privileges.
 - The recent sign-in check (operations that move money, grant access or mint
   credentials; `billing.RequiresRecentSignIn`) is AuthKit's: a stale
@@ -356,10 +356,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | (always) | Capability discovery and signature-checked provider callbacks |
 | `Checkout` | Products, prices, checkout config and [hosted checkout](api/commerce.md#hosted-checkout) sessions; requires `Authenticate`. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page |
 | `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`); `Treasury` adds `/v1/customers` |
-| `MerchantAdmin` | Customer and support management; requires `Authorize` |
-| `Catalog` | Merchant and creator catalog HTTP; requires `Authorize` |
-| `MerchantConfig` | Settings and provider configuration; requires `Authorize` |
-| `MerchantAPI` | Service and API-key routes; requires `Authorize` |
+| `Merchant` | The merchant API (`/v1/merchant/*`, `/v1/import/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
 slug). An advanced, delegated audience mounts a profile under its own `Prefix`

@@ -106,22 +106,22 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, ready.Code)
 	require.Contains(t, ready.Body.String(), `"dependencies"`)
 
-	// #623: configuration routes are advertised only when explicitly published.
+	// #623: the standalone server publishes every route group.
 	caps := get("/v1/capabilities")
 	require.Equal(t, http.StatusOK, caps.Code)
 	var groups struct {
 		RouteGroups map[string]bool `json:"route_groups"`
 	}
 	require.NoError(t, json.Unmarshal(caps.Body.Bytes(), &groups), caps.Body.String())
-	for _, rs := range embedhttp.StandaloneDefaultRouteSets {
-		require.Equal(t, rs != embedhttp.RouteSetMerchantConfig, groups.RouteGroups[string(rs)], rs)
+	for _, rs := range embedhttp.AllRouteSets {
+		require.True(t, groups.RouteGroups[string(rs)], rs)
 	}
 
 	// Provider credential writes are advertised only for a writable DB backend.
 	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, writable := range []bool{false, true} {
 			mux := http.NewServeMux()
-			(&Server{cfg: &config.Config{MerchantConfigHTTP: true}, runtime: &app.Runtime{
+			(&Server{cfg: &config.Config{}, runtime: &app.Runtime{
 				Config:            &config.Config{SecretBackend: source},
 				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
 			}}).registerStandaloneMetaRoutes(mux)

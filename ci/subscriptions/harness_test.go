@@ -295,7 +295,7 @@ func (w *world) start() {
 	if w.selfService {
 		scope = openrails.CustomerSelfService
 	}
-	httpConfig := &openrails.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []openrails.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
+	httpConfig := &openrails.HTTPConfig{Merchant: true, CustomerRoutes: []openrails.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
 	if w.mount != nil {
 		w.mount(httpConfig)
 	}

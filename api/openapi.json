@@ -813,7 +813,7 @@
     "/v1/merchant/checkout-sessions": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -882,7 +882,7 @@
     "/v1/merchant/checkout-sessions/lookup": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -950,7 +950,7 @@
     "/v1/merchant/hosted-checkout-sessions": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -1012,7 +1012,7 @@
     "/v1/merchant/payment-method-sessions": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1080,7 +1080,7 @@
     "/v1/merchant/solana-cancel-sessions": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1148,7 +1148,7 @@
     "/v1/merchant/solana-tier-change-sessions": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1216,7 +1216,7 @@
     "/v1/merchant/checkout-sessions/by-key": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1289,7 +1289,7 @@
     "/v1/merchant/checkout-sessions/{id}": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1357,7 +1357,7 @@
     "/v1/merchant/checkout-sessions/{id}/confirm": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1427,7 +1427,7 @@
     "/v1/merchant/checkout-options": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -1496,7 +1496,7 @@
     "/v1/merchant/checkout-config": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -2228,7 +2228,7 @@
     "/v1/merchant/customers/{customer_id}/rate-overrides": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2276,7 +2276,7 @@
     "/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}": {
       "put": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2340,7 +2340,7 @@
       },
       "delete": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2396,7 +2396,7 @@
     "/v1/merchant/catalog/offers/lookup": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -2443,7 +2443,7 @@
     "/v1/merchant/catalog/products": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -2492,7 +2492,7 @@
       },
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2567,7 +2567,7 @@
     "/v1/merchant/catalog/products/{id}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2613,7 +2613,7 @@
       },
       "patch": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2676,7 +2676,7 @@
     "/v1/merchant/catalog/products/by-key/{key}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2722,7 +2722,7 @@
       },
       "put": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2784,7 +2784,7 @@
     "/v1/merchant/catalog/products/{id}/activate": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2837,7 +2837,7 @@
     "/v1/merchant/catalog/products/{id}/deactivate": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -2890,7 +2890,7 @@
     "/v1/merchant/catalog/prices": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -2941,7 +2941,7 @@
       },
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3030,7 +3030,7 @@
     "/v1/merchant/catalog/prices/by-key/{key}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3077,7 +3077,7 @@
     "/v1/merchant/catalog/prices/by-key/{key}/history": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3124,7 +3124,7 @@
     "/v1/merchant/catalog/prices/{id}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3179,7 +3179,7 @@
       },
       "patch": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3241,7 +3241,7 @@
     "/v1/merchant/catalog/prices/{id}/activate": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3291,7 +3291,7 @@
     "/v1/merchant/catalog/prices/{id}/deactivate": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3341,7 +3341,7 @@
     "/v1/merchant/catalog/prices/{id}/key": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3401,7 +3401,7 @@
     "/v1/merchant/catalog/meters": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3451,7 +3451,7 @@
     "/v1/merchant/catalog/meters/{key}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3494,7 +3494,7 @@
       },
       "put": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3549,7 +3549,7 @@
     "/v1/merchant/catalog/meters/{key}/overrides": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3609,7 +3609,7 @@
     "/v1/merchant/catalog/meters/{key}/rate-card": {
       "put": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3664,7 +3664,7 @@
       },
       "delete": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3704,7 +3704,7 @@
     "/v1/merchant/catalog/drift": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3775,7 +3775,7 @@
     "/v1/merchant/catalog/drift/refresh": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -3812,7 +3812,7 @@
     "/v1/merchant/catalog/revision": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -3845,7 +3845,7 @@
     "/v1/merchant/catalog/applications": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -3904,7 +3904,7 @@
     "/v1/merchant/catalog/product-archives": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -3969,7 +3969,7 @@
     "/v1/merchant/catalog/product-archives/{id}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -4019,7 +4019,7 @@
     "/v1/merchant/catalogs": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -4070,7 +4070,7 @@
       },
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -4118,7 +4118,7 @@
     "/v1/merchant/catalogs/by-owner": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -4164,7 +4164,7 @@
     "/v1/merchant/catalogs/{id}": {
       "get": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5305,7 +5305,7 @@
     "/v1/merchant/catalog/ask": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -5354,7 +5354,7 @@
     "/v1/merchant/catalog/copilot/confirm": {
       "post": {
         "tags": [
-          "catalog"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -5401,7 +5401,7 @@
     "/v1/merchant/customers/{customer_id}/effective-tier": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5455,7 +5455,7 @@
     "/v1/merchant/subscriptions": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5707,7 +5707,7 @@
     "/v1/merchant/subscriptions/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5754,7 +5754,7 @@
     "/v1/merchant/subscriptions/{id}/cancel": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5816,7 +5816,7 @@
     "/v1/merchant/subscriptions/{id}/resume": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5863,7 +5863,7 @@
     "/v1/merchant/subscriptions/{id}/change-tier": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -5947,7 +5947,7 @@
     "/v1/merchant/subscriptions/{id}/change-tier/preview": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6011,7 +6011,7 @@
     "/v1/merchant/subscriptions/{id}/payment-method": {
       "put": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6074,7 +6074,7 @@
     "/v1/merchant/subscriptions/{id}/provider-cutover": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6146,7 +6146,7 @@
       },
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6211,7 +6211,7 @@
     "/v1/merchant/subscriptions/{id}/provider-cutover/preview": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6275,7 +6275,7 @@
     "/v1/merchant/subscriptions/{id}/engine-takeover/preview": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6323,7 +6323,7 @@
     "/v1/merchant/subscriptions/{id}/engine-takeover": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6379,7 +6379,7 @@
       },
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6427,7 +6427,7 @@
     "/v1/merchant/subscriptions/{id}/engine-takeover/abandon": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6485,7 +6485,7 @@
     "/v1/merchant/engine-takeovers": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -6533,7 +6533,7 @@
     "/v1/merchant/provider-refresh": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "202": {
@@ -6568,7 +6568,7 @@
     "/v1/merchant/subscriptions/{id}/reprice": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6633,7 +6633,7 @@
     "/v1/merchant/catalog/reprice-all-prior-versions": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -6687,7 +6687,7 @@
     "/v1/merchant/catalog/reprice-all-prior-versions/preview": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6734,7 +6734,7 @@
     "/v1/merchant/plan-migrations": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -6787,7 +6787,7 @@
     "/v1/merchant/plan-migrations/preview": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -6838,7 +6838,7 @@
     "/v1/merchant/plan-migrations/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6899,7 +6899,7 @@
     "/v1/merchant/plan-migrations/{id}/cancel": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -6946,7 +6946,7 @@
     "/v1/merchant/reprices": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -7019,7 +7019,7 @@
     "/v1/merchant/reprices/batches": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -7078,7 +7078,7 @@
     "/v1/merchant/reprices/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -7124,7 +7124,7 @@
     "/v1/merchant/reprices/{id}/cancel": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8161,7 +8161,7 @@
     "/v1/merchant/customers/entitlements:batch": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -8208,7 +8208,7 @@
     "/v1/merchant/customers/{customer_id}/entitlements": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8262,7 +8262,7 @@
       },
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8318,7 +8318,7 @@
     "/v1/merchant/entitlements/{entitlement}/customers": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8386,7 +8386,7 @@
     "/v1/merchant/users/{user_id}/entitlements/check": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8444,7 +8444,7 @@
     "/v1/merchant/users/{user_id}/product-access/check": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8501,7 +8501,7 @@
     "/v1/merchant/users/{user_id}/product-access": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8583,7 +8583,7 @@
     "/v1/merchant/customers/{customer_id}/entitlements/{id}": {
       "delete": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8638,7 +8638,7 @@
     "/v1/merchant/customers/{customer_id}/product-access": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8696,7 +8696,7 @@
     "/v1/merchant/customers/{customer_id}/product-access/{id}": {
       "delete": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8898,7 +8898,7 @@
     "/v1/merchant/customers/{customer_id}": {
       "put": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8941,7 +8941,7 @@
       },
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -8995,7 +8995,7 @@
     "/v1/merchant/customers/{customer_id}/billing-policy": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9039,7 +9039,7 @@
       },
       "put": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9096,7 +9096,7 @@
     "/v1/merchant/customers/{customer_id}/delinquency": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9143,7 +9143,7 @@
     "/v1/merchant/delinquency": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9196,7 +9196,7 @@
     "/v1/merchant/customers": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9291,7 +9291,7 @@
     "/v1/merchant/customers/{customer_id}/spend-delegations": {
       "put": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9347,7 +9347,7 @@
     "/v1/merchant/customers/{customer_id}/spend-delegations:upsert": {
       "put": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9403,7 +9403,7 @@
     "/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": {
       "delete": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9466,7 +9466,7 @@
     "/v1/merchant/invokers/{invoker}/credits": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9530,7 +9530,7 @@
     "/v1/merchant/trust-level": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9585,7 +9585,7 @@
     "/v1/merchant/credit-limit": {
       "put": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -9630,7 +9630,7 @@
       },
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9684,7 +9684,7 @@
     "/v1/merchant/credits/balance": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9738,7 +9738,7 @@
     "/v1/merchant/credits/deposit": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -9784,7 +9784,7 @@
       },
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9837,7 +9837,7 @@
     "/v1/merchant/customers/{customer_id}/credits": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9893,7 +9893,7 @@
       },
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -9962,7 +9962,7 @@
     "/v1/merchant/customers/{customer_id}/credits/{grant_id}": {
       "delete": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -10019,7 +10019,7 @@
     "/v1/merchant/customers/{customer_id}/credit-transactions": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -10587,7 +10587,7 @@
     "/v1/merchant/admissions": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -10634,7 +10634,7 @@
     "/v1/merchant/wasted-spend": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -10682,7 +10682,7 @@
     "/v1/merchant/admissions/{id}/capture": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -10741,7 +10741,7 @@
     "/v1/merchant/admissions/{id}/release": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -10790,7 +10790,7 @@
     "/v1/merchant/admissions/{id}/extend": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -10848,7 +10848,7 @@
     "/v1/merchant/provider-operations": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -10896,7 +10896,7 @@
     "/v1/merchant/provider-operations/{operation_id}": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -10943,7 +10943,7 @@
     "/v1/merchant/provider-operations/{operation_id}/release": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11001,7 +11001,7 @@
     "/v1/merchant/provider-operations/{operation_id}/observations": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11059,7 +11059,7 @@
     "/v1/merchant/provider-operations/{operation_id}/qualification": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11106,7 +11106,7 @@
     "/v1/merchant/usage/report": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -11155,7 +11155,7 @@
     "/v1/merchant/usage/rollup": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -11203,7 +11203,7 @@
     "/v1/merchant/usage/resource-revenue": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -11381,7 +11381,7 @@
     "/v1/merchant/invoices": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11441,7 +11441,7 @@
     "/v1/merchant/invoices/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11488,7 +11488,7 @@
     "/v1/merchant/invoices/{id}/payments": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11533,7 +11533,7 @@
       },
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11590,7 +11590,7 @@
     "/v1/merchant/invoices/{id}/void": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11647,7 +11647,7 @@
     "/v1/merchant/invoices/{id}/uncollectible": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11704,7 +11704,7 @@
     "/v1/merchant/invoices/{id}/retry-collection": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11775,7 +11775,7 @@
     "/v1/merchant/customers/{customer_id}/invoice-profile": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -11821,7 +11821,7 @@
       },
       "put": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12186,7 +12186,7 @@
     "/v1/merchant/customers/{customer_id}/payment-settlement-status": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12240,7 +12240,7 @@
     "/v1/merchant/customers/{customer_id}/payments": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12301,7 +12301,7 @@
     "/v1/merchant/customers/{customer_id}/payments/off-channel": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12370,7 +12370,7 @@
     "/v1/merchant/payments": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12550,7 +12550,7 @@
     "/v1/merchant/payments/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12596,7 +12596,7 @@
     "/v1/merchant/payments/{id}/refunds": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12682,7 +12682,7 @@
     "/v1/merchant/payment-attempts": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12734,7 +12734,7 @@
     "/v1/merchant/payment-attempts/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12780,7 +12780,7 @@
     "/v1/merchant/rebill-cycles": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12832,7 +12832,7 @@
     "/v1/merchant/rebill-cycles/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12878,7 +12878,7 @@
     "/v1/merchant/purchase-reviews": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -12944,7 +12944,7 @@
     "/v1/merchant/purchase-reviews/{id}/resolve": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -13248,7 +13248,7 @@
     "/v1/merchant/customers/{customer_id}/payment-methods": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -13293,7 +13293,7 @@
     "/v1/merchant/customers/{customer_id}/payment-methods/{id}": {
       "delete": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -13350,7 +13350,7 @@
     "/v1/merchant/customers/{customer_id}/default-payment-method": {
       "put": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -14353,7 +14353,7 @@
     "/v1/merchant/payment-providers": {
       "get": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -14418,7 +14418,7 @@
     "/v1/merchant/payment-providers/routing/dry-run": {
       "post": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -14464,7 +14464,7 @@
     "/v1/merchant/payment-providers/{provider}": {
       "get": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -14522,7 +14522,7 @@
       },
       "put": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -14586,7 +14586,7 @@
       },
       "delete": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -14646,7 +14646,7 @@
     "/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive": {
       "post": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -14787,7 +14787,7 @@
     "/v1/merchant/configuration": {
       "get": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -14820,7 +14820,7 @@
     "/v1/merchant/configuration/applications": {
       "post": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -14868,7 +14868,7 @@
     "/v1/merchant/settings": {
       "get": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -14899,7 +14899,7 @@
       },
       "put": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -14944,7 +14944,7 @@
     "/v1/merchant/api-host": {
       "get": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -14981,7 +14981,7 @@
       },
       "put": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -15045,7 +15045,7 @@
     "/v1/merchant/api-host/verify": {
       "post": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -15087,7 +15087,7 @@
     "/v1/merchant/webhooks": {
       "get": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -15121,7 +15121,7 @@
       },
       "post": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -15168,7 +15168,7 @@
     "/v1/merchant/webhooks/{id}": {
       "delete": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -15215,7 +15215,7 @@
     "/v1/merchant/webhooks/{id}/url": {
       "put": {
         "tags": [
-          "merchant_config"
+          "merchant"
         ],
         "parameters": [
           {
@@ -15273,7 +15273,7 @@
     "/v1/merchant/billing-archive": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -15307,7 +15307,7 @@
       },
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -15358,7 +15358,7 @@
     "/v1/import/billing": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -15976,7 +15976,7 @@
     "/v1/merchant/host-events": {
       "get": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16045,7 +16045,7 @@
     "/v1/merchant/host-events/{id}/acknowledge": {
       "post": {
         "tags": [
-          "merchant_api"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16091,7 +16091,7 @@
     "/v1/merchant/metrics/query": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -16127,7 +16127,7 @@
     "/v1/merchant/metrics/schema": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -16160,7 +16160,7 @@
     "/v1/merchant/dashboard": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -16193,7 +16193,7 @@
       },
       "put": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -16229,7 +16229,7 @@
     "/v1/merchant/notifications": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16275,7 +16275,7 @@
     "/v1/merchant/notifications/unread-count": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -16311,7 +16311,7 @@
     "/v1/merchant/notifications/{id}/read": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16358,7 +16358,7 @@
     "/v1/merchant/repair-alerts": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16415,7 +16415,7 @@
     "/v1/merchant/worker-health": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -16451,7 +16451,7 @@
     "/v1/merchant/findings": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16522,7 +16522,7 @@
     "/v1/merchant/findings/{id}": {
       "get": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16568,7 +16568,7 @@
     "/v1/merchant/findings/{id}/resolve": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "parameters": [
           {
@@ -16763,7 +16763,7 @@
     "/v1/merchant/metrics/ask": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
@@ -16812,7 +16812,7 @@
     "/v1/merchant/dashboard/widgets/generate": {
       "post": {
         "tags": [
-          "merchant_admin"
+          "merchant"
         ],
         "requestBody": {
           "content": {
