@@ -66,7 +66,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err := ownsInitialMembership(prior, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID); err != nil {
 			return nil, err
 		}
-		current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.BillingRailIntent) error {
+		current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.BillingProviderIntent) error {
 			return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 		})
 		if err != nil {
@@ -86,7 +86,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if s.Config == nil {
 		return nil, errors.New("engine initial membership custody is not configured")
 	}
-	var operation gen.BillingRailIntent
+	var operation gen.BillingProviderIntent
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: accepted.CustomerID}); err != nil {
@@ -164,10 +164,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 				return errors.New("new membership custodian is archived")
 			}
 		}
-		label := psp.ID.String()
-		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
-			label = *psp.Key
-		}
+		label := psp.Key
 		payload := subscriptions.InitialMembershipPayload{CheckoutAttemptID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method, accepted.PSPID), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
 		return err
@@ -175,7 +172,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.BillingRailIntent) error {
+	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.BillingProviderIntent) error {
 		return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 	})
 	if err != nil {

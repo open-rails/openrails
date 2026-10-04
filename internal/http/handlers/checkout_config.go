@@ -157,7 +157,7 @@ func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope
 // public values that render it, from the same armed-PSP projection
 // /checkout-config serves (#1078).
 func advertiseCheckoutOptions(options []billing.CheckoutOption, cfg merchants.PublicCheckoutConfig) {
-	byID := make(map[string]merchants.PublicPSPConfig, len(cfg.PSPs))
+	byID := make(map[billing.PSPID]merchants.PublicPSPConfig, len(cfg.PSPs))
 	for _, psp := range cfg.PSPs {
 		byID[psp.PSPID] = psp
 	}

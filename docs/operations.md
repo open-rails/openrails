@@ -96,7 +96,7 @@ bootstrap is first-run only and limited to AuthKit authority.
 
 **Outbound — durability is OUR job.** Every mutation OpenRails wants to make
 against a provider must survive failure of the attempt. The mechanism is the
-**provider intent ledger** (`billing.rail_intents`): every outbound
+**provider intent ledger** (`billing.provider_intents`): every outbound
 mutation is durably recorded with an idempotency key (re-enqueues dedupe), an
 origin (`user`/`admin`/`system`), the PSP row it was produced against, and a
 relevance window. Two scheduled workers drain it: the **executor** (every
@@ -129,7 +129,7 @@ resolved by *reading* the provider before any retry — a charge is never
 blind-retried; deletes/cancels are verify-then-execute (already-deleted =
 success); creates are content-addressed find-or-create. Stripe ops
 additionally send `Idempotency-Key`. Every attempt/outcome is appended to
-`billing.rail_mutation_logs`.
+`billing.provider_mutation_logs`.
 
 **Several replicas.** Hosts may run any number of processes against one
 database and River schema. Exactly-once rebilling rests on the database, not
@@ -162,7 +162,7 @@ the drain forecast: "N execute under mode=limited (or full), M require
 mode=full; nothing executes under readonly." Under `limited`/`readonly` this
 doubles as the dry-run view of a cutover.
 
-`openrails intents-log [--rail=…] [--intent=…] [--provider-account=…]
+`openrails intents-log [--rail=…] [--intent=…] [--psp=…]
 [--phase=attempting|succeeded|failed|unknown|parked]` renders the append-only
 mutation-attempt log — the executor's audit trail.
 
@@ -195,7 +195,7 @@ Rules:
 
 - **Rotating a credential within the SAME PSP**: replace the
   secret under the same PSP row — intents arm with the new value
-  transparently. `PUT /v1/merchant/payment-providers/{rail}` (and the console's
+  transparently. `PATCH /v1/merchant/psps/{psp_id}` (and the console's
   **Rotate** action) is atomic in the way that matters:
   - the **new** credential is live-probed against the provider *before*
     anything is written (NMI and CCBill today). A probe failure fails the whole
@@ -204,7 +204,7 @@ Rules:
   - a committed rotation is **deployment-wide at the next read**, not
     per-node. Each node fronts the secret backend with an in-process TTL cache,
     so the rotation records the credential's new secret version on the shared
-    PSP row (`evidence.credential_versions`, surfaced as
+    PSP row (`psps.credential_versions`, surfaced as
     `credentials.<key>.rotation_version`). Every credential resolution already
     re-reads that row, and no node may answer from a cache entry below the
     recorded version — so a retired credential cannot be presented after the
@@ -214,40 +214,20 @@ Rules:
     re-submitting an identical value is a no-op, not a rotation.
 - **Moving to a DIFFERENT PSP**: never repoint an existing PSP
   row's credentials (OpenRails cannot detect the swap — the declared
-  `account_id` would silently lie). Declare a NEW `psps` entry and archive
+  `account_id` would silently lie). Arm a NEW PSP and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
-  Archive by id: `POST /v1/merchant/payment-providers/{rail}/accounts/{psp_id}/archive`
-  (`internal/operator`: `ArchivePaymentProviderAccount`) makes no provider
-  call, so it works when the old provider is terminated or unreachable. The
-  rail-level `DELETE` refuses (`provider_accounts_ambiguous`) while two
-  accounts are active, and `PUT … {"enabled": false}` live-probes the stored
-  credentials, so neither archives a dark account.
+  `POST /v1/merchant/psps/{psp_id}/archive` makes no provider call, so it
+  works when the old provider is terminated or unreachable.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
-- **Per-subscriber cutover off an archived PSP is report-only (#657).**
-  `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
-  `internal/operator` reads the subscription, the card the subscriber
-  re-entered (`ReplacementPaymentMethodID`) and/or a `TargetPSPID` (default:
-  the card's PSP), and both PSP rows, and writes nothing. `Executable` is true
-  only for the durable payment-source update: an NMI subscription that is
-  active or past_due with a provider recurring record, a non-archived target
-  equal to its own account, and a PSP-vaulted, unparked card of the payer on
-  that account (`code: ready`; provider availability is checked when the
-  update runs). Everything else is a coded, non-executable plan
-  (`rail_unsupported`, `subscription_not_rebilling`, `target_archived`,
-  `replacement_card_required`, `replacement_card_psp_mismatch`, ...);
-  cross-account moves report `cross_account_requires_card_reentry` and are
-  never executed. The durable update itself refuses a cross-account target
-  at enqueue and again in the executor under the method's row lock
-  (`failed_terminal`, evidence `code: psp_mismatch`, no provider call), and a
-  custody remap (or#297) refuses an instrument any unresolved payment-source
-  update names (`operation_unresolved`), using the same predicate that protects
-  an unresolved invoice collection's frozen instrument. A replacement already
-  moved to third-party custody is also refused (`payment_method_not_psp_vaulted`)
-  before any provider traffic, even if its PSP id is unchanged.
+- **Subscribers on an archived PSP stay there.** OpenRails never moves or
+  cancels a working provider-owned subscription. An archived PSP takes no new
+  purchases; its live subscriptions keep renewing on it and stay monitored. A
+  subscriber leaves it only when their card lapses and they buy again with a
+  new card, which lands on an active PSP.
 
 ### Custodians (or#880)
 
@@ -261,7 +241,7 @@ Custodial credentials are scoped by the custodian's own identity,
 `custodians/<kind>/<environment>/<account_id>/<key>`, exactly as PSP
 credentials are scoped by theirs, and are read through the same rotation
 version floor (or#812) — recorded on `custodians.credential_versions` rather
-than on a PSP's evidence document. Rotation and archival follow the PSP rules
+than on a PSP row. Rotation and archival follow the PSP rules
 above verbatim: rotate in place under the same row; to move to a different
 custodian account, declare a NEW one and archive the old one for drain — an
 instrument the old custodian holds is never re-vaulted or destroyed
@@ -277,7 +257,7 @@ which of several referencing PSPs it belongs to has no answer.
 Manual-only — **never scheduled**. It never writes to a provider.
 
 ```
-openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--provider-account=<uuid>]
+openrails pull-provider --merchant=<slug> [--rail=nmi,stripe,…] [--psp=<uuid>]
                         [--since=… --until=…] [--manifest=…] [--format table|json]
                         [--log-dir=…] [--insert] [--overwrite] [--prune [--expect-rows=N]]
 openrails pull-provider report --merchant=<slug> [--run=ID] [--format table|json]
@@ -609,7 +589,7 @@ queue, skipping merchants with no declared PSPs (#719). Three lanes:
 
 | Lane | Purpose |
 |---|---|
-| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`billing.rail_refresh_watermarks`) |
+| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`billing.psp_refresh_watermarks`) |
 | Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth: one windowed bulk pull per rail + targeted per-subscription probes for rows the bulk pull can't decide |
 | CCBill DataLink Refresh | scheduled active-member bulk refresh (CCBill has no cheap per-subscription liveness API) |
 
@@ -870,7 +850,7 @@ SELECT count(*) FROM billing.entitlements
  WHERE revoked_at > (SELECT updated_at FROM billing.destructive_action_switch);
 
 -- 4. destructive provider intents are parked, not executing
-SELECT status, count(*) FROM billing.rail_intents
+SELECT status, count(*) FROM billing.provider_intents
  WHERE intent_type = 'nmi_delete_subscription' GROUP BY status;
 ```
 

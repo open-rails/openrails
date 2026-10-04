@@ -34,7 +34,7 @@ type HyperSwitchMethodDeletePayload struct {
 	DetachOnly      bool                      `json:"detach_only"`
 }
 
-func DecodeHyperSwitchMethodDelete(in gen.BillingRailIntent) (HyperSwitchMethodDeletePayload, error) {
+func DecodeHyperSwitchMethodDelete(in gen.BillingProviderIntent) (HyperSwitchMethodDeletePayload, error) {
 	var p HyperSwitchMethodDeletePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err
@@ -63,10 +63,10 @@ func (*HyperSwitchMethodDeleteHandler) Type() string                  { return T
 func (*HyperSwitchMethodDeleteHandler) Backoff(n int32) time.Duration { return DefaultBackoff.Delay(n) }
 func (*HyperSwitchMethodDeleteHandler) PrunePolicy() (bool, bool)     { return true, true }
 func (*HyperSwitchMethodDeleteHandler) CommitsTerminalOutcome() bool  { return true }
-func (*HyperSwitchMethodDeleteHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (Relevance, error) {
+func (*HyperSwitchMethodDeleteHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (Relevance, error) {
 	return StillRelevant(), nil
 }
-func (h *HyperSwitchMethodDeleteHandler) Verify(ctx context.Context, in gen.BillingRailIntent) Outcome {
+func (h *HyperSwitchMethodDeleteHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) Outcome {
 	current, err := NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
 		return Ambiguous("cannot load accepted deletion")
@@ -98,7 +98,7 @@ func deletionBinding(row gen.BillingCustodian, cfg *config.Config) (charge.Hyper
 	b := charge.HyperSwitchBinding{AccountID: row.AccountID, ProfileID: parsed.ProfileID, APIBaseURL: base}
 	return b, b.Validate()
 }
-func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.BillingRailIntent) Outcome {
+func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.BillingProviderIntent) Outcome {
 	current, err := NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
 		return Ambiguous("cannot load accepted deletion")
@@ -148,7 +148,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 	}
 	return Succeeded(deletionEvidence(p))
 }
-func (h *HyperSwitchMethodDeleteHandler) complete(ctx context.Context, in gen.BillingRailIntent, p HyperSwitchMethodDeletePayload) error {
+func (h *HyperSwitchMethodDeleteHandler) complete(ctx context.Context, in gen.BillingProviderIntent, p HyperSwitchMethodDeletePayload) error {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

@@ -94,11 +94,11 @@ const countUnpaidEngineRenewalGrants = `-- name: CountUnpaidEngineRenewalGrants 
 SELECT count(*) FROM billing.grants g
 WHERE g.merchant_id=$1::uuid AND g.source_type='subscription'
   AND g.event='grant'
-  AND EXISTS (SELECT 1 FROM billing.rail_intents i
+  AND EXISTS (SELECT 1 FROM billing.provider_intents i
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id
       AND g.starts_at >= (i.payload->'renewal'->>'period_start')::timestamptz)
-  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz

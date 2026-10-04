@@ -46,12 +46,12 @@ func (*SubscriptionCollectionHandler) Backoff(n int32) time.Duration {
 }
 func (*SubscriptionCollectionHandler) PrunePolicy() (bool, bool)    { return true, true }
 func (*SubscriptionCollectionHandler) CommitsTerminalOutcome() bool { return true }
-func (*SubscriptionCollectionHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
+func (*SubscriptionCollectionHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 func (h *SubscriptionCollectionHandler) now() time.Time { return h.Clock.Now().UTC() }
 
-func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
+func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -109,7 +109,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 // obligationPaid reads the obligation's shared order before a later attempt
 // is fenced: an earlier attempt's charge, found late, pays the period and
 // nothing is sent.
-func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
+func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if in.Rail == "stripe" || p.Attempt == 0 || p.Instrument.CustodianHeld() {
 		return intents.Outcome{}, false
 	}
@@ -124,7 +124,7 @@ func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in g
 }
 
 // hit runs the named failpoint for this operation.
-func (h *SubscriptionCollectionHandler) hit(ctx context.Context, in gen.BillingRailIntent, point failpoint.Point) error {
+func (h *SubscriptionCollectionHandler) hit(ctx context.Context, in gen.BillingProviderIntent, point failpoint.Point) error {
 	site := failpoint.Site{Point: point, Kind: in.IntentType, Operation: in.ID}
 	if in.SubscriptionID != nil {
 		site.Subscription = *in.SubscriptionID
@@ -132,7 +132,7 @@ func (h *SubscriptionCollectionHandler) hit(ctx context.Context, in gen.BillingR
 	return failpoint.Hit(ctx, site)
 }
 
-func (h *SubscriptionCollectionHandler) submissionHeld(in gen.BillingRailIntent) string {
+func (h *SubscriptionCollectionHandler) submissionHeld(in gen.BillingProviderIntent) string {
 	if h.Config == nil {
 		return "engine execution mode is not configured"
 	}
@@ -150,7 +150,7 @@ func (h *SubscriptionCollectionHandler) submissionHeld(in gen.BillingRailIntent)
 
 // dispatchNMI sends the accepted charge under its order reference. Only the
 // writer of a fresh submission or resend fence calls it.
-func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof, dupSeconds int) intents.Outcome {
+func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof, dupSeconds int) intents.Outcome {
 	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
 	execute := charger.ChargeRecurringMIT
 	if p.Initiator == charge.InitiatorCustomer {
@@ -206,13 +206,13 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 // transaction: the original submission or one armed resend.
 type submissionFence func(context.Context, *intents.Store) (intents.CollectionNonexecutionProof, bool, error)
 
-func (h *SubscriptionCollectionHandler) firstSubmission(in gen.BillingRailIntent) submissionFence {
+func (h *SubscriptionCollectionHandler) firstSubmission(in gen.BillingProviderIntent) submissionFence {
 	return func(ctx context.Context, s *intents.Store) (intents.CollectionNonexecutionProof, bool, error) {
 		return s.BeginCollectedPayment(ctx, in, h.now())
 	}
 }
 
-func (h *SubscriptionCollectionHandler) resendSubmission(in gen.BillingRailIntent, attempt int) submissionFence {
+func (h *SubscriptionCollectionHandler) resendSubmission(in gen.BillingProviderIntent, attempt int) submissionFence {
 	return func(ctx context.Context, s *intents.Store) (intents.CollectionNonexecutionProof, bool, error) {
 		return s.BeginLostSubmissionResend(ctx, in, attempt, h.now())
 	}
@@ -220,7 +220,7 @@ func (h *SubscriptionCollectionHandler) resendSubmission(in gen.BillingRailInten
 
 // Local lock order matches admission/deletion: customer, subscription, method,
 // then operation. No provider request runs while these locks are held.
-func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, fence submissionFence) (gen.BillingPaymentMethod, intents.CollectionNonexecutionProof, bool, error) {
+func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, fence submissionFence) (gen.BillingPaymentMethod, intents.CollectionNonexecutionProof, bool, error) {
 	var method gen.BillingPaymentMethod
 	if h.now().Before(p.AcceptedAt) {
 		return method, intents.CollectionNonexecutionProof{}, false, errors.New("engine admission time has not arrived")
@@ -279,7 +279,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 	return method, proof, first, err
 }
 
-func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
+func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -329,7 +329,7 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	}
 	return h.lostSubmission(ctx, in, p)
 }
-func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
+func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if receipt, found, err := intents.LoadCollectedReceipt(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
 	} else if found {
@@ -359,7 +359,7 @@ func (h *SubscriptionCollectionHandler) lifecycle(d *db.DB) *subscriptions.Subsc
 	lc.SetConfig(h.Config)
 	return lc
 }
-func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription) error) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription) error) intents.Outcome {
 	if err := h.hit(ctx, in, failpoint.BeforeComplete); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -393,7 +393,7 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.B
 	}
 	return outcome
 }
-func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, receipt intents.CollectedReceipt) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, receipt intents.CollectedReceipt) intents.Outcome {
 	retained, err := intents.NewStore(h.DB).RetainCollectedReceipt(ctx, in, receipt)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -428,11 +428,11 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		return h.lifecycle(d).RenewMembership(ctx, params)
 	})
 }
-func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
 	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
 	return h.completeDecline(ctx, in, p, strconv.Itoa(response), reference, outcome)
 }
-func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, code, reference string, outcome intents.Outcome) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, code, reference string, outcome intents.Outcome) intents.Outcome {
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
 		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Answer: decline.Evidence{Code: code}, TransactionID: reference}, h.now()); err != nil {
 			return err
@@ -460,7 +460,7 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 		return nil
 	})
 }
-func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
 	if len(proof) > 1 {
 		return intents.Ambiguous("invalid engine nonexecution capability")
 	}
@@ -477,10 +477,10 @@ var _ intents.Handler = (*SubscriptionCollectionHandler)(nil)
 
 // recordEngineAttempt records an engine charge's answer for its rebill cycle
 // (#1111) in the completion transaction.
-func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, a attempts.Attempt, at time.Time) error {
+func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Renewal.CustomerID, p.Instrument.PSPID, in.Rail
 	a.Kind, a.Owner, a.At, a.Step = attempts.RebillKind(p.Initiator == charge.InitiatorCustomer, p.FailureCount), attempts.OwnerEngine, at, "charge"
-	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
 	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd}
 	a.TokenType = payments.DefaultTokenType(in.Rail, p.Instrument.Custodian)
 	return attempts.Record(ctx, d.Gen(ctx), a)

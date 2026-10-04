@@ -98,11 +98,11 @@ func (h *InvoiceCollectionHandler) CommitsTerminalOutcome() bool { return true }
 // pointer blocks every competing mutation while the operation lives, and a
 // possibly submitted charge must reconcile, so only a terminal outcome (or an
 // operator release of a never-submitted operation) ends it.
-func (h *InvoiceCollectionHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
+func (h *InvoiceCollectionHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
-func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) intents.Outcome {
+func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
 	if err != nil {
 		return intents.Ambiguous("load canonical collection progress: " + err.Error())
@@ -161,7 +161,7 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Billi
 	return h.classify(ctx, intent, p, res, err)
 }
 
-func (h *InvoiceCollectionHandler) chargeRequest(intent gen.BillingRailIntent, p intents.InvoiceCollectionPayload) ChargeRequest {
+func (h *InvoiceCollectionHandler) chargeRequest(intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) ChargeRequest {
 	invoiceID := p.InvoiceID
 	return ChargeRequest{
 		MerchantID:          intent.MerchantID,
@@ -183,7 +183,7 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.BillingRailIntent, p
 // classify turns one submission answer into the operation outcome: a parsed
 // refusal is terminal, a receipt settles, every error is a possible
 // submission.
-func (h *InvoiceCollectionHandler) classify(ctx context.Context, intent gen.BillingRailIntent, p intents.InvoiceCollectionPayload, res ChargeResult, err error) intents.Outcome {
+func (h *InvoiceCollectionHandler) classify(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, res ChargeResult, err error) intents.Outcome {
 	if errors.Is(err, subscriptions.ErrStripeReceiptMismatch) {
 		return contradicted(err)
 	}
@@ -213,7 +213,7 @@ func (h *InvoiceCollectionHandler) classify(ctx context.Context, intent gen.Bill
 
 // replayStripe re-sends the same idempotent sequence while Stripe still holds
 // the key; beyond that window only an exact receipt resolves the operation.
-func (h *InvoiceCollectionHandler) replayStripe(ctx context.Context, intent gen.BillingRailIntent, p intents.InvoiceCollectionPayload) intents.Outcome {
+func (h *InvoiceCollectionHandler) replayStripe(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) intents.Outcome {
 	if !h.stripeReplayable(intent) {
 		return intents.Ambiguous("stripe idempotency window elapsed; resolve with the exact stripe invoice or provider-confirmed non-execution")
 	}
@@ -228,7 +228,7 @@ func (h *InvoiceCollectionHandler) replayStripe(ctx context.Context, intent gen.
 	return h.classify(ctx, intent, p, res, err)
 }
 
-func (h *InvoiceCollectionHandler) stripeReplayable(intent gen.BillingRailIntent) bool {
+func (h *InvoiceCollectionHandler) stripeReplayable(intent gen.BillingProviderIntent) bool {
 	submitted, err := time.Parse(time.RFC3339Nano, intents.EvidenceString(intent, collectionEvidenceSubmittedAt))
 	if err != nil {
 		submitted = intent.CreatedAt
@@ -238,7 +238,7 @@ func (h *InvoiceCollectionHandler) stripeReplayable(intent gen.BillingRailIntent
 
 // Verify reconciles a submitted operation from retained evidence or a
 // positive provider read. An empty search never authorizes another send.
-func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) intents.Outcome {
+func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
 	if err != nil {
 		return intents.Ambiguous("load canonical collection progress: " + err.Error())
@@ -270,7 +270,7 @@ func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.Billin
 // Resolve applies operator evidence: an exact provider object confirmed as
 // this operation's settled charge, or provider-confirmed non-execution. It
 // never re-sends.
-func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -325,7 +325,7 @@ func contradicted(err error) intents.Outcome {
 // the write-ahead fence is absent, so nothing can have been charged. The
 // attempt fails without a decline and the invoice becomes due again. An
 // operation carrying the fence belongs to its verifier.
-func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -349,7 +349,7 @@ func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen
 
 // finalizeFromEvidence retries local effects for an answer the operation
 // already holds (a receipt, a parsed refusal, confirmed non-execution).
-func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, intent gen.BillingRailIntent, p intents.InvoiceCollectionPayload) (intents.Outcome, bool) {
+func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (intents.Outcome, bool) {
 	rail := intents.EvidenceString(intent, collectionEvidenceRail)
 	if rail == "" {
 		rail = p.Rail
@@ -397,7 +397,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 // key), attempt settled, invoice released — all or nothing. A local failure
 // retains the receipt on the operation for the verifier and keeps the
 // invoice pointed at it.
-func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.BillingRailIntent, receipt intents.CollectedReceipt) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.BillingProviderIntent, receipt intents.CollectedReceipt) intents.Outcome {
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -529,7 +529,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 // finalizeRefusal records a definitive provider refusal: attempt failed,
 // invoice dunned by the or#870 decline doctrine on its own billing cycle,
 // invoice released. A local failure retains the refusal for the verifier.
-func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingRailIntent, p intents.InvoiceCollectionPayload, rail, failureCode, failureMessage, transactionID string) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, rail, failureCode, failureMessage, transactionID string) intents.Outcome {
 	if strings.TrimSpace(failureCode) == "" {
 		failureCode = "declined"
 	}
@@ -618,7 +618,7 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 // finalizeNotExecuted records a collection that provably never charged: the
 // attempt fails without a decline and the invoice is due again immediately.
 // code/reason default to provider-confirmed non-execution.
-func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.BillingRailIntent, p intents.InvoiceCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
 	if code == "" {
 		code, reason = "not_executed", "provider confirmed the collection was not executed"
 	}
@@ -736,7 +736,7 @@ func queueInvoiceCollectionOutcome(ctx context.Context, database *db.DB, invoice
 	return subscriptions.NewNotificationQueueRepo(database).Create(ctx, notification)
 }
 
-func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingRailIntent, reference string) intents.Outcome {
+func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingProviderIntent, reference string) intents.Outcome {
 	if h.Verifier == nil {
 		return intents.Ambiguous("no collection receipt reader wired")
 	}
@@ -755,12 +755,12 @@ func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.
 
 // recordInvoiceAttempt records the collection charge's answer as an invoice
 // attempt (#1111) in the transaction that settles or fails the invoice.
-func recordInvoiceAttempt(ctx context.Context, q *gen.Queries, in gen.BillingRailIntent, p intents.InvoiceCollectionPayload, rail string, a attempts.Attempt, at time.Time) error {
+func recordInvoiceAttempt(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, rail string, a attempts.Attempt, at time.Time) error {
 	if rail == "" {
 		rail = in.Rail
 	}
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail, a.Kind, a.At, a.Step = in.MerchantID, p.CustomerID, p.Instrument.PSPID, rail, attempts.Invoice, at, "charge"
-	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
 	a.TokenType = payments.DefaultTokenType(rail, p.Instrument.Custodian)
 	return attempts.Record(ctx, q, a)
 }

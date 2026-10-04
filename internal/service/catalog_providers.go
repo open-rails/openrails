@@ -511,19 +511,17 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 	if err != nil {
 		return out
 	}
-	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
-		MerchantID: mid.UUID(),
-	})
+	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
 	if err != nil {
 		log.WithContext(ctx).WithError(err).Warn("catalog: list declared rail accounts failed; only rail names resolve")
 		return out
 	}
 	environment := s.catalogProviderEnvironment()
 	for _, row := range rows {
-		if row.Archived || row.Environment != environment || row.Key == nil {
+		if row.Archived || row.Environment != environment {
 			continue
 		}
-		name := strings.ToLower(strings.TrimSpace(*row.Key))
+		name := strings.ToLower(strings.TrimSpace(row.Key))
 		if name == "" {
 			continue
 		}
@@ -548,9 +546,8 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		return
 	}
 	railName := strings.ToLower(strings.TrimSpace(rail))
-	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
-		MerchantID: mid.UUID(),
-		Rail:       &railName,
+	rows, err := s.catalogDatabase().Gen(ctx).ListActivePSPsForRailEnvironment(ctx, gen.ListActivePSPsForRailEnvironmentParams{
+		MerchantID: mid.UUID(), Rail: railName, Environment: s.catalogProviderEnvironment(),
 	})
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("rail", rail).

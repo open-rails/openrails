@@ -505,7 +505,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": mid, "renewed": res.Renewed, "adopted": res.Adopted, "past_due": res.PastDue,
 			"canceled": res.Canceled, "still_unknown": res.StillUnknown, "probed": res.Probed,
-			"backfilled": res.Backfilled, "rail_customer_accounts": res.RailCustomers, "rail_errors": len(res.RailErrors),
+			"backfilled": res.Backfilled, "psp_customers": res.RailCustomers, "rail_errors": len(res.RailErrors),
 		}).Info("Provider Refresh: unknown-cohort reconcile")
 	}
 	return err
@@ -639,7 +639,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		// watermark predates the previous pull (gated in SQL) — changes a
 		// webhook should have announced. Best-effort telemetry.
 		if n := len(res.AppliedChanges); n > 0 {
-			if _, derr := webhookhealth.Drift(ctx, w.DB, string(provider), now, n); derr != nil {
+			if _, derr := webhookhealth.Drift(ctx, w.DB, pspID, now, n); derr != nil {
 				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
 			}
 		}
@@ -653,7 +653,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	// #786: advance the pull watermark AFTER the pass so the NEXT pass's drift
 	// gate compares against this pull.
 	if out.Windows > 0 {
-		if err := webhookhealth.StampPull(ctx, w.DB, string(provider), now); err != nil {
+		if err := webhookhealth.StampPull(ctx, w.DB, pspID, now); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: stamp webhook pull watermark failed")
 		}
 	}
@@ -661,7 +661,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 }
 
 func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, fallback time.Time) (time.Time, error) {
-	watermark, err := w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, Rail: string(provider), PspID: pspID})
+	watermark, err := w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, PspID: pspID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fallback.UTC(), nil
 	}
@@ -672,7 +672,7 @@ func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID
 }
 
 func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark time.Time) error {
-	return w.DB.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: mid, Rail: string(provider), PspID: pspID, WatermarkAt: watermark.UTC()})
+	return w.DB.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: watermark.UTC()})
 }
 
 func (w *ProviderRefreshWorker) window() time.Duration {

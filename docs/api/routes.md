@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (244), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (242), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -130,10 +130,6 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/subscriptions/{id}/change-tier` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChangePreview` |  |
 | PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `merchant:subscriptions:update` | `UpdateSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
-| POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:update` | `ProviderCutoverRequest` | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
-| GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | merchant | `merchant:subscriptions:read` | — | 200 `ProviderCutover`<br>202 `ProviderCutover` |  |
-| POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | merchant | `merchant:subscriptions:read` | `ProviderCutoverRequest` | 200 `ProviderCutover` |  |
-| POST | `/v1/merchant/provider-refresh` | merchant | `merchant:subscriptions:update` | — | 202 `ProviderRefresh` |  |
 | POST | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:update` | `CreateRepriceBatchParams` | 201 `RepriceBatchResult` |  |
 | POST | `/v1/merchant/reprice-batches/preview` | merchant | `merchant:subscriptions:read` | `RepriceBatchPreviewParams` | 200 `RepriceBatchPreview` |  |
 | GET | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<RepriceBatch>` |  |
@@ -211,12 +207,14 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | merchant | `merchant:payments:refund` | `ResolvePurchaseReviewParams` | 200 `PurchaseReview` | limit `destructive` |
 | GET | `/v1/merchant/customers/{customer_id}/payment-methods` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<PaymentMethod>` |  |
 | DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | merchant | `merchant:customer-settings:update` | — | 202 —<br>204 — | limit `destructive` |
-| GET | `/v1/merchant/payment-providers` | merchant | `merchant:payment-providers:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/payment-providers/routing/dry-run` | merchant | `merchant:payment-providers:read` | `CheckoutRoutingDryRunRequest` | 200 `CheckoutRoutingDryRunResponse` |  |
-| GET | `/v1/merchant/payment-providers/{provider}` | merchant | `merchant:payment-providers:read` | — | 200 untyped |  |
-| PUT | `/v1/merchant/payment-providers/{provider}` | merchant | `merchant:payment-providers:update` | `UpsertPaymentProviderParams` | 200 untyped |  |
-| DELETE | `/v1/merchant/payment-providers/{provider}` | merchant | `merchant:payment-providers:update` | — | 200 untyped |  |
-| POST | `/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive` | merchant | `merchant:payment-providers:update` | `ArchivePaymentProviderAccountRequest` | 200 untyped |  |
+| GET | `/v1/merchant/psps` | merchant | `merchant:psps:read` | — | 200 `ListPage<PSP>` |  |
+| POST | `/v1/merchant/psps` | merchant | `merchant:psps:update` | `CreatePSPParams` | 201 `PSP` |  |
+| GET | `/v1/merchant/psps/{psp_id}` | merchant | `merchant:psps:read` | — | 200 `PSP` |  |
+| PATCH | `/v1/merchant/psps/{psp_id}` | merchant | `merchant:psps:update` | `UpdatePSPParams` | 200 `PSP` |  |
+| POST | `/v1/merchant/psps/{psp_id}/archive` | merchant | `merchant:psps:update` | `ArchivePSPParams` | 200 `PSP` |  |
+| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:psps:read` | `PSPRoutingPreviewParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/merchant/psps/refresh` | merchant | `merchant:subscriptions:update` | — | 202 `PSPRefresh` |  |
+| GET | `/v1/merchant/rails` | merchant | `merchant:psps:read` | — | 200 `ListPage<RailDefinition>` |  |
 | GET | `/v1/merchant/configuration` | merchant | `merchant:settings:read` | — | 200 `MerchantConfigurationState` |  |
 | POST | `/v1/merchant/configuration/applications` | merchant | `merchant:settings:update` | `MerchantConfigurationApplyParams` | 200 `MerchantConfigurationReceipt` |  |
 | GET | `/v1/merchant/settings` | merchant | `merchant:settings:read` | — | 200 `MerchantSettings` |  |
@@ -306,4 +304,4 @@ Inbound provider callbacks.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/webhooks/{provider}/{account_id}` | provider_signature | — | untyped | 200 untyped |  |
+| POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | untyped | 200 untyped |  |

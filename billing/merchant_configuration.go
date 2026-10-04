@@ -4,7 +4,7 @@ import "encoding/json"
 
 // MerchantConfigurationApplyParams is an explicit, replayable metadata update.
 // Omitted fields preserve stored values. Credentials and provider lifecycle
-// changes use PaymentProviders and their separate publication receipts.
+// changes use the PSP methods and their separate publication receipts.
 type MerchantConfigurationApplyParams struct {
 	ApplicationID    string            `json:"application_id"`
 	ExpectedRevision *string           `json:"expected_revision"`

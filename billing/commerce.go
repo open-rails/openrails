@@ -9,7 +9,7 @@ import "time"
 type CheckoutOption struct {
 	// Selector is the checkout payment.rail value (the PSP key).
 	Selector string `json:"selector"`
-	PSPID    string `json:"psp_id"`
+	PSPID    PSPID  `json:"psp_id"`
 	Rail     string `json:"rail"`
 	// Mode is one_off or subscription.
 	Mode string `json:"mode"`
@@ -68,7 +68,7 @@ type SolanaCheckoutToken struct {
 // CheckoutPSPConfig describes one armed PSP for browser checkout.
 type CheckoutPSPConfig struct {
 	// PSPID is the public stable account selector used by saved-method setup.
-	PSPID string `json:"psp_id"`
+	PSPID PSPID `json:"psp_id"`
 	// Key is the checkout payment.rail selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
@@ -142,7 +142,7 @@ type CreateCheckoutAttemptRequest struct {
 // or wallet. A Client cannot carry a card number: cards are entered on a
 // checkout session.
 type CheckoutPaymentOptions struct {
-	PSPID           string `json:"psp_id,omitzero"`
+	PSPID           PSPID  `json:"psp_id,omitzero"`
 	Rail            string `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
 	PaymentMethodID string `json:"payment_method_id,omitzero"` // For returning customers with saved payment methods
 	PaymentToken    string `json:"payment_token"`              // For new card tokenization (NMI Collect.js)

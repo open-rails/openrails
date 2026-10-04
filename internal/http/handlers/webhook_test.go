@@ -389,7 +389,7 @@ func TestCCBillWebhookDispatchResolvesClientIP(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill/900000-0000?eventType=NewSaleSuccess", strings.NewReader(body))
 		req.RemoteAddr = tc.peer
 		req.Header.Set("X-Forwarded-For", tc.xff)
-		req.SetPathValue("provider", "ccbill")
+		req.SetPathValue("rail", "ccbill")
 		req.SetPathValue("account_id", "900000-0000")
 		rt := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: tc.trusted}, TrustedProxies: iputil.ParseTrustedProxies(tc.trusted)}
 		rt.SetConfiguredMerchant(billing.MerchantID(uuid.New()))

@@ -65,25 +65,26 @@ func TestRebillFailureSpikeAlerts(t *testing.T) {
 	declined := attemptSeed{rail: "nmi", owner: "engine", category: "issuer_soft", reason: "insufficient_funds", code: "201", cycles: true}
 	collected := attemptSeed{rail: "nmi", owner: "engine", category: "approved", cycles: true}
 	// Four weeks at 5% for both PSPs, then a day at 80% on NMI only.
-	for _, psp := range []string{w.psp["nmi"], w.psp["stripe"]} {
+	for _, rail := range []string{"nmi", "stripe"} {
 		base := now.Add(-3 * 24 * time.Hour)
 		ok, bad := collected, declined
-		ok.psp, bad.psp, ok.at, bad.at, ok.n, bad.n = psp, psp, base, base, 190, 10
+		ok.psp, bad.psp, ok.at, bad.at, ok.n, bad.n = w.psp[rail].UUID().String(), w.psp[rail].UUID().String(), base, base, 190, 10
+		ok.rail, bad.rail = rail, rail
 		w.seedAttempts(c.id, ok)
 		w.seedAttempts(c.id, bad)
 	}
 	ok, bad := collected, declined
-	ok.psp, bad.psp, ok.at, bad.at, ok.n, bad.n = w.psp["nmi"], w.psp["nmi"], now, now, 12, 48
+	ok.psp, bad.psp, ok.at, bad.at, ok.n, bad.n = w.psp["nmi"].UUID().String(), w.psp["nmi"].UUID().String(), now, now, 12, 48
 	w.seedAttempts(c.id, ok)
 	w.seedAttempts(c.id, bad)
 	healthy := collected
-	healthy.psp, healthy.at, healthy.n = w.psp["stripe"], now, 60
+	healthy.psp, healthy.rail, healthy.at, healthy.n = w.psp["stripe"].UUID().String(), "stripe", now, 60
 	w.seedAttempts(c.id, healthy)
 
 	w.converge()
 	spikes := w.findings("life.payments.rebill_failure_spike")
 	require.Len(t, spikes, 1, "one PSP and owner")
-	require.Equal(t, "psp:e2e-nmi:owner:engine", spikes[0].subject)
+	require.Equal(t, "psp:"+w.psp["nmi"].String()+":owner:engine", spikes[0].subject)
 	require.Equal(t, "high", spikes[0].severity)
 	require.Contains(t, spikes[0].action, "80.0%")
 	require.Empty(t, w.findings("life.payments.new_card_decline_spike"))
@@ -112,7 +113,7 @@ func TestPaymentHealthAlerts(t *testing.T) {
 	c := w.newCustomer()
 	now := w.clock.Now()
 	nmi := func(kind, category, reason, code string, n int, at time.Time) attemptSeed {
-		return attemptSeed{psp: w.psp["nmi"], rail: "nmi", kind: kind, owner: "engine", cardEntry: "new", category: category, reason: reason, code: code, n: n, at: at}
+		return attemptSeed{psp: w.psp["nmi"].UUID().String(), rail: "nmi", kind: kind, owner: "engine", cardEntry: "new", category: category, reason: reason, code: code, n: n, at: at}
 	}
 	week := now.Add(-7 * 24 * time.Hour)
 	w.seedAttempts(c.id, nmi("initial", "approved", "", "", 90, week))
@@ -122,7 +123,7 @@ func TestPaymentHealthAlerts(t *testing.T) {
 	w.converge()
 	spikes := w.findings("life.payments.new_card_decline_spike")
 	require.Len(t, spikes, 1)
-	require.Equal(t, "psp:e2e-nmi:owner:engine", spikes[0].subject)
+	require.Equal(t, "psp:"+w.psp["nmi"].String()+":owner:engine", spikes[0].subject)
 	require.Contains(t, spikes[0].action, "41.7%")
 	require.Empty(t, w.findings("life.payments.system_errors"), "no system errors yet")
 
@@ -153,7 +154,7 @@ func TestPaymentAttemptRetention(t *testing.T) {
 	c := w.newCustomer()
 	now := w.clock.Now()
 	old := now.AddDate(0, -26, 0)
-	seed := attemptSeed{psp: w.psp["nmi"], rail: "nmi", owner: "engine", category: "approved", cycles: true}
+	seed := attemptSeed{psp: w.psp["nmi"].UUID().String(), rail: "nmi", owner: "engine", category: "approved", cycles: true}
 	seed.at, seed.n = old, 3
 	w.seedAttempts(c.id, seed)
 	seed.at, seed.n = now, 2
@@ -188,25 +189,25 @@ func TestWebhookSilenceAlerts(t *testing.T) {
 	w := newWorld(t)
 	c := w.newCustomer()
 	now := w.clock.Now()
-	charge := func(psp, via string, n int, at time.Time) attemptSeed {
-		return attemptSeed{psp: psp, rail: "nmi", kind: "rebill", owner: "nmi_schedule", cardEntry: "saved", category: "approved", n: n, at: at, via: via, cycles: true}
+	charge := func(rail, via string, n int, at time.Time) attemptSeed {
+		return attemptSeed{psp: w.psp[rail].UUID().String(), rail: rail, kind: "rebill", owner: "nmi_schedule", cardEntry: "saved", category: "approved", n: n, at: at, via: via, cycles: true}
 	}
 	earlier := now.Add(-3 * 24 * time.Hour)
-	w.seedAttempts(c.id, charge(w.psp["nmi"], "webhook", 20, earlier))
-	w.seedAttempts(c.id, charge(w.psp["nmi"], "pull", 4, now))
-	w.seedAttempts(c.id, charge(w.psp["stripe"], "webhook", 20, earlier))
-	w.seedAttempts(c.id, charge(w.psp["stripe"], "webhook", 4, now))
-	w.seedAttempts(c.id, charge(w.psp["ccbill"], "pull", 20, earlier))
-	w.seedAttempts(c.id, charge(w.psp["ccbill"], "pull", 4, now))
+	w.seedAttempts(c.id, charge("nmi", "webhook", 20, earlier))
+	w.seedAttempts(c.id, charge("nmi", "pull", 4, now))
+	w.seedAttempts(c.id, charge("stripe", "webhook", 20, earlier))
+	w.seedAttempts(c.id, charge("stripe", "webhook", 4, now))
+	w.seedAttempts(c.id, charge("ccbill", "pull", 20, earlier))
+	w.seedAttempts(c.id, charge("ccbill", "pull", 4, now))
 	w.converge()
 	silent := w.findings("life.webhooks.silent")
 	require.Len(t, silent, 1)
-	require.Equal(t, "psp:e2e-nmi", silent[0].subject)
+	require.Equal(t, "psp:"+w.psp["nmi"].String(), silent[0].subject)
 	require.Equal(t, "high", silent[0].severity)
 	require.Contains(t, silent[0].action, "pulls found 4")
 
 	w.advance(time.Hour)
-	w.seedAttempts(c.id, charge(w.psp["nmi"], "webhook", 1, w.clock.Now()))
+	w.seedAttempts(c.id, charge("nmi", "webhook", 1, w.clock.Now()))
 	w.converge()
 	require.Empty(t, w.findings("life.webhooks.silent"), "webhooks resumed")
 }

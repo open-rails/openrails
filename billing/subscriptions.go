@@ -40,7 +40,7 @@ type SubscriptionListParams struct {
 
 // Subscription exposes lifecycle and recovery state without making provider
 // credentials or mutable storage models part of the client contract. Ids are
-// the typed family of ids.go; PSPID is the provider account's plain UUID. The
+// the typed family of ids.go. The
 // merchant routes and the customer's own /v1/me/subscriptions routes serve
 // this one shape; the self routes additionally fill ScheduledPrice,
 // ScheduledProduct, CancelPortalURL and Access.
@@ -60,7 +60,7 @@ type Subscription struct {
 	CustomerID            CustomerID         `json:"customer_id"`
 	ProductID             ProductID          `json:"product_id"`
 	PriceID               PriceID            `json:"price_id"`
-	PSPID                 string             `json:"psp_id"`
+	PSPID                 PSPID              `json:"psp_id"`
 	Rail                  string             `json:"rail"`
 	RailSubscriptionID    string             `json:"rail_subscription_id"`
 	Status                SubscriptionStatus `json:"status"`

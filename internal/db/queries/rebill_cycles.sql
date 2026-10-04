@@ -59,7 +59,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 
 -- name: CountOpenSubscriptionCollections :one
 -- An engine renewal still being attempted decides its cycle itself.
-SELECT count(*) FROM billing.rail_intents
+SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 

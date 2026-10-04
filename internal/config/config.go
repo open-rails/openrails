@@ -641,7 +641,7 @@ var ReservedPSPRails = map[string]models.Rail{
 // rail is inferred from the name; other names (e.g. "mobius") must set Rail.
 //
 // PROGRAMMATIC-ONLY (#521/#711): no yaml/env loader parses these structs.
-// Embedded hosts build them in code (embedded.PaymentProvider); standalone
+// Embedded hosts build them in code (a PSP declaration); standalone
 // declares rail accounts in the merchant config manifest instead.
 type ResolvedPSP struct {
 	// ID is the immutable psps row id. Resolution OUTPUT only; zero for static sets.

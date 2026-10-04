@@ -693,7 +693,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// life.provider_intent.abandoned — a desired provider action that will not
 	// auto-retry (terminal/expired or past deadline) needs a human. Surface-only:
 	// MISMATCH → ADMIN, no auto-repair (the resolution is an operator/provider
-	// action). rail_intents are merchant-level (no customer_id), so this runs
+	// action). provider_intents are merchant-level (no customer_id), so this runs
 	// at merchant/subscription scope, not per-customer inline.
 	if scope.Customer == nil || scope.Subscription != nil {
 		abandoned, err := q.ListAbandonedProviderIntents(ctx, gen.ListAbandonedProviderIntentsParams{
@@ -730,7 +730,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		if scopeErr != nil {
 			return nil, scopeErr
 		}
-		stuck, err := q.ListStuckRailIntents(ctx, gen.ListStuckRailIntentsParams{
+		stuck, err := q.ListStuckProviderIntents(ctx, gen.ListStuckProviderIntentsParams{
 			MerchantID:   scopeMerchantID.UUID(),
 			ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
 		})
@@ -771,7 +771,7 @@ func isModeParkedReason(reason string) bool { return strings.Contains(reason, "m
 // stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the BARE
 // intent id — ledger continuity with the legacy pull-engine emissions of the
 // same finding type. Provider is the intent's own rail.
-func stuckIntentFinding(si *gen.BillingRailIntent, now time.Time) ConvergeFinding {
+func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFinding {
 	age := now.Sub(si.CreatedAt)
 	ev := map[string]any{
 		"intent_id":       si.ID.String(),

@@ -49,7 +49,7 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	if p.MerchantID == uuid.Nil || p.Provider == "" || p.Phase == "" {
 		return fmt.Errorf("intents: mutation log requires merchant_id, provider, and phase")
 	}
-	// rail_mutation_logs_addressed: the log records which account the attempt was
+	// provider_mutation_logs_addressed: the log records which account the attempt was
 	// sent to, and a custodian-addressed attempt names a custodian.
 	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
 		return fmt.Errorf("intents: mutation log for %s: %w", p.Provider, db.ErrNoPSPInContext)
@@ -69,18 +69,18 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	}
 	intentType := emptyStringNil(p.IntentType)
 	idempotencyKey := emptyStringNil(p.IdempotencyKey)
-	return s.db.Gen(ctx).InsertRailMutationLog(ctx, gen.InsertRailMutationLogParams{
-		MerchantID:     p.MerchantID,
-		Rail:           p.Provider,
-		PspID:          uuidPtrOrNil(p.PspID),
-		CustodianID:    uuidPtrOrNil(p.CustodianID),
-		RailIntentID:   p.ProviderIntentID,
-		IntentType:     intentType,
-		IdempotencyKey: idempotencyKey,
-		Attempt:        p.Attempt,
-		Phase:          string(p.Phase),
-		Reason:         reason,
-		Evidence:       evidence,
+	return s.db.Gen(ctx).InsertProviderMutationLog(ctx, gen.InsertProviderMutationLogParams{
+		MerchantID:       p.MerchantID,
+		Rail:             p.Provider,
+		PspID:            uuidPtrOrNil(p.PspID),
+		CustodianID:      uuidPtrOrNil(p.CustodianID),
+		ProviderIntentID: p.ProviderIntentID,
+		IntentType:       intentType,
+		IdempotencyKey:   idempotencyKey,
+		Attempt:          p.Attempt,
+		Phase:            string(p.Phase),
+		Reason:           reason,
+		Evidence:         evidence,
 	})
 }
 

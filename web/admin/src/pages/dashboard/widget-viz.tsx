@@ -384,7 +384,7 @@ function DonutViz({
 
 // --- table --------------------------------------------------------------------------
 
-// humanizeColumn turns raw result column names (rail_account) into labels
+// humanizeColumn turns raw result column names (first_failure_reason) into labels
 // (Rail account).
 function humanizeColumn(name: string): string {
   const words = name.replaceAll("_", " ").trim()

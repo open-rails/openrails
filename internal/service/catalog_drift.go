@@ -99,7 +99,7 @@ func catalogDrift(r gen.BillingReconciliationFinding) billing.CatalogDrift {
 		DetectedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,
 	}
 	if r.PspID != nil {
-		view.PSPID = *r.PspID
+		view.PSPID = billing.PSPID(*r.PspID)
 	}
 	return view
 }

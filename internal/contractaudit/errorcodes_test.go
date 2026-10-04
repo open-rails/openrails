@@ -36,7 +36,6 @@ var dynamicCodeFiles = map[string]bool{
 	"internal/http/handlers/change_tier.go":            true,
 	"internal/http/handlers/merchant_api_host.go":      true,
 	"internal/http/handlers/product_archive.go":        true,
-	"internal/http/handlers/provider_cutover.go":       true,
 	"internal/http/handlers/provider_operations.go":    true,
 	"internal/standalonehandlers/merchant_api_keys.go": true,
 	"internal/http/router/merchant_selectors.go":       true,

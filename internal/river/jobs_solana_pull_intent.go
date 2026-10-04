@@ -68,7 +68,7 @@ func (h *SolanaPullIntentHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
 
-func decodeSolanaPullPayload(intent gen.BillingRailIntent) (SolanaPullPayload, error) {
+func decodeSolanaPullPayload(intent gen.BillingProviderIntent) (SolanaPullPayload, error) {
 	var p SolanaPullPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("solana pull intent has no payload")
@@ -83,7 +83,7 @@ func decodeSolanaPullPayload(intent gen.BillingRailIntent) (SolanaPullPayload, e
 }
 
 // recordedSignature reads the pre-submit signature off the intent's evidence.
-func recordedSignature(intent gen.BillingRailIntent) string {
+func recordedSignature(intent gen.BillingProviderIntent) string {
 	if len(intent.ResultEvidence) == 0 {
 		return ""
 	}
@@ -103,7 +103,7 @@ func (h *SolanaPullIntentHandler) loadRow(ctx context.Context, p SolanaPullPaylo
 // CheckRelevance: the pull applies while the row is still active ON the same
 // period anchor. A cancel/expiry or an advanced next_pull_at (renewal applied,
 // dunning rescheduled, already-paid advanced) supersedes the intent.
-func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (intents.Relevance, error) {
+func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (intents.Relevance, error) {
 	p, err := decodeSolanaPullPayload(intent)
 	if err != nil {
 		return intents.SupersededBy("unusable solana pull intent: " + err.Error()), nil
@@ -124,7 +124,7 @@ func (h *SolanaPullIntentHandler) CheckRelevance(ctx context.Context, intent gen
 	return intents.StillRelevant(), nil
 }
 
-func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) intents.Outcome {
+func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	if h.Core == nil || h.Core.Cranker == nil || h.Core.Lifecycle == nil {
 		return intents.Parked("solana cranker not fully wired (no cranker/lifecycle)")
 	}
@@ -206,7 +206,7 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 // signature: landed ⇒ renewal repair; verified not landed ⇒ the executor may
 // re-crank (program period guard backstops); no signature ⇒ nothing was ever
 // signed, plain retry.
-func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) intents.Outcome {
+func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	p, err := decodeSolanaPullPayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())

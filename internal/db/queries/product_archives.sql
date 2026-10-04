@@ -39,7 +39,7 @@ ORDER BY pay.purchased_at, pay.id;
 INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(finding_type)::text, sqlc.arg(subject_key)::text, 'medium', 'requires_review',
         sqlc.arg(recommended_action)::text, sqlc.arg(evidence)::jsonb)
-ON CONFLICT (merchant_id, finding_type, subject_key) DO NOTHING;
+ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO NOTHING;
 
 -- name: GetPurchaseReviewBySubject :one
 SELECT id, status, evidence, operator_notes, created_at, resolved_at

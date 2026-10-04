@@ -208,7 +208,7 @@ NMI PSP then declares which NMI deployment its credentials belong to, in
 
 Verification runs once per loaded credential set (startup, credential
 create/rotate), bound to merchant + PSP + endpoint + credential fingerprint.
-Every NMI client (checkout, card save, rebills, refunds, cutover, pulls,
+Every NMI client (checkout, card save, rebills, refunds, pulls,
 custodian proxies) is built from that same PSP scope, so all of them share the
 one verdict;
 see `docs/design/provider-sandbox-posture.md`. A false, unknown or unavailable

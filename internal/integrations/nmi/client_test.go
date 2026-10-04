@@ -175,7 +175,6 @@ func TestV5WireShapes(t *testing.T) {
 		return 200, `{"object":"transaction","id":"r1","response":"1","response_code":"100"}`
 	})
 	c := f.client(t)
-	anchor := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name, method, path, body string
 		call                     func() error
@@ -217,13 +216,6 @@ func TestV5WireShapes(t *testing.T) {
 			return c.DeleteCustomerVault(t.Context(), DeleteCustomerVaultData{CustomerVaultID: "vault-9"})
 		}},
 		{"delete subscription", "DELETE", "/subscriptions/s1", ``, func() error { return c.DeleteRecurringSubscription(t.Context(), "s1") }},
-		{"paused cutover enrollment", "POST", "/subscriptions", `{"plan_id":"p1","customer_vault":{"id":"v1","billing_id":"b1"},"paused_subscription":true,"start_date":"20261021000000"}`, func() error {
-			_, err := c.CreatePausedSubscription(t.Context(), "p1", "v1", "b1", anchor)
-			return err
-		}},
-		{"cutover activation", "PUT", "/subscriptions/s1", `{"paused_subscription":false,"start_date":"20261021000000"}`, func() error {
-			return c.ActivateSubscription(t.Context(), "s1", anchor)
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := len(f.Calls())
@@ -293,7 +285,6 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 		}(),
 		"native sale with rotated key": unaccounted.PrepareRecurringSale(ctx, "v", "b"),
 		"native sale inexact billing":  c.PrepareRecurringSale(ctx, "v", " b"),
-		"paused enrollment w/o anchor": func() error { _, err := c.CreatePausedSubscription(ctx, "p", "v", "b", time.Time{}); return err }(),
 	} {
 		require.Error(t, err, name)
 		require.False(t, IsTransportAmbiguous(err), name)

@@ -50,7 +50,7 @@ var (
 		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate)
 	// MerchantViewer is read-only: finance, audit, analysts and LLM agents.
 	MerchantViewer = merchantRole("viewer",
-		billing.MerchantSettingsRead, billing.MerchantPaymentProvidersRead,
+		billing.MerchantSettingsRead, billing.MerchantPSPsRead,
 		billing.MerchantCatalogRead, billing.MerchantCustomerSettingsRead,
 		billing.MerchantPaymentsRead, billing.MerchantInvoicesRead, billing.MerchantSubscriptionsRead,
 		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantRepairAlertsRead,
@@ -77,7 +77,7 @@ var catalogPerms = func() map[string]iam.Perm {
 	declare(merchantPersona,
 		billing.MerchantHostEventsRead, billing.MerchantHostEventsAcknowledge,
 		billing.MerchantSettingsRead, billing.MerchantSettingsUpdate,
-		billing.MerchantPaymentProvidersRead, billing.MerchantPaymentProvidersUpdate,
+		billing.MerchantPSPsRead, billing.MerchantPSPsUpdate,
 		billing.MerchantCatalogRead, billing.MerchantCatalogUpdate,
 		billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate,
 		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,

@@ -14,95 +14,54 @@ import (
 
 const getPSPRefreshWatermark = `-- name: GetPSPRefreshWatermark :one
 SELECT watermark_at
-FROM billing.rail_refresh_watermarks
+FROM billing.psp_refresh_watermarks
 WHERE merchant_id = $1::uuid
-  AND rail = $2::text
-  AND psp_id = $3::uuid
+  AND psp_id = $2::uuid
   AND event_domain = 'events'
 `
 
 type GetPSPRefreshWatermarkParams struct {
 	MerchantID uuid.UUID
-	Rail       string
 	PspID      uuid.UUID
 }
 
 // Exact account event coverage. A sibling account's refresh or a recent
 // health stamp while catching up historical windows cannot retire this job.
 func (q *Queries) GetPSPRefreshWatermark(ctx context.Context, arg GetPSPRefreshWatermarkParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, getPSPRefreshWatermark, arg.MerchantID, arg.Rail, arg.PspID)
+	row := q.db.QueryRow(ctx, getPSPRefreshWatermark, arg.MerchantID, arg.PspID)
 	var watermark_at time.Time
 	err := row.Scan(&watermark_at)
 	return watermark_at, err
 }
 
-const listWebhookExpectedRails = `-- name: ListWebhookExpectedRails :many
-SELECT s.rail, count(*) AS billable
-FROM billing.subscriptions s
-JOIN billing.prices pr ON pr.id = s.price_id
-WHERE s.merchant_id = $1::uuid AND pr.merchant_id = $1::uuid AND pr.auto_renew
-  AND s.deleted_at IS NULL
-  AND s.status IN ('pending','active','past_due','awaiting_method','unverified')
-  AND s.canceled_at IS NULL
-  AND s.deletion_scheduled_at IS NULL
-  AND EXISTS (
-      SELECT 1 FROM billing.psps rma
-      WHERE rma.merchant_id = $1::uuid AND rma.merchant_id = s.merchant_id AND rma.rail = s.rail
-  )
-GROUP BY s.rail
-`
-
-type ListWebhookExpectedRailsRow struct {
-	Rail     string
-	Billable int64
-}
-
-// Expectation gate for the webhook_silence template: rails that are ARMED
-// (declared in psps; archived rows count — drain accounts
-// still receive provider events, #655) AND carry subscriptions projected to
-// keep billing (billable_subscriptions doctrine). Merchant-scoped.
-func (q *Queries) ListWebhookExpectedRails(ctx context.Context, merchantID uuid.UUID) ([]ListWebhookExpectedRailsRow, error) {
-	rows, err := q.db.Query(ctx, listWebhookExpectedRails, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListWebhookExpectedRailsRow
-	for rows.Next() {
-		var i ListWebhookExpectedRailsRow
-		if err := rows.Scan(&i.Rail, &i.Billable); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const recordWebhookAccepted = `-- name: RecordWebhookAccepted :exec
 
-INSERT INTO billing.webhook_health (merchant_id, rail, last_accepted_at)
-VALUES ($1::uuid, $2::text, $3::timestamptz)
-ON CONFLICT (merchant_id, rail) DO UPDATE SET
+
+INSERT INTO billing.webhook_health (merchant_id, psp_id, custodian_id, last_accepted_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz)
+ON CONFLICT (merchant_id, psp_id, custodian_id) DO UPDATE SET
     last_accepted_at = EXCLUDED.last_accepted_at,
     updated_at = now()
 `
 
 type RecordWebhookAcceptedParams struct {
-	MerchantID uuid.UUID
-	Rail       string
-	At         time.Time
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	At          time.Time
 }
 
 // #786 webhook-health recording. All statements run merchant-scoped (MerchantTx
 // or a pinned merchant connection); INSERTs pass merchant_id explicitly.
-// Verified-accepted webhook: stamp the silence watermark. The lifetime tallies
-// this used to bump were dropped in or#823 — a monotonic total answers no
-// windowed question, which is what webhook_health_daily is for.
+// A source is a PSP or a custodian: exactly one of psp_id and custodian_id.
+// Verified-accepted webhook: stamp the silence watermark.
 func (q *Queries) RecordWebhookAccepted(ctx context.Context, arg RecordWebhookAcceptedParams) error {
-	_, err := q.db.Exec(ctx, recordWebhookAccepted, arg.MerchantID, arg.Rail, arg.At)
+	_, err := q.db.Exec(ctx, recordWebhookAccepted,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustodianID,
+		arg.At,
+	)
 	return err
 }
 
@@ -111,15 +70,15 @@ WITH gate AS (
     UPDATE billing.webhook_health
     SET updated_at = now()
     WHERE merchant_id = $3::uuid
-      AND rail = $4::text
+      AND psp_id = $4::uuid
       AND last_pull_at IS NOT NULL
       AND (last_accepted_at IS NULL OR last_accepted_at < last_pull_at)
-    RETURNING merchant_id, rail
+    RETURNING merchant_id, psp_id
 )
-INSERT INTO billing.webhook_health_daily (merchant_id, rail, day_at, drift)
-SELECT merchant_id, rail, date_trunc('day', $1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', $2::bigint
+INSERT INTO billing.webhook_health_daily (merchant_id, psp_id, day_at, drift)
+SELECT merchant_id, psp_id, date_trunc('day', $1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', $2::bigint
 FROM gate
-ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
+ON CONFLICT (merchant_id, psp_id, custodian_id, day_at) DO UPDATE SET
     drift = billing.webhook_health_daily.drift + EXCLUDED.drift
 `
 
@@ -127,20 +86,20 @@ type RecordWebhookDriftParams struct {
 	At         time.Time
 	N          int64
 	MerchantID uuid.UUID
-	Rail       string
+	PspID      uuid.UUID
 }
 
-// Pull-derived corrections count as drift ONLY when the accepted watermark
-// predates the previous pull (last_pull_at still holds it during a refresh) —
-// i.e. the change arrived by pull when a webhook should have announced it.
-// First-ever pull (no last_pull_at / no row) records nothing: an initial
-// import is not drift. Returns rows affected (0 = gate closed).
+// Pull-derived corrections count as drift ONLY when the PSP's accepted
+// watermark predates its previous pull (last_pull_at still holds it during a
+// refresh) — the change arrived by pull when a webhook should have announced
+// it. A first-ever pull records nothing: an initial import is not drift.
+// Returns rows affected (0 = gate closed).
 func (q *Queries) RecordWebhookDrift(ctx context.Context, arg RecordWebhookDriftParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordWebhookDrift,
 		arg.At,
 		arg.N,
 		arg.MerchantID,
-		arg.Rail,
+		arg.PspID,
 	)
 	if err != nil {
 		return 0, err
@@ -150,73 +109,73 @@ func (q *Queries) RecordWebhookDrift(ctx context.Context, arg RecordWebhookDrift
 
 const recordWebhookRejected = `-- name: RecordWebhookRejected :exec
 WITH health AS (
-    INSERT INTO billing.webhook_health (merchant_id, rail)
-    VALUES ($1::uuid, $2::text)
-    ON CONFLICT (merchant_id, rail) DO UPDATE SET
+    INSERT INTO billing.webhook_health (merchant_id, psp_id, custodian_id)
+    VALUES ($1::uuid, $2::uuid, $3::uuid)
+    ON CONFLICT (merchant_id, psp_id, custodian_id) DO UPDATE SET
         updated_at = now()
 )
-INSERT INTO billing.webhook_health_daily (merchant_id, rail, day_at, rejected)
-VALUES ($1::uuid, $2::text, date_trunc('day', $3::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', 1)
-ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
+INSERT INTO billing.webhook_health_daily (merchant_id, psp_id, custodian_id, day_at, rejected)
+VALUES ($1::uuid, $2::uuid, $3::uuid, date_trunc('day', $4::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', 1)
+ON CONFLICT (merchant_id, psp_id, custodian_id, day_at) DO UPDATE SET
     rejected = billing.webhook_health_daily.rejected + 1
 `
 
 type RecordWebhookRejectedParams struct {
-	MerchantID uuid.UUID
-	Rail       string
-	At         time.Time
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	At          time.Time
 }
 
-// Failed signature verification: bump the daily reject bucket. NEVER touches
+// Failed verification: bump the daily reject bucket. NEVER touches
 // last_accepted_at — rejects must not look like liveness. The snapshot row is
-// still upserted so a rail that has ONLY ever rejected still has a created_at
-// for the silence age to measure from.
+// still upserted so a source that has only ever rejected has a created_at for
+// the silence age to measure from.
 func (q *Queries) RecordWebhookRejected(ctx context.Context, arg RecordWebhookRejectedParams) error {
-	_, err := q.db.Exec(ctx, recordWebhookRejected, arg.MerchantID, arg.Rail, arg.At)
+	_, err := q.db.Exec(ctx, recordWebhookRejected,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustodianID,
+		arg.At,
+	)
 	return err
 }
 
 const stampWebhookPull = `-- name: StampWebhookPull :exec
-INSERT INTO billing.webhook_health (merchant_id, rail, last_pull_at)
-VALUES ($1::uuid, $2::text, $3::timestamptz)
-ON CONFLICT (merchant_id, rail) DO UPDATE SET
+INSERT INTO billing.webhook_health (merchant_id, psp_id, last_pull_at)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz)
+ON CONFLICT (merchant_id, psp_id, custodian_id) DO UPDATE SET
     last_pull_at = EXCLUDED.last_pull_at,
     updated_at = now()
 `
 
 type StampWebhookPullParams struct {
 	MerchantID uuid.UUID
-	Rail       string
+	PspID      uuid.UUID
 	At         time.Time
 }
 
-// Advance the pull watermark AFTER a provider-refresh pass, so during the next
+// Advance the PSP's pull watermark AFTER a refresh pass, so during the next
 // pass last_pull_at is the PREVIOUS pull the drift gate compares against.
 func (q *Queries) StampWebhookPull(ctx context.Context, arg StampWebhookPullParams) error {
-	_, err := q.db.Exec(ctx, stampWebhookPull, arg.MerchantID, arg.Rail, arg.At)
+	_, err := q.db.Exec(ctx, stampWebhookPull, arg.MerchantID, arg.PspID, arg.At)
 	return err
 }
 
 const upsertPSPRefreshWatermark = `-- name: UpsertPSPRefreshWatermark :exec
-INSERT INTO billing.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
-VALUES ($1::uuid, $2::text, $3::uuid, 'events', $4::timestamptz)
-ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
+INSERT INTO billing.psp_refresh_watermarks (merchant_id, psp_id, event_domain, watermark_at)
+VALUES ($1::uuid, $2::uuid, 'events', $3::timestamptz)
+ON CONFLICT (merchant_id, psp_id, event_domain)
 DO UPDATE SET watermark_at = EXCLUDED.watermark_at, updated_at = now()
 `
 
 type UpsertPSPRefreshWatermarkParams struct {
 	MerchantID  uuid.UUID
-	Rail        string
 	PspID       uuid.UUID
 	WatermarkAt time.Time
 }
 
 func (q *Queries) UpsertPSPRefreshWatermark(ctx context.Context, arg UpsertPSPRefreshWatermarkParams) error {
-	_, err := q.db.Exec(ctx, upsertPSPRefreshWatermark,
-		arg.MerchantID,
-		arg.Rail,
-		arg.PspID,
-		arg.WatermarkAt,
-	)
+	_, err := q.db.Exec(ctx, upsertPSPRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
 	return err
 }

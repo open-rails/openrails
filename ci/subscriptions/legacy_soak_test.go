@@ -105,7 +105,7 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 
 // Soak: a schedule NMI deleted without a notification is mirrored as soon as
 // the host asks for a provider refresh through its Client, embedded or remote.
-func TestLegacyNMIRefreshProviders(t *testing.T) {
+func TestLegacyNMIRefreshPSPs(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
 		t.Run(string(tp), func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestLegacyNMIRefreshProviders(t *testing.T) {
 			w.nmi.DeleteSchedule(l.railSub)
 			w.advance(time.Hour)
 
-			res, err := w.client[tp].RefreshProviders(t.Context())
+			res, err := w.client[tp].RefreshPSPs(t.Context())
 			require.NoError(t, err)
 			require.Contains(t, []string{"queued", "already_running"}, res.Status)
 			require.Positive(t, res.JobID)

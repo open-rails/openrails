@@ -1,11 +1,12 @@
 package merchants
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
+
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // SEC-29: a rotated-out webhook signing secret verifies only until an explicit
@@ -50,18 +51,11 @@ func (s *Service) overlapWindow() time.Duration {
 }
 
 // webhookOverlapExpiry reads the published expiry, else the declared setting.
-func webhookOverlapExpiry(evidence []byte) time.Time {
-	var doc struct {
-		ExpiresAt string         `json:"webhook_overlap_expires_at"`
-		Settings  map[string]any `json:"settings"`
+func webhookOverlapExpiry(row gen.BillingPsp) time.Time {
+	if row.WebhookOverlapExpiresAt != nil {
+		return row.WebhookOverlapExpiresAt.UTC()
 	}
-	if len(evidence) == 0 || json.Unmarshal(evidence, &doc) != nil {
-		return time.Time{}
-	}
-	raw := doc.ExpiresAt
-	if raw == "" {
-		raw, _ = doc.Settings[WebhookOverlapExpiresKey].(string)
-	}
+	raw, _ := rowSettings(row)[WebhookOverlapExpiresKey].(string)
 	at, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
 	if err != nil {
 		return time.Time{}

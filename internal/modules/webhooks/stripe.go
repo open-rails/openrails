@@ -1196,8 +1196,8 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 
 const stripeDisputeWonOp = "stripe.dispute_won"
 
-// markStripeDisputeWon durably records a won dispute so a late created notice
-// cannot reverse it.
+// markStripeDisputeWon durably records a won dispute, under the PSP whose
+// account owns it, so a late created notice cannot reverse it.
 func (s *StripeWebhookService) markStripeDisputeWon(ctx context.Context, disputeID string) error {
 	disputeID = strings.TrimSpace(disputeID)
 	if s.DB == nil || disputeID == "" {
@@ -1207,7 +1207,11 @@ func (s *StripeWebhookService) markStripeDisputeWon(ctx context.Context, dispute
 	if err != nil {
 		return err
 	}
-	if _, err := s.DB.Gen(ctx).MarkWebhookEventCompleted(ctx, gen.MarkWebhookEventCompletedParams{MerchantID: mid.UUID(), Op: stripeDisputeWonOp, EventID: disputeID}); err != nil {
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return fmt.Errorf("record won stripe dispute: %w", err)
+	}
+	if _, err := s.DB.Gen(ctx).MarkWebhookEventCompleted(ctx, gen.MarkWebhookEventCompletedParams{MerchantID: mid.UUID(), PspID: &psp, Op: stripeDisputeWonOp, EventID: disputeID}); err != nil {
 		return fmt.Errorf("record won stripe dispute: %w", err)
 	}
 	return nil
@@ -1222,7 +1226,11 @@ func (s *StripeWebhookService) stripeDisputeAlreadyWon(ctx context.Context, disp
 	if err != nil {
 		return false, err
 	}
-	won, err := s.DB.Gen(ctx).WebhookEventCompleted(ctx, gen.WebhookEventCompletedParams{MerchantID: mid.UUID(), Op: stripeDisputeWonOp, EventID: disputeID})
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return false, fmt.Errorf("lookup won stripe dispute: %w", err)
+	}
+	won, err := s.DB.Gen(ctx).WebhookEventCompleted(ctx, gen.WebhookEventCompletedParams{MerchantID: mid.UUID(), PspID: &psp, Op: stripeDisputeWonOp, EventID: disputeID})
 	if err != nil {
 		return false, fmt.Errorf("lookup won stripe dispute: %w", err)
 	}

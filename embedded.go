@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	riverhelpers "github.com/open-rails/helpers/river"
@@ -16,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/hosttools"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -273,13 +271,20 @@ func (InvoiceSweepArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{
 
 // DeclarePSP records a PSP identity, without credentials, for imported billing
 // facts attributed to it. Call during setup, before serving or starting
-// workers. It never arms the PSP for checkout.
-func (c *Client) DeclarePSP(ctx context.Context, merchantID billing.MerchantID, declaration billing.PSPDeclaration) (uuid.UUID, error) {
+// workers. It never arms the PSP for checkout. Embedded only.
+func (c *Client) DeclarePSP(ctx context.Context, merchantID billing.MerchantID, declaration billing.PSPDeclaration) (*billing.PSP, error) {
 	e, err := c.embedded()
 	if err != nil {
-		return uuid.Nil, err
+		return nil, err
 	}
-	return hosttools.DeclarePSP(ctx, e.App, merchantID, declaration)
+	if e.App.Runtime == nil || e.App.Runtime.Merchants == nil {
+		return nil, fmt.Errorf("openrails: runtime not initialized")
+	}
+	psp, err := e.App.Runtime.Merchants.DeclarePSP(ctx, merchantID, declaration)
+	if err != nil {
+		return nil, err
+	}
+	return &psp, nil
 }
 
 // OpenOperationAuthorizationTx is OpenOperationAuthorization inside tx, a

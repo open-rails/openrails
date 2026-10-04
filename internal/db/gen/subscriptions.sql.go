@@ -1389,7 +1389,7 @@ FROM (
        AND (s.status = 'active' OR s.next_retry_at <= $1::timestamptz)
        AND s.rail = ANY($2::text[])
        AND NOT EXISTS (
-             SELECT 1 FROM billing.rail_intents i
+             SELECT 1 FROM billing.provider_intents i
               WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                 AND i.intent_type = 'subscription_collection'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
@@ -1443,7 +1443,7 @@ WHERE sub.merchant_id = $1::uuid AND sub.rail = ANY($2::text[])
            AND (($4::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
        OR ($4::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= $3::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= $3::timestamptz))
-           AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
+           AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
 ORDER BY CASE WHEN sub.status='awaiting_method' THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT $5::int

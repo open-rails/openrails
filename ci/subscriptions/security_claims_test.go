@@ -20,14 +20,13 @@ func TestSecurityProviderAccountClaimsNeedProof(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	r := w.rival()
-	zero := int64(0)
 	for _, account := range []string{"945280-0001", "945280-0000"} {
-		_, err := r.client.PaymentProviders.Upsert(t.Context(), "ccbill", &billing.UpsertPaymentProviderParams{OperationID: uuid.New(), ExpectedRevision: &zero, AccountID: account})
+		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{OperationID: uuid.New(), Key: "squat", Rail: billing.RailCCBill, AccountID: account})
 		require.Error(t, err, "an unproven claim of %s is refused", account)
 	}
-	list, err := r.client.PaymentProviders.List(t.Context(), &billing.PaymentProviderListParams{Provider: "ccbill"})
+	list, err := r.client.ListPSPs(t.Context(), billing.PSPListParams{Rail: billing.RailCCBill})
 	require.NoError(t, err)
-	for _, psp := range list.Data {
+	for _, psp := range list.Items {
 		require.NotContains(t, []string{"945280-0001", "945280-0000"}, psp.AccountID)
 	}
 	// The operator-declared account keeps working for its merchant.

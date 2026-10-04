@@ -161,7 +161,6 @@ func TestCalculateTokenQuote(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(19_990_000), q.Units)
 		require.Equal(t, "19.990000", q.Amount)
-		require.Equal(t, moneyutil.Micros(19_990_000), q.AmountUSDMicros)
 		require.Equal(t, "USD", q.FXCurrency)
 		require.Equal(t, 1.0, q.FXRate)
 	})
@@ -171,7 +170,6 @@ func TestCalculateTokenQuote(t *testing.T) {
 		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "eur", mockFX, usdc)
 		require.NoError(t, err)
 		require.Equal(t, uint64(10_800_000), q.Units, "1.08 must not add a phantom base unit")
-		require.Equal(t, moneyutil.Micros(10_800_000), q.AmountUSDMicros)
 		require.Equal(t, "EUR", q.FXCurrency)
 	})
 

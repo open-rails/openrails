@@ -234,7 +234,7 @@ type Decision struct {
 	Backfill []RemoteTransaction
 	// RemoteCustomerID is the provider's customer-scope object id when it has
 	// one (Stripe cus_*; NMI reports the per-card vault id — #682, so only
-	// Stripe materializes rail_customer_accounts).
+	// Stripe materializes psp_customers).
 	RemoteCustomerID string
 	// Certainty (#821) names the leg that justified TransitionCancel — one of
 	// the Certainty* constants. A TransitionCancel with an EMPTY Certainty is
@@ -468,7 +468,7 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	base := Decision{Kind: TransitionNone, Reason: "snapshot_inconclusive"}
 	if remoteSub != nil {
 		// Carry the provider's customer-scope id so the orchestration can
-		// materialize a rail_customer_accounts row (#635).
+		// materialize a psp_customers row (#635).
 		base.RemoteCustomerID = remoteSub.CustomerID
 	}
 

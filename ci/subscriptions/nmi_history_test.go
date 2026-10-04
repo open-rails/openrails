@@ -137,16 +137,17 @@ func TestNMIDeclineHistory(t *testing.T) {
 
 	// The measures, split like the report: by month, kind and PSP.
 	rates := map[string][3]float64{}
-	for _, r := range w.metricRows(month(24), []string{"nmi_history_authorizations", "nmi_history_refused", "nmi_history_refusal_rate"}, []string{"time", "nmi_kind", "rail_account"}, nil) {
+	for _, r := range w.metricRows(month(24), []string{"nmi_history_authorizations", "nmi_history_refused", "nmi_history_refusal_rate"}, []string{"time", "nmi_kind", "psp"}, nil) {
 		if n := decimal(t, r["nmi_history_authorizations"]); n > 0 {
-			key := r["time"].(string)[:7] + " " + r["nmi_kind"].(string) + " " + r["rail_account"].(string)
+			key := r["time"].(string)[:7] + " " + r["nmi_kind"].(string) + " " + r["psp"].(string)
 			rates[key] = [3]float64{n, decimal(t, r["nmi_history_refused"]), decimal(t, r["nmi_history_refusal_rate"])}
 		}
 	}
+	psp := w.psp["nmi"].String()
 	require.Equal(t, map[string][3]float64{
-		month(3).Format("2006-01") + " one_off_sale " + nmiAcct:     {3, 1, 1.0 / 3},
-		month(2).Format("2006-01") + " scheduled_rebill " + nmiAcct: {2, 1, 0.5},
-		start.UTC().Format("2006-01") + " verification " + nmiAcct:  {1, 0, 0},
+		month(3).Format("2006-01") + " one_off_sale " + psp:     {3, 1, 1.0 / 3},
+		month(2).Format("2006-01") + " scheduled_rebill " + psp: {2, 1, 0.5},
+		start.UTC().Format("2006-01") + " verification " + psp:  {1, 0, 0},
 	}, rates)
 	reasons := map[string]float64{}
 	for _, r := range w.metricRows(month(24), []string{"nmi_history_refused"}, []string{"nmi_kind", "category", "reason"}, map[string][]string{"category": {"issuer_soft"}}) {

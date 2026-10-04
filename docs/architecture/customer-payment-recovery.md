@@ -8,20 +8,8 @@ returns the existing result after settlement; a different key cannot displace
 unresolved work. The existing invoice/subscription read exposes `recovery` and
 any unresolved operation, without a second operation API.
 
-The shared Go Client runs identically over HTTP or in process. Embedded hosts
-verify customer credentials with `Deps.Authenticate` and derive a customer
-Client with explicit credentials:
-
-```go
-customer, err := client.With(openrails.WithTokenProvider(func(ctx context.Context) (string, error) {
-    return verifiedCustomerToken, nil
-}))
-result, err := customer.PayInvoiceNow(ctx, billing.PayInvoiceNowRequest{
-    InvoiceID: invoiceID,
-    PaymentMethodID: paymentMethodID,
-    IdempotencyKey: stableKeyForThisCustomerAction,
-})
-```
+These are customer HTTP routes; the Go Client carries merchant routes only.
+Embedded hosts verify customer credentials with `Deps.Authenticate`.
 
 The authenticator must verify a customer's credential before mapping it to the
 payer and set `CredentialClassUserSession`. The host explicitly maps a verified

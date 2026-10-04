@@ -141,7 +141,7 @@ func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	c := w.newCustomer()
 	held := strings.TrimPrefix(c.saveCard("nmi", visa), "pm_")
 	q := gen.New(db.RewriteDBTX(w.pool, w.schema))
-	psp := uuid.MustParse(w.psp["nmi"])
+	psp := w.psp["nmi"].UUID()
 	var merchant uuid.UUID
 	var env string
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT merchant_id, environment FROM billing.psps WHERE id = $1`), psp).Scan(&merchant, &env))

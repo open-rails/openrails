@@ -4,7 +4,7 @@ INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
-    subscription_id, payment_method_id, payment_id, rail_intent_id, step, cycle_id,
+    subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
     card_bin, issuer_code, issuer_text, enriched_at
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
@@ -15,7 +15,7 @@ INSERT INTO billing.payment_attempts (
     sqlc.narg(card_brand)::text, sqlc.narg(card_last4)::text, sqlc.narg(token_type)::text,
     sqlc.arg(amount)::bigint, sqlc.narg(currency)::text, sqlc.arg(attempted_at)::timestamptz,
     sqlc.narg(checkout_id)::uuid, sqlc.narg(checkout_target)::text, sqlc.narg(subscription_id)::uuid,
-    sqlc.narg(payment_method_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.narg(rail_intent_id)::uuid,
+    sqlc.narg(payment_method_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.narg(provider_intent_id)::uuid,
     sqlc.arg(step)::text, sqlc.narg(cycle_id)::uuid,
     sqlc.narg(card_bin)::text, sqlc.narg(issuer_code)::text, sqlc.narg(issuer_text)::text,
     sqlc.narg(enriched_at)::timestamptz

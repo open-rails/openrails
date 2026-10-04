@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -14,8 +13,8 @@ import (
 // browser SDK collects the card. Consent is the customer's permission to
 // charge the card for future agreed payments.
 type PaymentMethodSetupParams struct {
-	PSPID   uuid.UUID `json:"psp_id"`
-	Consent bool      `json:"consent"`
+	PSPID   billing.PSPID `json:"psp_id"`
+	Consent bool          `json:"consent"`
 }
 
 // CreatePaymentMethodSetup (POST /me/payment-method-setups) starts a card
@@ -37,7 +36,7 @@ func CreatePaymentMethodSetup(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	result, err := r.State.CheckoutService.CreateStripeMethodSetup(r.Request.Context(), req.PSPID, r.Header("Idempotency-Key"), checkoutVerifiedPrincipal(r), resolver)
+	result, err := r.State.CheckoutService.CreateStripeMethodSetup(r.Request.Context(), req.PSPID.UUID(), r.Header("Idempotency-Key"), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
 		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return

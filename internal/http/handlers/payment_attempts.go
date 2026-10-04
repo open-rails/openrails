@@ -34,7 +34,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 	params := gen.ListPaymentAttemptsParams{
 		MerchantID: mid, Kinds: q.list("kind"), Owners: q.list("owner"), Categories: q.list("category"), Reasons: q.list("reason"),
 		ResponseCodes: q.list("response_code"), CardEntries: q.list("card_entry"), Sources: q.list("source"), ObservedVias: q.list("observed_via"),
-		AvsResults: q.list("avs_result"), CvvResults: q.list("cvv_result"), PspID: q.uuid("psp_id"), CustomerID: q.uuid("customer_id"),
+		AvsResults: q.list("avs_result"), CvvResults: q.list("cvv_result"), PspID: q.typed("psp_id", parsePSPID), CustomerID: q.uuid("customer_id"),
 		CheckoutID: q.uuid("checkout_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
 			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
@@ -104,7 +104,7 @@ func ListRebillCycles(r *httprequest.Request) {
 	now := r.Clock.Now()
 	params := gen.ListRebillCyclesParams{
 		MerchantID: mid, Now: now, Owners: q.list("owner"), FirstOutcomes: q.list("first_outcome"), MissReasons: q.list("miss_reason"), Outcomes: outcomes,
-		PspID: q.uuid("psp_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
+		PspID: q.typed("psp_id", parsePSPID), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
 			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
 		}), DueSince: q.time("due_since"), DueUntil: q.time("due_until"),
@@ -183,7 +183,7 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		IssuerCode: normalize.FromPtr(a.IssuerCode), IssuerText: normalize.FromPtr(a.IssuerText), AVSResult: normalize.FromPtr(a.AvsResult),
 		CVVResult: normalize.FromPtr(a.CvvResult), Card: models.CardFromColumns(a.CardBrand, a.CardLast4, nil, nil).Details(),
 		CardBIN: normalize.FromPtr(a.CardBin), TokenType: normalize.FromPtr(a.TokenType), TransactionID: normalize.FromPtr(a.TransactionID),
-		Rail: a.Rail, PSPID: a.PspID.String(), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
+		Rail: a.Rail, PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
 		AttemptedAt: a.AttemptedAt, CheckoutTarget: normalize.FromPtr(a.CheckoutTarget), EnrichedAt: a.EnrichedAt,
 	}
 	if a.CheckoutID != nil {
@@ -211,7 +211,7 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.RebillCycle {
 	out := billing.RebillCycle{
 		ID: billing.RebillCycleID(c.ID), SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
-		CustomerID: billing.CustomerID(c.CustomerID), PSPID: c.PspID.String(), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
+		CustomerID: billing.CustomerID(c.CustomerID), PSPID: billing.PSPID(c.PspID), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
 		Currency: c.Currency, FirstOutcome: c.FirstOutcome, MissedAt: c.MissedAt, MissReason: normalize.FromPtr(c.MissReason),
 		CollectedAt: c.WonAt, RecoveredBy: c.RecoveredBy, ClosesAt: c.ClosedAt,
 	}
@@ -296,4 +296,9 @@ func (q *queryReader) fail(err error) {
 	if q.err == nil {
 		q.err = err
 	}
+}
+
+func parsePSPID(s string) (uuid.UUID, error) {
+	id, err := billing.ParsePSPID(s)
+	return id.UUID(), err
 }

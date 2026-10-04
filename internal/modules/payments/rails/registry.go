@@ -54,7 +54,7 @@ type Descriptor struct {
 	HasPSPs bool
 
 	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer
-	// object worth materializing into rail_customer_accounts (#635) — Stripe cus_*
+	// object worth materializing into psp_customers (#635) — Stripe cus_*
 	// only. NMI's vault "customer" is an instrument container that OpenRails
 	// deliberately mints PER CARD (#682), so it is not person-unique and does
 	// not qualify; CCBill keys on subscription_id and Solana on the wallet

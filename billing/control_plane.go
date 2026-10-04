@@ -187,12 +187,3 @@ type MerchantRetirement struct {
 	Retired bool
 	Refusal MerchantRetirementRefusal
 }
-
-// PSPDeclaration identifies a PSP account without credentials, for imported
-// billing facts. Existing aliases, archive state, custody and configuration
-// are preserved.
-type PSPDeclaration struct {
-	Key       string
-	Rail      string
-	AccountID string
-}

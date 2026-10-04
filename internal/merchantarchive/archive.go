@@ -269,8 +269,8 @@ func exportQuery(p contract.Profile) string {
 	for i, c := range p.Columns {
 		expr := "t." + pgx.Identifier{c.Name}.Sanitize()
 		switch p.Name + "." + c.Name {
-		case "psps.evidence":
-			expr = "jsonb_strip_nulls(jsonb_build_object('settings',(t.evidence->'settings')-'rpc_api_key','signer',t.evidence->'signer','public_config',t.evidence->'public_config'))"
+		case "psps.settings":
+			expr = "t.settings - 'rpc_api_key'"
 		}
 		cols[i] = "(" + expr + ")::text"
 	}

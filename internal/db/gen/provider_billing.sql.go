@@ -14,7 +14,7 @@ import (
 
 const getProviderBillingObservation = `-- name: GetProviderBillingObservation :one
 SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end, raw_body_available, raw_body_bytes, raw_body_digest, normalized_records_bytes, normalized_records_digest, cost_amount, has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
-FROM billing.provider_billing_observations
+FROM billing.cost_observations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
   AND observation_id = $3::text
@@ -26,9 +26,9 @@ type GetProviderBillingObservationParams struct {
 	ObservationID string
 }
 
-func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProviderBillingObservationParams) (BillingProviderBillingObservation, error) {
+func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProviderBillingObservationParams) (BillingCostObservation, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingObservation, arg.MerchantID, arg.OperationID, arg.ObservationID)
-	var i BillingProviderBillingObservation
+	var i BillingCostObservation
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -53,7 +53,7 @@ func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProv
 
 const getProviderBillingQualificationForUpdate = `-- name: GetProviderBillingQualificationForUpdate :one
 SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
-FROM billing.provider_billing_qualifications
+FROM billing.cost_qualifications
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
 FOR UPDATE
@@ -64,9 +64,9 @@ type GetProviderBillingQualificationForUpdateParams struct {
 	OperationID string
 }
 
-func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, arg GetProviderBillingQualificationForUpdateParams) (BillingProviderBillingQualification, error) {
+func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, arg GetProviderBillingQualificationForUpdateParams) (BillingCostQualification, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingQualificationForUpdate, arg.MerchantID, arg.OperationID)
-	var i BillingProviderBillingQualification
+	var i BillingCostQualification
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -96,7 +96,7 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 
 const getProviderBillingQualificationWithAuthorization = `-- name: GetProviderBillingQualificationWithAuthorization :one
 SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_start, q.provider_lifetime_end, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest
-FROM billing.provider_billing_qualifications q
+FROM billing.cost_qualifications q
 JOIN billing.operation_authorizations a
   ON a.merchant_id = q.merchant_id
  AND a.operation_id = q.operation_id
@@ -110,36 +110,36 @@ type GetProviderBillingQualificationWithAuthorizationParams struct {
 }
 
 type GetProviderBillingQualificationWithAuthorizationRow struct {
-	BillingProviderBillingQualification BillingProviderBillingQualification
-	BillingOperationAuthorization       BillingOperationAuthorization
+	BillingCostQualification      BillingCostQualification
+	BillingOperationAuthorization BillingOperationAuthorization
 }
 
 func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.Context, arg GetProviderBillingQualificationWithAuthorizationParams) (GetProviderBillingQualificationWithAuthorizationRow, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingQualificationWithAuthorization, arg.MerchantID, arg.OperationID)
 	var i GetProviderBillingQualificationWithAuthorizationRow
 	err := row.Scan(
-		&i.BillingProviderBillingQualification.MerchantID,
-		&i.BillingProviderBillingQualification.OperationID,
-		&i.BillingProviderBillingQualification.Provider,
-		&i.BillingProviderBillingQualification.ProviderResourceID,
-		&i.BillingProviderBillingQualification.ProviderLifetimeStart,
-		&i.BillingProviderBillingQualification.ProviderLifetimeEnd,
-		&i.BillingProviderBillingQualification.ProviderAbsentAt,
-		&i.BillingProviderBillingQualification.ProviderAbsenceReference,
-		&i.BillingProviderBillingQualification.BillingStopReference,
-		&i.BillingProviderBillingQualification.WindowsClosedAt,
-		&i.BillingProviderBillingQualification.WindowsClosedReference,
-		&i.BillingProviderBillingQualification.LifecycleEvidenceBytes,
-		&i.BillingProviderBillingQualification.LifecycleEvidenceDigest,
-		&i.BillingProviderBillingQualification.QuiescenceSeconds,
-		&i.BillingProviderBillingQualification.State,
-		&i.BillingProviderBillingQualification.Reason,
-		&i.BillingProviderBillingQualification.BaselineObservationID,
-		&i.BillingProviderBillingQualification.QualifiedObservationID,
-		&i.BillingProviderBillingQualification.QualifiedCostAmount,
-		&i.BillingProviderBillingQualification.QualifiedAt,
-		&i.BillingProviderBillingQualification.CreatedAt,
-		&i.BillingProviderBillingQualification.UpdatedAt,
+		&i.BillingCostQualification.MerchantID,
+		&i.BillingCostQualification.OperationID,
+		&i.BillingCostQualification.Provider,
+		&i.BillingCostQualification.ProviderResourceID,
+		&i.BillingCostQualification.ProviderLifetimeStart,
+		&i.BillingCostQualification.ProviderLifetimeEnd,
+		&i.BillingCostQualification.ProviderAbsentAt,
+		&i.BillingCostQualification.ProviderAbsenceReference,
+		&i.BillingCostQualification.BillingStopReference,
+		&i.BillingCostQualification.WindowsClosedAt,
+		&i.BillingCostQualification.WindowsClosedReference,
+		&i.BillingCostQualification.LifecycleEvidenceBytes,
+		&i.BillingCostQualification.LifecycleEvidenceDigest,
+		&i.BillingCostQualification.QuiescenceSeconds,
+		&i.BillingCostQualification.State,
+		&i.BillingCostQualification.Reason,
+		&i.BillingCostQualification.BaselineObservationID,
+		&i.BillingCostQualification.QualifiedObservationID,
+		&i.BillingCostQualification.QualifiedCostAmount,
+		&i.BillingCostQualification.QualifiedAt,
+		&i.BillingCostQualification.CreatedAt,
+		&i.BillingCostQualification.UpdatedAt,
 		&i.BillingOperationAuthorization.OperationID,
 		&i.BillingOperationAuthorization.MerchantID,
 		&i.BillingOperationAuthorization.CustomerID,
@@ -164,7 +164,7 @@ func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.C
 }
 
 const insertProviderBillingObservation = `-- name: InsertProviderBillingObservation :one
-INSERT INTO billing.provider_billing_observations (
+INSERT INTO billing.cost_observations (
     merchant_id,
     operation_id,
     observation_id,
@@ -225,7 +225,7 @@ type InsertProviderBillingObservationParams struct {
 	ObservedAt              time.Time
 }
 
-func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg InsertProviderBillingObservationParams) (BillingProviderBillingObservation, error) {
+func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg InsertProviderBillingObservationParams) (BillingCostObservation, error) {
 	row := q.db.QueryRow(ctx, insertProviderBillingObservation,
 		arg.MerchantID,
 		arg.OperationID,
@@ -245,7 +245,7 @@ func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg Inse
 		arg.QualificationReason,
 		arg.ObservedAt,
 	)
-	var i BillingProviderBillingObservation
+	var i BillingCostObservation
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -270,7 +270,7 @@ func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg Inse
 
 const insertProviderBillingQualification = `-- name: InsertProviderBillingQualification :one
 
-INSERT INTO billing.provider_billing_qualifications (
+INSERT INTO billing.cost_qualifications (
     merchant_id,
     operation_id,
     provider,
@@ -323,7 +323,7 @@ type InsertProviderBillingQualificationParams struct {
 }
 
 // th-045 OpenRails-owned provider billing evidence and qualification.
-func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg InsertProviderBillingQualificationParams) (BillingProviderBillingQualification, error) {
+func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg InsertProviderBillingQualificationParams) (BillingCostQualification, error) {
 	row := q.db.QueryRow(ctx, insertProviderBillingQualification,
 		arg.MerchantID,
 		arg.OperationID,
@@ -340,7 +340,7 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 		arg.LifecycleEvidenceDigest,
 		arg.QuiescenceSeconds,
 	)
-	var i BillingProviderBillingQualification
+	var i BillingCostQualification
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -369,7 +369,7 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 }
 
 const updateProviderBillingQualification = `-- name: UpdateProviderBillingQualification :one
-UPDATE billing.provider_billing_qualifications
+UPDATE billing.cost_qualifications
 SET state = $1::text,
     reason = $2::text,
     baseline_observation_id = $3::text,
@@ -394,7 +394,7 @@ type UpdateProviderBillingQualificationParams struct {
 	OperationID            string
 }
 
-func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg UpdateProviderBillingQualificationParams) (BillingProviderBillingQualification, error) {
+func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg UpdateProviderBillingQualificationParams) (BillingCostQualification, error) {
 	row := q.db.QueryRow(ctx, updateProviderBillingQualification,
 		arg.State,
 		arg.Reason,
@@ -406,7 +406,7 @@ func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg Up
 		arg.MerchantID,
 		arg.OperationID,
 	)
-	var i BillingProviderBillingQualification
+	var i BillingCostQualification
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,

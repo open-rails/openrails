@@ -29,7 +29,7 @@ func validateSaleReferences(ctx context.Context, tx pgx.Tx, mid billing.Merchant
 		}
 		for _, op := range rows {
 			if err := validateSaleReference(ctx, q, op); err != nil {
-				return &Error{Code: "unsupported_state", Table: "rail_intents", Count: 1, Err: err}
+				return &Error{Code: "unsupported_state", Table: "provider_intents", Count: 1, Err: err}
 			}
 		}
 		next := rows[len(rows)-1].ID
@@ -37,7 +37,7 @@ func validateSaleReferences(ctx context.Context, tx pgx.Tx, mid billing.Merchant
 	}
 }
 
-func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingRailIntent) error {
+func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingProviderIntent) error {
 	if err := intents.ValidateNMISaleTerminal(op); err != nil {
 		return err
 	}

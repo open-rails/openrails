@@ -68,9 +68,9 @@ func canonicalWireFixtures() map[string]any {
 			LineItems: []checkoutsession.CheckoutSessionLineItem{{Label: "Premium Membership", Sublabel: ptr("Renews monthly"), Amount: maxMoney}, {Label: "Launch discount", Amount: minMoney}},
 			Tax:       &zero, DueToday: &maxMoney,
 			Options: []checkoutsession.CheckoutSessionOption{
-				{ID: "option_card", PSPID: "55555555-5555-5555-5555-555555555555", Rail: "nmi", Mode: "subscription", Driver: "collect_js", PublicConfig: map[string]string{"tokenization_key": "public-key", "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js"}},
-				{ID: "option_wallet", PSPID: "66666666-6666-4666-8666-666666666666", Rail: "solana", Mode: "one_off", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "USDC", "network": "devnet"}},
-				{ID: "option_elements", PSPID: "77777777-7777-4777-8777-777777777777", Rail: "stripe", Mode: "subscription", Driver: "stripe_elements", PublicConfig: map[string]string{"publishable_key": "pk_test_fixture"}},
+				{ID: "option_card", PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")), Rail: "nmi", Mode: "subscription", Driver: "collect_js", PublicConfig: map[string]string{"tokenization_key": "public-key", "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js"}},
+				{ID: "option_wallet", PSPID: billing.PSPID(uuid.MustParse("66666666-6666-4666-8666-666666666666")), Rail: "solana", Mode: "one_off", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "USDC", "network": "devnet"}},
+				{ID: "option_elements", PSPID: billing.PSPID(uuid.MustParse("77777777-7777-4777-8777-777777777777")), Rail: "stripe", Mode: "subscription", Driver: "stripe_elements", PublicConfig: map[string]string{"publishable_key": "pk_test_fixture"}},
 			},
 			SavedMethods: []checkoutsession.CheckoutSessionSavedMethod{{ID: methodFixture, OptionID: "option_card", Rail: "nmi", Card: card}},
 			NextAction:   &billing.NextAction{Type: "solana_pay", URL: ptr("solana:https://pay.example/billing/v1/checkout-attempts/chk_ffffffff-ffff-4fff-8fff-ffffffffffff/solana-pay")},
@@ -93,7 +93,7 @@ func canonicalWireFixtures() map[string]any {
 		},
 		"payment.json": paymentFixtureValue(when, priceFixtureValue, card),
 		"payment_method.json": billing.PaymentMethod{
-			ID: methodFixture, CustomerID: customerFixture, Rail: "nmi", PSPID: ptr("55555555-5555-5555-5555-555555555555"), Card: card,
+			ID: methodFixture, CustomerID: customerFixture, Rail: "nmi", PSPID: ptr(billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555"))), Card: card,
 			BillingDetails:       &billing.BillingDetails{Name: ptr("Ada Lovelace"), Address: &billing.BillingAddress{PostalCode: ptr("80202"), Country: ptr("US")}},
 			Health:               billing.PaymentMethodHealth{ExpiryStatus: ptr(billing.CardExpiryValid), LastChargedAt: &when, LastChargeOutcome: ptr(billing.ChargeSucceeded), Active: true},
 			Subscriptions:        []billing.PaymentMethodSubscription{{ID: subscriptionFixture, DisplayName: "Pro", CreatedAt: when}},
@@ -119,7 +119,7 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 	scheduled.ID, scheduled.Key = scheduledPriceFixture, "pro-annual"
 	return billing.Subscription{
 		CollectionPolicy: "provider",
-		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: "55555555-5555-5555-5555-555555555555",
+		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
 		Rail: "nmi", RailSubscriptionID: "rail-sub-1", Status: "active", ScheduledPriceID: ptr(scheduledPriceFixture), PaymentMethodID: &methodFixture,
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,
 		Price:            &price,
@@ -137,7 +137,7 @@ func paymentFixtureValue(when time.Time, price billing.Price, card *billing.Card
 		ID: paymentFixture, Kind: billing.PaymentCharge, Status: billing.PaymentSucceeded, Amount: price.UnitAmount, Currency: "USD", CustomerID: customerFixture,
 		SubscriptionID: &subscriptionFixture, PriceID: priceFixture, Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		Price:   &price,
-		Channel: billing.ChannelRail, Rail: ptr("nmi"), PSPID: ptr("55555555-5555-5555-5555-555555555555"), TransactionID: "txn-1", Card: card, CreatedAt: when,
+		Channel: billing.ChannelRail, Rail: ptr("nmi"), PSPID: ptr(billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555"))), TransactionID: "txn-1", Card: card, CreatedAt: when,
 	}
 }
 

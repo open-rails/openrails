@@ -75,9 +75,7 @@ func (r *RunResult) PullProofs() PullProofs {
 // (enforce insert+overwrite) — an advisory dry-run proves nothing about the
 // LOCAL mirror.
 func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, proofs PullProofs) ([]string, error) {
-	accounts, err := q.ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
-		MerchantID: merchantID,
-	})
+	accounts, err := q.ListPSPsForMerchant(ctx, merchantID)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: list PSPs: %w", err)
 	}

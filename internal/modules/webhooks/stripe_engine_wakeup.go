@@ -69,7 +69,7 @@ func (s *StripeWebhookService) wakeStripeEngineOperation(ctx context.Context, ra
 	}
 }
 
-func qualifyStripeEngineNotification(operation gen.BillingRailIntent, event stripeEngineNotification, raw json.RawMessage, environment string) error {
+func qualifyStripeEngineNotification(operation gen.BillingProviderIntent, event stripeEngineNotification, raw json.RawMessage, environment string) error {
 	params, err := intents.StripeEngineParams(operation)
 	if err != nil {
 		return err

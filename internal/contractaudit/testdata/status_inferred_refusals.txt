@@ -21,17 +21,14 @@ internal/http/handlers/entitlements.go 7
 internal/http/handlers/merchant_alerts.go 7
 internal/http/handlers/merchant_api_host.go 2
 internal/http/handlers/merchant_catalog_copilot.go 6
-internal/http/handlers/merchant_checkout_routing.go 2
 internal/http/handlers/merchant_dashboard.go 7
 internal/http/handlers/merchant_metrics.go 7
-internal/http/handlers/merchant_payment_providers.go 7
 internal/http/handlers/notifications.go 4
 internal/http/handlers/payment_attempts.go 1
 internal/http/handlers/platform_merchants.go 15
 internal/http/handlers/portal.go 3
 internal/http/handlers/product_access.go 5
 internal/http/handlers/product_archive.go 9
-internal/http/handlers/provider_refresh.go 3
 internal/http/handlers/self_account.go 2
 internal/http/handlers/service_admission.go 4
 internal/http/handlers/service_commerce.go 4

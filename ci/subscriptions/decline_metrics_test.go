@@ -135,9 +135,9 @@ func TestDeclineMetrics(t *testing.T) {
 
 	// Every dimension of every new family compiles and runs.
 	families := map[string][]string{
-		"attempts":    {"currency", "rail", "rail_account", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"},
-		"checkouts":   {"currency", "rail", "rail_account", "owner", "card_entry"},
-		"rebills_due": {"currency", "rail", "rail_account", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"},
+		"attempts":    {"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"},
+		"checkouts":   {"currency", "rail", "psp", "owner", "card_entry"},
+		"rebills_due": {"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"},
 	}
 	for measure, dims := range families {
 		for _, dim := range dims {

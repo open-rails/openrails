@@ -1,5 +1,5 @@
 -- Operational job state: catalog drift events (reconciliation). Manual rebill
--- attempts were folded into billing.rail_intents (#358 phase C).
+-- attempts were folded into billing.provider_intents (#358 phase C).
 
 -- Catalog drift events are the catalog.* reconciliation findings; kind is the
 -- finding type without its "catalog." prefix.
@@ -27,7 +27,7 @@ INSERT INTO billing.reconciliation_findings (
     sqlc.narg(openrails_value)::text, sqlc.narg(external_value)::text,
     sqlc.arg(observed_at)::timestamptz, sqlc.arg(observed_at)::timestamptz, sqlc.arg(observed_at)::timestamptz
 )
-ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     openrails_value = CASE WHEN billing.reconciliation_findings.status = 'ignored'
         THEN billing.reconciliation_findings.openrails_value ELSE EXCLUDED.openrails_value END,
     external_value = CASE WHEN billing.reconciliation_findings.status = 'ignored'

@@ -177,11 +177,11 @@ SELECT cardinality($1::text[])>0 AND NOT EXISTS (
       AND COALESCE(s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0'
       -- #1099: a session whose sale finally failed reserves nothing; its
       -- operation's outcome is the session's.
-      AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
+      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
         WHERE f.merchant_id=s.merchant_id
           AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
           AND f.status IN ('failed_terminal','expired','superseded')))
-   OR EXISTS (SELECT 1 FROM billing.rail_intents i
+   OR EXISTS (SELECT 1 FROM billing.provider_intents i
     WHERE i.merchant_id=$2::uuid AND i.intent_type='nmi_sale'
       AND i.payload->>'user_id'=$3::uuid::text
       AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')

@@ -16,7 +16,7 @@ import (
 
 // The concrete custody read and contract check precede the durable fence. They
 // prove the observed binding, not a remote lock; Charge rechecks before dispatch.
-func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
+func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context, in gen.BillingProviderIntent, p InitialMembershipPayload, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
 	if h.Checkout.Config == nil || h.Checkout.Config.HyperSwitch == nil || config.IsProviderReadOnly(h.Checkout.Config) || gateway.ReadOnly || p.HyperSwitch == nil {
 		return nil, errors.New("initial membership custody is not armed")
 	}

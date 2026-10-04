@@ -41,8 +41,8 @@ func (q *Queries) InsertSnapshotCustodian(ctx context.Context, arg InsertSnapsho
 }
 
 const insertSnapshotPSP = `-- name: InsertSnapshotPSP :exec
-INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,archived,evidence,custodian_id)
-VALUES($1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::boolean,$8::jsonb,$9::uuid)
+INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,archived,archived_at,settings,signer,credential_custody,custodian_id)
+VALUES($1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::boolean,CASE WHEN $7::boolean THEN now() END,$8::jsonb,$9::jsonb,'snapshot',$10::uuid)
 ON CONFLICT(rail,environment,account_id) DO NOTHING
 `
 
@@ -54,7 +54,8 @@ type InsertSnapshotPSPParams struct {
 	AccountID   string
 	Key         string
 	Archived    bool
-	Evidence    []byte
+	Settings    []byte
+	Signer      []byte
 	CustodianID *uuid.UUID
 }
 
@@ -67,7 +68,8 @@ func (q *Queries) InsertSnapshotPSP(ctx context.Context, arg InsertSnapshotPSPPa
 		arg.AccountID,
 		arg.Key,
 		arg.Archived,
-		arg.Evidence,
+		arg.Settings,
+		arg.Signer,
 		arg.CustodianID,
 	)
 	return err

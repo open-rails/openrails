@@ -73,7 +73,7 @@ func TestGateExecutionFailsClosed(t *testing.T) {
 func TestDestructiveClassificationAndBudget(t *testing.T) {
 	assert.Equal(t, []string{
 		TypeCCBillCancelSubscription, TypeHyperSwitchMethodDelete, TypeNMIDeleteSubscription,
-		TypeNMIProviderCutover, TypeNMIPaymentMethodDelete,
+		TypeNMIPaymentMethodDelete,
 	}, DestructiveIntentTypes(), "sorted, complete breaker-gated set")
 	for _, typ := range []string{subscriptions.TypeManualRebill, TypeNMIPaymentSourceUpdate, TypeNMIRefund, TypeStripeRefund, TypeStripeCancelSubscription} {
 		assert.False(t, IsDestructiveIntentType(typ), typ)
@@ -141,9 +141,6 @@ func TestOperatorResolutionNeedsAttributionAndExactlyOneEvidence(t *testing.T) {
 	}{
 		{"reference", Resolution{ProviderReference: " txn_1 ", Actor: "op", Reason: "seen"}, true, "provider_reference"},
 		{"not executed", Resolution{NotExecuted: true, Actor: "op", Reason: "r"}, true, "not_executed"},
-		{"abandon", Resolution{Abandon: true, Actor: "op", Reason: "r"}, true, "abandon"},
-		{"requalify", Resolution{RequalifyAccount: "acct", Actor: "op", Reason: "r"}, true, "requalify_account"},
-		{"anchor", Resolution{BillingAnchor: anchor, Actor: "op", Reason: "r"}, true, "billing_anchor"},
 		{"no evidence", Resolution{Actor: "op", Reason: "r"}, false, ""},
 		{"two evidences", Resolution{ProviderReference: "x", NotExecuted: true, Actor: "op", Reason: "r"}, false, ""},
 		{"blank actor", Resolution{NotExecuted: true, Actor: "  ", Reason: "r"}, false, ""},
@@ -163,9 +160,6 @@ func TestOperatorResolutionNeedsAttributionAndExactlyOneEvidence(t *testing.T) {
 	got, err := Resolution{ProviderReference: " txn_1 ", Actor: " op ", Reason: " seen "}.normalized()
 	require.NoError(t, err)
 	assert.Equal(t, "txn_1", got.Record(anchor)["provider_reference"])
-	got, err = Resolution{BillingAnchor: anchor, Actor: "op", Reason: "r"}.normalized()
-	require.NoError(t, err)
-	assert.Equal(t, time.UTC, got.BillingAnchor.Location())
 }
 
 // IDEM-3: keys are content-addressed, stable, and separate distinct operations.

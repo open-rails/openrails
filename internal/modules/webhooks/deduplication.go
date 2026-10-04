@@ -111,29 +111,46 @@ func NewDeduplicationService(claims *idempotency.Store, database *db.DB) (*Dedup
 // can commit the mark atomically with their effects (MarkWebhookProcessedInTx).
 type dedupMarkCtxKey struct{}
 
-// dedupMark identifies the Postgres truth row for an in-flight webhook.
+// dedupMark identifies the Postgres truth row for an in-flight webhook: the
+// event of one source, a PSP or a custodian.
 type dedupMark struct {
-	merchantID billing.MerchantID
-	op         string
-	eventID    string
+	merchantID  billing.MerchantID
+	pspID       *uuid.UUID
+	custodianID *uuid.UUID
+	op          string
+	eventID     string
 }
 
 func (m *dedupMark) params() gen.MarkWebhookEventCompletedParams {
 	return gen.MarkWebhookEventCompletedParams{
-		MerchantID: m.merchantID.UUID(),
-		Op:         m.op,
-		EventID:    m.eventID,
+		MerchantID:  m.merchantID.UUID(),
+		PspID:       m.pspID,
+		CustodianID: m.custodianID,
+		Op:          m.op,
+		EventID:     m.eventID,
 	}
 }
 
+// ErrWebhookSourceUnresolved refuses an event whose PSP or custodian the
+// webhook plane did not pin: its event id has no namespace to dedupe in.
+var ErrWebhookSourceUnresolved = errors.New("webhook event source unresolved")
+
 // newDedupMark resolves the truth-row identity, or nil when no merchant is on
-// ctx: both the claim and the truth row are merchant-scoped.
-func (s *DeduplicationService) newDedupMark(ctx context.Context, op, eventID string) *dedupMark {
+// ctx: the truth row is per merchant and source.
+func (s *DeduplicationService) newDedupMark(ctx context.Context, op, eventID string) (*dedupMark, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return &dedupMark{merchantID: mid, op: op, eventID: eventID}
+	m := &dedupMark{merchantID: mid, op: op, eventID: eventID}
+	if id := db.PSPIDFromContext(ctx); id != uuid.Nil {
+		m.pspID = &id
+	} else if id := db.CustodianIDFromContext(ctx); id != uuid.Nil {
+		m.custodianID = &id
+	} else {
+		return nil, ErrWebhookSourceUnresolved
+	}
+	return m, nil
 }
 
 // markCompleted reports whether the truth row exists (merchant-scoped via MerchantTx).
@@ -142,9 +159,11 @@ func (s *DeduplicationService) markCompleted(ctx context.Context, m *dedupMark) 
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var qerr error
 		done, qerr = gen.New(tx).WebhookEventCompleted(ctx, gen.WebhookEventCompletedParams{
-			MerchantID: m.merchantID.UUID(),
-			Op:         m.op,
-			EventID:    m.eventID,
+			MerchantID:  m.merchantID.UUID(),
+			PspID:       m.pspID,
+			CustodianID: m.custodianID,
+			Op:          m.op,
+			EventID:     m.eventID,
 		})
 		return qerr
 	})
@@ -190,24 +209,29 @@ func MarkWebhookProcessedInTx(ctx context.Context, tx pgx.Tx) error {
 func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, source models.EventSource, processingFunc func(ctx context.Context) error) error {
 	trimmedEventID := strings.TrimSpace(eventID)
 	op := fmt.Sprintf("webhook.%s.%s", source, eventType)
-	// Provider event IDs are account-local, including retries after archive.
-	// Carry the authenticated identity through the claim and truth keys.
+	// Provider event IDs are account-local, including retries after archive:
+	// the claim key carries the authenticated source; the truth row has it as
+	// columns.
+	claimOp := op
 	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
-		op += ".psp." + pspID.String()
+		claimOp += ".psp." + pspID.String()
 	} else if custodianID := db.CustodianIDFromContext(ctx); custodianID != uuid.Nil {
-		op += ".custodian." + custodianID.String()
+		claimOp += ".custodian." + custodianID.String()
 	}
 
 	if trimmedEventID == "" {
 		return s.run(ctx, nil, nil, processingFunc)
 	}
 	fields := log.Fields{"eventID": trimmedEventID, "eventType": eventType, "source": source}
-	mark := s.newDedupMark(ctx, op, trimmedEventID)
+	mark, err := s.newDedupMark(ctx, op, trimmedEventID)
+	if err != nil {
+		return err
+	}
 	if mark == nil {
 		log.WithContext(ctx).WithFields(fields).Warn("no merchant on context: processing webhook without dedupe protection")
 		return s.run(ctx, nil, nil, processingFunc)
 	}
-	claim, rec, err := s.claim(ctx, op, trimmedEventID)
+	claim, rec, err := s.claim(ctx, claimOp, trimmedEventID)
 	if err != nil {
 		return err
 	}

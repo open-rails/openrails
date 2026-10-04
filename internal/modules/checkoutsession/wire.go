@@ -85,8 +85,8 @@ type CheckoutSessionOption struct {
 	ID string `json:"id"`
 	// PSPID is the PSP the option pays on; a page that saves a card in the
 	// PSP's own fields (stripe_elements) names it.
-	PSPID string `json:"psp_id"`
-	Rail  string `json:"rail"`
+	PSPID billing.PSPID `json:"psp_id"`
+	Rail  string        `json:"rail"`
 	// Mode is one_off or subscription.
 	Mode string `json:"mode"`
 	// Driver is collect_js, card, stripe_elements, redirect or solana_pay.

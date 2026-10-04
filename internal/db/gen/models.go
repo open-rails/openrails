@@ -193,6 +193,53 @@ type BillingCheckoutSession struct {
 	CreatedAt  time.Time
 }
 
+// Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
+type BillingCostObservation struct {
+	MerchantID              uuid.UUID
+	OperationID             string
+	ObservationID           string
+	NormalizedQuery         string
+	QueryStart              time.Time
+	QueryEnd                time.Time
+	RawBodyAvailable        bool
+	RawBodyBytes            []byte
+	RawBodyDigest           []byte
+	NormalizedRecordsBytes  []byte
+	NormalizedRecordsDigest []byte
+	CostAmount              *int64
+	HasNegativeRecord       bool
+	RefusalKind             *string
+	CoversLifetime          bool
+	QualificationReason     string
+	ObservedAt              time.Time
+}
+
+// OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
+type BillingCostQualification struct {
+	MerchantID               uuid.UUID
+	OperationID              string
+	Provider                 string
+	ProviderResourceID       string
+	ProviderLifetimeStart    time.Time
+	ProviderLifetimeEnd      time.Time
+	ProviderAbsentAt         time.Time
+	ProviderAbsenceReference string
+	BillingStopReference     string
+	WindowsClosedAt          time.Time
+	WindowsClosedReference   string
+	LifecycleEvidenceBytes   []byte
+	LifecycleEvidenceDigest  []byte
+	QuiescenceSeconds        int64
+	State                    string
+	Reason                   string
+	BaselineObservationID    *string
+	QualifiedObservationID   *string
+	QualifiedCostAmount      *int64
+	QualifiedAt              *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+}
+
 // Credential publication receipts. Identities and exact secret references only, never secret values.
 type BillingCredentialPublication struct {
 	MerchantID       uuid.UUID
@@ -457,7 +504,7 @@ type BillingInvoice struct {
 	NextCollectionAttemptAt      *time.Time
 	LastCollectionFailureCode    *string
 	LastCollectionFailureMessage *string
-	// The live invoice_collection operation (rail_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation's terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.
+	// The live invoice_collection operation (provider_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation's terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.
 	CollectionIntentID *uuid.UUID
 }
 
@@ -845,40 +892,40 @@ type BillingPayment struct {
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved.
 type BillingPaymentAttempt struct {
-	ID              uuid.UUID
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	PspID           uuid.UUID
-	Rail            string
-	Kind            string
-	Owner           string
-	CardEntry       string
-	Source          string
-	ObservedVia     string
-	Category        string
-	Reason          *string
-	Action          *string
-	ResponseCode    *string
-	ResponseText    *string
-	TransactionID   *string
-	AvsResult       *string
-	CvvResult       *string
-	CardBrand       *string
-	CardLast4       *string
-	TokenType       *string
-	Amount          int64
-	Currency        *string
-	AttemptedAt     time.Time
-	CheckoutID      *uuid.UUID
-	CheckoutTarget  *string
-	SubscriptionID  *uuid.UUID
-	PaymentMethodID *uuid.UUID
-	PaymentID       *uuid.UUID
-	RailIntentID    *uuid.UUID
-	Step            string
-	CreatedAt       time.Time
-	CycleID         *uuid.UUID
-	CardBin         *string
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	PspID            uuid.UUID
+	Rail             string
+	Kind             string
+	Owner            string
+	CardEntry        string
+	Source           string
+	ObservedVia      string
+	Category         string
+	Reason           *string
+	Action           *string
+	ResponseCode     *string
+	ResponseText     *string
+	TransactionID    *string
+	AvsResult        *string
+	CvvResult        *string
+	CardBrand        *string
+	CardLast4        *string
+	TokenType        *string
+	Amount           int64
+	Currency         *string
+	AttemptedAt      time.Time
+	CheckoutID       *uuid.UUID
+	CheckoutTarget   *string
+	SubscriptionID   *uuid.UUID
+	PaymentMethodID  *uuid.UUID
+	PaymentID        *uuid.UUID
+	ProviderIntentID *uuid.UUID
+	Step             string
+	CreatedAt        time.Time
+	CycleID          *uuid.UUID
+	CardBin          *string
 	// The issuer's raw answer (NMI processor_response_code); response_code is the gateway's.
 	IssuerCode *string
 	IssuerText *string
@@ -898,7 +945,7 @@ type BillingPaymentMethod struct {
 	// Who holds the instrument: psp (the processor itself), basis_theory or hyperswitch (a third-party vault proxied to the processor at charge time).
 	Custodian   string
 	CustodianID *uuid.UUID
-	// Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in rail_customer_accounts (Stripe).
+	// Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in psp_customers (Stripe).
 	RailCustomerRef string
 	// Instrument-scope handle: NMI billing_id, Stripe pm_, or the custodian token.
 	RailMethodRef string
@@ -1028,93 +1075,8 @@ type BillingProductArchiveOperation struct {
 	CreatedAt      time.Time
 }
 
-// Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
-type BillingProviderBillingObservation struct {
-	MerchantID              uuid.UUID
-	OperationID             string
-	ObservationID           string
-	NormalizedQuery         string
-	QueryStart              time.Time
-	QueryEnd                time.Time
-	RawBodyAvailable        bool
-	RawBodyBytes            []byte
-	RawBodyDigest           []byte
-	NormalizedRecordsBytes  []byte
-	NormalizedRecordsDigest []byte
-	CostAmount              *int64
-	HasNegativeRecord       bool
-	RefusalKind             *string
-	CoversLifetime          bool
-	QualificationReason     string
-	ObservedAt              time.Time
-}
-
-// OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
-type BillingProviderBillingQualification struct {
-	MerchantID               uuid.UUID
-	OperationID              string
-	Provider                 string
-	ProviderResourceID       string
-	ProviderLifetimeStart    time.Time
-	ProviderLifetimeEnd      time.Time
-	ProviderAbsentAt         time.Time
-	ProviderAbsenceReference string
-	BillingStopReference     string
-	WindowsClosedAt          time.Time
-	WindowsClosedReference   string
-	LifecycleEvidenceBytes   []byte
-	LifecycleEvidenceDigest  []byte
-	QuiescenceSeconds        int64
-	State                    string
-	Reason                   string
-	BaselineObservationID    *string
-	QualifiedObservationID   *string
-	QualifiedCostAmount      *int64
-	QualifiedAt              *time.Time
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-}
-
-// Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.
-type BillingPsp struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
-	Rail string
-	// Provider environment: live or test. Live and test accounts are distinct identities and may each have their own primary.
-	Environment string
-	// Provider-returned account identity, e.g. Stripe acct_..., NMI profile account id, CCBill account/subaccount, or Solana authority address.
-	AccountID string
-	// The PSP's manifest key (e.g. mobius) — the vocabulary catalog psp_links and checkout speak.
-	Key            *string
-	Evidence       []byte
-	FirstSeenAt    time.Time
-	LastVerifiedAt *time.Time
-	ReplacedAt     *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
-	Archived bool
-	// The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant's custodian.
-	CustodianID            *uuid.UUID
-	PendingSignerPublicKey *string
-}
-
-// Customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings.
-type BillingRailCustomerAccount struct {
-	ID         uuid.UUID
-	Rail       string
-	AccountID  string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	// PSP whose remote customer object this row maps. Required.
-	PspID uuid.UUID
-}
-
 // Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
-type BillingRailIntent struct {
+type BillingProviderIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Rail the mutation targets (e.g. 'nmi', 'stripe').
@@ -1146,7 +1108,7 @@ type BillingRailIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (rail_intents_addressed).
+	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (provider_intents_addressed).
 	PspID *uuid.UUID
 	// The destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
 	DestructiveRunID    *uuid.UUID
@@ -1156,16 +1118,16 @@ type BillingRailIntent struct {
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
-type BillingRailMutationLog struct {
+type BillingProviderMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (rail_mutation_logs_addressed).
-	PspID          *uuid.UUID
-	RailIntentID   *uuid.UUID
-	IntentType     *string
-	IdempotencyKey *string
-	Attempt        int32
+	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed).
+	PspID            *uuid.UUID
+	ProviderIntentID *uuid.UUID
+	IntentType       *string
+	IdempotencyKey   *string
+	Attempt          int32
 	// Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.
 	Phase  string
 	Reason *string
@@ -1176,16 +1138,65 @@ type BillingRailMutationLog struct {
 	CustodianID *uuid.UUID
 }
 
-// Durable Provider Refresh watermarks: the exclusive lower bound for the next bounded event window, per (merchant, rail, PSP, domain). A failed or partial provider read simply never advances watermark_at — the failure itself is recorded by the job, not here.
-type BillingRailRefreshWatermark struct {
+// Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail. The rail vocabulary lives here only; every table that stores rail beside psp_id references (merchant_id, id, rail).
+type BillingPsp struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Rail       string
-	// The PSP whose event stream this cursor bounds. Required: a pull arms from exactly one PSP, and a watermark shared across PSPs skips the events of every PSP but the one that advanced it.
-	PspID uuid.UUID
-	// Refresh domain. events currently covers provider transaction/subscription event windows.
+	// The merchant's name for the PSP (e.g. mobius): the value price psp_links and checkout's payment.rail name it by. Unique among the merchant's live PSPs in an environment.
+	Key  string
+	Rail string
+	// Provider environment: live or test, derived from the deployment's posture.
+	Environment string
+	// Operator-declared account identity on the rail (Stripe acct_, NMI gateway id, CCBill account-subaccount, Solana signer address).
+	AccountID string
+	// The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault).
+	CustodianID *uuid.UUID
+	// Declared non-secret values, including the public keys a browser uses (publishable_key, tokenization_key).
+	Settings []byte
+	// Solana signer declaration: {mode, key}. NULL on other rails.
+	Signer []byte
+	// The secret backend holding the published credentials; snapshot for credentials a manifest supplies at startup.
+	CredentialCustody *string
+	// Published secret references per credential key: {name, min_version, custody}. Never secret values.
+	CredentialRefs []byte
+	// Rotation watermarks per credential key: a reader holding an older cached version goes back to the backend.
+	CredentialVersions []byte
+	// Credential keys retired from service (an overlapping webhook secret ended early).
+	RetiredCredentials []string
+	// When the provider last accepted the stored credentials; NULL when never checked.
+	CredentialsValidatedAt *time.Time
+	// The provider webhook endpoint OpenRails manages for this PSP.
+	WebhookEndpointID *string
+	// Until when the rotated-out webhook signing secret is still accepted.
+	WebhookOverlapExpiresAt *time.Time
+	PendingSignerPublicKey  *string
+	// Configuration revision: every settings, credential or archive change increments it; writers name the revision they read.
+	Revision int64
+	// Drain-only lifecycle flag. An archived PSP takes no new work and stays addressable for existing obligations and inbound events.
+	Archived   bool
+	ArchivedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// A customer's customer object at one PSP. Two PSPs on one rail hold independent mappings.
+type BillingPspCustomer struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	PspID      uuid.UUID
+	// The PSP's own customer id (Stripe cus_). Unique only within the PSP that minted it.
+	RemoteCustomerRef string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// PSP refresh cursors: the exclusive lower bound of the next bounded event window, per (merchant, PSP, domain). A failed or partial provider read never advances watermark_at.
+type BillingPspRefreshWatermark struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	// Refresh domain. events covers provider transaction/subscription event windows.
 	EventDomain string
-	// Exclusive lower bound for the next successful bounded provider event refresh window.
 	WatermarkAt time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -1209,13 +1220,13 @@ type BillingRebillCycle struct {
 	MissReason *string
 }
 
-// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.
+// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.
 type BillingReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	FindingType string
 	Rail        string
-	// Catalog findings only: the immutable PSP account whose catalog was compared. Part of the identity; absence can be proven only by a complete read of this account.
+	// Catalog and pull.* findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.
 	PspID                 *uuid.UUID
 	OpenrailsResourceType string
 	OpenrailsResourceID   *string
@@ -1450,34 +1461,38 @@ type BillingUsageEvent struct {
 	CreatedAt        time.Time
 }
 
-// Webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.
+// webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied.
 type BillingWebhookEvent struct {
-	MerchantID uuid.UUID
-	// Dedup operation key, webhook.<rail>.<event_type> — matches the Redis key derivation.
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	// webhook.<source>.<event_type>.
 	Op          string
 	EventID     string
 	CreatedAt   time.Time
 	CompletedAt time.Time
 }
 
-// Per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.
+// inbound-webhook health per event source (a PSP, or a custodian): accepted and pull watermarks. last_accepted_at is stamped only by verified webhooks; last_pull_at is the PSP refresh watermark the drift gate uses.
 type BillingWebhookHealth struct {
-	MerchantID uuid.UUID
-	Rail       string
-	// Last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	// Last verified webhook from the source; silence age is measured from here (or created_at when nothing was ever accepted).
 	LastAcceptedAt *time.Time
 	LastPullAt     *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
 
-// UTC-day webhook counter buckets backing the webhook_rejects / webhook_drift_events windowed metrics.
+// UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics.
 type BillingWebhookHealthDaily struct {
-	MerchantID uuid.UUID
-	Rail       string
-	DayAt      time.Time
-	Rejected   int64
-	Drift      int64
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	DayAt       time.Time
+	Rejected    int64
+	Drift       int64
 }
 
 // Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.

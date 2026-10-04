@@ -14,8 +14,8 @@ receipt even if later updates changed the merchant. Reusing an ID for different
 content or applying against a stale revision fails with a conflict.
 
 Omitted fields preserve existing values. Explicit empty policy lists clear those
-lists. Provider credentials and lifecycle use `Client.PaymentProviders` and their
-own publication operations. Metadata applications cannot change issuer trust,
+lists. PSP credentials and lifecycle use the PSP methods (`Client.CreatePSP`,
+`UpdatePSP`, `ArchivePSP`) and their own publication operations. Metadata applications cannot change issuer trust,
 credential backends, HTTP exposure or Vault paths.
 
 ## CLI

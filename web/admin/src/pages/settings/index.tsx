@@ -36,8 +36,8 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type {
-  PaymentProviderConfig,
-  PaymentProviderDefinition,
+  PSP,
+  RailDefinition,
 } from "@/lib/api/types"
 import {
   amountFromInput,
@@ -48,7 +48,7 @@ import {
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
-import { ProviderPublicationAttempts } from "@/lib/provider-publication"
+import { PSPPublicationAttempts } from "@/lib/psp-publication"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import { NotificationsTab } from "./notifications"
@@ -89,8 +89,8 @@ export function SettingsPage() {
           <TabsTrigger value="notifications" className={LINE_TAB}>
             Notifications
           </TabsTrigger>
-          <TabsTrigger value="providers" className={LINE_TAB}>
-            Payment providers
+          <TabsTrigger value="psps" className={LINE_TAB}>
+            PSPs
           </TabsTrigger>
           <TabsTrigger value="api-keys" className={LINE_TAB}>
             API keys
@@ -109,8 +109,8 @@ export function SettingsPage() {
       <TabsContent value="notifications">
         <NotificationsTab />
       </TabsContent>
-      <TabsContent value="providers">
-        <ProvidersTab />
+      <TabsContent value="psps">
+        <PSPsTab />
       </TabsContent>
       <TabsContent value="api-keys">
         <ApiKeysTab />
@@ -438,35 +438,36 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
   )
 }
 
-function ProvidersTab() {
-  const { data, isPending: loading } = useQuery(adminQueries.paymentProviders())
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
+function PSPsTab() {
+  const psps = useQuery(adminQueries.psps())
+  const rails = useQuery(adminQueries.rails())
+  if (psps.isPending || rails.isPending)
+    return <p className="text-sm text-muted-foreground">Loading…</p>
 
-  const providerDefinitions = data?.provider_definitions ?? []
+  const railDefinitions = rails.data?.data ?? []
 
   return (
     <div>
       <section className="grid gap-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="grid gap-1">
-            <h2 className="text-base font-semibold">Payment providers</h2>
+            <h2 className="text-base font-semibold">PSPs</h2>
             <p className="text-sm text-muted-foreground">
-              Configure the payment rails this merchant can use.
+              The accounts this merchant takes payments through, one or more
+              per rail.
             </p>
           </div>
-          <ProviderDialog key={selectedMerchant() ?? ""} providerDefinitions={providerDefinitions} />
+          <PSPDialog key={selectedMerchant() ?? ""} railDefinitions={railDefinitions} />
         </div>
-        {!data?.data?.length ? (
+        {!psps.data?.data?.length ? (
           <p className="py-2 text-sm text-muted-foreground">
-            No payment providers configured.
+            No PSPs configured.
           </p>
         ) : (
           <Table className="min-w-[44rem]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="text-muted-foreground">
-                  Provider
-                </TableHead>
+                <TableHead className="text-muted-foreground">PSP</TableHead>
                 <TableHead className="text-muted-foreground">
                   Environment
                 </TableHead>
@@ -480,12 +481,8 @@ function ProvidersTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.data.map((provider) => (
-                <ProviderRow
-                  key={provider.id}
-                  provider={provider}
-                  providerDefinitions={providerDefinitions}
-                />
+              {psps.data.data.map((psp) => (
+                <PSPRow key={psp.id} psp={psp} railDefinitions={railDefinitions} />
               ))}
             </TableBody>
           </Table>
@@ -499,60 +496,50 @@ function ProvidersTab() {
 // stamp — a credential's version floor is what every node cuts over to.
 function credentialTitle(c: {
   configured: boolean
-  last_validated_at?: string
-  rotation_version?: number
+  validated_at: string | null
+  rotation_version: number
 }) {
   const parts: string[] = []
-  if (c.last_validated_at)
-    parts.push(`Validated ${formatDate(c.last_validated_at)}`)
+  if (c.validated_at) parts.push(`Validated ${formatDate(c.validated_at)}`)
   if (c.rotation_version) parts.push(`rotation v${c.rotation_version}`)
   if (parts.length) return parts.join(" ·")
   return c.configured ? "Configured" : "Not configured"
 }
 
-function ProviderRow({
-  provider,
-  providerDefinitions,
+function PSPRow({
+  psp,
+  railDefinitions,
 }: {
-  provider: PaymentProviderConfig
-  providerDefinitions: PaymentProviderDefinition[]
+  psp: PSP
+  railDefinitions: RailDefinition[]
 }) {
   const queryClient = useQueryClient()
-  const archiveProvider = useMutation(
-    adminMutations.archivePaymentProvider(queryClient)
-  )
+  const archivePSP = useMutation(adminMutations.archivePSP(queryClient))
   const [confirmLastOpen, setConfirmLastOpen] = React.useState(false)
-  const definition = providerDefinitions.find((d) => d.rail === provider.rail)
-  // Archive exactly this row's account (#655). It never contacts the
-  // provider, so a terminated account archives too. The rail's last active
-  // account needs an explicit confirmation.
+  const definition = railDefinitions.find((d) => d.rail === psp.rail)
+  const railName = definition?.display_name ?? psp.rail
+  // Archive exactly this PSP (#655). It never contacts the provider, so a
+  // terminated account archives too. The rail's last active PSP needs an
+  // explicit confirmation.
   const archive = async (allowLast: boolean) => {
-    await archiveProvider.mutateAsync({
-      rail: provider.rail,
-      id: provider.id,
-      allowLast,
-    })
-    toast.success("Provider archived")
+    await archivePSP.mutateAsync({ id: psp.id, allowLast })
+    toast.success("PSP archived")
   }
   return (
-    <TableRow className={provider.archived ? "opacity-60" : undefined}>
+    <TableRow className={psp.archived ? "opacity-60" : undefined}>
       <TableCell className="py-3">
         <div className="grid min-w-0 leading-tight">
-          <span className="font-medium">
-            {definition?.display_name ?? provider.rail}
-          </span>
+          <span className="font-medium">{psp.key}</span>
           <span className="truncate text-xs text-muted-foreground">
-            {provider.rail} · {provider.account_id}
+            {railName} · {psp.account_id}
           </span>
         </div>
       </TableCell>
-      <TableCell className="py-3 capitalize">
-        {provider.environment || "Default"}
-      </TableCell>
+      <TableCell className="py-3 capitalize">{psp.environment}</TableCell>
       <TableCell className="py-3">
-        {Object.keys(provider.credentials).length > 0 ? (
+        {Object.keys(psp.credentials).length > 0 ? (
           <span className="flex flex-wrap gap-1">
-            {Object.entries(provider.credentials).map(([name, credential]) => (
+            {Object.entries(psp.credentials).map(([name, credential]) => (
               <Badge
                 key={name}
                 variant="secondary"
@@ -575,11 +562,11 @@ function ProviderRow({
         )}
       </TableCell>
       <TableCell className="py-3">
-        {provider.archived ? (
+        {psp.archived && psp.open_obligations === 0 ? (
           <Badge variant="secondary">archived</Badge>
-        ) : provider.drained ? (
+        ) : psp.archived ? (
           <Badge variant="secondary" className="bg-held-surface text-held">
-            draining ({provider.open_obligations})
+            draining ({psp.open_obligations})
           </Badge>
         ) : (
           <Badge
@@ -591,32 +578,28 @@ function ProviderRow({
         )}
       </TableCell>
       <TableCell className="py-3 text-right">
-        {!provider.archived && (
+        {!psp.archived && (
           <div className="flex justify-end gap-2">
             <RotateCredentialsDialog
-              key={`${selectedMerchant() ?? ""}:${provider.id}`}
-              provider={provider}
+              key={`${selectedMerchant() ?? ""}:${psp.id}`}
+              psp={psp}
               credentialKeys={
-                providerDefinitions.find((d) => d.rail === provider.rail)
-                  ?.credential_keys ?? Object.keys(provider.credentials)
+                definition?.credential_keys ?? Object.keys(psp.credentials)
               }
             />
             <Button
               variant="outline"
               size="sm"
-              disabled={archiveProvider.isPending}
+              disabled={archivePSP.isPending}
               onClick={async () => {
                 try {
                   await archive(false)
                 } catch (err) {
-                  if (
-                    err instanceof ApiError &&
-                    err.code === "provider_account_last_active"
-                  ) {
+                  if (err instanceof ApiError && err.code === "psp_last_active") {
                     setConfirmLastOpen(true)
                     return
                   }
-                  toastApiError(err, "Archive provider")
+                  toastApiError(err, "Archive PSP")
                 }
               }}
             >
@@ -625,15 +608,15 @@ function ProviderRow({
             <TypedConfirmDialog
               open={confirmLastOpen}
               onOpenChange={setConfirmLastOpen}
-              title={`Archive the last active ${definition?.display_name ?? provider.rail} account?`}
-              description="New checkout on this rail is refused until another account is armed. Existing subscriptions, refunds and webhooks keep using this account."
+              title={`Archive the last active ${railName} PSP?`}
+              description="New checkout on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one."
               confirmationWord="ARCHIVE"
-              actionLabel="Archive account"
+              actionLabel="Archive PSP"
               onConfirm={async () => {
                 try {
                   await archive(true)
                 } catch (err) {
-                  toastApiError(err, "Archive provider")
+                  toastApiError(err, "Archive PSP")
                 }
               }}
             />
@@ -656,20 +639,18 @@ function ProviderRow({
 //  3. Secret fields clear on success or dismissal. Unconfirmed submissions
 //     retain their operation identity for a deliberate retry.
 export function RotateCredentialsDialog({
-  provider,
+  psp,
   credentialKeys,
 }: {
-  provider: PaymentProviderConfig
+  psp: PSP
   credentialKeys: string[]
 }) {
   const [open, setOpen] = React.useState(false)
   const [merchant] = React.useState(() => selectedMerchant() ?? "")
-  const attempts = React.useRef(new ProviderPublicationAttempts())
+  const attempts = React.useRef(new PSPPublicationAttempts())
   const reviewedRevision = React.useRef(0)
   const queryClient = useQueryClient()
-  const saveProvider = useMutation(
-    adminMutations.savePaymentProvider(queryClient)
-  )
+  const updatePSP = useMutation(adminMutations.updatePSP(queryClient))
   const form = useForm({
     defaultValues: { credentials: {} as Record<string, string> },
     onSubmit: async ({ value }) => {
@@ -677,26 +658,27 @@ export function RotateCredentialsDialog({
         Object.entries(value.credentials).filter(([, item]) => item.trim())
       )
       try {
-        const request = await attempts.current.prepare(merchant, provider.rail, reviewedRevision.current, {
-          account_id: provider.account_id, credentials: supplied,
+        const request = await attempts.current.prepare([merchant, psp.id], {
+          expected_revision: reviewedRevision.current,
+          credentials: supplied,
         })
-        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
-        await saveProvider.mutateAsync({ rail: provider.rail, provider: request })
+        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this form")
+        await updatePSP.mutateAsync({ id: psp.id, psp: request })
         attempts.current.complete(request.operation_id)
         form.reset()
         toast.success(
-          `Credentials validated and rotated. Every node serves the new ${provider.rail} credential from its next read.`
+          `Credentials validated and rotated. Every node serves the new ${psp.key} credential from its next read.`
         )
         setOpen(false)
       } catch (err) {
         toastApiError(
           err,
           err instanceof ApiError && err.status === 409
-            ? "Provider changed. Close this form and review its current state before changing your submission."
+            ? "The PSP changed. Close this form and review its current state before changing your submission."
             : "Rotation outcome unconfirmed. Retry the same credentials to recover this submission."
         )
       } finally {
-        saveProvider.reset()
+        updatePSP.reset()
       }
     },
   })
@@ -704,7 +686,7 @@ export function RotateCredentialsDialog({
   const close = (next: boolean) => {
     // Never leave plaintext in state behind a closed dialog.
     if (!next) form.reset()
-    if (next) reviewedRevision.current = provider.configuration_revision ?? 0
+    if (next) reviewedRevision.current = psp.revision
     setOpen(next)
   }
 
@@ -720,7 +702,7 @@ export function RotateCredentialsDialog({
       <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>
-            Rotate {provider.rail} credentials · {provider.account_id}
+            Rotate {psp.key} credentials · {psp.account_id}
           </DialogTitle>
           <DialogDescription>
             The new credential is validated against the live provider before it
@@ -741,15 +723,15 @@ export function RotateCredentialsDialog({
             {(field) => (
               <div className="grid gap-3">
                 {credentialKeys.map((name) => {
-                  const current = provider.credentials[name]
+                  const current = psp.credentials[name]
                   return (
                     <Field
                       key={name}
                       label={name}
-                      id={`rot-${provider.id}-${name}`}
+                      id={`rot-${psp.id}-${name}`}
                     >
                       <Input
-                        id={`rot-${provider.id}-${name}`}
+                        id={`rot-${psp.id}-${name}`}
                         type="password"
                         autoComplete="new-password"
                         placeholder={
@@ -767,8 +749,8 @@ export function RotateCredentialsDialog({
                         {current?.rotation_version
                           ? `current rotation v${current.rotation_version}`
                           : "no rotation recorded"}
-                        {current?.last_validated_at &&
-                          ` · last validated ${formatDate(current.last_validated_at)}`}
+                        {current?.validated_at &&
+                          ` · last validated ${formatDate(current.validated_at)}`}
                       </p>
                     </Field>
                   )
@@ -861,21 +843,20 @@ function credentialLabel(name: string): string {
     .join(" ")
 }
 
-function ProviderDialog({
-  providerDefinitions,
+function PSPDialog({
+  railDefinitions,
 }: {
-  providerDefinitions: PaymentProviderDefinition[]
+  railDefinitions: RailDefinition[]
 }) {
   const [open, setOpen] = React.useState(false)
   const [merchant] = React.useState(() => selectedMerchant() ?? "")
-  const attempts = React.useRef(new ProviderPublicationAttempts())
+  const attempts = React.useRef(new PSPPublicationAttempts())
   const queryClient = useQueryClient()
-  const saveProvider = useMutation(
-    adminMutations.savePaymentProvider(queryClient)
-  )
+  const createPSP = useMutation(adminMutations.createPSP(queryClient))
   const form = useForm({
     defaultValues: {
       rail: "",
+      key: "",
       accountID: "",
       credentials: {} as Record<string, string>,
     },
@@ -884,22 +865,24 @@ function ProviderDialog({
         Object.entries(value.credentials).filter(([, item]) => item !== "")
       )
       try {
-        const request = await attempts.current.prepare(merchant, value.rail, 0, {
+        const request = await attempts.current.prepare([merchant, value.rail], {
+          key: value.key.trim().toLowerCase(),
+          rail: value.rail,
           account_id: value.accountID.trim(),
           ...(Object.keys(credentials).length ? { credentials } : {}),
         })
-        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
-        await saveProvider.mutateAsync({ rail: value.rail, provider: request })
+        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this form")
+        await createPSP.mutateAsync(request)
         attempts.current.complete(request.operation_id)
         form.reset()
-        toast.success("Provider saved")
+        toast.success("PSP added")
         setOpen(false)
       } catch (err) {
         toastApiError(err, err instanceof ApiError && err.status === 409
-          ? "This account changed or already exists. Review the provider list before submitting a new change."
+          ? "This account or key is already in use. Review the PSP list before submitting a new change."
           : "Save outcome unconfirmed. Retry the same submission to recover its result.")
       } finally {
-        saveProvider.reset()
+        createPSP.reset()
       }
     },
   })
@@ -911,10 +894,10 @@ function ProviderDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm">Configure provider</Button>} />
+      <DialogTrigger render={<Button size="sm">Add PSP</Button>} />
       <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
-          <DialogTitle>Configure payment provider</DialogTitle>
+          <DialogTitle>Add a PSP</DialogTitle>
           <DialogDescription>
             Connect the account that will take money for you. Credentials go
             straight into the secret store and are never shown again.
@@ -939,11 +922,11 @@ function ProviderDialog({
               {(field) => (
                 <Field label="Payment rail" id="pv-rail">
                   <Select
-                    items={providerDefinitions.map((provider) => ({
-                      value: provider.rail,
+                    items={railDefinitions.map((definition) => ({
+                      value: definition.rail,
                       label: railProviderLabel(
-                        provider.rail,
-                        provider.display_name
+                        definition.rail,
+                        definition.display_name
                       ),
                     }))}
                     value={field.state.value || null}
@@ -962,16 +945,42 @@ function ProviderDialog({
                       <SelectValue placeholder="Pick a rail…" />
                     </SelectTrigger>
                     <SelectContent>
-                      {providerDefinitions.map((provider) => (
-                        <SelectItem key={provider.rail} value={provider.rail}>
+                      {railDefinitions.map((definition) => (
+                        <SelectItem key={definition.rail} value={definition.rail}>
                           {railProviderLabel(
-                            provider.rail,
-                            provider.display_name
+                            definition.rail,
+                            definition.display_name
                           )}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </Field>
+              )}
+            </form.Field>
+            <form.Field
+              name="key"
+              validators={{
+                onChange: ({ value }) =>
+                  /^[a-z0-9][a-z0-9_-]{0,62}$/.test(value.trim().toLowerCase())
+                    ? undefined
+                    : "Lowercase letters, digits, - or _",
+              }}
+            >
+              {(field) => (
+                <Field
+                  label="Key"
+                  id="pv-key"
+                  hint="Your name for this PSP, such as mobius. Prices and checkout name it by this key."
+                >
+                  <Input
+                    id="pv-key"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
                   <FormFieldErrors errors={field.state.meta.errors} />
                 </Field>
               )}
@@ -1010,8 +1019,8 @@ function ProviderDialog({
             </form.Subscribe>
             <form.Subscribe selector={(state) => state.values.rail}>
               {(rail) => {
-                const selectedProvider = providerDefinitions.find(
-                  (provider) => provider.rail === rail
+                const selectedProvider = railDefinitions.find(
+                  (definition) => definition.rail === rail
                 )
                 return (
                   <form.Field name="credentials">
@@ -1049,13 +1058,14 @@ function ProviderDialog({
               selector={(state) =>
                 [
                   state.values.rail,
+                  state.values.key,
                   state.values.accountID,
                   state.canSubmit,
                   state.isSubmitting,
                 ] as const
               }
             >
-              {([rail, accountID, canSubmit, isSubmitting]) => (
+              {([rail, key, accountID, canSubmit, isSubmitting]) => (
                 <>
                   <Button
                     type="button"
@@ -1067,10 +1077,10 @@ function ProviderDialog({
                   <Button
                     type="submit"
                     disabled={
-                      !rail || !accountID.trim() || !canSubmit || isSubmitting
+                      !rail || !key.trim() || !accountID.trim() || !canSubmit || isSubmitting
                     }
                   >
-                    {isSubmitting ? "Saving…" : "Save provider"}
+                    {isSubmitting ? "Saving…" : "Add PSP"}
                   </Button>
                 </>
               )}

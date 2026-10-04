@@ -30,7 +30,7 @@ func (c *claim) lose() { c.lost.Store(true) }
 
 type claimKey struct{}
 
-func withClaim(ctx context.Context, in gen.BillingRailIntent) (context.Context, *claim) {
+func withClaim(ctx context.Context, in gen.BillingProviderIntent) (context.Context, *claim) {
 	c := &claim{id: in.ID, status: in.Status, attempts: in.Attempts}
 	return context.WithValue(ctx, claimKey{}, c), c
 }
@@ -60,7 +60,7 @@ func (s *Store) RequireClaim(ctx context.Context, id uuid.UUID, now time.Time) e
 	if err != nil {
 		return err
 	}
-	held, err := s.db.Gen(ctx).RailIntentClaimHeld(ctx, gen.RailIntentClaimHeldParams{
+	held, err := s.db.Gen(ctx).ProviderIntentClaimHeld(ctx, gen.ProviderIntentClaimHeldParams{
 		MerchantID: mid.UUID(), ID: id, Status: c.status, Attempts: c.attempts, HeldUntil: now.UTC().Add(ProviderCallHold),
 	})
 	if err != nil {

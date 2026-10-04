@@ -164,8 +164,8 @@ func TestReplicasStalledExecutorSendsNothing(t *testing.T) {
 				}
 				once.Do(func() {
 					// The stall outlives the lease; another executor claims
-					// the row exactly as ClaimRailIntentByID does.
-					_, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE billing.rail_intents
+					// the row exactly as ClaimProviderIntentByID does.
+					_, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE billing.provider_intents
 						SET attempts = attempts + 1, claimed_until = $2 WHERE id = $1 AND status = 'in_flight'`),
 						s.Operation, f.base.clock.Now().Add(2*time.Minute))
 					if err != nil {
@@ -215,7 +215,7 @@ func TestReplicasShortLeaseSendsNothing(t *testing.T) {
 				}
 				once.Do(func() {
 					// Still this executor's claim, but it lapses mid-call.
-					_, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE billing.rail_intents
+					_, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE billing.provider_intents
 						SET claimed_until = $2 WHERE id = $1 AND status = 'in_flight'`),
 						s.Operation, f.base.clock.Now().Add(intents.ProviderCallHold-time.Second))
 					if err != nil {
@@ -269,7 +269,7 @@ func TestReplicasStalledHeartbeatLeavesOthersLease(t *testing.T) {
 			takeOnce.Do(func() {
 				first = true
 				op, theirs = s.Operation, f.base.clock.Now().Add(2*time.Minute).UTC().Truncate(time.Microsecond)
-				if _, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE billing.rail_intents
+				if _, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE billing.provider_intents
 					SET attempts = attempts + 1, claimed_until = $2 WHERE id = $1 AND status = 'in_flight'`), op, theirs); err != nil {
 					t.Errorf("take over the claim: %v", err)
 				}
@@ -300,7 +300,7 @@ func TestReplicasStalledHeartbeatLeavesOthersLease(t *testing.T) {
 		t.Fatal("the stalled run's heartbeat never ran")
 	}
 	var until time.Time
-	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claimed_until FROM billing.rail_intents WHERE id = $1`), op).Scan(&until))
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claimed_until FROM billing.provider_intents WHERE id = $1`), op).Scan(&until))
 	require.True(t, theirs.Equal(until), "the other executor's lease is untouched: %s != %s", until, theirs)
 	close(resume)
 

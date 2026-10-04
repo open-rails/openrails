@@ -66,24 +66,16 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 			_, err := ProvisionMerchantForRestore(ctx, a, ProvisionMerchantForRestoreRequest{MerchantID: id})
 			return err
 		},
-		"RunBootstrap":            func() error { _, err := RunBootstrap(ctx, a, BootstrapOptions{}); return err },
-		"ListMerchantsForSubject": func() error { _, err := ListMerchantsForSubject(ctx, a, "user"); return err },
-		"ListUserMerchants":       func() error { _, err := ListUserMerchants(ctx, a, "user"); return err },
-		"ListActiveMerchantIDs":   func() error { _, err := ListActiveMerchantIDs(ctx, a, 10, 0); return err },
-		"SetMerchantDisplayName":  func() error { return SetMerchantDisplayName(ctx, a, id, "Shop") },
-		"RenameMerchant":          func() error { return RenameMerchant(ctx, a, id, "shop") },
-		"SetMerchantAPIHost":      func() error { return SetMerchantAPIHost(ctx, a, id, "api.shop.example") },
-		"GetMerchantAPIHost":      func() error { _, err := GetMerchantAPIHost(ctx, a, id); return err },
-		"FleetAnalytics":          func() error { _, err := FleetAnalytics(ctx, a, billing.MerchantID{}, 30); return err },
-		"FleetTimeseries":         func() error { _, err := FleetTimeseries(ctx, a, billing.MerchantID{}, 12); return err },
-		"ListPaymentProviderConfigs": func() error {
-			_, err := ListPaymentProviderConfigs(ctx, a, id, "", "")
-			return err
-		},
-		"PlanProviderAccountCutover": func() error {
-			_, err := PlanProviderAccountCutover(ctx, a, id, ProviderAccountCutoverQuery{})
-			return err
-		},
+		"RunBootstrap":                       func() error { _, err := RunBootstrap(ctx, a, BootstrapOptions{}); return err },
+		"ListMerchantsForSubject":            func() error { _, err := ListMerchantsForSubject(ctx, a, "user"); return err },
+		"ListUserMerchants":                  func() error { _, err := ListUserMerchants(ctx, a, "user"); return err },
+		"ListActiveMerchantIDs":              func() error { _, err := ListActiveMerchantIDs(ctx, a, 10, 0); return err },
+		"SetMerchantDisplayName":             func() error { return SetMerchantDisplayName(ctx, a, id, "Shop") },
+		"RenameMerchant":                     func() error { return RenameMerchant(ctx, a, id, "shop") },
+		"SetMerchantAPIHost":                 func() error { return SetMerchantAPIHost(ctx, a, id, "api.shop.example") },
+		"GetMerchantAPIHost":                 func() error { _, err := GetMerchantAPIHost(ctx, a, id); return err },
+		"FleetAnalytics":                     func() error { _, err := FleetAnalytics(ctx, a, billing.MerchantID{}, 30); return err },
+		"FleetTimeseries":                    func() error { _, err := FleetTimeseries(ctx, a, billing.MerchantID{}, 12); return err },
 		"CompletePendingMerchantRetirements": func() error { _, err := CompletePendingMerchantRetirements(ctx, a, 10); return err },
 		"StandaloneRoutes":                   func() error { _, err := StandaloneRoutes(a); return err },
 		"SubjectHasVaultedPaymentMethod": func() error {

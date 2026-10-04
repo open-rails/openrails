@@ -38,19 +38,27 @@ func (q *Queries) DeleteCompletedWebhookEventsBefore(ctx context.Context, arg De
 }
 
 const markWebhookEventCompleted = `-- name: MarkWebhookEventCompleted :execrows
-INSERT INTO billing.webhook_events (merchant_id, op, event_id)
-VALUES ($1, $2, $3)
-ON CONFLICT (merchant_id, op, event_id) DO NOTHING
+INSERT INTO billing.webhook_events (merchant_id, psp_id, custodian_id, op, event_id)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text, $5::text)
+ON CONFLICT (merchant_id, psp_id, custodian_id, op, event_id) DO NOTHING
 `
 
 type MarkWebhookEventCompletedParams struct {
-	MerchantID uuid.UUID
-	Op         string
-	EventID    string
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	Op          string
+	EventID     string
 }
 
 func (q *Queries) MarkWebhookEventCompleted(ctx context.Context, arg MarkWebhookEventCompletedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markWebhookEventCompleted, arg.MerchantID, arg.Op, arg.EventID)
+	result, err := q.db.Exec(ctx, markWebhookEventCompleted,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustodianID,
+		arg.Op,
+		arg.EventID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -61,20 +69,32 @@ const webhookEventCompleted = `-- name: WebhookEventCompleted :one
 
 SELECT EXISTS(
   SELECT 1 FROM billing.webhook_events
-  WHERE merchant_id = $1 AND op = $2 AND event_id = $3
+  WHERE merchant_id = $1::uuid
+    AND psp_id IS NOT DISTINCT FROM $2::uuid
+    AND custodian_id IS NOT DISTINCT FROM $3::uuid
+    AND op = $4::text AND event_id = $5::text
 ) AS completed
 `
 
 type WebhookEventCompletedParams struct {
-	MerchantID uuid.UUID
-	Op         string
-	EventID    string
+	MerchantID  uuid.UUID
+	PspID       *uuid.UUID
+	CustodianID *uuid.UUID
+	Op          string
+	EventID     string
 }
 
 // Webhook dedup truth (#678): a row = the event's effects are durably applied.
-// Explicit merchant_id predicates scope every statement.
+// The source is a PSP or a custodian; explicit merchant_id predicates scope
+// every statement.
 func (q *Queries) WebhookEventCompleted(ctx context.Context, arg WebhookEventCompletedParams) (bool, error) {
-	row := q.db.QueryRow(ctx, webhookEventCompleted, arg.MerchantID, arg.Op, arg.EventID)
+	row := q.db.QueryRow(ctx, webhookEventCompleted,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustodianID,
+		arg.Op,
+		arg.EventID,
+	)
 	var completed bool
 	err := row.Scan(&completed)
 	return completed, err

@@ -127,9 +127,9 @@ missing, `--overwrite` updates existing, `--prune` removes extras
 
 | Command | What it does |
 |---|---|
-| `openrails pull-provider --merchant=<slug>` | pull provider-observed truth, diff against the local mirror, write nothing. Add `--insert/--overwrite/--prune` to converge local state; the remote rails are **never** mutated. Filters: `--rail`, `--provider-account`, `--since/--until`, `--format table\|json`. |
+| `openrails pull-provider --merchant=<slug>` | pull provider-observed truth, diff against the local mirror, write nothing. Add `--insert/--overwrite/--prune` to converge local state; the remote rails are **never** mutated. Filters: `--rail`, `--psp`, `--since/--until`, `--format table\|json`. |
 | `openrails pull-provider report --merchant=<slug> [--run=ID]` | render a run's summary, standing open findings, and the dunning-forensics report |
-| `openrails nmi decline-report --merchant=<slug> --since=<date> [--until] [--provider-account] [--format table\|json]` | read-only decline baseline from an NMI account's history: approval and refusal rates of card verifications, one-off sales and NMI-scheduled rebills by month, and each refusal's reason and category from OpenRails' classifier. Writes nothing. History cannot say who sent a one-off sale, so rebill retries are not separated. The history job stores the same numbers daily for Payments → Health (#1120). |
+| `openrails nmi decline-report --merchant=<slug> --since=<date> [--until] [--psp] [--format table\|json]` | read-only decline baseline from an NMI account's history: approval and refusal rates of card verifications, one-off sales and NMI-scheduled rebills by month, and each refusal's reason and category from OpenRails' classifier. Writes nothing. History cannot say who sent a one-off sale, so rebill retries are not separated. The history job stores the same numbers daily for Payments → Health (#1120). |
 | `openrails intents [--status=…] [--rail=…] [--type=…] [--merchant=…]` | list the provider-intent ledger: queued outbound mutations, each row's `executes_under` mode, and the drain forecast |
 | `openrails intents-log [--rail=…] [--intent=…] [--phase=…]` | append-only log of actual provider mutation attempts/results (the executor's audit trail) |
 | `openrails intents resolve --merchant=… --intent=… [--step=…] (--receipt=<provider id> \| --not-executed) --actor=… --reason=…` | close an `unknown_needs_verify` operation from an exact provider receipt (read back and matched) or provider-supported non-execution (an empty submitted NMI invoice search is insufficient); `--not-executed` also releases a `pending` invoice collection that never crossed its submission fence; never resends ([provider uncertainty](provider-uncertainty.md)) |
@@ -223,7 +223,7 @@ checkout_routing:
 - **Why did this customer get CCBill?** `checkout_attempts.routing_reason` holds the
   decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
   with its class. Written once at creation, never rewritten.
-- **Preview without charging**: `POST /v1/merchant/payment-providers/routing/dry-run`
+- **Preview without charging**: `POST /v1/merchant/psps/routing-preview`
   with `{"price_id": "...", "country": "US"}` returns the same decision a real session
   would make, including the exact `routing_reason` it would store.
 

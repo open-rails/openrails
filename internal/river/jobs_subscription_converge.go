@@ -54,7 +54,7 @@ const (
 	// fetched charge or decline, or checkout expiry — the converge then
 	// returns something other than ErrConvergeRetryLater), or the provider
 	// refresh pull having covered this rail since the job was born
-	// (rail_refresh_watermarks, scoped to the captured PSP) —
+	// (psp_refresh_watermarks, scoped to the captured PSP) —
 	// from then on the pull re-reads the same provider evidence on its own
 	// cadence, and this job's snooze would only duplicate it. It used to give
 	// up after 24 h whether or not anything else had looked.
@@ -243,7 +243,7 @@ func (w *SubscriptionConvergeWorker) predecessorRunning(ctx context.Context, id 
 	return err == nil && job.State == rivertype.JobStateRunning
 }
 
-// pullCoveredSince reports whether a provider-refresh pull for the rail has
+// pullCoveredSince reports whether a PSP refresh pull for the rail has
 // completed after `since` — the observed hand-off signal for the snooze loop.
 // A read failure is "not covered": the job keeps snoozing, which costs one
 // provider read a minute, whereas a wrong hand-off could leave a pending
@@ -253,7 +253,7 @@ func (w *SubscriptionConvergeWorker) pullCoveredSince(mctx context.Context, args
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 		var qerr error
 		pulledAt, qerr = w.DB.Gen(cctx).GetPSPRefreshWatermark(cctx, gen.GetPSPRefreshWatermarkParams{
-			MerchantID: args.MerchantID, Rail: args.Rail, PspID: args.PSPID,
+			MerchantID: args.MerchantID, PspID: args.PSPID,
 		})
 		if qerr != nil && db.IsNotFound(qerr) {
 			pulledAt, qerr = time.Time{}, nil

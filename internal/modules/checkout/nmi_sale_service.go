@@ -31,8 +31,8 @@ type checkoutSaleIdempotencyResult struct {
 // EnqueueAndExecute posts the durable intent and executes it inline; anything
 // not finished inline is drained by the scheduled executor/verifier.
 type intentExecutor interface {
-	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.BillingRailIntent, error)
-	EnqueueOwnedAndExecute(ctx context.Context, p intents.EnqueueParams, owns func(gen.BillingRailIntent) error) (gen.BillingRailIntent, error)
+	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.BillingProviderIntent, error)
+	EnqueueOwnedAndExecute(ctx context.Context, p intents.EnqueueParams, owns func(gen.BillingProviderIntent) error) (gen.BillingProviderIntent, error)
 }
 
 // ErrCheckoutProcessing is returned when the provider write's outcome is not
@@ -102,7 +102,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		}
 		// The canonical operation owns replay, including uncertain or declined
 		// outcomes. No Redis success shortcut may bypass its request binding.
-		intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.BillingRailIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
+		intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +129,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	if err != nil {
 		return nil, err
 	}
-	var intent gen.BillingRailIntent
+	var intent gen.BillingProviderIntent
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		bound := database.NewWithPgxTx(tx)
 		customer, err := customerIDFromUser(user.ID)
@@ -169,7 +169,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	if err != nil {
 		return nil, err
 	}
-	intent, err = s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(intent), func(in gen.BillingRailIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
+	intent, err = s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(intent), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (s *CheckoutNMISaleService) replayAcceptedRequest(ctx context.Context, req 
 	if s.Intents == nil {
 		return nil, true, errors.New("sale executor is unavailable")
 	}
-	operation, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.BillingRailIntent) error { return ownsSaleRequest(in, user.ID, p.PriceID, fingerprint) })
+	operation, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, p.PriceID, fingerprint) })
 	if err != nil {
 		return nil, true, err
 	}
@@ -211,7 +211,7 @@ func (s *CheckoutNMISaleService) replayAcceptedRequest(ctx context.Context, req 
 	return response, true, err
 }
 
-func renderSaleOperation(intent gen.BillingRailIntent) (*CheckoutResponse, error) {
+func renderSaleOperation(intent gen.BillingProviderIntent) (*CheckoutResponse, error) {
 	switch intent.Status {
 	case intents.StatusSucceeded:
 		cached, derr := saleResultFromIntent(intent)
@@ -230,7 +230,7 @@ func renderSaleOperation(intent gen.BillingRailIntent) (*CheckoutResponse, error
 
 // saleResultFromIntent reads the producer-facing evidence off a succeeded
 // sale intent.
-func saleResultFromIntent(intent gen.BillingRailIntent) (checkoutSaleIdempotencyResult, error) {
+func saleResultFromIntent(intent gen.BillingProviderIntent) (checkoutSaleIdempotencyResult, error) {
 	var out checkoutSaleIdempotencyResult
 	var evidence struct {
 		TransactionID string `json:"transaction_id"`

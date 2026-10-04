@@ -3,7 +3,7 @@
 import { webcrypto } from "node:crypto"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
-import type { PaymentProviderConfig } from "@/lib/api/types"
+import type { PSP } from "@/lib/api/types"
 import { client, selectMerchant, server } from "@/test/harness"
 import { act, browserEnvironment, click, mount, unmount } from "@/test/mount"
 import { RotateCredentialsDialog } from "./index"
@@ -15,9 +15,9 @@ it("the mounted rotation form submits reviewed revision, reuses its operation af
   vi.stubGlobal("crypto", webcrypto)
   let succeed = false
   const requests = await server({
-    "PUT /merchant/payment-providers/stripe": () =>
+    "PATCH /merchant/psps/psp_a": () =>
       succeed
-        ? { payment_provider: {} }
+        ? {}
         : Response.json(
             {
               error: {
@@ -30,24 +30,27 @@ it("the mounted rotation form submits reviewed revision, reuses its operation af
   })
   selectMerchant("merchant-a")
   const cache = client()
-  const provider: PaymentProviderConfig = {
+  const psp: PSP = {
     id: "psp_a",
+    key: "main",
     rail: "stripe",
     account_id: "acct_a",
-    configuration_revision: 7,
-    credentials: { secret_key: { configured: true } },
+    revision: 7,
+    settings: {},
+    credentials: {
+      secret_key: { configured: true, validated_at: null, rotation_version: 1 },
+    },
     environment: "test",
     archived: false,
-    drained: false,
+    archived_at: null,
     open_obligations: 0,
-    first_seen_at: "2026-09-23",
     created_at: "2026-09-23",
     updated_at: "2026-09-23",
   }
   await mount(
     <QueryClientProvider client={cache}>
       <RotateCredentialsDialog
-        provider={provider}
+        psp={psp}
         credentialKeys={["secret_key"]}
       />
     </QueryClientProvider>
@@ -67,13 +70,12 @@ it("the mounted rotation form submits reviewed revision, reuses its operation af
   await vi.waitFor(() => expect(requests).toHaveLength(1))
   const first = requests[0].body as Record<string, unknown>
   expect(first).toMatchObject({
-    account_id: "acct_a",
     expected_revision: 7,
     credentials: { secret_key: "sk_test_input" },
   })
   expect(first.operation_id).toMatch(/^[a-f\d-]{36}$/)
   // A refreshed object cannot silently rebase the already submitted intent.
-  provider.configuration_revision = 12
+  psp.revision = 12
   succeed = true
   await click("Validate & rotate")
   await vi.waitFor(() => expect(requests).toHaveLength(2))

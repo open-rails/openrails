@@ -31,7 +31,6 @@ var (
 // the HTTP wire. The guard fails when a listed field becomes a decimal string
 // or stops existing, so the list can only shrink.
 var pendingNumericMoney = map[string]string{
-	"internal/intents/nmi_provider_cutover.go:nmiCutoverPayload.Amount amount":                                               notHTTPIntentPayload,
 	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":    "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
 	"billing/control_plane.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                              notMoneyCount,
 	"billing/control_plane.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                notMoneyCount,
@@ -157,11 +156,11 @@ const (
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
 	notHTTPInternalRow      = "not HTTP: internal rows converted by internal/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
-	// The invoice collection operation freezes its charge in a rail_intents
+	// The invoice collection operation freezes its charge in a provider_intents
 	// payload row under internal/modules/money, which this guard scans. It is
 	// internal persisted intent data, never an HTTP body: an internal
 	// exception, not permission to leave HTTP money numeric.
-	notHTTPIntentPayload = "not HTTP: internal persisted rail_intents data; the pinned provider wire is asserted separately"
+	notHTTPIntentPayload = "not HTTP: internal persisted provider_intents data; the pinned provider wire is asserted separately"
 )
 
 // pendingDynamicMoney lists the map[string]any entries with a monetary key

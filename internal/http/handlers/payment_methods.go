@@ -87,11 +87,11 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 	defer req.Card.Zero()
-	pspID, err := uuid.Parse(strings.TrimSpace(req.PSPID))
-	if err != nil {
+	if req.PSPID.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must name a PSP").WithParam("psp_id"))
 		return
 	}
+	pspID := req.PSPID.UUID()
 	if req.Card != nil {
 		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", billingDetailStrings(req.BillingDetails)...) {
 			return
@@ -476,7 +476,7 @@ func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		CreatedAt:            pm.CreatedAt,
 	}
 	if pm.PspID != nil {
-		psp := pm.PspID.String()
+		psp := billing.PSPID(*pm.PspID)
 		out.PSPID = &psp
 	}
 	return out

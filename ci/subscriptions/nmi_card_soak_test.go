@@ -131,7 +131,7 @@ func TestNMIInPlaceCardReplacementWithoutBrand(t *testing.T) {
 	w.settle()
 	require.Contains(t, w.openFindings("life.payment_method_update.provider_data_gap"), strings.TrimPrefix(gap, "pm_"))
 	var open int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.rail_intents WHERE intent_type = 'nmi_payment_method_update'
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type = 'nmi_payment_method_update'
 		AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`)).Scan(&open))
 	require.Zero(t, open, "a deterministic data gap is not retried")
 	require.Equal(t, visa.Last4, w.storedCard(gap).lastFour, "the local card is unchanged")

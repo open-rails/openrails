@@ -126,7 +126,7 @@ func Schema() SchemaDoc {
 			Intent: "new-card decline rate per day and PSP, by decline reason",
 			Query: Query{
 				Measures: []string{"failed_attempts", "attempt_failure_rate"},
-				By:       []string{"time", "rail_account", "reason"},
+				By:       []string{"time", "psp", "reason"},
 				Grain:    "day",
 				Range:    &QueryRange{From: "2026-06-26", To: "2026-07-03"},
 				Filters:  map[string][]string{"kind": {"verify", "initial"}, "card_entry": {"new"}},
@@ -136,7 +136,7 @@ func Schema() SchemaDoc {
 			Intent: "rebill first-attempt failures and missed rebills by owner",
 			Query: Query{
 				Measures: []string{"rebill_first_failure_rate", "rebill_missed_rate"},
-				By:       []string{"owner", "rail_account"},
+				By:       []string{"owner", "psp"},
 				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
 			},
 		},
@@ -152,7 +152,7 @@ func Schema() SchemaDoc {
 			Intent: "NMI's own refusal rate by month and kind, per PSP, over its history",
 			Query: Query{
 				Measures: []string{"nmi_history_authorizations", "nmi_history_refusal_rate"},
-				By:       []string{"time", "nmi_kind", "rail_account"},
+				By:       []string{"time", "nmi_kind", "psp"},
 				Grain:    "month",
 				Range:    &QueryRange{Last: "25m"},
 			},

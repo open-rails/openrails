@@ -46,7 +46,7 @@ that merchant's UUID subtree). Operational consequences:
 - The Vault policy scopes what the **process** may do, not what any merchant may do. Protect the
   app credential accordingly: it can read every merchant's secrets the policy grants.
 - Merchants never receive Vault credentials. Their surface is the delegated admin API
-  (`/v1/merchant/payment-providers`): secret fields are accepted on write, validated, and
+  (`/v1/merchant/psps`): secret fields are accepted on write, validated, and
   **redacted on read** — plaintext is never returned.
 - All secret paths derive from one builder in code (test-guarded); ad-hoc path construction
   cannot escape a merchant's namespace.
@@ -131,8 +131,8 @@ operation-named candidates and publishes their exact names and versions in
 PostgreSQL. Secret values are write-only at the Client/API boundary and never go
 into publication receipts.
 
-Use `Client.PaymentProviders.Upsert` with a stable `operation_id` and the observed
-`expected_revision`. Reuse that operation ID to recover a lost reply. Competing
+Use `Client.CreatePSP`/`UpdatePSP` with a stable `operation_id` and, on update,
+the observed `expected_revision`. Reuse that operation ID to recover a lost reply. Competing
 updates fail with a revision conflict; they do not silently overwrite each other.
 A failed SQL publication leaves the candidate inactive and preserves the old
 active references. The API cannot change Vault addresses, mounts or prefixes.
@@ -153,7 +153,7 @@ webhook routes return 503 so the provider redelivers; workers retry rather than 
 - **Snapshot update:** change the host's credential source and restart with the
   new snapshot. Startup preserves existing merchant metadata and archived provider
   state; it does not make the YAML an automatic overwrite/prune operation.
-- **Managed publication/rotation:** use `Client.PaymentProviders.Upsert` locally
+- **Managed publication/rotation:** use `Client.UpdatePSP` locally
   or remotely with explicit operation identity and revision. Webhook rotations
   retain required overlap; another rotation cannot discard an unretired prior key.
 - **Custody transition:** the local operator supplies source and target runtimes

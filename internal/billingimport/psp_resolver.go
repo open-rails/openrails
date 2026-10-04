@@ -31,7 +31,7 @@ type pspResolver struct {
 }
 
 func newPSPResolver(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, fallback PSPRef) (*pspResolver, error) {
-	rows, err := q.ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: merchantID})
+	rows, err := q.ListPSPsForMerchant(ctx, merchantID)
 	if err != nil {
 		return nil, fmt.Errorf("import billing: read PSP catalog: %w", err)
 	}
@@ -42,12 +42,8 @@ func newPSPResolver(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f
 	}
 	for _, p := range rows {
 		r.byID[p.ID] = p
-		if p.Key != nil && strings.TrimSpace(*p.Key) != "" {
-			r.byKey[pspKeyIndex(p.Rail, *p.Key)] = p
-			r.known = append(r.known, p.Rail+"/"+strings.TrimSpace(*p.Key))
-		} else {
-			r.known = append(r.known, p.Rail+"/"+p.ID.String())
-		}
+		r.byKey[pspKeyIndex(p.Rail, p.Key)] = p
+		r.known = append(r.known, p.Rail+"/"+strings.TrimSpace(p.Key))
 	}
 	sort.Strings(r.known)
 	return r, nil

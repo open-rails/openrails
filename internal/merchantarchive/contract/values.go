@@ -165,8 +165,8 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		case "jsonb":
 			field := p.Name + "." + c.Name
-			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == "nmi_provider_cutover") {
+			if p.Name == "provider_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection) {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -193,7 +193,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if v != "released" && v != "captured" {
 				return bad()
 			}
-		case "rail_intents.status":
+		case "provider_intents.status":
 			if v != "succeeded" && v != "failed_terminal" && v != "expired" && v != "superseded" {
 				return bad()
 			}
@@ -298,17 +298,17 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "host_outbox" && value(p, values, "delivered_at") == nil {
 		return fmt.Errorf("undelivered host event")
 	}
-	if p.Name == "rail_intents" {
+	if p.Name == "provider_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != "nmi_provider_cutover")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection)) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
 			if payload == nil {
 				return fmt.Errorf("refund operation has no accepted payload")
 			}
-			if _, err := intents.DecodeRefundPayload(gen.BillingRailIntent{Payload: []byte(*payload)}); err != nil {
+			if _, err := intents.DecodeRefundPayload(gen.BillingProviderIntent{Payload: []byte(*payload)}); err != nil {
 				return fmt.Errorf("invalid accepted refund payload: %w", err)
 			}
 		}
@@ -320,7 +320,7 @@ func ValidateValues(p Profile, values []*string) error {
 // validateRetainedPayment also identifies an engine-generated key. A caller key or arbitrary metadata
 // never reaches this exception merely by resembling a hash.
 func validateRetainedPayment(p Profile, values []*string) (bool, error) {
-	if p.Name != "rail_intents" {
+	if p.Name != "provider_intents" {
 		return false, nil
 	}
 	field := func(name string) string {
@@ -335,7 +335,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	}
 	id, _ := uuid.Parse(field("id"))
 	merchant, _ := uuid.Parse(field("merchant_id"))
-	row := gen.BillingRailIntent{ID: id, MerchantID: merchant, Rail: field("rail"), IntentType: typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), Origin: field("origin"), IdempotencyKey: field("idempotency_key")}
+	row := gen.BillingProviderIntent{ID: id, MerchantID: merchant, Rail: field("rail"), IntentType: typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), Origin: field("origin"), IdempotencyKey: field("idempotency_key")}
 	if actor := field("actor"); actor != "" {
 		row.Actor = &actor
 	}

@@ -299,7 +299,7 @@ func (s *CheckoutAttemptService) createSession(ctx context.Context, req *Checkou
 			}
 			return cached, nil
 		}
-		// A reclaimed claim reruns: the session row and its rail_intents are
+		// A reclaimed claim reruns: the session row and its provider_intents are
 		// keyed by this request key, so the rerun resumes them, never charges again.
 	}
 

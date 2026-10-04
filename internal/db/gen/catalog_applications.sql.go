@@ -107,7 +107,7 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 }
 
 const lockCatalogApplicationPSP = `-- name: LockCatalogApplicationPSP :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM billing.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
+SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at FROM billing.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
 `
 
 type LockCatalogApplicationPSPParams struct {
@@ -121,19 +121,26 @@ func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalog
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
+		&i.Key,
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
-		&i.Key,
-		&i.Evidence,
-		&i.FirstSeenAt,
-		&i.LastVerifiedAt,
-		&i.ReplacedAt,
+		&i.CustodianID,
+		&i.Settings,
+		&i.Signer,
+		&i.CredentialCustody,
+		&i.CredentialRefs,
+		&i.CredentialVersions,
+		&i.RetiredCredentials,
+		&i.CredentialsValidatedAt,
+		&i.WebhookEndpointID,
+		&i.WebhookOverlapExpiresAt,
+		&i.PendingSignerPublicKey,
+		&i.Revision,
+		&i.Archived,
+		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Archived,
-		&i.CustodianID,
-		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }

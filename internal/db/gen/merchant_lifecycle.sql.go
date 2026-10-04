@@ -45,7 +45,7 @@ func (q *Queries) CountMerchantRowsEntitlements(ctx context.Context, merchantID 
 }
 
 const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM billing.rail_mutation_logs WHERE merchant_id = $1
+SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -160,7 +160,7 @@ func (q *Queries) CountMerchantRowsProducts(ctx context.Context, merchantID uuid
 }
 
 const countMerchantRowsProviderIntents = `-- name: CountMerchantRowsProviderIntents :one
-SELECT count(*) FROM billing.rail_intents WHERE merchant_id = $1
+SELECT count(*) FROM billing.provider_intents WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -171,7 +171,7 @@ func (q *Queries) CountMerchantRowsProviderIntents(ctx context.Context, merchant
 }
 
 const countMerchantRowsRailCustomers = `-- name: CountMerchantRowsRailCustomers :one
-SELECT count(*) FROM billing.rail_customer_accounts WHERE merchant_id = $1
+SELECT count(*) FROM billing.psp_customers WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -253,7 +253,7 @@ func (q *Queries) PurgeMerchantRowsEntitlements(ctx context.Context, merchantID 
 }
 
 const purgeMerchantRowsExternalProviderMutationLogs = `-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM billing.rail_mutation_logs WHERE merchant_id = $1
+DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) error {
@@ -343,7 +343,7 @@ func (q *Queries) PurgeMerchantRowsProducts(ctx context.Context, merchantID uuid
 }
 
 const purgeMerchantRowsProviderIntents = `-- name: PurgeMerchantRowsProviderIntents :exec
-DELETE FROM billing.rail_intents WHERE merchant_id = $1
+DELETE FROM billing.provider_intents WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) error {
@@ -352,7 +352,7 @@ func (q *Queries) PurgeMerchantRowsProviderIntents(ctx context.Context, merchant
 }
 
 const purgeMerchantRowsRailCustomers = `-- name: PurgeMerchantRowsRailCustomers :exec
-DELETE FROM billing.rail_customer_accounts WHERE merchant_id = $1
+DELETE FROM billing.psp_customers WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) error {

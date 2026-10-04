@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-func (h *ManualRebillHandler) Resolve(ctx context.Context, in gen.BillingRailIntent, resolution Resolution) (Outcome, error) {
+func (h *ManualRebillHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution Resolution) (Outcome, error) {
 	ctx = pinIntentAddress(ctx, in)
 	p, err := subscriptions.DecodeManualRebillPayload(in)
 	if err != nil {

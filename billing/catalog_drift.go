@@ -12,7 +12,7 @@ import (
 // them.
 type CatalogDrift struct {
 	ID                 uuid.UUID  `json:"id"`
-	PSPID              uuid.UUID  `json:"psp_id"`
+	PSPID              PSPID      `json:"psp_id"`
 	Rail               string     `json:"rail"`
 	Kind               string     `json:"kind"`
 	ResourceType       string     `json:"resource_type"`

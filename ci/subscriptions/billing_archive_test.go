@@ -100,21 +100,21 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(body), &refusal), body)
 		return refusal.Error.Metadata.Table
 	}
-	require.NotEqual(t, "rail_intents", refusedTable())
+	require.NotEqual(t, "provider_intents", refusedTable())
 
 	// The decline record the checkout wrote before #1111.
 	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.payments (merchant_id, id, customer_id, price_id, psp_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
 		SELECT merchant_id, (payload->'terms'->>'payment_id')::uuid, (payload->'terms'->>'customer_id')::uuid, (payload->'terms'->>'price_id')::uuid,
 		       psp_id, rail, rail || '_sub_declined:' || id, (payload->'terms'->>'amount')::bigint, (payload->'terms'->>'recurring_amount')::bigint,
 		       payload->'terms'->>'currency', 'failed', 'none'
-		FROM billing.rail_intents WHERE intent_type = 'initial_membership' AND status = 'failed_terminal'`))
+		FROM billing.provider_intents WHERE intent_type = 'initial_membership' AND status = 'failed_terminal'`))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, record.RowsAffected())
-	require.NotEqual(t, "rail_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
+	require.NotEqual(t, "provider_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
 
 	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET status = 'completed' WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
-	require.Equal(t, "rail_intents", refusedTable(), "a completed payment under a refused enrollment")
+	require.Equal(t, "provider_intents", refusedTable(), "a completed payment under a refused enrollment")
 	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.payments WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
 }

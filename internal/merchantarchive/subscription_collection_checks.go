@@ -31,7 +31,7 @@ func validateSubscriptionCollectionReferences(ctx context.Context, tx pgx.Tx, mi
 		}
 		for _, op := range rows {
 			if err := validateSubscriptionCollectionReference(ctx, q, op); err != nil {
-				return &Error{Code: "unsupported_state", Table: "rail_intents", Count: 1, Err: err}
+				return &Error{Code: "unsupported_state", Table: "provider_intents", Count: 1, Err: err}
 			}
 		}
 		id := rows[len(rows)-1].ID
@@ -47,7 +47,7 @@ func validateSubscriptionCollectionReferences(ctx context.Context, tx pgx.Tx, mi
 	return nil
 }
 
-func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries, op gen.BillingRailIntent) error {
+func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries, op gen.BillingProviderIntent) error {
 	if err := intents.ValidateSubscriptionCollectionTerminal(op); err != nil {
 		return err
 	}

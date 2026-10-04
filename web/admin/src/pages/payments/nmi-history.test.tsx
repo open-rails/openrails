@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { MetricsQuery, MetricsResult } from "@/lib/api/metrics"
-import type { PaymentProviderConfig } from "@/lib/api/types"
+import type { PSP } from "@/lib/api/types"
 import { adminQueries } from "@/lib/queries"
 import { formatBucket } from "@/pages/dashboard/lib"
 import { client, render, selectMerchant, server } from "@/test/harness"
@@ -45,14 +45,14 @@ describe("queries", () => {
     }
   })
 
-  it("scopes to the PSP account but not the owner NMI's history lacks", () => {
+  it("scopes to the PSP but not the owner NMI's history lacks", () => {
     const scope: Scope = {
       owner: "nmi_schedule",
-      psp: { id: "psp-1", account: "acct-1" },
+      psp: { id: "psp_1" },
       last: "7d",
     }
     for (const [name, q] of Object.entries(nmiHistoryQueries(scope))) {
-      expect(q.filters?.rail_account, name).toEqual(["acct-1"])
+      expect(q.filters?.psp, name).toEqual(["psp_1"])
       expect(q.filters?.owner, name).toBeUndefined()
       expect(q.range, name).toEqual({ last: "25m" })
     }
@@ -105,16 +105,17 @@ describe("shaping", () => {
 })
 
 describe("page", () => {
-  const nmi: Partial<PaymentProviderConfig> = {
+  const nmi: Partial<PSP> = {
     id: "psp-1",
+    key: "mobius",
     rail: "nmi",
     account_id: "acct-1",
   }
-  const page = (providers: Partial<PaymentProviderConfig>[]) => {
+  const page = (providers: Partial<PSP>[]) => {
     const queries = client()
-    queries.setQueryData(adminQueries.paymentProviders().queryKey, {
-      data: providers as PaymentProviderConfig[],
-      provider_definitions: [],
+    queries.setQueryData(adminQueries.psps().queryKey, {
+      data: providers as PSP[],
+      next_cursor: null,
     })
     const built = nmiHistoryQueries(all) as Record<string, MetricsQuery>
     for (const [name, { result }] of Object.entries(captured))
@@ -138,7 +139,7 @@ describe("page", () => {
   })
 
   it("is absent without an NMI PSP", () => {
-    const stripe: Partial<PaymentProviderConfig> = {
+    const stripe: Partial<PSP> = {
       id: "psp-2",
       rail: "stripe",
       account_id: "acct_2",

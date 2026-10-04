@@ -114,7 +114,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 			}
 			target = row.ID
 		}
-		accounts, err := q.ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
+		accounts, err := q.ListPSPsForMerchant(ctx, mid.UUID())
 		if err != nil {
 			return nil, err
 		}
@@ -319,10 +319,7 @@ func selectCatalogApplicationPSP(accounts []gen.BillingPsp, key string, link map
 	var selected gen.BillingPsp
 	found := false
 	for _, row := range accounts {
-		rowKey := row.ID.String()
-		if row.Key != nil {
-			rowKey = *row.Key
-		}
+		rowKey := row.Key
 		if rawID := link["psp_id"]; rawID != "" {
 			if row.ID.String() != rawID {
 				continue
@@ -346,7 +343,7 @@ func selectCatalogApplicationPSP(accounts []gen.BillingPsp, key string, link map
 	return selected, found, nil
 }
 func sameCatalogApplicationPSP(a, b gen.BillingPsp) bool {
-	return a.ID == b.ID && a.MerchantID == b.MerchantID && a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && a.Archived == b.Archived && reflect.DeepEqual(a.Key, b.Key) && reflect.DeepEqual(a.CustodianID, b.CustodianID) && bytes.Equal(a.Evidence, b.Evidence)
+	return a.ID == b.ID && a.MerchantID == b.MerchantID && a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && a.Archived == b.Archived && a.Key == b.Key && reflect.DeepEqual(a.CustodianID, b.CustodianID) && a.Revision == b.Revision && bytes.Equal(a.Settings, b.Settings)
 }
 func (s *Service) revalidateCatalogApplicationProviders(ctx context.Context, prepared *catalogApplicationPreparation) error {
 	mid, err := merchant.Require(ctx)

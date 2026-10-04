@@ -44,7 +44,7 @@
   },
   "channel": "rail",
   "rail": "nmi",
-  "psp_id": "55555555-5555-5555-5555-555555555555",
+  "psp_id": "psp_55555555-5555-5555-5555-555555555555",
   "transaction_id": "txn-1",
   "card": {
     "brand": "visa",

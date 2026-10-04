@@ -46,7 +46,7 @@ func ObligationOrderReference(subscriptionID uuid.UUID, boundary time.Time) stri
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("obligation:"+subscriptionID.String()+":"+boundary.UTC().Format(time.RFC3339Nano))).String()
 }
 
-func DecodeManualRebillPayload(in gen.BillingRailIntent) (ManualRebillPayload, error) {
+func DecodeManualRebillPayload(in gen.BillingProviderIntent) (ManualRebillPayload, error) {
 	var p ManualRebillPayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode rebill payload: %w", err)

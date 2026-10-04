@@ -90,7 +90,7 @@ func (w *world) checkMoneyInvariants() {
 	rows.Close()
 
 	unresolved := 0
-	if err := w.pool.QueryRow(ctx, `SELECT count(*) FROM `+schema+`.rail_intents
+	if err := w.pool.QueryRow(ctx, `SELECT count(*) FROM `+schema+`.provider_intents
 		WHERE status IN ('in_flight', 'unknown_needs_verify', 'failed_retryable', 'pending')
 		  AND intent_type IN ('subscription_collection', 'manual_rebill', 'initial_membership', 'nmi_sale', 'invoice_collection', 'nmi_upgrade', 'stripe_tier_change')`).Scan(&unresolved); err != nil {
 		t.Errorf("invariants: read open operations: %v", err)

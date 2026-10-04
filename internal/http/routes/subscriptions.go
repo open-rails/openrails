@@ -9,7 +9,7 @@ import (
 
 // subscriptionsRoutes is recurring agreements: reading, canceling, resuming
 // and changing a subscription as the customer or as merchant staff, and the
-// merchant's bulk moves (reprices, plan migrations, PSP cutovers).
+// merchant's bulk moves (reprices, plan migrations).
 var subscriptionsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/subscriptions", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,
 		Query: params(queryOf(subscriptions.GetSubscriptionsFilters{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("catalog_scope_mismatch", "invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
@@ -25,14 +25,6 @@ var subscriptionsRoutes = []Route{
 		Request: handlers.ChangeTierRequest{}, Responses: []Reply{{200, billing.TierChangePreview{}}}, Errors: codes("card_declined", "catalog_scope_mismatch", "customer_action_required", "invalid_param", "payment_method_stale", "payment_provider_rejected", "reprice_cross_currency", "resource_conflict", "resource_not_found", "tier_change_already_scheduled", "tier_change_in_flight"), Handler: h(handlers.AdminChangeTierPreview)},
 	{Method: PUT, Path: "/v1/merchant/subscriptions/{id}/payment-method", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
 		Request: handlers.UpdateSubscriptionPaymentMethodBody{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminUpdateSubscriptionPaymentMethod)},
-	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/provider-cutover", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
-		Query: params(text("idempotency_key")), Request: billing.ProviderCutoverRequest{}, Responses: []Reply{{200, billing.ProviderCutover{}}, {202, billing.ProviderCutover{}}}, Errors: codes("rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.ProviderCutover)},
-	{Method: GET, Path: "/v1/merchant/subscriptions/{id}/provider-cutover", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,
-		Query: params(text("idempotency_key")), Responses: []Reply{{200, billing.ProviderCutover{}}, {202, billing.ProviderCutover{}}}, Errors: codes("rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.ProviderCutover)},
-	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/provider-cutover/preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,
-		Query: params(text("idempotency_key")), Request: billing.ProviderCutoverRequest{}, Responses: []Reply{{200, billing.ProviderCutover{}}}, Errors: codes("rate_limit_exceeded", "rebill_terms_committed", "resource_conflict"), Handler: h(handlers.PreviewProviderCutover)},
-	{Method: POST, Path: "/v1/merchant/provider-refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
-		Responses: []Reply{{202, billing.ProviderRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshProviders)},
 	{Method: POST, Path: "/v1/merchant/reprice-batches", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
 		Request: billing.CreateRepriceBatchParams{}, Responses: []Reply{{201, billing.RepriceBatchResult{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param", "rebill_terms_committed", "reprice_already_scheduled", "reprice_cross_currency", "reprice_cross_product", "reprice_inactive_price", "reprice_not_scheduled", "reprice_notice_window_violation", "reprice_price_key_not_found"), Handler: h(handlers.CreateRepriceBatch)},
 	{Method: POST, Path: "/v1/merchant/reprice-batches/preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsRead,

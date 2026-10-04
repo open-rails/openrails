@@ -30,7 +30,7 @@ type InitialMembershipPayload = subscriptions.InitialMembershipPayload
 func InitialMembershipIdempotencyKey(key string) string {
 	return TypeInitialMembership + ":" + strings.TrimSpace(key)
 }
-func decodeInitialMembershipPayload(in gen.BillingRailIntent) (InitialMembershipPayload, error) {
+func decodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMembershipPayload, error) {
 	return subscriptions.DecodeInitialMembershipPayload(in)
 }
 
@@ -53,7 +53,7 @@ func (h *InitialMembershipIntentHandler) Backoff(attempts int32) time.Duration {
 }
 func (h *InitialMembershipIntentHandler) PrunePolicy() (bool, bool)    { return true, true }
 func (h *InitialMembershipIntentHandler) CommitsTerminalOutcome() bool { return true }
-func (h *InitialMembershipIntentHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
+func (h *InitialMembershipIntentHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 func (h *InitialMembershipIntentHandler) database() *db.DB {
@@ -62,7 +62,7 @@ func (h *InitialMembershipIntentHandler) database() *db.DB {
 	}
 	return h.Checkout.SubscriptionService.Database()
 }
-func (h *InitialMembershipIntentHandler) client(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload) (*nmi.NMIClient, error) {
+func (h *InitialMembershipIntentHandler) client(ctx context.Context, in gen.BillingProviderIntent, p InitialMembershipPayload) (*nmi.NMIClient, error) {
 	var client *nmi.NMIClient
 	var err error
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
@@ -87,7 +87,7 @@ func (h *InitialMembershipIntentHandler) client(ctx context.Context, in gen.Bill
 	return client, nil
 }
 
-func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
+func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	if h.database() == nil || h.Checkout.Lifecycle == nil {
 		return intents.Parked("initial membership services unavailable")
 	}
@@ -238,7 +238,7 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 	return h.Verify(ctx, in)
 }
 
-func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
+func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
 	if h.database() == nil || h.Checkout.Lifecycle == nil {
 		return intents.Ambiguous("initial membership recovery unavailable")
 	}
@@ -332,7 +332,7 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Bill
 	return h.complete(ctx, in, intents.Succeeded(map[string]any{"provider_subscription_id": schedule.SubscriptionID()}))
 }
 
-func (h *InitialMembershipIntentHandler) retainInitialPayment(ctx context.Context, in gen.BillingRailIntent, client *nmi.NMIClient) error {
+func (h *InitialMembershipIntentHandler) retainInitialPayment(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient) error {
 	var err error
 	ref := intents.EvidenceString(in, "transaction_id")
 	if ref == "" {
@@ -352,7 +352,7 @@ func (h *InitialMembershipIntentHandler) retainInitialPayment(ctx context.Contex
 	return nil
 }
 
-func (h *InitialMembershipIntentHandler) Resolve(ctx context.Context, in gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *InitialMembershipIntentHandler) Resolve(ctx context.Context, in gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	if resolution.Step != "" {
 		return intents.Outcome{}, intents.RejectResolution("initial enrollment has no steps")
 	}
@@ -415,7 +415,7 @@ func (h *InitialMembershipIntentHandler) Resolve(ctx context.Context, in gen.Bil
 	return h.Verify(ctx, in), nil
 }
 
-func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.BillingRailIntent, outcome intents.Outcome) intents.Outcome {
+func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.BillingProviderIntent, outcome intents.Outcome) intents.Outcome {
 	p, err := decodeInitialMembershipPayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -428,7 +428,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Terms.CustomerID}); err != nil {
 			return err
 		}
-		current, err := d.Gen(ctx).LockRailIntentForInitialEnrollmentCompletion(ctx, gen.LockRailIntentForInitialEnrollmentCompletionParams{MerchantID: in.MerchantID, ID: in.ID})
+		current, err := d.Gen(ctx).LockProviderIntentForInitialEnrollmentCompletion(ctx, gen.LockProviderIntentForInitialEnrollmentCompletionParams{MerchantID: in.MerchantID, ID: in.ID})
 		if err != nil {
 			return err
 		}
@@ -664,7 +664,7 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
 
-func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload) (intents.InitialMembershipNonexecutionProof, bool, error) {
+func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.BillingProviderIntent, p InitialMembershipPayload) (intents.InitialMembershipNonexecutionProof, bool, error) {
 	var proof intents.InitialMembershipNonexecutionProof
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Checkout.Config != nil && h.Checkout.Config.EngineAdmissionHold {
 		return proof, false, errors.New("engine payment admission is held")
@@ -700,7 +700,7 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 	return proof, submitted, err
 }
 
-func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p InitialMembershipPayload, success bool) error {
+func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p InitialMembershipPayload, success bool) error {
 	if p.CheckoutAttemptID == nil {
 		return nil
 	}
@@ -732,7 +732,7 @@ func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx con
 	return nil
 }
 
-func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context.Context, in gen.BillingRailIntent, proof intents.InitialMembershipNonexecutionProof) intents.Outcome {
+func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context.Context, in gen.BillingProviderIntent, proof intents.InitialMembershipNonexecutionProof) intents.Outcome {
 	if err := intents.NewStore(h.database()).RetainInitialMembershipNonexecution(ctx, in, proof); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -741,14 +741,14 @@ func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context
 
 // recordInitialAttempt records the enrollment charge's answer (#1110) in its
 // completion transaction.
-func recordInitialAttempt(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p InitialMembershipPayload, a attempts.Attempt, at time.Time) error {
+func recordInitialAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p InitialMembershipPayload, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Terms.CustomerID, *in.PspID, in.Rail
 	a.Kind, a.Owner, a.At, a.Target, a.Step = attempts.Initial, attempts.OwnerOf(p.Terms.CollectionPolicy), at, p.Terms.PriceID.String(), "charge"
 	if p.Upgrade() {
 		a.Kind = attempts.Upgrade
 	}
 	a.Amount, a.Currency = p.Terms.Amount, p.Terms.Currency
-	a.SubscriptionID, a.PaymentMethodID, a.RailIntentID = &p.Terms.SubscriptionID, &p.Terms.PaymentMethodID, &in.ID
+	a.SubscriptionID, a.PaymentMethodID, a.ProviderIntentID = &p.Terms.SubscriptionID, &p.Terms.PaymentMethodID, &in.ID
 	a.TokenType = charge.TokenTypePSPToken
 	if p.Instrument.CustodianHeld() {
 		a.TokenType = charge.TokenTypePANViaProxy

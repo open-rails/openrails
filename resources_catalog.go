@@ -11,7 +11,6 @@ import (
 
 func (c *Client) initResources() {
 	c.MerchantConfiguration = &MerchantConfigurationClient{client: c}
-	c.PaymentProviders = &PaymentProviderClient{client: c}
 }
 
 // catalogPath is the catalog the product, price and offer methods act on: the

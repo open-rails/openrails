@@ -44,20 +44,20 @@ ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 
 -- --- intent attribution -------------------------------------------------------
 
--- name: StampRailIntentsForRun :execrows
+-- name: StampProviderIntentsForRun :execrows
 -- Attribute the provider writes this pass queued for one subscription to the
 -- run that queued them. `since` is the instant the run captured that
 -- subscription's before-image, so anything newer for that subject is this
 -- pass's doing; `destructive_run_id IS NULL` keeps an earlier run's intent from
 -- being re-attributed. Attribution only — no status is changed here.
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET destructive_run_id = sqlc.arg(run_id)::uuid
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND destructive_run_id IS NULL
   AND created_at >= sqlc.arg(since)::timestamptz;
 
--- name: SupersedeUnfiredRailIntentsForRun :many
+-- name: SupersedeUnfiredProviderIntentsForRun :many
 -- STEP ONE of the reverse, before a single row is restored, because it is the
 -- only step racing a live actor: the intent runner may claim a queued NMI vault
 -- delete at any moment.
@@ -68,13 +68,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- so neither is touched here — they are reported instead.
 --
 -- The race is decided by Postgres row locks: this UPDATE and the executor's
--- claim (ClaimDueRailIntents / ClaimRailIntentByID) contend for the same row,
+-- claim (ClaimDueProviderIntents / ClaimProviderIntentByID) contend for the same row,
 -- and under READ COMMITTED the loser re-evaluates its WHERE against the winner's
 -- committed row and matches nothing. So exactly one of {superseded, in_flight}
 -- happens per intent, never both, and whichever way it goes the reverse's
 -- report is truthful. The reverse also disarms the destructive-action switch
 -- first, which is what stops NEW claims from starting during the reversal.
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason)::text,
     claimed_until = NULL,
@@ -84,13 +84,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status IN ('pending', 'failed_retryable')
 RETURNING id, intent_type, subscription_id, rail;
 
--- name: ListRailIntentsForRun :many
+-- name: ListProviderIntentsForRun :many
 -- The divergence manifest. Read AFTER the supersede so every row's status is
 -- final: superseded = neutralised; succeeded = it reached the provider and is
 -- IRREVERSIBLE (the vault entry is gone, the remote subscription is canceled);
 -- in_flight / unknown_needs_verify = ambiguous, may have reached the provider.
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid
 ORDER BY created_at;

@@ -435,7 +435,7 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 		if !db.IsNotFound(err) {
 			return nil, err
 		}
-		intent, err := d.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
+		intent, err := d.Gen(ctx).GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
 		if err == nil {
 			rec := &SolanaLocalRecord{Kind: SolanaLocalKindPullIntent, Rail: intent.Rail}
 			var payload struct {

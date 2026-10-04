@@ -89,13 +89,13 @@ func NewNMICardVaultHandler(d *db.DB, clients CardVaultClients, store *Store, cl
 func (h *NMICardVaultHandler) Type() string                         { return TypeNMICardVault }
 func (h *NMICardVaultHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 func (h *NMICardVaultHandler) PruneTerminalPayload() bool           { return true }
-func (h *NMICardVaultHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
+func (h *NMICardVaultHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	return h.advance(ctx, intent, false)
 }
-func (h *NMICardVaultHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
+func (h *NMICardVaultHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	return h.advance(ctx, intent, true)
 }
-func (h *NMICardVaultHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (Relevance, error) {
+func (h *NMICardVaultHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (Relevance, error) {
 	return StillRelevant(), nil
 }
 
@@ -109,7 +109,7 @@ func (h *NMICardVaultHandler) now() time.Time {
 // reenterCard ends a vaulting that cannot be established or repeated.
 func reenterCard(reason string) Outcome { return retokenizeTerminal(reason) }
 
-func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingRailIntent, verifying bool) Outcome {
+func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingProviderIntent, verifying bool) Outcome {
 	var payload NMICardVaultPayload
 	if err := json.Unmarshal(intent.Payload, &payload); err != nil || payload.PaymentMethodID == uuid.Nil || !payload.Card.complete() {
 		return Terminal("nmi card vault payload is incomplete")

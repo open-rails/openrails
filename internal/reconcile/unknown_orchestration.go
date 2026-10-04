@@ -63,7 +63,7 @@ type UnknownReconcileResult struct {
 	Probed        int                 // per-subscription probe fallbacks attempted (#665)
 	Held          int                 // cancellations a pass-level guard withheld (#834)
 	Backfilled    int                 // payments imported (#634)
-	RailCustomers int                 // rail_customer_accounts materialized from a remote customer id (#635)
+	RailCustomers int                 // psp_customers materialized from a remote customer id (#635)
 	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
 }
 

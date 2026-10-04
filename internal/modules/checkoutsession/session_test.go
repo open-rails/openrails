@@ -1,6 +1,7 @@
 package checkoutsession
 
 import (
+	"github.com/google/uuid"
 	"strings"
 	"testing"
 
@@ -34,26 +35,27 @@ func TestSessionID(t *testing.T) {
 }
 
 func TestPayment(t *testing.T) {
-	card := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_card", Rail: "nmi", Mode: "subscription", Driver: "collect_js", PSPID: "psp-1"}, Selector: "cards"}
-	redirect := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_redirect", Rail: "ccbill", Driver: "redirect", PSPID: "psp-2"}, Selector: "ccbill"}
-	stripe := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_stripe", Rail: "stripe", Mode: "subscription", Driver: "stripe_elements", PSPID: "psp-5"}, Selector: "stripe"}
-	solana := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_sol", Rail: "solana", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "usdc"}, PSPID: "psp-3"}, Selector: "solana"}
+	psp := billing.PSPID(uuid.New())
+	card := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_card", Rail: "nmi", Mode: "subscription", Driver: "collect_js", PSPID: psp}, Selector: "cards"}
+	redirect := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_redirect", Rail: "ccbill", Driver: "redirect", PSPID: billing.PSPID(uuid.New())}, Selector: "ccbill"}
+	stripe := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_stripe", Rail: "stripe", Mode: "subscription", Driver: "stripe_elements", PSPID: billing.PSPID(uuid.New())}, Selector: "stripe"}
+	solana := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_sol", Rail: "solana", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "usdc"}, PSPID: billing.PSPID(uuid.New())}, Selector: "solana"}
 	method := billing.PaymentMethodID{1}.String()
 	owns := func(id string) bool { return id == method }
 	newCard := CheckoutSessionPayRequest{PaymentToken: " tok ", NameOnCard: "A Buyer", Country: "us", Zip: "10001", Address1: "1 Main St", Email: "attacker@example.test"}
 
 	got, _, err := Payment(card, newCard, "buyer@example.test", owns)
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "cards", PSPID: "psp-1", PaymentToken: "tok", Email: "buyer@example.test", NameOnCard: "A Buyer", Country: "US", Zip: "10001"}, got,
+	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "cards", PSPID: psp, PaymentToken: "tok", Email: "buyer@example.test", NameOnCard: "A Buyer", Country: "US", Zip: "10001"}, got,
 		"the option binds the PSP, the account the email; the compact form carries no street")
 
 	got, _, err = Payment(card, CheckoutSessionPayRequest{PaymentMethodID: method, NameOnCard: "Someone Else", Zip: "99999", Country: "US"}, "", owns)
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "cards", PSPID: "psp-1", PaymentMethodID: method}, got, "a saved card keeps its own billing identity")
+	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "cards", PSPID: psp, PaymentMethodID: method}, got, "a saved card keeps its own billing identity")
 
 	got, _, err = Payment(stripe, CheckoutSessionPayRequest{PaymentMethodID: method, NameOnCard: "Ignored", Zip: "99999"}, "buyer@example.test", owns)
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "stripe", PSPID: "psp-5", PaymentMethodID: method, Email: "buyer@example.test"}, got, "a card saved in Stripe's fields")
+	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "stripe", PSPID: stripe.PSPID, PaymentMethodID: method, Email: "buyer@example.test"}, got, "a card saved in Stripe's fields")
 
 	got, _, err = Payment(solana, CheckoutSessionPayRequest{TokenSymbol: "USDC"}, "", owns)
 	require.NoError(t, err)
@@ -94,7 +96,7 @@ func TestPayment(t *testing.T) {
 	require.NoError(t, err, "a postal code is not demanded where none exists")
 
 	// A PSP whose card_entry is server takes the card itself (#1129).
-	server := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_server", Rail: "nmi", Driver: "card", PSPID: "psp-4"}, Selector: "cards"}
+	server := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_server", Rail: "nmi", Driver: "card", PSPID: billing.PSPID(uuid.New())}, Selector: "cards"}
 	entered, err := cardguard.NewCard("4111111111111111", 10, 2027, "0739")
 	require.NoError(t, err)
 	defer entered.Zero()

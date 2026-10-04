@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -169,18 +167,15 @@ func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.S
 
 	railCustomer := false
 	if d.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
-		if err := q.UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
-			ID:         uuid.New(),
+		if err := q.UpsertPSPCustomer(ctx, gen.UpsertPSPCustomerParams{
 			CustomerID: sub.CustomerID,
-			Rail:       string(sub.Rail),
 			// or#893: the mapping belongs to the account that owns the
 			// subscription, which is the account whose remote customer id this
 			// is. The subscription's own provenance answers it — no resolution.
-			PspID:      sub.PspID,
-			AccountID:  d.RemoteCustomerID,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-			MerchantID: sub.MerchantID,
+			PspID:             sub.PspID,
+			RemoteCustomerRef: d.RemoteCustomerID,
+			At:                now,
+			MerchantID:        sub.MerchantID,
 		}); err != nil {
 			return backfilled, false, fmt.Errorf("converge: materialize rail_customer %s: %w", sub.ID, err)
 		}

@@ -38,7 +38,7 @@ type SubmissionHistory struct {
 	Latest  time.Time
 }
 
-func LoadSubmissionHistory(in gen.BillingRailIntent) (SubmissionHistory, error) {
+func LoadSubmissionHistory(in gen.BillingProviderIntent) (SubmissionHistory, error) {
 	raw := EvidenceString(in, "submitted_at")
 	if raw == "" {
 		return SubmissionHistory{}, errors.New("operation has no submission fence")
@@ -79,13 +79,13 @@ func (h SubmissionHistory) DupSeconds(now time.Time) int {
 
 // RecordDuplicateRefusal marks that NMI refused the charge as a duplicate of
 // a recent one. Such an operation is never resent.
-func (s *Store) RecordDuplicateRefusal(ctx context.Context, in gen.BillingRailIntent, at time.Time) error {
+func (s *Store) RecordDuplicateRefusal(ctx context.Context, in gen.BillingProviderIntent, at time.Time) error {
 	_, err := s.RecordProgressIfAbsent(ctx, in.ID, duplicateRefusedKey, at.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 // DuplicateRefusedAt is when NMI refused the operation as a duplicate.
-func DuplicateRefusedAt(in gen.BillingRailIntent) (time.Time, bool) {
+func DuplicateRefusedAt(in gen.BillingProviderIntent) (time.Time, bool) {
 	at, err := time.Parse(time.RFC3339Nano, EvidenceString(in, duplicateRefusedKey))
 	return at, err == nil
 }
@@ -93,11 +93,11 @@ func DuplicateRefusedAt(in gen.BillingRailIntent) (time.Time, bool) {
 // ArmLostSubmissionResend records that an authoritative read found nothing
 // under the operation after the settle delay. It opens the retry transition
 // for exactly the next resend.
-func (s *Store) ArmLostSubmissionResend(ctx context.Context, in gen.BillingRailIntent, attempt int) error {
+func (s *Store) ArmLostSubmissionResend(ctx context.Context, in gen.BillingProviderIntent, attempt int) error {
 	if attempt < 1 || attempt > MaxLostSubmissionResends {
 		return errors.New("resend attempt is outside the cap")
 	}
-	n, err := s.db.Gen(ctx).ArmRailIntentResend(ctx, gen.ArmRailIntentResendParams{ID: in.ID, MerchantID: in.MerchantID, Attempt: int32(attempt)})
+	n, err := s.db.Gen(ctx).ArmProviderIntentResend(ctx, gen.ArmProviderIntentResendParams{ID: in.ID, MerchantID: in.MerchantID, Attempt: int32(attempt)})
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func (s *Store) ArmLostSubmissionResend(ctx context.Context, in gen.BillingRailI
 // BeginLostSubmissionResend is the fence for one armed resend. Only its
 // writer may send; a crash after it counts toward the cap. The proof it mints
 // stays bound to the operation's original fence.
-func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.BillingRailIntent, attempt int, now time.Time) (CollectionNonexecutionProof, bool, error) {
+func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.BillingProviderIntent, attempt int, now time.Time) (CollectionNonexecutionProof, bool, error) {
 	if in.IntentType != subscriptions.TypeSubscriptionCollection {
 		return CollectionNonexecutionProof{}, false, errors.New("only engine collections resend lost submissions")
 	}
@@ -130,7 +130,7 @@ func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.BillingRai
 
 // ReadNMIOrderAttempts reads this attempt's transactions under the
 // obligation's shared order from its accepted account.
-func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingRailIntent, resolver NMIClientResolver) (nmi.OrderAttempts, error) {
+func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver) (nmi.OrderAttempts, error) {
 	history, err := LoadSubmissionHistory(in)
 	if err != nil {
 		return nmi.OrderAttempts{}, err
@@ -148,7 +148,7 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingRailIntent, resolve
 
 // ReadNMIVaultTransactions reads every transaction on the operation's frozen
 // vault since since, of any order and outcome.
-func ReadNMIVaultTransactions(ctx context.Context, in gen.BillingRailIntent, resolver NMIClientResolver, since time.Time) ([]nmi.VaultTransaction, error) {
+func ReadNMIVaultTransactions(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver, since time.Time) ([]nmi.VaultTransaction, error) {
 	p, err := decodeCollectedTerms(in)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func ReadNMIVaultTransactions(ctx context.Context, in gen.BillingRailIntent, res
 	return client.ReadVaultTransactions(ctx, p.Instrument.RailCustomerRef, since)
 }
 
-func evidenceInt(in gen.BillingRailIntent, key string) int {
+func evidenceInt(in gen.BillingProviderIntent, key string) int {
 	var evidence map[string]json.RawMessage
 	if json.Unmarshal(in.ResultEvidence, &evidence) != nil {
 		return 0

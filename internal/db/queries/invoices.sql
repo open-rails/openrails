@@ -449,7 +449,7 @@ SELECT sqlc.embed(a), sqlc.embed(i), l.amount AS ledger_amount,
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
         AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
 FROM billing.invoice_payments a
-JOIN billing.rail_intents i ON i.merchant_id = a.merchant_id
+JOIN billing.provider_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
 LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.idempotency_key LIKE 'invoice_collection:%'

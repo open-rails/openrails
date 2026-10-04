@@ -88,7 +88,7 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 	sig := r.Header(basistheory.SignatureHeader)
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)
 	if err := basisTheoryVerifier(r).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
-		r.State.WebhookHealth.Rejected(r.Request.Context(), rail)
+		r.State.WebhookHealth.Rejected(r.Request.Context())
 		log.Warn("basistheory webhook signature verification failed")
 		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 		return false
@@ -98,7 +98,7 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
 		return false
 	}
-	r.State.WebhookHealth.Accepted(r.Request.Context(), rail)
+	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return false

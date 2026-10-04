@@ -65,7 +65,7 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		out.Rail = &rail
 	}
 	if p.PspID != nil {
-		psp := p.PspID.String()
+		psp := billing.PSPID(*p.PspID)
 		out.PSPID = &psp
 	}
 	card := models.Card{}

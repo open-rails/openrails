@@ -91,8 +91,8 @@ type Attempt struct {
 	At       time.Time
 	// Target groups a buyer's new-card attempts into one checkout: a price id,
 	// or CardSave. Empty for rebills.
-	Target                                                   string
-	SubscriptionID, PaymentMethodID, PaymentID, RailIntentID *uuid.UUID
+	Target                                                       string
+	SubscriptionID, PaymentMethodID, PaymentID, ProviderIntentID *uuid.UUID
 	// Step keys an operation's attempts that carry no transaction id.
 	Step      string
 	TokenType string
@@ -156,7 +156,7 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		Kind: string(a.Kind), Owner: string(OwnerNone), CardEntry: "saved", Source: "openrails", ObservedVia: "response",
 		Amount: a.Amount, Currency: optional(strings.ToUpper(a.Currency)), AttemptedAt: a.At.UTC(),
 		SubscriptionID: a.SubscriptionID, PaymentMethodID: a.PaymentMethodID, PaymentID: a.PaymentID,
-		RailIntentID: a.RailIntentID, Step: a.Step,
+		ProviderIntentID: a.ProviderIntentID, Step: a.Step,
 		TransactionID: optional(a.TransactionID), ResponseText: optional(truncate(a.Answer.Text, 128)),
 	}
 	c := cardOf(a.Answer)

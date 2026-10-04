@@ -27,7 +27,7 @@ var NeverRollbackableTables = map[string]string{
 	"grants": "the authority every grant effect is RE-DERIVED from. Roll it back and derived state becomes unrecoverable — " +
 		"this is the table that makes the whole design work (ID-8)",
 	"subscription_status_transitions": "lifecycle audit trail; a reversal appends to it, never rewinds it",
-	"rail_mutation_logs":              "the record of what we did to the outside world — the divergence manifest an undo READS, never edits",
+	"provider_mutation_logs":          "the record of what we did to the outside world — the divergence manifest an undo READS, never edits",
 	"webhook_events": "dedup truth (IDEM-11). Roll it back and every webhook after T becomes re-processable: duplicate grants, " +
 		"duplicate charges, duplicate cancels",
 	"reconciliation_findings": "forensics: a rollback that erases the evidence of what went wrong defeats itself",
@@ -41,7 +41,7 @@ var NeverRollbackableTables = map[string]string{
 // harder than a name list could: guard_billing_fact_columns triggers on both
 // refuse any rewrite of a run's identity or a captured image.
 
-// rail_intents is deliberately NOT in the register even though the spec lists it
+// provider_intents is deliberately NOT in the register even though the spec lists it
 // as Class A, and the distinction is the single most valuable thing tier 1 does:
 // moving a queued row to `status='superseded'` is a FORWARD lifecycle transition
 // on an existing status value, not a rollback of an append-only log. That is how
@@ -49,7 +49,7 @@ var NeverRollbackableTables = map[string]string{
 // forbidden is deleting the row or rewriting one that already executed, and the
 // supersede query's `status IN ('pending','failed_retryable')` predicate is what
 // holds that line.
-const railIntentsForwardOnlyReason = "forward lifecycle transition only: pending/failed_retryable -> superseded. Never deleted, never rewritten once it has executed"
+const providerIntentsForwardOnlyReason = "forward lifecycle transition only: pending/failed_retryable -> superseded. Never deleted, never rewritten once it has executed"
 
 // UnrecoverableRunKinds are destructive-run kinds whose damage no local undo can
 // reverse, mapped to what the operator must reach for instead. Refusing them by

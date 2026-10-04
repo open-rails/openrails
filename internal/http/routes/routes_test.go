@@ -144,11 +144,14 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/merchant/configuration":                                                    billing.MerchantSettingsRead,
 		"POST /v1/merchant/configuration/applications":                                      billing.MerchantSettingsUpdate,
 		"PUT /v1/merchant/webhooks/{id}/url":                                                billing.MerchantSettingsUpdate,
-		"GET /v1/merchant/payment-providers":                                                billing.MerchantPaymentProvidersRead,
-		"POST /v1/merchant/payment-providers/routing/dry-run":                               billing.MerchantPaymentProvidersRead,
-		"PUT /v1/merchant/payment-providers/{provider}":                                     billing.MerchantPaymentProvidersUpdate,
-		"DELETE /v1/merchant/payment-providers/{provider}":                                  billing.MerchantPaymentProvidersUpdate,
-		"POST /v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive":          billing.MerchantPaymentProvidersUpdate,
+		"GET /v1/merchant/psps":                                                             billing.MerchantPSPsRead,
+		"POST /v1/merchant/psps":                                                            billing.MerchantPSPsUpdate,
+		"GET /v1/merchant/psps/{psp_id}":                                                    billing.MerchantPSPsRead,
+		"PATCH /v1/merchant/psps/{psp_id}":                                                  billing.MerchantPSPsUpdate,
+		"POST /v1/merchant/psps/{psp_id}/archive":                                           billing.MerchantPSPsUpdate,
+		"POST /v1/merchant/psps/routing-preview":                                            billing.MerchantPSPsRead,
+		"POST /v1/merchant/psps/refresh":                                                    billing.MerchantSubscriptionsUpdate,
+		"GET /v1/merchant/rails":                                                            billing.MerchantPSPsRead,
 		"GET /v1/merchant/catalog/products":                                                 billing.MerchantCatalogRead,
 		"POST /v1/merchant/catalog/offers/lookup":                                           billing.MerchantCatalogRead,
 		"POST /v1/merchant/catalog/applications":                                            billing.MerchantCatalogUpdate,
@@ -194,8 +197,8 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 			keys := routeKeys(table)
 			for _, key := range []string{
 				"GET /merchant/configuration", "POST /merchant/configuration/applications", "GET /merchant/settings", "PUT /merchant/settings",
-				"GET /merchant/payment-providers", "PUT /merchant/payment-providers/{provider}", "DELETE /merchant/payment-providers/{provider}",
-				"POST /merchant/payment-providers/{provider}/accounts/{psp_id}/archive", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url",
+				"GET /merchant/psps", "POST /merchant/psps", "PATCH /merchant/psps/{psp_id}",
+				"POST /merchant/psps/{psp_id}/archive", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url",
 			} {
 				require.Contains(t, keys, key, "%s/%v", backend, writable)
 			}

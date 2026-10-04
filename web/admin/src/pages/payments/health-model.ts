@@ -2,7 +2,7 @@
 // of their results, and the list URL every tile and cell opens. The metric
 // filters and the list filters use the same names, so a drill-down carries the
 // panel's filters unchanged; only the PSP is named differently (the metrics
-// label an account, the lists take its id).
+// group by its key, the lists take its id).
 import type {
   MetricsCell,
   MetricsQuery,
@@ -23,11 +23,10 @@ export const RANGES = [
   { value: "90d", label: "Last 90 days" },
 ] as const
 
-// Scope is the page's controls: owner, PSP (id for lists, account label for
-// metrics) and the trailing range.
+// Scope is the page's controls: owner, PSP id and the trailing range.
 export interface Scope {
   owner: string
-  psp?: { id: string; account: string }
+  psp?: { id: string }
   last: string
 }
 
@@ -50,7 +49,7 @@ export const FIRST_FAILED = ["declined", "error", "missed"]
 function scoped(scope: Scope, extra: Filters = {}): Filters | undefined {
   const out: Filters = { ...extra }
   if (scope.owner) out.owner = [scope.owner]
-  if (scope.psp) out.rail_account = [scope.psp.account]
+  if (scope.psp) out.psp = [scope.psp.id]
   return Object.keys(out).length ? out : undefined
 }
 
@@ -386,14 +385,14 @@ export function recoveryCurves(
 
 export const missedQuery = (scope: Scope): MetricsQuery => ({
   measures: ["rebills_missed"],
-  by: ["miss_reason", "rail_account"],
+  by: ["miss_reason", "psp"],
   range: { last: scope.last },
   filters: scoped(scope),
 })
 
 export interface MissedRow {
   reason: string
-  account: string
+  psp: string
   count: number
 }
 
@@ -401,13 +400,13 @@ export function missedRows(result: MetricsResult | undefined): MissedRow[] {
   if (!result) return []
   const idx = indexColumns(result.columns)
   const reason = idx.dims.find((d) => d.name === "miss_reason")?.index ?? -1
-  const account = idx.dims.find((d) => d.name === "rail_account")?.index ?? -1
+  const psp = idx.dims.find((d) => d.name === "psp")?.index ?? -1
   const count = idx.measures[0]?.index ?? -1
-  if (reason < 0 || account < 0 || count < 0) return []
+  if (reason < 0 || psp < 0 || count < 0) return []
   return result.rows
     .map((r) => ({
       reason: String(r[reason] ?? ""),
-      account: String(r[account] ?? ""),
+      psp: String(r[psp] ?? ""),
       count: Number(r[count] ?? 0),
     }))
     .filter((r) => r.reason !== "" && r.count > 0)
@@ -417,13 +416,13 @@ export function missedRows(result: MetricsResult | undefined): MissedRow[] {
 // coverageQuery: how OpenRails learned of the providers' own charges.
 export const coverageQuery = (scope: Scope): MetricsQuery => ({
   measures: ["attempts"],
-  by: ["rail_account", "observed_via"],
+  by: ["psp", "observed_via"],
   range: { last: scope.last },
   filters: scoped(scope, { source: ["provider_schedule"] }),
 })
 
 export interface CoverageRow {
-  account: string
+  psp: string
   webhook: number
   pull: number
   // coverage is the share learned by webhook.
@@ -433,16 +432,16 @@ export interface CoverageRow {
 export function coverageRows(result: MetricsResult | undefined): CoverageRow[] {
   if (!result) return []
   const idx = indexColumns(result.columns)
-  const account = idx.dims.find((d) => d.name === "rail_account")?.index ?? -1
+  const psp = idx.dims.find((d) => d.name === "psp")?.index ?? -1
   const via = idx.dims.find((d) => d.name === "observed_via")?.index ?? -1
   const count = idx.measures[0]?.index ?? -1
-  if (account < 0 || via < 0 || count < 0) return []
+  if (psp < 0 || via < 0 || count < 0) return []
   const rows = new Map<string, CoverageRow>()
   for (const r of result.rows) {
-    const key = String(r[account] ?? "")
+    const key = String(r[psp] ?? "")
     let row = rows.get(key)
     if (!row) {
-      row = { account: key, webhook: 0, pull: 0, coverage: null }
+      row = { psp: key, webhook: 0, pull: 0, coverage: null }
       rows.set(key, row)
     }
     const n = Number(r[count] ?? 0)
@@ -454,7 +453,7 @@ export function coverageRows(result: MetricsResult | undefined): CoverageRow[] {
       const seen = row.webhook + row.pull
       return { ...row, coverage: seen ? row.webhook / seen : null }
     })
-    .sort((a, b) => a.account.localeCompare(b.account))
+    .sort((a, b) => a.psp.localeCompare(b.psp))
 }
 
 // --- drill-down -----------------------------------------------------------------------------
@@ -492,7 +491,7 @@ export const NMI_KINDS = [
 ] as const
 
 export const nmiHistoryQueries = (scope: Scope) => {
-  const psp: Filters = scope.psp ? { rail_account: [scope.psp.account] } : {}
+  const psp: Filters = scope.psp ? { psp: [scope.psp.id] } : {}
   const range = { last: "25m" }
   const months: MetricsQuery = {
     measures: ["nmi_history_authorizations", "nmi_history_refusal_rate"],

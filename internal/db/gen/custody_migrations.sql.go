@@ -13,7 +13,7 @@ import (
 )
 
 const countInFlightChargeIntentsForPaymentMethod = `-- name: CountInFlightChargeIntentsForPaymentMethod :one
-SELECT count(*)::bigint FROM billing.rail_intents ri
+SELECT count(*)::bigint FROM billing.provider_intents ri
 JOIN billing.subscriptions s ON s.id = ri.subscription_id
 WHERE s.merchant_id = $1::uuid AND ri.merchant_id = $1::uuid
   AND s.payment_method_id = $2::uuid
@@ -42,7 +42,7 @@ func (q *Queries) CountInFlightChargeIntentsForPaymentMethod(ctx context.Context
 }
 
 const countUnresolvedOperationsNamingPaymentMethod = `-- name: CountUnresolvedOperationsNamingPaymentMethod :one
-SELECT count(*)::bigint FROM billing.rail_intents ri
+SELECT count(*)::bigint FROM billing.provider_intents ri
 WHERE ri.merchant_id = $1::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
   AND ((CASE WHEN ri.intent_type='initial_membership' THEN ri.payload->'terms'->>'payment_method_id' ELSE ri.payload->>'payment_method_id' END) = $2::uuid::text

@@ -20,7 +20,6 @@ import (
 // The volume breaker (#679) gates ONLY these; add future destructive types here.
 var destructiveIntentTypes = map[string]struct{}{
 	TypeNMIDeleteSubscription:    {},
-	TypeNMIProviderCutover:       {},
 	TypeCCBillCancelSubscription: {}, // #696: stops rebilling irreversibly (no resume API)
 	// #674 tail: deleting a vaulted card destroys the stored instrument
 	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
@@ -107,11 +106,11 @@ func NewVolumeBreaker(d *db.DB) *VolumeBreaker { return &VolumeBreaker{db: d} }
 // serialized per merchant, and an admitted intent's attempt is recorded by
 // admit in the same transaction, so concurrent executors cannot spend one
 // remaining budget twice.
-func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingRailIntent, now time.Time, admit func(context.Context, *db.DB) error) (held bool, reason string, err error) {
+func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingProviderIntent, now time.Time, admit func(context.Context, *db.DB) error) (held bool, reason string, err error) {
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")
 	}
-	// or#862: under the since-removed RLS both counts below (rail_intents,
+	// or#862: under the since-removed RLS both counts below (provider_intents,
 	// subscriptions) came back 0 and 0 on a connection with no app.merchant_id,
 	// giving budget = max(25, 1% × 0) = 25 against executed = 0 — a breaker
 	// that could never hold, on exactly the unattended plane it exists
@@ -136,7 +135,7 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingRailIntent,
 	return held, reason, nil
 }
 
-func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.BillingRailIntent, now time.Time) (held bool, reason string, err error) {
+func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.BillingProviderIntent, now time.Time) (held bool, reason string, err error) {
 	q := d.Gen(ctx)
 
 	windowStart := now.Add(-DestructiveWindow)
@@ -158,7 +157,7 @@ func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.BillingR
 		}
 	}
 
-	executed, err := q.CountDestructiveRailIntentsExecutedSince(ctx, gen.CountDestructiveRailIntentsExecutedSinceParams{
+	executed, err := q.CountDestructiveProviderIntentsExecutedSince(ctx, gen.CountDestructiveProviderIntentsExecutedSinceParams{
 		MerchantID:  intent.MerchantID,
 		IntentTypes: DestructiveIntentTypes(),
 		Since:       windowStart.UTC(),

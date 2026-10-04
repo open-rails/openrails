@@ -125,7 +125,7 @@ func (s *Service) readPublishedProviderCredential(ctx context.Context, id billin
 			return Secret{}, err
 		}
 		if err == nil {
-			ref, err = PSPSecretRef(rail, environment, account, row.Evidence, key)
+			ref, err = PSPSecretRef(row, key)
 			if err != nil {
 				return Secret{}, err
 			}

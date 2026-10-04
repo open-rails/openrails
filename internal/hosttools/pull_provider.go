@@ -143,7 +143,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			} else {
 				for _, p := range providers {
 					if p != provider {
-						return fmt.Errorf("--provider-account %s is a %s account, but --provider includes %s", opts.PSP, provider, p)
+						return fmt.Errorf("--psp %s is a %s account, but --rail includes %s", opts.PSP, provider, p)
 					}
 				}
 			}
@@ -153,7 +153,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 
 		// #699/#788: fetchers arm from the merchant's armed rail state
 		// (psps + secret store) — the ONLY credential plane.
-		// An explicit --provider-account pins that rail to the named account
+		// An explicit --psp pins that rail to the named account
 		// (archived accounts stay addressable for drain, #655).
 		armed := reconcile.MerchantFetcherBuilder{
 			StripeClients: rt.StripeClients,
@@ -171,7 +171,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		// or#893: every armed rail carries the PSP its credentials came from.
 		// An unpinned pull used to run with NO binding at all — reading and
 		// writing the rail's mirror account-agnostically — so default to what
-		// the arming already resolved; --provider-account only overrides it.
+		// the arming already resolved; --psp only overrides it.
 		selected := map[reconcile.Provider]bool{}
 		for _, p := range providers {
 			selected[p] = true
@@ -215,7 +215,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			// authorise 3 for every other account too. Applying is one PSP at a
 			// time; planning across all of them is fine.
 			if opts.PruneExpectRows != nil && len(bindings) > 1 {
-				return fmt.Errorf("refusing to apply a prune across %d PSPs at once: --expect-rows is a per-account count. Scope it with --provider-account=<uuid> and apply one at a time", len(bindings))
+				return fmt.Errorf("refusing to apply a prune across %d PSPs at once: --expect-rows is a per-account count. Scope it with --psp=<uuid> and apply one at a time", len(bindings))
 			}
 			for provider, binding := range bindings {
 				fetcher, ok := fetchers[provider]
@@ -508,7 +508,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr string) (reconcile.Provider, reconcile.PSPBinding, error) {
 	id, err := uuid.Parse(strings.TrimSpace(pspStr))
 	if err != nil {
-		return "", reconcile.PSPBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
+		return "", reconcile.PSPBinding{}, fmt.Errorf("invalid --psp UUID: %w", err)
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {

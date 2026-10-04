@@ -13,7 +13,7 @@ import (
 )
 
 const completeCustodianMethodDelete = `-- name: CompleteCustodianMethodDelete :execrows
-UPDATE billing.rail_intents
+UPDATE billing.provider_intents
 SET status = 'succeeded', result_evidence = $1::jsonb,
     claimed_until = NULL, executed_at = $2::timestamptz,
     updated_at = $2::timestamptz, last_failure_reason = NULL
@@ -106,7 +106,7 @@ func (q *Queries) CountNativeVaultAliases(ctx context.Context, arg CountNativeVa
 const custodianMethodDeletionState = `-- name: CustodianMethodDeletionState :one
 SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
        COALESCE(bool_or(status='succeeded' AND payload->>'detach_only' IS DISTINCT FROM 'true'),false)::boolean AS erased
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id=$1::uuid
   AND custodian_id=$2::uuid
   AND intent_type='hyperswitch_method_delete'
@@ -182,7 +182,7 @@ func (q *Queries) FencePaymentMethodDeletion(ctx context.Context, arg FencePayme
 }
 
 const listMethodDeletesForArchive = `-- name: ListMethodDeletesForArchive :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND status = 'succeeded'
   AND idempotency_key IN ('hyperswitch_method_delete:' || $2::uuid::text,
                           'nmi_vault_delete:' || $2::uuid::text)
@@ -195,15 +195,15 @@ type ListMethodDeletesForArchiveParams struct {
 	PaymentMethodID uuid.UUID
 }
 
-func (q *Queries) ListMethodDeletesForArchive(ctx context.Context, arg ListMethodDeletesForArchiveParams) ([]BillingRailIntent, error) {
+func (q *Queries) ListMethodDeletesForArchive(ctx context.Context, arg ListMethodDeletesForArchiveParams) ([]BillingProviderIntent, error) {
 	rows, err := q.db.Query(ctx, listMethodDeletesForArchive, arg.MerchantID, arg.PaymentMethodID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingRailIntent
+	var items []BillingProviderIntent
 	for rows.Next() {
-		var i BillingRailIntent
+		var i BillingProviderIntent
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -273,7 +273,7 @@ func (q *Queries) LockCustodianDeletionAccount(ctx context.Context, arg LockCust
 }
 
 const lockCustodianMethodDelete = `-- name: LockCustodianMethodDelete :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND intent_type = 'hyperswitch_method_delete'
 FOR UPDATE
@@ -284,9 +284,9 @@ type LockCustodianMethodDeleteParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) LockCustodianMethodDelete(ctx context.Context, arg LockCustodianMethodDeleteParams) (BillingRailIntent, error) {
+func (q *Queries) LockCustodianMethodDelete(ctx context.Context, arg LockCustodianMethodDeleteParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, lockCustodianMethodDelete, arg.MerchantID, arg.ID)
-	var i BillingRailIntent
+	var i BillingProviderIntent
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -329,7 +329,7 @@ func (q *Queries) LockCustodianMethodHandle(ctx context.Context, lockKey string)
 }
 
 const lockNativeMethodDelete = `-- name: LockNativeMethodDelete :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND intent_type = 'nmi_vault_delete'
 FOR UPDATE
@@ -340,9 +340,9 @@ type LockNativeMethodDeleteParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) LockNativeMethodDelete(ctx context.Context, arg LockNativeMethodDeleteParams) (BillingRailIntent, error) {
+func (q *Queries) LockNativeMethodDelete(ctx context.Context, arg LockNativeMethodDeleteParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, lockNativeMethodDelete, arg.MerchantID, arg.ID)
-	var i BillingRailIntent
+	var i BillingProviderIntent
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -378,7 +378,7 @@ const nativeVaultDeletionState = `-- name: NativeVaultDeletionState :one
 SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
        COALESCE(bool_or(status='succeeded' AND
          (payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR payload->>'rail_method_ref'=$1::text)),false)::boolean AS erased
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id=$2::uuid AND psp_id=$3::uuid
   AND intent_type='nmi_vault_delete' AND payload->>'rail_customer_ref'=$4::text
 `

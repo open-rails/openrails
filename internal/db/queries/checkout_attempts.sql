@@ -45,7 +45,7 @@ SET status = 'failed', updated_at = sqlc.arg(now)::timestamptz,
       'failure_kind', sqlc.arg(kind)::text, 'failure_code', sqlc.arg(code)::text)
 WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.id = sqlc.arg(id)::uuid
   AND cs.deleted_at IS NULL AND cs.status = 'created'
-  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i
                   WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY(sqlc.arg(intent_keys)::text[]));
 
 -- name: UpdateCheckoutAttempt :execrows
@@ -229,7 +229,7 @@ AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merc
 
 -- name: CountInvalidEngineCheckoutReferences :one
 SELECT count(*) FROM billing.checkout_attempts cs
-LEFT JOIN billing.rail_intents i ON i.merchant_id=cs.merchant_id
+LEFT JOIN billing.provider_intents i ON i.merchant_id=cs.merchant_id
  AND i.payload->>'checkout_attempt_id'=cs.id::text AND i.intent_type='initial_membership'
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state ? 'initial_membership_quote'
 AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
@@ -305,7 +305,7 @@ SELECT EXISTS (
    AND (s.status IN ('created','requires_action')
      OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
    -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
+   AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
      WHERE f.merchant_id=s.merchant_id
        AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
        AND f.status IN ('failed_terminal','expired','superseded'))

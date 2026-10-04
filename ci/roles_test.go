@@ -39,7 +39,7 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		require.True(t, strings.HasSuffix(p, ":read"), "viewer is read-only: %s", p)
 	}
 	ownerOnly := []string{
-		billing.MerchantSettingsUpdate, billing.MerchantPaymentProvidersUpdate, billing.MerchantCatalogUpdate,
+		billing.MerchantSettingsUpdate, billing.MerchantPSPsUpdate, billing.MerchantCatalogUpdate,
 		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantCredentialsManage,
 		billing.MerchantMembersRead, billing.MerchantMembersManage, billing.MerchantBillingImport,
 		billing.MerchantBillingExport, billing.MerchantAdmissionsCreate, billing.MerchantCheckoutCreate,

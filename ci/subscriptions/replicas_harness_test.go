@@ -666,7 +666,7 @@ type renewalOp struct {
 func (f *fleet) collections(e *engineCase) []renewalOp {
 	f.t.Helper()
 	rows, err := f.base.pool.Query(f.t.Context(), f.q(`SELECT coalesce(payload->>'previous_period_end', ''), coalesce(payload->>'attempt', ''), status, coalesce(result_evidence::text, '')
-		FROM billing.rail_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' ORDER BY created_at, id`), subUUID(e.sub))
+		FROM billing.provider_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' ORDER BY created_at, id`), subUUID(e.sub))
 	require.NoError(f.t, err)
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[renewalOp])
 	require.NoError(f.t, err)

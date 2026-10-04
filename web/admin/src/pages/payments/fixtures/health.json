@@ -17,7 +17,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "source": "openrails",
         "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
@@ -41,7 +41,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "reason": "insufficient_funds",
         "response_code": "202",
@@ -67,7 +67,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "reason": "insufficient_funds",
         "response_code": "202",
@@ -94,7 +94,7 @@
         "owner": "engine",
         "payment_id": "pay_01a0f338-2e49-7bf0-953c-73b99890d215",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "source": "openrails",
         "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
@@ -117,7 +117,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "source": "openrails",
         "token_type": "psp_token",
@@ -138,7 +138,7 @@
         "object": "payment_attempt",
         "observed_via": "response",
         "owner": "engine",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "reason": "incorrect_cvc",
         "response_code": "200",
@@ -173,7 +173,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "reason": "insufficient_funds",
         "response_code": "202",
@@ -199,7 +199,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "reason": "insufficient_funds",
         "response_code": "202",
@@ -224,7 +224,7 @@
         "observed_via": "response",
         "owner": "engine",
         "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "source": "openrails",
         "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
@@ -242,7 +242,7 @@
     "object": "rebill_cycle",
     "outcome": "collected",
     "owner": "engine",
-    "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+    "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
     "rail": "nmi",
     "recovered_by": "dunning_retry",
     "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190"
@@ -261,7 +261,7 @@
         "object": "rebill_cycle",
         "outcome": "collected",
         "owner": "engine",
-        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "psp_id": "psp_b0382e51-d8a6-5759-8226-deb029c83d83",
         "rail": "nmi",
         "recovered_by": "dunning_retry",
         "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190"
@@ -416,7 +416,7 @@
     "coverage": {
       "query": {
         "by": [
-          "rail_account",
+          "psp",
           "observed_via"
         ],
         "filters": {
@@ -436,7 +436,7 @@
         "columns": [
           {
             "kind": "dimension",
-            "name": "rail_account"
+            "name": "psp"
           },
           {
             "kind": "dimension",
@@ -517,7 +517,7 @@
       "query": {
         "by": [
           "miss_reason",
-          "rail_account"
+          "psp"
         ],
         "measures": [
           "rebills_missed"
@@ -535,7 +535,7 @@
           },
           {
             "kind": "dimension",
-            "name": "rail_account"
+            "name": "psp"
           },
           {
             "kind": "measure",

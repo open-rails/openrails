@@ -51,16 +51,18 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
-    first_seen_run, last_seen_run
+    first_seen_run, last_seen_run, psp_id, rail
 ) VALUES (
     sqlc.arg(merchant_id), sqlc.arg(finding_type), sqlc.arg(subject_key),
     sqlc.arg(severity), sqlc.arg(status), sqlc.narg(recommended_action),
     sqlc.narg(evidence)::jsonb,
     CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN now() ELSE NULL END,
     CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
-    sqlc.narg(run_id), sqlc.narg(run_id)
+    sqlc.narg(run_id), sqlc.narg(run_id), sqlc.narg(psp_id)::uuid,
+    -- A pull finding carries its PSP's rail (the psps FK checks they agree).
+    COALESCE((SELECT p.rail FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id) AND p.id = sqlc.narg(psp_id)::uuid), '')
 )
-ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
+ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
         WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored'
@@ -140,9 +142,10 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND (sql
 ORDER BY last_seen_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
--- name: ListActionableReconciliationFindingsByProvider :many
+-- name: ListActionablePullFindingsForPSP :many
 SELECT * FROM billing.reconciliation_findings
-WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
@@ -160,7 +163,7 @@ SET status = 'fixed',
 WHERE ctid IN (
     SELECT f.ctid FROM billing.reconciliation_findings f
     WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND f.evidence->>'provider' = sqlc.arg(provider)
+      AND f.psp_id = sqlc.arg(psp_id)::uuid
       AND f.status IN ('reconcile_required', 'requires_review')
       AND f.last_seen_run <> sqlc.arg(run_id)
       AND f.finding_type = ANY (sqlc.arg(finding_types)::text[])
@@ -170,7 +173,7 @@ WHERE ctid IN (
 -- life.provider_intent.stuck findings recover subject-first: an open finding
 -- whose intent no longer meets the stuck criteria (executed, superseded, or
 -- re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
--- detection (ListStuckRailIntents) exactly — edit together.
+-- detection (ListStuckProviderIntents) exactly — edit together.
 -- name: AutoResolveRecoveredStuckIntentFindings :execrows
 UPDATE billing.reconciliation_findings f
 SET status = 'fixed',
@@ -182,7 +185,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
   AND f.status IN ('reconcile_required', 'requires_review')
   AND NOT EXISTS (
-      SELECT 1 FROM billing.rail_intents pi
+      SELECT 1 FROM billing.provider_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
         AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz)
@@ -323,7 +326,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        entitlements_spec_snapshot, scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
-       EXISTS (SELECT 1 FROM billing.rail_intents ri
+       EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
@@ -580,7 +583,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- will not auto-retry (terminal/expired, or past their deadline) and need an
 -- operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
 -- name: ListAbandonedProviderIntents :many
-SELECT id, intent_type, status, rail FROM billing.rail_intents
+SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (
@@ -1057,7 +1060,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: CountUnknownOperations :one
 SELECT count(*)::bigint AS open_count,
        COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(created_at))), 0)::bigint AS oldest_age_seconds
-FROM billing.rail_intents
+FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status = 'unknown_needs_verify';
 

@@ -67,7 +67,7 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 		return rec
 	}
 	var create billing.CreatePaymentMethodParams
-	require.Empty(t, bind(`{"psp_id":"`+uuid.NewString()+`",`+cardBody+`}`, &create).Body.String())
+	require.Empty(t, bind(`{"psp_id":"`+billing.PSPID(uuid.New()).String()+`",`+cardBody+`}`, &create).Body.String())
 	require.Equal(t, []string{"visa", "1111", "10/27"}, []string{create.Card.Brand(), create.Card.LastFour(), create.Card.Expiry()})
 	var update billing.ReplacePaymentMethodCardParams
 	require.Empty(t, bind(`{`+cardBody+`}`, &update).Body.String())
@@ -77,7 +77,7 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 	require.NotNil(t, pay.Card)
 
 	// A card number in a field of its own is an unknown field, never echoed.
-	rec := bind(`{"psp_id":"x","card_number":"4111111111111111"}`, new(billing.CreatePaymentMethodParams))
+	rec := bind(`{"psp_id":"`+billing.PSPID(uuid.New()).String()+`","card_number":"4111111111111111"}`, new(billing.CreatePaymentMethodParams))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "unknown_field")
 	require.NotContains(t, rec.Body.String(), "4111")

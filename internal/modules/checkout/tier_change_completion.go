@@ -20,7 +20,7 @@ import (
 // writes; its operation lock remains held through the final commit.
 type tierCompletion struct {
 	db        *db.DB
-	current   gen.BillingRailIntent
+	current   gen.BillingProviderIntent
 	class     intents.OutcomeClass
 	reason    string
 	evidence  []byte
@@ -28,14 +28,14 @@ type tierCompletion struct {
 	committed bool
 }
 
-func prepareTierCompletion(ctx context.Context, d *db.DB, in gen.BillingRailIntent, outcome intents.Outcome, now time.Time) (*tierCompletion, error) {
+func prepareTierCompletion(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, outcome intents.Outcome, now time.Time) (*tierCompletion, error) {
 	if d == nil || d.Pool() != nil {
 		return nil, errors.New("tier completion requires a transaction")
 	}
 	if outcome.Class != intents.OutcomeSucceeded && outcome.Class != intents.OutcomeTerminal {
 		return nil, errors.New("tier completion requires a terminal outcome")
 	}
-	current, err := d.Gen(ctx).LockRailIntentForTierCompletion(ctx, gen.LockRailIntentForTierCompletionParams{ID: in.ID, MerchantID: in.MerchantID})
+	current, err := d.Gen(ctx).LockProviderIntentForTierCompletion(ctx, gen.LockProviderIntentForTierCompletionParams{ID: in.ID, MerchantID: in.MerchantID})
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (c *tierCompletion) commit(ctx context.Context) error {
 	return nil
 }
 
-func validateNMITierCompletion(in gen.BillingRailIntent, expected []byte, class intents.OutcomeClass) error {
+func validateNMITierCompletion(in gen.BillingProviderIntent, expected []byte, class intents.OutcomeClass) error {
 	p, err := subscriptions.DecodeNMIUpgradePayload(in)
 	if err != nil {
 		return err
@@ -161,7 +161,7 @@ func validateNMITierCompletion(in gen.BillingRailIntent, expected []byte, class 
 	return nil
 }
 
-func validateStripeTierCompletion(in gen.BillingRailIntent, expected []byte, class intents.OutcomeClass) error {
+func validateStripeTierCompletion(in gen.BillingProviderIntent, expected []byte, class intents.OutcomeClass) error {
 	p, actual, err := decodeStripeTierChange(in)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func validateStripeTierCompletion(in gen.BillingRailIntent, expected []byte, cla
 	return actual.Phases.Schedule.MatchesPhases(p.StripeSubscriptionID, in.ID.String(), p.OldStripePriceID, p.StripePriceID, currentPhase(actual.Schedule.Schedule, p).EndDate)
 }
 
-func commitTierRefusal(ctx context.Context, d *db.DB, in gen.BillingRailIntent, outcome intents.Outcome, now time.Time) intents.Outcome {
+func commitTierRefusal(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, outcome intents.Outcome, now time.Time) intents.Outcome {
 	ctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
 	err := d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

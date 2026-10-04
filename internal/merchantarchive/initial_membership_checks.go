@@ -28,7 +28,7 @@ func validateInitialEnrollmentReferences(ctx context.Context, tx pgx.Tx, mid bil
 		}
 		for _, op := range rows {
 			if err := validateInitialEnrollmentReference(ctx, q, op); err != nil {
-				return &Error{Code: "unsupported_state", Table: "rail_intents", Count: 1, Err: err}
+				return &Error{Code: "unsupported_state", Table: "provider_intents", Count: 1, Err: err}
 			}
 		}
 		id := rows[len(rows)-1].ID
@@ -36,7 +36,7 @@ func validateInitialEnrollmentReferences(ctx context.Context, tx pgx.Tx, mid bil
 	}
 }
 
-func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op gen.BillingRailIntent) error {
+func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op gen.BillingProviderIntent) error {
 	if err := intents.ValidateInitialMembershipTerminal(op); err != nil {
 		return err
 	}
@@ -107,16 +107,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		return err
 	}
 	if err := p.Terms.ValidateSubscriptionIdentity(sub, models.Rail(op.Rail), evidence.ProviderSubscriptionID); err != nil {
-		if sub.ID != p.Terms.SubscriptionID || sub.CustomerID != p.Terms.CustomerID || sub.CollectionPolicy != p.Terms.CollectionPolicy || sub.Rail != models.Rail(op.Rail) || p.NativeSchedule == nil {
-			return err
-		}
-		transitions, err := q.ListCompletedProviderCutoversForSubscription(ctx, gen.ListCompletedProviderCutoversForSubscriptionParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
-		if err != nil {
-			return err
-		}
-		if err := intents.ValidateProviderCutoverLineage(op.MerchantID, sub.ID, sub.CustomerID, p.Terms.PSPID, evidence.ProviderSubscriptionID, sub.PspID, sub.RailSubscriptionID, transitions); err != nil {
-			return err
-		}
+		return err
 	}
 	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PriceID})
 	if err != nil {

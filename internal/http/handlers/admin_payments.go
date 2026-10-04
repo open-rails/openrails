@@ -259,7 +259,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		if !adminRefundMatchesRequest(existing, req) {
 			return nil, adminRefundCodedError(http.StatusConflict, refundCodeKeyReused, "idempotency key was already used for a different refund request")
 		}
-		intent, err := txDB.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{
+		intent, err := txDB.Gen(ctx).GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{
 			MerchantID: mid.UUID(), IdempotencyKey: intents.RefundIdempotencyKey(paymentID, idempotencyKey),
 		})
 		if err == nil && (intent.PaymentID == nil || *intent.PaymentID != paymentID) {
