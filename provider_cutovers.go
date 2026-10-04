@@ -8,6 +8,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// PreviewProviderCutover reports what moving a subscription to another PSP
+// would do, without changing anything.
 func (c *Client) PreviewProviderCutover(ctx context.Context, subscriptionID billing.SubscriptionID, req billing.ProviderCutoverRequest, requestOptions ...RequestOption) (*billing.ProviderCutover, error) {
 	var out billing.ProviderCutover
 	path, err := subscriptionPath(subscriptionID)
@@ -20,6 +22,8 @@ func (c *Client) PreviewProviderCutover(ctx context.Context, subscriptionID bill
 	return &out, nil
 }
 
+// CutoverProvider moves a subscription to another PSP on the customer's
+// newly vaulted card. The same key replays the operation.
 func (c *Client) CutoverProvider(ctx context.Context, subscriptionID billing.SubscriptionID, key string, req billing.ProviderCutoverRequest, requestOptions ...RequestOption) (*billing.ProviderCutover, error) {
 	var out billing.ProviderCutover
 	path, err := subscriptionPath(subscriptionID)
@@ -35,6 +39,7 @@ func (c *Client) CutoverProvider(ctx context.Context, subscriptionID billing.Sub
 	return &out, nil
 }
 
+// GetProviderCutover reads the cutover CutoverProvider started under key.
 func (c *Client) GetProviderCutover(ctx context.Context, subscriptionID billing.SubscriptionID, key string, requestOptions ...RequestOption) (*billing.ProviderCutover, error) {
 	var out billing.ProviderCutover
 	path, err := subscriptionPath(subscriptionID)

@@ -8,6 +8,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// CatalogClient applies whole-catalog documents and reads the catalog
+// revision (Client.Catalog).
 type CatalogClient struct{ client *Client }
 
 // Apply commits one authorized batch. A declarative document (no application

@@ -13,6 +13,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// ListMerchantInvoices returns one page of the merchant's invoices matching
+// filter, and the total count.
 func (c *Client) ListMerchantInvoices(ctx context.Context, filter billing.MerchantInvoiceFilter, limit, offset int, requestOptions ...RequestOption) ([]billing.MerchantInvoiceDTO, int64, error) {
 	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
 	if filter.CustomerID != "" {
@@ -48,6 +50,7 @@ func invoicePath(id uuid.UUID) (string, error) {
 	return "/v1/merchant/invoices/" + invoice, nil
 }
 
+// GetMerchantInvoice reads one invoice.
 func (c *Client) GetMerchantInvoice(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) (*billing.MerchantInvoiceDTO, error) {
 	path, err := invoicePath(id)
 	if err != nil {
@@ -60,6 +63,8 @@ func (c *Client) GetMerchantInvoice(ctx context.Context, id uuid.UUID, requestOp
 	return &out, nil
 }
 
+// VoidInvoice voids a draft, open or past-due invoice. Repeating it changes
+// nothing.
 func (c *Client) VoidInvoice(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) (*billing.MerchantInvoiceDTO, error) {
 	path, err := invoicePath(id)
 	if err != nil {
@@ -72,6 +77,8 @@ func (c *Client) VoidInvoice(ctx context.Context, id uuid.UUID, requestOptions .
 	return &out, nil
 }
 
+// MarkInvoiceUncollectible marks an open or past-due invoice uncollectible.
+// Repeating it changes nothing.
 func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) (*billing.MerchantInvoiceDTO, error) {
 	path, err := invoicePath(id)
 	if err != nil {
@@ -84,6 +91,9 @@ func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id uuid.UUID, req
 	return &out, nil
 }
 
+// RecordInvoicePayment records money received outside automatic collection.
+// The request's Reference identifies the remittance, so a retry records it
+// once.
 func (c *Client) RecordInvoicePayment(ctx context.Context, id uuid.UUID, request billing.RecordInvoicePaymentRequest, requestOptions ...RequestOption) (*billing.MerchantInvoiceDTO, error) {
 	path, err := invoicePath(id)
 	if err != nil {
@@ -96,6 +106,8 @@ func (c *Client) RecordInvoicePayment(ctx context.Context, id uuid.UUID, request
 	return &out, nil
 }
 
+// RetryInvoiceCollection collects an open invoice now. The same
+// IdempotencyKey replays the attempt.
 func (c *Client) RetryInvoiceCollection(ctx context.Context, request billing.InvoiceCollectionRetryRequest, requestOptions ...RequestOption) (*billing.InvoiceCollectionRetryResult, error) {
 	path, err := invoicePath(request.InvoiceID)
 	if err != nil {
@@ -108,6 +120,8 @@ func (c *Client) RetryInvoiceCollection(ctx context.Context, request billing.Inv
 	return &out, nil
 }
 
+// ListInvoicePaymentAttempts returns one page of an invoice's payment
+// attempts, and the total count.
 func (c *Client) ListInvoicePaymentAttempts(ctx context.Context, id uuid.UUID, limit, offset int, requestOptions ...RequestOption) ([]billing.InvoicePaymentAttemptDTO, int64, error) {
 	path, err := invoicePath(id)
 	if err != nil {
@@ -124,6 +138,8 @@ func (c *Client) ListInvoicePaymentAttempts(ctx context.Context, id uuid.UUID, l
 	return out.Items, out.Total, nil
 }
 
+// GetCustomerInvoiceProfile reads how a customer is invoiced: payment terms,
+// collection method, PO number, tax details and billing contacts.
 func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID string, requestOptions ...RequestOption) (*billing.InvoiceProfileDTO, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
@@ -138,6 +154,8 @@ func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID strin
 	return out.Profile, nil
 }
 
+// SetCustomerInvoiceProfile replaces how a customer is invoiced (see
+// GetCustomerInvoiceProfile).
 func (c *Client) SetCustomerInvoiceProfile(ctx context.Context, customerID string, profile billing.InvoiceProfileDTO, requestOptions ...RequestOption) error {
 	path, err := customerPath(customerID)
 	if err != nil {

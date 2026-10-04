@@ -37,6 +37,7 @@ func (c *Client) OpenOperationAuthorization(ctx context.Context, req billing.Ope
 	return &out, nil
 }
 
+// GetOperationAuthorization reads one reservation by its operation ID.
 func (c *Client) GetOperationAuthorization(ctx context.Context, operationID string, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
 	path, err := providerOperationPath(operationID)
 	if err != nil {
@@ -89,6 +90,8 @@ func (c *Client) RecordProviderBillingObservation(ctx context.Context, req billi
 	return &out, nil
 }
 
+// GetProviderBillingQualification reads how far an operation's provider
+// evidence has qualified it for settlement.
 func (c *Client) GetProviderBillingQualification(ctx context.Context, operationID string, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
 	path, err := providerOperationPath(operationID)
 	if err != nil {

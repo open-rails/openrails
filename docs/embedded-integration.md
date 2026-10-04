@@ -421,8 +421,10 @@ billing is an empty slice, never an error. Deny verdicts are `(Allowed=false, ni
 error)`.
 
 `Admit` is the batch-of-one convenience on the same client in every mode.
-`openrails.WithCurrency` and `openrails.WithTimeout` configure the same call behavior
-as the remote constructor. Both modes default to a two-second call deadline;
+`openrails.WithTimeout` configures the same call behavior as the remote
+constructor; the credential and transport options (`WithAPIKey`,
+`WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient`) belong to
+`NewRemote` and `New` refuses them. Both modes default to a two-second call deadline;
 `openrails.WithTimeout(0)` explicitly delegates the deadline to the caller.
 
 Checkout creation/read/confirmation, checkout provider options and effective-tier

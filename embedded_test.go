@@ -51,6 +51,40 @@ func TestRemoteClientRefusesHostingOperations(t *testing.T) {
 	require.NoError(t, c.Close(t.Context()))
 }
 
+// New authenticates as the host over its own transport: the options that
+// configure a remote client's credential or transport are refused before
+// anything opens, never dropped.
+func TestNewRefusesRemoteOptions(t *testing.T) {
+	token := func(context.Context) (string, error) { return "t", nil }
+	for name, opt := range map[string]ClientOption{
+		"WithAPIKey":             WithAPIKey("k"),
+		"WithTokenProvider":      WithTokenProvider(token),
+		"WithHTTPClient":         WithHTTPClient(&http.Client{}),
+		"WithCredentialProvider": WithCredentialProvider(func(context.Context, CredentialTarget) (string, error) { return "t", nil }),
+	} {
+		_, err := New(t.Context(), Config{}, Deps{}, opt)
+		require.ErrorContains(t, err, "New runs in process", name)
+	}
+	_, err := New(t.Context(), Config{}, Deps{}, WithMerchantID(billing.MerchantID{}))
+	require.ErrorContains(t, err, "merchant ID must not be zero", "an invalid option fails before the engine is built")
+}
+
+// Only the Client a constructor returned owns the engine and transport.
+func TestDerivedClientCannotClose(t *testing.T) {
+	c, err := NewRemote("https://billing.example", WithAPIKey("k"))
+	require.NoError(t, err)
+	derived, err := c.With(WithTimeout(1))
+	require.NoError(t, err)
+	owner, err := c.ForCatalogOwner("author")
+	require.NoError(t, err)
+	again, err := derived.With()
+	require.NoError(t, err)
+	for _, d := range []*Client{derived, owner, again} {
+		require.ErrorContains(t, d.Close(t.Context()), "derived client")
+	}
+	require.NoError(t, c.Close(t.Context()))
+}
+
 // A catalog-owner clone is attenuated: the selector travels as a header, the
 // transport principal never becomes that subject, and nothing the clone
 // exposes can widen scope or reach admin operations.

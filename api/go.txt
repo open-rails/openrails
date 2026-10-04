@@ -1,6 +1,4 @@
 pkg openrails, const CredentialAutomation billingauth.CredentialClass = "automation"
-pkg openrails, const CredentialScopeMerchant CredentialScope = "merchant"
-pkg openrails, const CredentialScopePlatform CredentialScope = "platform"
 pkg openrails, const CredentialUserSession billingauth.CredentialClass = "user_session"
 pkg openrails, const CustomerBillingManagement config.CustomerHTTPScope = 2
 pkg openrails, const CustomerScope billingauth.Scope = "customer"
@@ -32,7 +30,6 @@ pkg openrails, func NewRemote(string, ...ClientOption) (*Client, error)
 pkg openrails, func PSPFromEnv(string, func(string) (string, bool)) (PSPConfig, error)
 pkg openrails, func WithAPIKey(string) ClientOption
 pkg openrails, func WithCredentialProvider(func(context.Context, CredentialTarget) (string, error)) ClientOption
-pkg openrails, func WithCurrency(string) ClientOption
 pkg openrails, func WithDefaultMerchant(string) ClientOption
 pkg openrails, func WithHTTPClient(*http.Client) ClientOption
 pkg openrails, func WithMerchant(string) RequestOption
@@ -50,7 +47,6 @@ pkg openrails, method (*Client) AdmitBatch(context.Context, []billing.AdmitReque
 pkg openrails, method (*Client) ArchiveProduct(context.Context, billing.ArchiveProductParams, ...RequestOption) (*billing.ProductArchive, error)
 pkg openrails, method (*Client) AuthKit() *authkit.Client
 pkg openrails, method (*Client) AuthenticateUser(*http.Request) (Identity, error)
-pkg openrails, method (*Client) Balance(context.Context, string, ...RequestOption) (*billing.BalanceResponse, error)
 pkg openrails, method (*Client) CancelPlanMigration(context.Context, uuid.UUID, ...RequestOption) (*billing.PlanMigrationCancelResult, error)
 pkg openrails, method (*Client) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionRequest, ...RequestOption) error
 pkg openrails, method (*Client) Capture(context.Context, string, int64, *billing.CaptureUsage, ...RequestOption) (*billing.CaptureReceipt, error)
@@ -363,11 +359,9 @@ pkg openrails, type CredentialClass = billingauth.CredentialClass
 pkg openrails, type CredentialClass string
 pkg openrails, type CredentialPosture = config.CredentialPosture
 pkg openrails, type CredentialPosture string
-pkg openrails, type CredentialScope string
 pkg openrails, type CredentialTarget struct
 pkg openrails, type CredentialTarget struct, MerchantID billing.MerchantID
 pkg openrails, type CredentialTarget struct, MerchantSlug string
-pkg openrails, type CredentialTarget struct, Scope CredentialScope
 pkg openrails, type CustodianAccountConfig = config.CustodianAccountConfig
 pkg openrails, type CustodianAccountConfig struct
 pkg openrails, type CustodianAccountConfig struct, AccountID string `yaml:"account_id,omitempty" koanf:"account_id"`

@@ -37,20 +37,21 @@ type Client struct {
 	merchantSlug          string
 	ownCatalog            bool
 	catalogOwner          string
-	currency              string
-	client                *http.Client
-	timeout               time.Duration
-	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
-	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
-	// mint failure errors the call so the problem surfaces instead of being
-	// masked.
+	// derived marks a Client made from another (With, ForCatalogOwner): it
+	// shares the engine and transport and does not own their lifecycle.
+	derived bool
+	client  *http.Client
+	timeout time.Duration
+	// tokenFn mints the per-call Bearer (a host-signed AuthKit service JWT or
+	// an OpenRails-issued API key). It is the sole credential; a mint failure
+	// fails the call.
 	tokenFn      func(context.Context) (string, error)
 	credentialFn func(context.Context, CredentialTarget) (string, error)
 	// setupErr records invalid static options until construction validates them.
 	setupErr error
 }
 
-// ClientOption configures NewRemote.
+// ClientOption configures a Client: New, NewRemote and Client.With take them.
 type ClientOption func(*Client)
 
 // WithOwnCatalog selects creator-catalog endpoints for the catalog methods.
@@ -91,23 +92,15 @@ func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(r *Client) { r.client = hc }
 }
 
-// WithCurrency sets the client-level currency used by Balance and by requests
-// that leave their currency empty. Empty currency is rejected by service routes.
-func WithCurrency(currency string) ClientOption {
-	return func(r *Client) { r.currency = normalizeCurrency(currency) }
-}
-
-// WithTokenProvider supplies the per-call Bearer minting function. REQUIRED for
-// any authenticated deployment: without it every call fails with a descriptive
-// error (the mintless tokenFn pattern from go-client, #411).
+// WithTokenProvider supplies the function that mints the Bearer token for
+// each call. Every client needs a credential: without one NewRemote fails. A
+// mint failure fails the call.
 func WithTokenProvider(fn func(context.Context) (string, error)) ClientOption {
 	return func(r *Client) { r.tokenFn, r.credentialFn = fn, nil }
 }
 
-// WithAPIKey authenticates every call with a static OpenRails API key — sugar
-// over WithTokenProvider for the blessed static-credential case. An empty key
-// fails each call with a descriptive error instead of erroring at construction
-// (the mintless tokenFn pattern).
+// WithAPIKey authenticates every call with a static OpenRails API key. An
+// empty key fails construction.
 func WithAPIKey(key string) ClientOption {
 	key = strings.TrimSpace(key)
 	return func(c *Client) {
@@ -156,14 +149,15 @@ func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 }
 
 // With returns a client sharing c's transport, and an embedded client's engine,
-// with opts applied: another default merchant or currency, a timeout, or a
-// customer's own credential (WithTokenProvider) over the in-process transport.
-// Closing either closes the shared engine.
+// with opts applied: another default merchant, a timeout, or a customer's own
+// credential (WithTokenProvider) over the in-process transport. c keeps the
+// lifecycle: Close the Client that New or NewRemote returned, not this one.
 func (c *Client) With(opts ...ClientOption) (*Client, error) {
 	if c == nil {
 		return nil, invalidErr("client is required")
 	}
 	derived := *c
+	derived.derived = true
 	derived.setupErr = nil
 	for _, opt := range opts {
 		if opt != nil {
@@ -198,19 +192,17 @@ func validateBaseURL(baseURL string) error {
 	return nil
 }
 
-// Verify is an authenticated readiness probe (the db.Ping pattern): one cheap
-// authenticated GET that proves both reachability AND credential validity.
-// Constructors stay I/O-free; hosts that want fail-fast-at-boot call Verify in
-// main. It reads /v1/merchant/settings, so the credential needs the merchant
-// settings:read permission (any merchant-owner API key has it). Errors map to
-// the canonical sentinels: ErrUnauthorized (bad credential), ErrUnreachable
-// (transport/5xx), etc.
+// Verify proves the server is reachable and the credential valid with one
+// authenticated read of the merchant settings (so the credential needs
+// merchant:settings:read). Constructors do no I/O; call it at boot to fail
+// fast. A bad credential is billing.ErrUnauthorized; an unreachable server
+// or a 5xx is billing.ErrUnreachable.
 func (c *Client) Verify(ctx context.Context, requestOptions ...RequestOption) error {
 	return c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, nil, requestOptions...)
 }
 
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
-// matches ErrInvalid identically to the embedded transport (#338).
+// matches ErrInvalid identically to the embedded transport.
 func invalidErr(msg string) error {
 	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
 }
@@ -281,13 +273,11 @@ func (c *Client) bearer(ctx context.Context, target CredentialTarget) (string, e
 	return strings.TrimSpace(tok), nil
 }
 
-// DepositCredits implements Client (handler ServiceDepositCredits).
+// DepositCredits adds credit to a customer's balance. SourceID identifies the
+// deposit: an identical retry returns the existing transaction, and one whose
+// amount, currency or expiry differs is billing.ErrIdempotencyKeyReused.
 func (c *Client) DepositCredits(ctx context.Context, req billing.DepositCreditsRequest, requestOptions ...RequestOption) (*billing.CreditTransaction, error) {
-	currency := normalizeCurrency(req.Currency)
-	if currency == "" {
-		currency = normalizeCurrency(c.currency)
-	}
-	req.Currency = currency
+	req.Currency = normalizeCurrency(req.Currency)
 	var out billing.CreditTransaction
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/deposit", req, &out, requestOptions...); err != nil {
 		return nil, err
@@ -295,8 +285,8 @@ func (c *Client) DepositCredits(ctx context.Context, req billing.DepositCreditsR
 	return &out, nil
 }
 
-// GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
-// never committed returns an error matching ErrNotFound.
+// GetDeposit reads the deposit DepositCredits committed under sourceID; one
+// that never committed is billing.ErrNotFound.
 func (c *Client) GetDeposit(ctx context.Context, customerID string, sourceID string, requestOptions ...RequestOption) (*billing.CreditTransaction, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
@@ -346,8 +336,8 @@ func admissionActionPath(requestID, action string) string {
 	return "/v1/merchant/admissions/" + segment + "/" + action
 }
 
-// Release implements Client (handler ServiceReleaseHold). Idempotent on the
-// request_id. Used when the work fails after a successful authorize/admit.
+// Release frees the hold of an admission whose work failed. It is idempotent
+// on the request ID.
 func (c *Client) Release(ctx context.Context, requestID string, requestOptions ...RequestOption) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("request_id is required")
@@ -370,25 +360,8 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 	return c.do(ctx, http.MethodPost, path, body, nil, requestOptions...)
 }
 
-// Balance implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) Balance(ctx context.Context, customerID string, requestOptions ...RequestOption) (*billing.BalanceResponse, error) {
-	customer, err := requireCustomerID(customerID)
-	if err != nil {
-		return nil, err
-	}
-	q := url.Values{}
-	q.Set("customer_id", customer)
-	if c.currency != "" {
-		q.Set("currency", c.currency)
-	}
-	var out billing.BalanceResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
+// GetCreditAccount reads a customer's balance, holds and owed amount in one
+// currency.
 func (c *Client) GetCreditAccount(ctx context.Context, customerID string, currency string, requestOptions ...RequestOption) (*billing.CreditAccount, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
@@ -404,7 +377,8 @@ func (c *Client) GetCreditAccount(ctx context.Context, customerID string, curren
 	return &out, nil
 }
 
-// UsageRollup implements Client (handler ServiceUsageRollup).
+// UsageRollup returns a customer's spend between from and to, grouped by
+// groupBy.
 func (c *Client) UsageRollup(ctx context.Context, customerID string, currency string, from, to time.Time, groupBy string, requestOptions ...RequestOption) ([]billing.UsageRollupRow, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
@@ -426,7 +400,7 @@ func (c *Client) UsageRollup(ctx context.Context, customerID string, currency st
 	return resp.Rows, nil
 }
 
-// GetTrustLevel implements Client (handler ServiceGetTrustLevel, #477).
+// GetTrustLevel returns a customer's trust tier in one currency.
 func (c *Client) GetTrustLevel(ctx context.Context, customerID string, currency string, requestOptions ...RequestOption) (string, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
@@ -445,7 +419,8 @@ func (c *Client) GetTrustLevel(ctx context.Context, customerID string, currency 
 	return resp.TrustLevel, nil
 }
 
-// ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
+// ReportWastedSpend records spend a customer wasted (failed or abusive work)
+// against their wasted-spend windows. Source and SourceID identify the report.
 func (c *Client) ReportWastedSpend(ctx context.Context, report billing.WastedSpendReport, requestOptions ...RequestOption) (*billing.WastedSpendResponse, error) {
 	var out billing.WastedSpendResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", report, &out, requestOptions...); err != nil {
@@ -454,18 +429,15 @@ func (c *Client) ReportWastedSpend(ctx context.Context, report billing.WastedSpe
 	return &out, nil
 }
 
-// RecordUsage implements Client (handler ServiceRecordUsage, #797).
+// RecordUsage records one usage event. The event's identity makes a retry
+// record and charge it once; a retry with a different amount is refused.
 func (c *Client) RecordUsage(ctx context.Context, report billing.UsageReport, requestOptions ...RequestOption) error {
-	currency := normalizeCurrency(report.Currency)
-	if currency == "" {
-		currency = normalizeCurrency(c.currency)
-	}
-	report.Currency = currency
-
+	report.Currency = normalizeCurrency(report.Currency)
 	return c.do(ctx, http.MethodPost, "/v1/merchant/usage/report", report, nil, requestOptions...)
 }
 
-// SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
+// SetCreditLimit sets how much a customer may owe in arrears, in the
+// currency's native units.
 func (c *Client) SetCreditLimit(ctx context.Context, customerID string, currency string, creditLimit int64, requestOptions ...RequestOption) error {
 	if _, err := requireCustomerID(customerID); err != nil {
 		return err
@@ -474,7 +446,8 @@ func (c *Client) SetCreditLimit(ctx context.Context, customerID string, currency
 	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil, requestOptions...)
 }
 
-// GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
+// GetCreditLimit returns how much a customer may owe in arrears, in the
+// currency's native units.
 func (c *Client) GetCreditLimit(ctx context.Context, customerID string, currency string, requestOptions ...RequestOption) (int64, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
@@ -510,9 +483,8 @@ func (c *Client) Admit(ctx context.Context, request billing.AdmitRequest, reques
 	return nil, fmt.Errorf("openrails: admission returned neither a decision nor an error")
 }
 
-// AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
-// itself answers 200 with positional per-item verdicts; batch-level validation
-// (empty / oversized) is the server's, so both transports reject identically.
+// AdmitBatch decides several admissions in one call and returns one verdict
+// per request, in order. A refused item is a verdict, not an error.
 func (c *Client) AdmitBatch(ctx context.Context, items []billing.AdmitRequest, requestOptions ...RequestOption) ([]billing.AdmitBatchVerdict, error) {
 	var out struct {
 		Items []billing.AdmitBatchVerdict `json:"items"`
@@ -590,8 +562,8 @@ func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID stri
 	return c.do(ctx, http.MethodPut, path, delegation, nil, requestOptions...)
 }
 
-// DeleteCustomerSpendDelegation revokes exactly one delegation (or#911); a
-// missing grant returns ErrNotFound.
+// DeleteCustomerSpendDelegation revokes one delegation; a missing one is
+// billing.ErrNotFound.
 func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID string, scope, scopeKey string, requestOptions ...RequestOption) error {
 	path, err := customerPath(customerID)
 	if err != nil {
@@ -628,8 +600,7 @@ func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, 
 	return out, nil
 }
 
-// ListEntitlements implements Client as the single-subject form of
-// ListActiveEntitlements.
+// ListEntitlements is ListActiveEntitlements for one subject.
 func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time, requestOptions ...RequestOption) ([]billing.EntitlementRecord, error) {
 	if strings.TrimSpace(subject) == "" {
 		return nil, invalidErr("subject is required")
@@ -655,9 +626,8 @@ func (c *Client) HasEntitlement(ctx context.Context, subject string, entitlement
 	return access[entitlement], nil
 }
 
-// ListCustomersWithEntitlement implements Client (handler
-// ServiceGetCustomersWithEntitlement). It walks the keyset-paginated reverse
-// route to completion.
+// ListCustomersWithEntitlement returns every customer holding entitlement at
+// the given time (zero means now). It reads all pages.
 func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, requestOptions ...RequestOption) ([]string, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
@@ -691,7 +661,8 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 	return all, nil
 }
 
-// ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
+// ResourceRevenueDaily returns a resource's revenue per day between from and
+// to.
 func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time, requestOptions ...RequestOption) (*billing.ResourceRevenueResponse, error) {
 	body := map[string]any{
 		"resource": strings.TrimSpace(resource),

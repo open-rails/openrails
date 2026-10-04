@@ -26,6 +26,7 @@ func (c *Client) ForCatalogOwner(subject string) (*Client, error) {
 		return nil, &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients cannot change owner"}}
 	}
 	scoped := *c
+	scoped.derived = true
 	scoped.ownCatalog = true
 	scoped.catalogOwner = subject
 	scoped.initResources()
@@ -58,6 +59,7 @@ func (c *Client) EnsureCatalogForOwner(ctx context.Context, subject string, requ
 	return &out, nil
 }
 
+// GetCatalog reads one catalog by ID with merchant-administrator authority.
 func (c *Client) GetCatalog(ctx context.Context, id billing.CatalogID, requestOptions ...RequestOption) (*billing.Catalog, error) {
 	key, err := requireTypedID("catalog_id", id)
 	if err != nil {

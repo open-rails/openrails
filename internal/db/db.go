@@ -153,7 +153,7 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
 // host keeps ownership of its pool; Close() is a no-op for it. schema is the
-// OpenRails Postgres schema (config.DBConfig.SchemaName()); when it differs from
+// OpenRails Postgres schema (config.SchemaName); when it differs from
 // the default, runtime queries are rewritten to it (#471) — essential here
 // because OpenRails shares the host's pool and cannot repoint its search_path.
 func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {

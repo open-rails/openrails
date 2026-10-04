@@ -223,3 +223,20 @@ func TestRemoteApplicationTokenType(t *testing.T) {
 	_, err = cp.ResolveRemoteApplication(context.Background(), "  ")
 	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }
+
+// Fleet aggregates refuse an out-of-range window; they never substitute one.
+func TestFleetAggregatesRefuseOutOfRangeWindows(t *testing.T) {
+	var cp *ControlPlane
+	for _, days := range []int{0, -1, 366} {
+		_, err := cp.FleetAnalytics(t.Context(), billing.MerchantID{}, days)
+		require.ErrorIs(t, err, billing.ErrInvalid, days)
+	}
+	for _, weeks := range []int{0, 3, 53} {
+		_, err := cp.FleetTimeseries(t.Context(), billing.MerchantID{}, weeks)
+		require.ErrorIs(t, err, billing.ErrInvalid, weeks)
+	}
+	_, err := cp.FleetAnalytics(t.Context(), billing.MerchantID{}, 365)
+	require.NotErrorIs(t, err, billing.ErrInvalid)
+	_, err = cp.FleetTimeseries(t.Context(), billing.MerchantID{}, 4)
+	require.NotErrorIs(t, err, billing.ErrInvalid)
+}

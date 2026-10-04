@@ -23,6 +23,8 @@ import (
 // ErrRemoteClient refuses an operation only an embedded Client (New) offers.
 var ErrRemoteClient = errors.New("openrails: not available on a remote client")
 
+var errDerivedClose = errors.New("openrails: Close on a derived client; close the Client that New or NewRemote returned")
+
 func init() {
 	engine.Of = func(client any) *engine.Engine {
 		if c, ok := client.(*Client); ok && c != nil {
@@ -47,8 +49,23 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 // references it cannot confirm within seconds finish in the background, and
 // Ready fails until they do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
-// opts apply as they do to NewRemote (WithCurrency, WithTimeout, ...).
+// opts are the options that make sense in process (WithTimeout, a default
+// merchant, WithOwnCatalog). The credential and transport options belong to
+// NewRemote and are refused: New authenticates as the host itself. For a
+// customer's own credential over the same engine, use Client.With.
 func New(ctx context.Context, cfg Config, deps Deps, opts ...ClientOption) (*Client, error) {
+	requested := &Client{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(requested)
+		}
+	}
+	if requested.setupErr != nil {
+		return nil, requested.setupErr
+	}
+	if requested.client != nil || requested.tokenFn != nil || requested.credentialFn != nil {
+		return nil, fmt.Errorf("openrails: New runs in process and takes no WithHTTPClient, WithAPIKey, WithTokenProvider or WithCredentialProvider; use Client.With for a customer's own credential")
+	}
 	e, err := engine.New(ctx, cfg, deps)
 	if err != nil {
 		return nil, err
@@ -91,10 +108,15 @@ func (c *Client) Start(ctx context.Context) error {
 
 // Close stops the workers and closes the engine, leaving the host's pool,
 // Redis and Vault clients open. On a remote client it releases idle
-// connections.
+// connections. Only the Client that New or NewRemote returned closes: one
+// derived from it (With, ForCatalogOwner) shares its engine and transport, and
+// Close on it changes nothing and returns an error.
 func (c *Client) Close(ctx context.Context) error {
 	if c == nil {
 		return nil
+	}
+	if c.derived {
+		return errDerivedClose
 	}
 	if c.engine == nil {
 		c.client.CloseIdleConnections()
@@ -235,8 +257,9 @@ const QueueBilling = riverjobs.QueueBilling
 type InvoiceSweepArgs struct {
 	// Collect runs the collection pass over open receivables.
 	Collect bool `json:"collect,omitempty"`
-	// CollectionThresholdAmount overrides the merchant's collection trigger
-	// (minor units); 0 keeps the merchant setting.
+	// CollectionThresholdAmount overrides the merchant's collection trigger,
+	// in the currency's native units (micros for fiat); 0 keeps the merchant
+	// setting.
 	CollectionThresholdAmount int64 `json:"collection_threshold_amount,omitempty"`
 	// UseMonthlyFloor collects down to the merchant's monthly floor instead of
 	// its collection threshold.
@@ -263,12 +286,11 @@ func (c *Client) DeclarePSP(ctx context.Context, merchantID billing.MerchantID, 
 	return hosttools.DeclarePSP(ctx, e.App, merchantID, declaration)
 }
 
-// The Tx operations run the same commands as their Client counterparts inside
-// tx, a transaction from the host's pool on the engine's database, for provider
-// obligations that must commit atomically with host rows. OpenRails binds the
-// declared merchant and never commits or rolls tx back; after an error the
-// host rolls back. Embedded only.
-
+// OpenOperationAuthorizationTx is OpenOperationAuthorization inside tx, a
+// transaction from the host's pool on the engine's database, so a provider
+// obligation commits atomically with host rows. OpenRails binds the declared
+// merchant and never commits or rolls tx back; after an error the host rolls
+// back. Embedded only: a remote client returns ErrRemoteClient.
 func (c *Client) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	e, err := c.embedded()
 	if err != nil {
@@ -277,6 +299,8 @@ func (c *Client) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, re
 	return e.OpenOperationAuthorizationTx(ctx, tx, req)
 }
 
+// GetOperationAuthorizationTx is GetOperationAuthorization inside tx (see
+// OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.OperationAuthorization, error) {
 	e, err := c.embedded()
 	if err != nil {
@@ -285,6 +309,8 @@ func (c *Client) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, ope
 	return e.GetOperationAuthorizationTx(ctx, tx, operationID)
 }
 
+// ReleaseOperationAuthorizationTx is ReleaseOperationAuthorization inside tx
+// (see OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	e, err := c.embedded()
 	if err != nil {
@@ -293,6 +319,8 @@ func (c *Client) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx,
 	return e.ReleaseOperationAuthorizationTx(ctx, tx, req)
 }
 
+// RecordProviderBillingObservationTx is RecordProviderBillingObservation inside
+// tx (see OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
 	e, err := c.embedded()
 	if err != nil {
@@ -301,6 +329,8 @@ func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.
 	return e.RecordProviderBillingObservationTx(ctx, tx, req)
 }
 
+// GetProviderBillingQualificationTx is GetProviderBillingQualification inside
+// tx (see OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {
 	e, err := c.embedded()
 	if err != nil {

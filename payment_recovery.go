@@ -48,6 +48,8 @@ func (c *Client) RetrySubscriptionNow(ctx context.Context, request billing.Retry
 	return &out, nil
 }
 
+// GetMyInvoice reads one of the customer's own invoices. Like PayInvoiceNow
+// it needs the customer's own credential.
 func (c *Client) GetMyInvoice(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) (*billing.InvoiceDTO, error) {
 	value, err := requireUUID("invoice_id", id)
 	if err != nil {
@@ -60,6 +62,8 @@ func (c *Client) GetMyInvoice(ctx context.Context, id uuid.UUID, requestOptions 
 	return &out, nil
 }
 
+// GetMySubscription reads one of the customer's own subscriptions. Like
+// PayInvoiceNow it needs the customer's own credential.
 func (c *Client) GetMySubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	value, err := requireTypedID("subscription_id", id)
 	if err != nil {

@@ -16,7 +16,7 @@ import (
 // gates it behind platform-superadmin authority and audits every request.
 // exclude removes one merchant from every aggregate (a hosted platform passes
 // its own platform merchant); zero excludes nothing. windowDays outside 1..365
-// falls back to 30. Calling without an attached control plane is a wiring error
+// is refused. Calling without an attached control plane is a wiring error
 // (call Attach/AttachWithOptions first).
 func FleetAnalytics(ctx context.Context, a *app.App, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
 	cp := Get(a)

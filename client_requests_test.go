@@ -343,7 +343,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"effective tier":      func(id string) error { _, err := c.ResolveEffectiveTier(ctx, id, "group"); return err },
 		"invoice profile":     func(id string) error { _, err := c.GetCustomerInvoiceProfile(ctx, id); return err },
 		"set invoice profile": func(id string) error { return c.SetCustomerInvoiceProfile(ctx, id, billing.InvoiceProfileDTO{}) },
-		"balance":             func(id string) error { _, err := c.Balance(ctx, id); return err },
 		"credit account":      func(id string) error { _, err := c.GetCreditAccount(ctx, id, "USD"); return err },
 		"usage rollup":        func(id string) error { _, err := c.UsageRollup(ctx, id, "USD", now, now, "day"); return err },
 		"trust level":         func(id string) error { _, err := c.GetTrustLevel(ctx, id, "USD"); return err },

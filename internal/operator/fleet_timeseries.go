@@ -13,8 +13,8 @@ import (
 // snapshot's trend companion, under the same SearchMerchants (#226) doctrine: the CALLER
 // gates it behind platform-superadmin authority and audits every request.
 // exclude removes one merchant from every series (a hosted platform passes its
-// own platform merchant); zero excludes nothing. weeks outside 4..52 falls
-// back to 12. Calling without an attached control plane is a wiring error
+// own platform merchant); zero excludes nothing. weeks outside 4..52 is
+// refused. Calling without an attached control plane is a wiring error
 // (call Attach/AttachWithOptions first).
 func FleetTimeseries(ctx context.Context, a *app.App, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
 	cp := Get(a)

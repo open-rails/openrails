@@ -68,13 +68,13 @@ type FleetAnalytics struct {
 // FleetAnalytics aggregates the fleet snapshot. exclude removes one merchant
 // from every aggregate (the platform merchant itself, so its self-billing book
 // never counts as fleet processing volume); zero means exclude nothing.
-// windowDays outside 1..365 falls back to 30.
+// windowDays outside 1..365 is refused (billing.ErrInvalid).
 func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude billing.MerchantID, windowDays int) (*FleetAnalytics, error) {
+	if windowDays < 1 || windowDays > 365 {
+		return nil, invalidRange("windowDays", 1, 365)
+	}
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for fleet analytics")
-	}
-	if windowDays < 1 || windowDays > 365 {
-		windowDays = 30
 	}
 	since := time.Now().UTC().AddDate(0, 0, -windowDays)
 	var excludeArg *uuid.UUID

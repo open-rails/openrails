@@ -29,7 +29,7 @@ func observe(r *http.Request) observedRequest {
 // targetCredential mints a credential naming the requested target, so the
 // header proves which selector reached the credential provider.
 func targetCredential(_ context.Context, target CredentialTarget) (string, error) {
-	if target.Scope != CredentialScopeMerchant || (target.MerchantSlug == "") == target.MerchantID.IsZero() {
+	if (target.MerchantSlug == "") == target.MerchantID.IsZero() {
 		return "", fmt.Errorf("target must name exactly one merchant: %+v", target)
 	}
 	if target.MerchantSlug != "" {

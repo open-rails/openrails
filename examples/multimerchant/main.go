@@ -41,7 +41,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := openrails.Migrate(ctx, db, cfg); err != nil {
 		return err
 	}
-	bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db}, openrails.WithCurrency("USD"))
+	bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db})
 	if err != nil {
 		return err
 	}

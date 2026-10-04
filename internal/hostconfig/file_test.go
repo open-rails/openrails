@@ -1,8 +1,10 @@
 package hostconfig
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/stretchr/testify/require"
@@ -62,4 +64,24 @@ func TestPort(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, ok, Validate(cfg) == nil, value)
 	}
+}
+
+// config.example.yaml is the documented file: every key in it must still load.
+func TestConfigExampleLoads(t *testing.T) {
+	example, err := filepath.Abs(filepath.Join("..", "..", "config.example.yaml"))
+	require.NoError(t, err)
+	bootEnv(t)
+	unsetenv(t, "TEST_MODE")
+	unsetenv(t, "PROVIDER_WRITE_MODE")
+	cfg, err := Load(example)
+	require.NoError(t, err)
+	require.Equal(t, "0.0.0.0", cfg.Host)
+	require.Equal(t, 3053, cfg.Port)
+	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
+	require.Equal(t, billing.ProviderWriteModeFull, cfg.ProviderWriteMode)
+	require.Equal(t, "http://localhost:3053", cfg.Auth.Issuer)
+	require.True(t, cfg.Auth.AllowEphemeralSigningKey)
+	require.Equal(t, 2160*time.Hour, *cfg.Auth.Naming.FormerNames.Duration)
+	require.Equal(t, 1200, (*cfg.RateLimits)["webhook"].RequestsPerMinute)
+	require.Contains(t, cfg.DB.URL, "@localhost:5434/openrails_db")
 }

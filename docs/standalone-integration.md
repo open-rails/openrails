@@ -163,7 +163,6 @@ embedded mode:
 client, err := openrails.NewRemote("https://openrails.example",
     openrails.WithAPIKey(os.Getenv("OPENRAILS_API_KEY")), // or WithTokenProvider for minted JWTs
     openrails.WithMerchantID(merchantID),                 // immutable merchant binding
-    openrails.WithCurrency("USD"),
     openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
 )
 if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
@@ -184,7 +183,8 @@ receipt, err := client.Capture(ctx, requestID, 43_000, &billing.CaptureUsage{Eve
 
 Options: `WithAPIKey`, `WithTokenProvider` (per-call minted bearer),
 `WithMerchantID` ([client-merchant-binding.md](client-merchant-binding.md)),
-`WithCurrency`, `WithTimeout`, `WithHTTPClient`. The constructor validates
+`WithTimeout`, `WithHTTPClient`. Every request carries its own currency. The
+constructor validates
 static configuration without I/O; `Verify` is the live check.
 
 **Errors** are canonical sentinels (`errors.Is` works identically against a

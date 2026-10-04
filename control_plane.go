@@ -195,7 +195,8 @@ func (c *Client) SubjectHasVaultedPaymentMethod(ctx context.Context, vaultMercha
 }
 
 // FleetAnalytics returns cross-merchant aggregates over the last windowDays
-// (1..365, else 30), excluding one merchant. The caller gates and audits it.
+// (1..365; anything else is billing.ErrInvalid), excluding one merchant. The
+// caller gates and audits it.
 func (c *Client) FleetAnalytics(ctx context.Context, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
 	a, _, err := c.controlPlane()
 	if err != nil {
@@ -204,8 +205,9 @@ func (c *Client) FleetAnalytics(ctx context.Context, exclude billing.MerchantID,
 	return operator.FleetAnalytics(ctx, a, exclude, windowDays)
 }
 
-// FleetTimeseries returns the weekly fleet trend (4..52 weeks, else 12),
-// excluding one merchant. The caller gates and audits it.
+// FleetTimeseries returns the weekly fleet trend over 4..52 weeks (anything
+// else is billing.ErrInvalid), excluding one merchant. The caller gates and
+// audits it.
 func (c *Client) FleetTimeseries(ctx context.Context, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
 	a, _, err := c.controlPlane()
 	if err != nil {

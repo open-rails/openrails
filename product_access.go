@@ -23,6 +23,8 @@ func productAccessCustomerPath(id string) (string, error) {
 	return "/v1/merchant/users/" + customer.String() + "/product-access", nil
 }
 
+// Check reports whether a customer currently has access to one product,
+// named by exactly one of ProductID and ProductKey.
 func (s *ProductAccessClient) Check(ctx context.Context, params *billing.ProductAccessCheckParams, requestOptions ...RequestOption) (*billing.ProductAccessCheck, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
@@ -107,6 +109,7 @@ func validProductKey(key string) bool {
 	return strings.TrimSpace(key) != "" && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }
 
+// List returns one page (1..100) of the products a customer has access to.
 func (s *ProductAccessClient) List(ctx context.Context, params *billing.ProductAccessListParams, requestOptions ...RequestOption) (*billing.ProductAccessList, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
