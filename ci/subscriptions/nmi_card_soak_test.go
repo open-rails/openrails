@@ -88,7 +88,7 @@ func TestNMISavedCardVerificationRefused(t *testing.T) {
 	c := w.newCustomer()
 	vaults := func() int { return len(w.nmi.Vaults()) }
 	before := vaults()
-	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"],
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi",
 		"payment_token": w.nmi.Tokenize(card{Brand: "visa", Last4: "0119", Decline: "200"}), "name_on_card": "Refused Payer"})
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
 	require.Equal(t, "card_declined", errorCode(body))

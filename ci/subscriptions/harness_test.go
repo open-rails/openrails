@@ -670,7 +670,7 @@ func (c *customer) saveCard(rail string, card card) string {
 		return confirmed["payment_method_id"].(string)
 	case "nmi":
 		token := c.w.nmi.Tokenize(card)
-		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": c.w.psp["nmi"], "payment_token": token, "name_on_card": "E2E Payer"}))
+		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "payment_token": token, "name_on_card": "E2E Payer"}))
 		return saved["id"].(string)
 	}
 	c.w.t.Fatalf("unknown rail %s", rail)
