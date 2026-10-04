@@ -52,7 +52,6 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.listPayments(),
     () => client.listInvoices(),
     () => client.getInvoice("inv_1"),
-    () => client.getStatus(),
     () => client.createCheckoutSession({ priceKey: "monthly" }),
   ]
   for (const call of calls) await call().catch(() => undefined)
@@ -62,5 +61,5 @@ it("calls only routes OpenRails mounts for customers", async () => {
     return !routes.some((r) => r.method === method && r.pattern.test(path))
   })
   expect(missing).toEqual([])
-  expect(called.size).toBe(25)
+  expect(called.size).toBe(24)
 })

@@ -59,8 +59,8 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 
 	overflow := base
 	overflow.Records = []ProviderBillingRecord{
-		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Hour), AmountUSDMicros: math.MaxInt64, TimeBilledMS: 1},
-		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Minute), AmountUSDMicros: 1, TimeBilledMS: 1},
+		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Hour), Amount: math.MaxInt64, TimeBilledMS: 1},
+		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Minute), Amount: 1, TimeBilledMS: 1},
 	}
 	_, err = prepareProviderBillingObservation(overflow)
 	require.ErrorContains(t, err, "total USD micros overflow")
@@ -68,7 +68,7 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 	negative := base
 	negative.Records = []ProviderBillingRecord{{
 		ProviderResourceID: base.Lifecycle.ProviderResourceID,
-		BucketStart:        now.Add(-time.Hour), AmountUSDMicros: -1, TimeBilledMS: 1,
+		BucketStart:        now.Add(-time.Hour), Amount: -1, TimeBilledMS: 1,
 	}}
 	prepared, err = prepareProviderBillingObservation(negative)
 	require.NoError(t, err)

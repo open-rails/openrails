@@ -166,7 +166,7 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 			return Decision{}, err
 		}
 		usage, err := q.AdmissionWindowUsage(ctx, gen.AdmissionWindowUsageParams{
-			MerchantID: mid.UUID(), PayerID: in.Customer, Currency: in.Currency,
+			MerchantID: mid.UUID(), CustomerID: in.Customer, Currency: in.Currency,
 			WindowKey: key, WindowStart: start, WindowEnd: end, AsOf: now,
 		})
 		if err != nil {
@@ -183,7 +183,7 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		return Decision{}, err
 	}
 	row, err := q.InsertAdmissionOperation(ctx, gen.InsertAdmissionOperationParams{
-		MerchantID: mid.UUID(), RequestID: in.RequestID, PayerID: in.Customer,
+		MerchantID: mid.UUID(), RequestID: in.RequestID, CustomerID: in.Customer,
 		Currency: in.Currency, EstimatedAmount: in.Cost, Terms: body,
 		AvailableAmount:    capacity - in.Cost,
 		RequestedExpiresAt: expiry, AdmittedAt: now, WindowKeys: keys,
@@ -221,7 +221,7 @@ func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput)
 func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decision, error) {
 	field := ""
 	switch {
-	case row.PayerID != in.Customer:
+	case row.CustomerID != in.Customer:
 		field = "payer"
 	case row.Currency != in.Currency:
 		field = "currency"
@@ -297,7 +297,7 @@ func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(cont
 		if err != nil {
 			return err
 		}
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: row.PayerID}); err != nil {
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: row.CustomerID}); err != nil {
 			return err
 		}
 		row, err = q.LockAdmissionOperation(ctx, gen.LockAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})

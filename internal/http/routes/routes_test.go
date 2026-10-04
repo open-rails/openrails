@@ -100,27 +100,28 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/merchant/customers/{customer_id}/delinquency":                              p,
 		"GET /v1/merchant/delinquency":                                                      p,
 		"GET /v1/merchant/customers/{customer_id}/payment-settlement-status":                billing.MerchantPaymentsRead,
-		"PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert":                 w,
+		"PUT /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}":    w,
 		"DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": w,
 		"DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}":                  w,
 		"POST /v1/merchant/customers/{customer_id}/payments/off-channel":                    w,
 		"POST /v1/merchant/customers/{customer_id}/entitlements":                            w,
 		"PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}":               w,
 		"PUT /v1/merchant/customers/{customer_id}/invoice-profile":                          w,
-		"POST /v1/merchant/customers/{customer_id}/credits":                                 billing.MerchantCreditsGrant,
-		"DELETE /v1/merchant/customers/{customer_id}/credits/{grant_id}":                    billing.MerchantCreditsRevoke,
-		"POST /v1/merchant/credits/deposit":                                                 billing.MerchantCreditsGrant,
-		"GET /v1/merchant/credits/deposit":                                                  p,
-		"PUT /v1/merchant/credit-limit":                                                     billing.MerchantCreditsGrant,
+		"POST /v1/merchant/customers/{customer_id}/credit-grants":                           billing.MerchantCreditsGrant,
+		"POST /v1/merchant/customers/{customer_id}/credit-grants/{grant_id}/revoke":         billing.MerchantCreditsRevoke,
+		"GET /v1/merchant/customers/{customer_id}/credit-grants":                            p,
+		"PUT /v1/merchant/customers/{customer_id}/credit-limit":                             billing.MerchantCreditsGrant,
+		"PUT /v1/merchant/customers/{customer_id}/trust-level":                              w,
 		"POST /v1/merchant/checkout-sessions":                                               billing.MerchantCheckoutCreate,
 		"POST /v1/merchant/hosted-checkout-sessions":                                        billing.MerchantCheckoutCreate,
 		"GET /v1/merchant/checkout-sessions/{id}":                                           p,
 		"POST /v1/merchant/admissions":                                                      billing.MerchantAdmissionsCreate,
-		"POST /v1/merchant/admissions/{id}/capture":                                         billing.MerchantAdmissionsCreate,
+		"POST /v1/merchant/admissions/{request_id}/capture":                                 billing.MerchantAdmissionsCreate,
+		"GET /v1/merchant/admissions/{request_id}":                                          billing.MerchantUsageRead,
 		"POST /v1/merchant/provider-operations":                                             billing.MerchantAdmissionsCreate,
 		"GET /v1/merchant/provider-operations/{operation_id}":                               billing.MerchantUsageRead,
-		"POST /v1/merchant/usage/report":                                                    billing.MerchantAdmissionsCreate,
-		"POST /v1/merchant/usage/rollup":                                                    billing.MerchantUsageRead,
+		"POST /v1/merchant/usage-events":                                                    billing.MerchantAdmissionsCreate,
+		"GET /v1/merchant/customers/{customer_id}/usage":                                    billing.MerchantUsageRead,
 		"GET /v1/merchant/payments":                                                         billing.MerchantPaymentsRead,
 		"POST /v1/merchant/payments/{id}/refunds":                                           billing.MerchantPaymentsRefund,
 		"POST /v1/merchant/purchase-reviews/{id}/resolve":                                   billing.MerchantPaymentsRefund,
@@ -242,7 +243,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 
 		keys = all
 		require.Contains(t, keys, "GET /merchant/customers/{customer_id}/rate-overrides")
-		require.Contains(t, keys, "POST /merchant/customers/{customer_id}/credits", "credit grants are not catalog authoring")
+		require.Contains(t, keys, "POST /merchant/customers/{customer_id}/credit-grants", "credit grants are not catalog authoring")
 		for _, method := range []string{http.MethodPut, http.MethodDelete} {
 			require.Equal(t, allow, slices.Contains(keys, method+" /merchant/customers/{customer_id}/rate-overrides/{meter_key}"))
 		}

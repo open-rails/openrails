@@ -229,7 +229,6 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `GET /billing/v1/me/status` | are they premium right now, and on which subscription |
 | `GET /billing/v1/me/entitlements/active` | everything they currently have access to |
 | `GET /billing/v1/me/tier` | their effective tier in a tier group |
 | `GET /billing/v1/me/products`, `/me/products/{id}/access` | products they own; access to one |

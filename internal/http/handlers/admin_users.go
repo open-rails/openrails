@@ -2,55 +2,20 @@ package handlers
 
 import (
 	"net/http"
-	"strings"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/query"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
 
 type adminUserPath struct {
 	UserID string `uri:"customer_id" binding:"required"`
-}
-
-// adminUserBillingProfile is the composite admin user-detail (#528): one read
-// returns the user's billing sections so admins don't fan out across dedicated
-// per-section endpoints. Every section is the shared Client DTO the dedicated
-// route serves.
-type AdminUserBillingProfile struct {
-	CustomerID     billing.CustomerID           `json:"customer_id"`
-	Email          *string                      `json:"email,omitempty"`
-	TrustLevel     string                       `json:"trust_level,omitempty"`
-	Subscriptions  []billing.Subscription       `json:"subscriptions"`
-	Entitlements   []billing.EntitlementRecord  `json:"entitlements"`
-	Payments       []billing.Payment            `json:"payments"`
-	PaymentMethods []PaymentMethodResponse      `json:"payment_methods"`
-	CreditBalance  []adminCreditBalanceResponse `json:"credit_balance"`
-	ProductAccess  []billing.ProductAccessGrant `json:"product_access"`
-}
-
-// adminCreditBalanceResponse is one currency's balance on the profile; the
-// amounts are native units as decimal strings (docs/money-wire.md).
-type adminCreditBalanceResponse struct {
-	Currency              string `json:"currency"`
-	TrustLevel            string `json:"trust_level,omitempty"`
-	DisplayName           string `json:"display_name"`
-	Unit                  string `json:"unit"`
-	DecimalPlaces         int    `json:"decimal_places"`
-	Balance               int64  `json:"balance,string"`
-	HeldBalance           int64  `json:"held_balance,string"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount,string"`
 }
 
 // adminProfileSubscriptionWindow bounds the profile's subscriptions section to
@@ -63,54 +28,52 @@ type adminSubscriptionPath struct {
 
 type AdminCancelSubscriptionRequest = billing.CancelSubscriptionRequest
 
-func GetAdminUserBillingProfile(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+// GetCustomerBillingProfile is one customer's billing at a glance: each
+// section is the shape its own route serves.
+func GetCustomerBillingProfile(r *httprequest.Request) {
+	customerID, ok := customerParam(r)
+	if !ok {
 		return
 	}
-	customerID := identity.CustomerIDFromString(path.UserID)
-	if customerID.UUID() == uuid.Nil {
-		// CustomerIDFromString coerces empty/non-UUID input to the zero id, which
-		// this caller must reject (#784): otherwise a malformed customer_id path
-		// segment (e.g. "does-not-exist") returns a 200 empty profile coerced to
-		// the zero UUID instead of a 400. A well-formed but never-seen id is still
-		// a valid (empty) profile by design — customers are implicit.
-		r.ErrorJSON(http.StatusBadRequest, "invalid customer id")
+	svc, ok := billingService(r)
+	if !ok {
 		return
 	}
 	ctx := r.Request.Context()
+	customer, err := svc.GetCustomer(ctx, customerID)
+	if err != nil {
+		writeRefusal(r, err, "customer read failed")
+		return
+	}
 	now := r.Clock.Now()
-	profile := AdminUserBillingProfile{
-		CustomerID:     billing.CustomerID(customerID),
+	subject := customerID.String()
+	profile := billing.CustomerBillingProfile{
+		Customer:       *customer,
+		Balances:       []billing.Balance{},
 		Subscriptions:  []billing.Subscription{},
 		Entitlements:   []billing.EntitlementRecord{},
 		Payments:       []billing.Payment{},
-		PaymentMethods: []PaymentMethodResponse{},
-		CreditBalance:  []adminCreditBalanceResponse{},
+		PaymentMethods: []billing.PaymentMethod{},
 		ProductAccess:  []billing.ProductAccessGrant{},
 	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "merchant scope required")
-		return
-	}
-	email, err := r.State.DB.Gen(ctx).GetLatestCustomerEmail(ctx, gen.GetLatestCustomerEmailParams{
-		CustomerID: customerID.UUID(),
-		MerchantID: merchantID.UUID(),
-	})
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load customer email")
-		return
-	}
-	if email != "" {
-		profile.Email = &email
+	if r.State.MoneyService != nil {
+		balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, customerID)
+		if err != nil {
+			r.InternalError("failed to load balances", err)
+			return
+		}
+		for _, bal := range balances {
+			balance, err := svc.GetBalance(ctx, customerID, bal.Currency)
+			if err != nil {
+				r.InternalError("failed to load balance", err)
+				return
+			}
+			profile.Balances = append(profile.Balances, *balance)
+		}
 	}
 	if r.State.SubscriptionService != nil {
-		// Every non-deleted subscription, newest first, with its status: an
-		// admin 360 that hid pending/past_due/cancelled/unknown rows forced
-		// hosts to fan out to GET /subscriptions?user_id= to see them.
-		subs, _, err := r.State.SubscriptionService.GetPaginatedByUserID(ctx, path.UserID, 1, adminProfileSubscriptionWindow)
+		// The customer's most recent subscriptions of any status.
+		subs, _, err := r.State.SubscriptionService.GetPaginatedByUserID(ctx, subject, 1, adminProfileSubscriptionWindow)
 		if err == nil {
 			for i := range subs {
 				sub := &subs[i]
@@ -119,7 +82,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		}
 	}
 	if r.State.EntitlementService != nil {
-		ents, err := r.State.EntitlementService.ListActiveRecords(ctx, path.UserID, now)
+		ents, err := r.State.EntitlementService.ListActiveRecords(ctx, subject, now)
 		if err == nil {
 			for i := range ents {
 				profile.Entitlements = append(profile.Entitlements, entitlementRecordFromModel(&ents[i]))
@@ -127,7 +90,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		}
 	}
 	if r.State.PaymentService != nil {
-		payments, err := r.State.PaymentService.GetByUserID(ctx, path.UserID)
+		payments, err := r.State.PaymentService.GetByUserID(ctx, subject)
 		if err == nil {
 			for _, p := range payments {
 				profile.Payments = append(profile.Payments, PaymentToAPI(p, nil))
@@ -135,76 +98,20 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		}
 	}
 	if r.State.PaymentMethodService != nil {
-		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, path.UserID); err == nil && len(pms) > 0 {
-			// Collection defaults are an enrichment of this section, not the
-			// point of the profile: a loader failure used to 500 the whole
-			// composite and blank the host's admin view. Degrade to the
-			// methods without defaults; GetAdminUserPaymentMethods keeps the
-			// hard failure.
+		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, subject); err == nil && len(pms) > 0 {
+			// Collection defaults enrich this section; a loader failure keeps
+			// the methods without them rather than failing the profile.
 			methods := paymentMethodsToAPI(pms, paymentMethodCharges(r, pms))
 			stampDefaultPaymentMethod(r, pms, methods)
 			if err := applyCollectionDefaults(r, customerID, pms, methods); err != nil {
-				log.WithError(err).WithField("user_id", path.UserID).
+				log.WithError(err).WithField("customer_id", subject).
 					Warn("failed to load collection payment method defaults; profile payment methods returned without them")
 			}
 			profile.PaymentMethods = methods
 		}
 	}
-	if r.State.MoneyService != nil {
-		payer := identity.CustomerIDFromString(path.UserID)
-		if !payer.IsZero() {
-			// or#864: no invented currency. Trust level is per (payer,
-			// currency); an absent query param used to silently mean USD, so a
-			// EUR-only customer's profile reported a USD trust level as if it
-			// were theirs. The top-level field is now populated ONLY when the
-			// caller names a currency, and every balance carries its OWN trust
-			// level below — strictly more information, none of it guessed.
-			if currency := strings.TrimSpace(r.Query("currency")); currency != "" {
-				if err := moneyutil.ValidateCurrency(currency); err != nil {
-					r.ErrorJSON(http.StatusBadRequest, err.Error())
-					return
-				}
-				if trustLevel, err := r.State.MoneyService.GetTrustLevel(ctx, payer, currency); err == nil {
-					profile.TrustLevel = trustLevel
-				}
-			}
-			balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, payer)
-			if err != nil {
-				log.WithError(err).WithField("user_id", path.UserID).Error("failed to load credit balances")
-				r.ErrorJSON(http.StatusInternalServerError, "failed to load credit balances")
-				return
-			}
-			for _, bal := range balances {
-				decimals, err := money.CurrencyDecimals(bal.Currency)
-				if err != nil {
-					r.ErrorJSON(http.StatusInternalServerError, "failed to resolve credit currency")
-					return
-				}
-				var owed int64
-				balanceTrust := ""
-				owed, err = r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
-				if err != nil {
-					r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
-					return
-				}
-				if tl, err := r.State.MoneyService.GetTrustLevel(ctx, payer, bal.Currency); err == nil {
-					balanceTrust = tl
-				}
-				profile.CreditBalance = append(profile.CreditBalance, adminCreditBalanceResponse{
-					Currency:              bal.Currency,
-					TrustLevel:            balanceTrust,
-					DisplayName:           bal.Currency,
-					Unit:                  bal.Currency,
-					DecimalPlaces:         decimals,
-					Balance:               bal.Balance,
-					HeldBalance:           bal.HeldBalance,
-					OutstandingOwedAmount: owed,
-				})
-			}
-		}
-	}
 	if svc := productAccessService(r); svc != nil {
-		if grants, err := svc.ListAllGrantsByUser(ctx, path.UserID); err == nil && len(grants) > 0 {
+		if grants, err := svc.ListAllGrantsByUser(ctx, subject); err == nil && len(grants) > 0 {
 			profile.ProductAccess = productAccessResponses(r, grants)
 		}
 	}

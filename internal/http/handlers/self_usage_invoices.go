@@ -6,34 +6,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
+// GetMyUsage reports the customer's own usage.
 func GetMyUsage(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
-	if !ok {
-		return
-	}
-	from, to, ok := selfUsageWindow(r)
-	if !ok {
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	rows, err := svc.GetUsage(r.Request.Context(), payer, currency, from, to)
-	if err != nil {
-		writeRefusal(r, err, "usage unavailable")
-		return
-	}
-	r.SuccessJSON(map[string]any{"usage": rows, "currency": currency, "from": from, "to": to})
+	getUsage(r, payer)
 }
 
 func GetMyInvoices(r *httprequest.Request) {
@@ -95,30 +80,57 @@ func selfLimitOffset(r *httprequest.Request, def int) (int, int) {
 	return limit, offset
 }
 
-func selfUsageWindow(r *httprequest.Request) (time.Time, time.Time, bool) {
+// usageWindow reads ?from= and ?to= (RFC 3339 or a date); the default is
+// the month before now.
+func usageWindow(r *httprequest.Request) (time.Time, time.Time, bool) {
 	to := r.Clock.Now().UTC()
 	from := to.AddDate(0, -1, 0)
-	if raw := r.Request.URL.Query().Get("from"); raw != "" {
+	for _, bound := range []struct {
+		name string
+		into *time.Time
+	}{{"from", &from}, {"to", &to}} {
+		raw := r.Request.URL.Query().Get(bound.name)
+		if raw == "" {
+			continue
+		}
 		parsed, err := parseSelfTime(raw)
 		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid from")
+			r.APIError(api.Coded(billing.CodeInvalidQuery, bound.name+" is not a time").WithParam(bound.name))
 			return time.Time{}, time.Time{}, false
 		}
-		from = parsed
-	}
-	if raw := r.Request.URL.Query().Get("to"); raw != "" {
-		parsed, err := parseSelfTime(raw)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid to")
-			return time.Time{}, time.Time{}, false
-		}
-		to = parsed
+		*bound.into = parsed.UTC()
 	}
 	if !from.Before(to) {
-		r.ErrorJSON(http.StatusBadRequest, "from must be before to")
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "from must be before to").WithParam("from"))
 		return time.Time{}, time.Time{}, false
 	}
 	return from, to, true
+}
+
+// getUsage answers a customer's usage report.
+func getUsage(r *httprequest.Request, customer billing.CustomerID) {
+	from, to, ok := usageWindow(r)
+	if !ok {
+		return
+	}
+	query := r.Request.URL.Query()
+	params := billing.UsageParams{Currency: query.Get("currency"), From: from, To: to, GroupBy: billing.UsageGroupBy(query.Get("group_by"))}
+	switch params.GroupBy {
+	case "", billing.UsageByEventType, billing.UsageByResource, billing.UsageByInvoker, billing.UsageByFunction, billing.UsageByTier:
+	default:
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "group_by must be event_type, resource, invoker, function or tier").WithParam("group_by"))
+		return
+	}
+	svc, ok := billingService(r)
+	if !ok {
+		return
+	}
+	usage, err := svc.GetUsage(r.Request.Context(), customer, params)
+	if err != nil {
+		writeMoneyError(r, err, "usage read failed")
+		return
+	}
+	r.SuccessJSON(usage)
 }
 
 func parseSelfTime(raw string) (time.Time, error) {

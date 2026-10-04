@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -59,22 +60,22 @@ type RecordUsageInput struct {
 // a non-zero Amount) via money.RecordUsage (#289/#797). Idempotent on
 // (merchant, payer, currency, usage:<event_type>, source, source_id); a replay
 // carrying a different Amount returns money.ErrIdempotencyKeyReused.
-func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
+func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billing.UsageEvent, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return pinErr
+		return nil, pinErr
 	}
 	defer release()
 
 	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
+		return nil, fmt.Errorf("service not initialized")
 	}
 	if in.CustomerID.IsZero() {
-		return fmt.Errorf("payer required")
+		return nil, fmt.Errorf("customer_id required")
 	}
 	cur, err := requireCurrency(in.Currency)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	metadata := in.Metadata
 	if in.Resource = strings.TrimSpace(in.Resource); in.Resource != "" {
@@ -86,7 +87,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 		}
 	}
 	payer := in.CustomerID
-	_, err = s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
+	ev, err := s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
 		Payer:      &payer,
 		Invoker:    strings.TrimSpace(in.Invoker),
 		Currency:   cur,
@@ -97,7 +98,19 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 		Metadata:   metadata,
 		OccurredAt: in.OccurredAt,
 	})
-	return err
+	if err != nil {
+		return nil, err
+	}
+	out := &billing.UsageEvent{
+		ID: billing.UsageEventID(ev.ID), CustomerID: billing.CustomerID(ev.CustomerID), Invoker: ev.Invoker, Currency: ev.Currency,
+		EventType: ev.EventType, Dimensions: ev.Dimensions, Amount: ev.Amount, Resource: ev.Resource, Metadata: ev.Metadata,
+		Source: ev.Source, SourceID: ev.SourceID, OccurredAt: ev.OccurredAt, CreatedAt: ev.CreatedAt, Replayed: ev.Replayed,
+	}
+	if ev.LedgerTransferID != nil {
+		txn := billing.CreditTransactionID(*ev.LedgerTransferID)
+		out.CreditTransactionID = &txn
+	}
+	return out, nil
 }
 
 // FinalizeInvoice closes the rating window [from, to) for one payer: the

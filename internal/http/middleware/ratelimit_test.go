@@ -273,7 +273,7 @@ func TestCaptchaChallenges(t *testing.T) {
 		h := engine(deps, okHandler())
 		call{path: "/v1/me/payment-methods", ip: ip, want: 403, body: "captcha_required"}.do(t, h)
 		call{method: "GET", path: "/v1/merchant/findings", ip: ip, want: 200}.do(t, h)
-		call{path: "/v1/merchant/credits/deposit", ip: ip, want: 200}.do(t, h)
+		call{path: "/v1/merchant/admissions", ip: ip, want: 200}.do(t, h)
 	})
 
 	// Without a captcha to solve, neither a challenged subject nor a merchant's

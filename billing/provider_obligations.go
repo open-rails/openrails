@@ -5,17 +5,16 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Provider obligations reserve customer capacity for one provider operation and
-// settle it from immutable provider observations. Amounts are exact integer USD
-// micros. Callers never supply a rated customer amount: OpenRails qualifies the
-// evidence, rates it, and posts the one final settlement.
+// settle it from immutable provider observations. Amounts are native units of
+// the authorization's currency, USD for now. Callers never supply a rated
+// customer amount: OpenRails qualifies the evidence, rates it, and posts the
+// one final settlement.
 
 // ProviderBillingObservationMaxBytes bounds the canonical JSON encoding of one
-// ProviderBillingObservationRequest in every deployment, so a request accepted
+// ProviderBillingObservationParams in every deployment, so a request accepted
 // embedded also fits the HTTP body limit. An adapter whose provider response
 // cannot fit submits ProviderBillingRefusalResponseTooLarge instead.
 const ProviderBillingObservationMaxBytes = 768 << 10
@@ -48,46 +47,53 @@ const (
 	OperationAuthorizationSettled  OperationAuthorizationState = "settled"
 )
 
-// OperationAuthorizationRequest is exact host-authored authority for one
-// provider operation. OperationID is also the provider operation's idempotency
-// identity. OpenRails verifies the digest but never parses AuthorizationBody.
-type OperationAuthorizationRequest struct {
+// OperationAuthorizationParams is exact host-authored authority for one
+// provider operation, reserving Amount of the customer's capacity in
+// Currency (USD is the only currency accepted for now). OperationID is also
+// the provider operation's idempotency identity. OpenRails verifies the
+// digest but never parses AuthorizationBody.
+type OperationAuthorizationParams struct {
 	OperationID             string     `json:"operation_id"` // canonical, at most 255 bytes
-	Payer                   CustomerID `json:"payer"`
+	CustomerID              CustomerID `json:"customer_id"`
 	RecordOwner             string     `json:"record_owner"` // canonical, at most 255 bytes
-	AuthorizedUSDMicros     int64      `json:"authorized_usd_micros,string"`
+	Currency                string     `json:"currency"`
+	Amount                  int64      `json:"amount,string"`
 	ClaimReference          string     `json:"claim_reference"`    // canonical, at most 1024 bytes
 	AuthorizationBody       []byte     `json:"authorization_body"` // exact bytes, 1..65536
 	AuthorizationBodySHA256 SHA256     `json:"authorization_body_sha256"`
 }
 
 // OperationAuthorization is the durable reservation. Settlement fields are
-// null until OpenRails settles qualified provider evidence.
+// null until OpenRails settles qualified provider evidence:
+// SettlementCostAmount is the qualified provider cost, SettlementAmount what
+// the customer is charged (equal under the pass-through contract, and never
+// clamped to Amount).
 type OperationAuthorization struct {
-	OperationID                     string                      `json:"operation_id"`
-	MerchantID                      uuid.UUID                   `json:"merchant_id"`
-	Payer                           CustomerID                  `json:"payer"`
-	RecordOwner                     string                      `json:"record_owner"`
-	AuthorizedUSDMicros             int64                       `json:"authorized_usd_micros,string"`
-	ClaimReference                  string                      `json:"claim_reference"`
-	AuthorizationBody               []byte                      `json:"authorization_body"`
-	AuthorizationBodySHA256         SHA256                      `json:"authorization_body_sha256"`
-	State                           OperationAuthorizationState `json:"state"`
-	TerminalReference               string                      `json:"terminal_reference"`
-	SettlementProviderCostUSDMicros *int64                      `json:"settlement_provider_cost_usd_micros,string"`
-	SettlementRatedUSDMicros        *int64                      `json:"settlement_rated_usd_micros,string"`
-	SettlementBody                  []byte                      `json:"settlement_body"`
-	SettlementBodySHA256            *SHA256                     `json:"settlement_body_sha256"`
-	CreatedAt                       time.Time                   `json:"created_at"`
-	ReleasedAt                      *time.Time                  `json:"released_at"`
-	SettledAt                       *time.Time                  `json:"settled_at"`
-	Replayed                        bool                        `json:"replayed"`
+	OperationID             string                      `json:"operation_id"`
+	MerchantID              MerchantID                  `json:"merchant_id"`
+	CustomerID              CustomerID                  `json:"customer_id"`
+	RecordOwner             string                      `json:"record_owner"`
+	Currency                string                      `json:"currency"`
+	Amount                  int64                       `json:"amount,string"`
+	ClaimReference          string                      `json:"claim_reference"`
+	AuthorizationBody       []byte                      `json:"authorization_body"`
+	AuthorizationBodySHA256 SHA256                      `json:"authorization_body_sha256"`
+	State                   OperationAuthorizationState `json:"state"`
+	TerminalReference       string                      `json:"terminal_reference"`
+	SettlementCostAmount    *int64                      `json:"settlement_cost_amount,string"`
+	SettlementAmount        *int64                      `json:"settlement_amount,string"`
+	SettlementBody          []byte                      `json:"settlement_body"`
+	SettlementBodySHA256    *SHA256                     `json:"settlement_body_sha256"`
+	CreatedAt               time.Time                   `json:"created_at"`
+	ReleasedAt              *time.Time                  `json:"released_at"`
+	SettledAt               *time.Time                  `json:"settled_at"`
+	Replayed                bool                        `json:"replayed"`
 }
 
-// ReleaseOperationAuthorizationRequest releases an open reservation after the
+// ReleaseOperationAuthorizationParams releases an open reservation after the
 // host proves the provider operation never happened. Any billing evidence
 // refuses release.
-type ReleaseOperationAuthorizationRequest struct {
+type ReleaseOperationAuthorizationParams struct {
 	OperationID      string `json:"-"`                 // carried by the route path
 	ReleaseReference string `json:"release_reference"` // canonical opaque proof, at most 1024 bytes
 }
@@ -129,11 +135,12 @@ type ProviderBillingLifecycleEvidence struct {
 }
 
 // ProviderBillingRecord is one provider-reported cost bucket, decoded exactly by
-// the provider adapter. It is evidence, not a customer charge.
+// the provider adapter, in the authorization's currency. It is evidence, not a
+// customer charge.
 type ProviderBillingRecord struct {
 	ProviderResourceID string    `json:"provider_resource_id"`
 	BucketStart        time.Time `json:"bucket_start"`
-	AmountUSDMicros    int64     `json:"amount_usd_micros,string"`
+	Amount             int64     `json:"amount,string"`
 	TimeBilledMS       int64     `json:"time_billed_ms,string"`
 }
 
@@ -153,9 +160,9 @@ type ProviderBillingObservationRefusal struct {
 	Kind ProviderBillingEvidenceRefusalKind `json:"kind"`
 }
 
-// ProviderBillingObservationRequest appends one immutable provider billing read.
+// ProviderBillingObservationParams appends one immutable provider billing read.
 // It carries no rated amount; eligible evidence settles inside the same commit.
-type ProviderBillingObservationRequest struct {
+type ProviderBillingObservationParams struct {
 	OperationID     string                             `json:"-"` // carried by the route path
 	ObservationID   string                             `json:"observation_id"`
 	Lifecycle       ProviderBillingLifecycleEvidence   `json:"lifecycle"`
@@ -167,20 +174,23 @@ type ProviderBillingObservationRequest struct {
 	Refusal         *ProviderBillingObservationRefusal `json:"refusal"`
 }
 
+// ProviderBillingQualification is whether an operation's provider evidence
+// qualifies for settlement. QualifiedCostAmount is in the authorization's
+// currency, null until eligible.
 type ProviderBillingQualification struct {
-	OperationID                    string                             `json:"operation_id"`
-	MerchantID                     uuid.UUID                          `json:"merchant_id"`
-	Lifecycle                      ProviderBillingLifecycleEvidence   `json:"lifecycle"`
-	LifecycleEvidenceSHA256        SHA256                             `json:"lifecycle_evidence_sha256"`
-	QuiescenceSeconds              int64                              `json:"quiescence_seconds"`
-	State                          ProviderBillingQualificationState  `json:"state"`
-	Reason                         ProviderBillingQualificationReason `json:"reason"`
-	BaselineObservationID          string                             `json:"baseline_observation_id"`
-	QualifiedObservationID         string                             `json:"qualified_observation_id"`
-	QualifiedProviderCostUSDMicros *int64                             `json:"qualified_provider_cost_usd_micros,string"`
-	QualifiedAt                    *time.Time                         `json:"qualified_at"`
-	Authorization                  OperationAuthorization             `json:"authorization"`
-	CreatedAt                      time.Time                          `json:"created_at"`
-	UpdatedAt                      time.Time                          `json:"updated_at"`
-	Replayed                       bool                               `json:"replayed"`
+	OperationID             string                             `json:"operation_id"`
+	MerchantID              MerchantID                         `json:"merchant_id"`
+	Lifecycle               ProviderBillingLifecycleEvidence   `json:"lifecycle"`
+	LifecycleEvidenceSHA256 SHA256                             `json:"lifecycle_evidence_sha256"`
+	QuiescenceSeconds       int64                              `json:"quiescence_seconds"`
+	State                   ProviderBillingQualificationState  `json:"state"`
+	Reason                  ProviderBillingQualificationReason `json:"reason"`
+	BaselineObservationID   string                             `json:"baseline_observation_id"`
+	QualifiedObservationID  string                             `json:"qualified_observation_id"`
+	QualifiedCostAmount     *int64                             `json:"qualified_cost_amount,string"`
+	QualifiedAt             *time.Time                         `json:"qualified_at"`
+	Authorization           OperationAuthorization             `json:"authorization"`
+	CreatedAt               time.Time                          `json:"created_at"`
+	UpdatedAt               time.Time                          `json:"updated_at"`
+	Replayed                bool                               `json:"replayed"`
 }

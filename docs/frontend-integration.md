@@ -66,10 +66,9 @@ session identity embedded). There is **no `:user_id` anywhere** — a browser cr
 can only ever act on itself. In embedded mode, prepend the mount prefix to every path.
 
 ```
-GET  /v1/me/status                        premium status: active subscription, next renewal, entitlements
 GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
-GET  /v1/me/transactions                  ledger transactions, newest first
-GET  /v1/me/usage                         metered usage rolled up by event type
+GET  /v1/me/transactions?currency=USD     credit ledger, newest first
+GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
@@ -245,7 +244,7 @@ The response's `next_action` tells the frontend what to do next:
    touch you or OpenRails) and is redirected back to your site.
 3. A provider webhook finalizes the payment server-side. Poll
    `GET /v1/me/checkout/:id` until `status: "succeeded"` (then `payment_id` /
-   `subscription_id` are set), and refresh `/v1/me/status`.
+   `subscription_id` are set), and refresh `/v1/me/entitlements/active`.
 
 **Saved-card flow** (`flow: "elements"` — Stripe; also any saved NMI card):
 1. POST the session with `payment_method_id`. The card is charged in place (customer

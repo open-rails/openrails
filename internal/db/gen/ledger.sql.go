@@ -12,26 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countLedgerTransfersByCustomer = `-- name: CountLedgerTransfersByCustomer :one
-SELECT count(*) FROM billing.ledger_transfers
-WHERE merchant_id = $1::uuid
-  AND customer_id = $2::uuid
-  AND currency = $3::text
-`
-
-type CountLedgerTransfersByCustomerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-func (q *Queries) CountLedgerTransfersByCustomer(ctx context.Context, arg CountLedgerTransfersByCustomerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countLedgerTransfersByCustomer, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getLedgerAccount = `-- name: GetLedgerAccount :one
 
 SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at FROM billing.ledger_accounts
@@ -527,28 +507,33 @@ SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, t
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
+  AND ($4::timestamptz IS NULL
+   OR (created_at, id) < ($4::timestamptz, $5::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $5::int OFFSET $4::int
+LIMIT $6::int
 `
 
 type ListLedgerTransfersByCustomerParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	Off        int32
-	Lim        int32
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
 }
 
 // ListLedgerTransfersByCustomer: a customer's money-movement history (newest
 // first, paginated) — the source for GetTransactions after the single-entry
 // money_transactions table was retired (#512 hard cut).
+// A customer's movements in one currency, newest first.
 func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLedgerTransfersByCustomerParams) ([]BillingLedgerTransfer, error) {
 	rows, err := q.db.Query(ctx, listLedgerTransfersByCustomer,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.Off,
-		arg.Lim,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

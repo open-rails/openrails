@@ -163,7 +163,7 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)

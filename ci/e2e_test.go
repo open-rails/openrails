@@ -149,9 +149,9 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 
 	customerA := uuid.NewString()
 	customerB := uuid.NewString()
-	_, err = alice.EnsureCustomer(t.Context(), customerA)
+	_, err = alice.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.CustomerParams{})
 	require.NoError(t, err)
-	_, err = bob.EnsureCustomer(t.Context(), customerB)
+	_, err = bob.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerB)), billing.CustomerParams{})
 	require.NoError(t, err)
 	_, err = alice.GrantEntitlement(t.Context(), customerA, billing.GrantEntitlementRequest{Entitlement: "content:" + productA.Key})
 	require.NoError(t, err)

@@ -46,7 +46,7 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 			InitialTransactionID: sale.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "tier-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, AmountCents: cents, Currency: "USD", OccurredAt: start}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, Amount: cents * 10_000, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)

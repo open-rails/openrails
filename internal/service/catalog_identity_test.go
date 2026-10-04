@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/stretchr/testify/require"
@@ -103,18 +104,18 @@ func TestRequireCurrencyConsultsTheRegistry(t *testing.T) {
 	}
 }
 
-func TestValidateInvokerSpendLimitInputs(t *testing.T) {
+func TestValidateSpendDelegations(t *testing.T) {
 	roleID := "22222222-2222-2222-2222-222222222222"
-	next, err := ValidateInvokerSpendLimitInputs([]InvokerSpendLimitInput{{
+	next, err := ValidateSpendDelegations([]billing.SpendDelegation{{
 		Scope: " role ", ScopeKey: " " + roleID + " ",
-		Windows: []SpendLimitWindowInput{{Key: " day ", WindowSeconds: 86400, Limit: 1000, Currency: " usd "}},
+		Windows: []billing.BudgetWindow{{Key: " day ", WindowSeconds: 86400, Limit: 1000, Currency: " usd "}},
 	}})
 	require.NoError(t, err)
-	require.Equal(t, []InvokerSpendLimitInput{{Scope: "role", ScopeKey: roleID,
-		Windows: []SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 1000, Currency: "USD"}}}}, next)
+	require.Equal(t, []billing.SpendDelegation{{Scope: "role", ScopeKey: roleID,
+		Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000, Currency: "USD"}}}}, next)
 
-	windows := []SpendLimitWindowInput{{Key: "day", WindowSeconds: 86400, Limit: 1000}}
-	_, err = ValidateInvokerSpendLimitInputs([]InvokerSpendLimitInput{
+	windows := []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000}}
+	_, err = ValidateSpendDelegations([]billing.SpendDelegation{
 		{Scope: " role ", ScopeKey: " " + roleID + " ", Windows: windows},
 		{Scope: "role", ScopeKey: roleID, Windows: windows},
 	})

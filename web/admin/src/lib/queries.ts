@@ -131,10 +131,10 @@ export const merchantQueryKeys = (): MerchantQueryKeys => {
 }
 
 export const adminQueries = {
-  customers: (q: string, limit: number, offset: number) =>
+  customers: (q: string, limit: number, cursor: string) =>
     queryOptions({
-      queryKey: [...queryKeys.customers(), { q, limit, offset }],
-      queryFn: ({ signal }) => listCustomers(q, limit, offset, signal),
+      queryKey: [...queryKeys.customers(), { q, limit, cursor }],
+      queryFn: ({ signal }) => listCustomers(q, limit, cursor, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load customers" },
     }),

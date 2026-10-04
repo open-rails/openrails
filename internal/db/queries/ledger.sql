@@ -68,18 +68,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- first, paginated) — the source for GetTransactions after the single-entry
 -- money_transactions table was retired (#512 hard cut).
 -- name: ListLedgerTransfersByCustomer :many
+-- A customer's movements in one currency, newest first.
 SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+   OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT sqlc.arg(lim)::int OFFSET sqlc.arg(off)::int;
-
--- name: CountLedgerTransfersByCustomer :one
-SELECT count(*) FROM billing.ledger_transfers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text;
+LIMIT sqlc.arg(row_limit)::int;
 
 -- GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
 -- coordinate (merchant, customer, currency, transfer_type, operation, source,

@@ -8,7 +8,7 @@ import (
 )
 
 func ServiceCheckEntitlements(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("user_id")))
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
 	if !ok {
 		return
 	}

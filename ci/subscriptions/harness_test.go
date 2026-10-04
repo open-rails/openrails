@@ -612,7 +612,7 @@ type customer struct {
 
 func (w *world) newCustomer() *customer {
 	id := uuid.NewString()
-	_, err := w.client[embedded].EnsureCustomer(w.t.Context(), id)
+	_, err := w.client[embedded].EnsureCustomer(w.t.Context(), billing.CustomerID(uuid.MustParse(id)), billing.CustomerParams{})
 	require.NoError(w.t, err)
 	return &customer{w: w, id: id, token: w.auth.token(w.t, id)}
 }

@@ -355,7 +355,7 @@ export function MeterDetailPage() {
           <p className="mt-1 max-w-3xl text-sm text-pretty text-muted-foreground">
             Creating this meter does not send events. The host application must
             report idempotent usage to{" "}
-            <code className="text-foreground">/merchant/usage/report</code> with
+            <code className="text-foreground">/merchant/usage-events</code> with
             this shape.
           </p>
         </div>

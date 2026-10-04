@@ -18,7 +18,7 @@ import (
 
 // OpenOperationAuthorization reserves capacity; commit it with the host's
 // provider obligation before calling the provider.
-func (e *Engine) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
+func (e *Engine) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (e *Engine) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, ope
 
 // ReleaseOperationAuthorization commits with the host's proven provider
 // non-creation fact. Billing evidence refuses it.
-func (e *Engine) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
+func (e *Engine) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func (e *Engine) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx,
 
 // RecordProviderBillingObservation appends provider evidence; eligible evidence
 // is rated and settled by OpenRails inside tx.
-func (e *Engine) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
+func (e *Engine) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err

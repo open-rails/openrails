@@ -8148,14 +8148,14 @@
         ]
       }
     },
-    "/v1/merchant/users/{user_id}/entitlements/check": {
+    "/v1/merchant/customers/{customer_id}/entitlements/check": {
       "post": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "user_id",
+            "name": "customer_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -8206,14 +8206,14 @@
         ]
       }
     },
-    "/v1/merchant/users/{user_id}/product-access/check": {
+    "/v1/merchant/customers/{customer_id}/product-access/check": {
       "post": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "user_id",
+            "name": "customer_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -8263,14 +8263,14 @@
         ]
       }
     },
-    "/v1/merchant/users/{user_id}/product-access": {
+    "/v1/merchant/customers/{customer_id}/product-access": {
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "user_id",
+            "name": "customer_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -8343,64 +8343,7 @@
           "tier:merchant",
           "request"
         ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/entitlements/{id}": {
-      "delete": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/product-access": {
+      },
       "post": {
         "tags": [
           "merchant"
@@ -8455,6 +8398,61 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/entitlements/{id}": {
+      "delete": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-operation-limit": "destructive",
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -8660,8 +8658,85 @@
         ]
       }
     },
+    "/v1/merchant/customers": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Customer"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/merchant/customers/{customer_id}": {
-      "put": {
+      "get": {
         "tags": [
           "merchant"
         ],
@@ -8696,14 +8771,73 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "customer_not_found",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
       },
+      "put": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-errors": [
+          "invalid_customer_id",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/billing-profile": {
       "get": {
         "tags": [
           "merchant"
@@ -8716,13 +8850,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -8731,7 +8858,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminUserBillingProfile"
+                  "$ref": "#/components/schemas/CustomerBillingProfile"
                 }
               }
             }
@@ -8748,12 +8875,12 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
-          "invalid_param"
+          "customer_not_found",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       }
     },
@@ -8778,7 +8905,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerBillingPolicyAssignment"
+                  "$ref": "#/components/schemas/CustomerBillingPolicy"
                 }
               }
             }
@@ -8796,7 +8923,8 @@
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
           "customer_not_found",
-          "invalid_param"
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -8820,7 +8948,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CustomerBillingPolicyWrite"
+                "$ref": "#/components/schemas/CustomerBillingPolicyParams"
               }
             }
           }
@@ -8831,7 +8959,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerBillingPolicyAssignment"
+                  "$ref": "#/components/schemas/CustomerBillingPolicy"
                 }
               }
             }
@@ -8850,7 +8978,9 @@
         "x-openrails-errors": [
           "billing_policy_not_found",
           "customer_not_found",
-          "invalid_param"
+          "invalid_customer_id",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -8880,7 +9010,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Delinquency"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -8897,8 +9044,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -8911,6 +9058,13 @@
           "merchant"
         ],
         "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "limit",
             "in": "query",
@@ -8933,7 +9087,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Delinquency"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -8950,6 +9121,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
+          "invalid_cursor",
           "invalid_param"
         ],
         "x-openrails-error-sets": [
@@ -8958,12 +9130,102 @@
         ]
       }
     },
-    "/v1/merchant/customers": {
+    "/v1/merchant/customers/{customer_id}/credit-grants": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreditGrantParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditGrant"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:credits:grant",
+        "x-openrails-operation-limit": "grant",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "idempotency_key_reused",
+          "invalid_customer_id",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      },
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "limit",
             "in": "query",
@@ -8972,14 +9234,7 @@
             }
           },
           {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "q",
+            "name": "source_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -8992,7 +9247,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfAdminCustomerSummary"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CreditGrant"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -9009,7 +9282,9 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -9017,10 +9292,28 @@
         ]
       }
     },
-    "/v1/me/status": {
+    "/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}": {
       "get": {
         "tags": [
-          "customer"
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -9028,7 +9321,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BillingStatus"
+                  "$ref": "#/components/schemas/CreditGrant"
                 }
               }
             }
@@ -9042,19 +9335,453 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "authentication_required",
-          "catalog_scope_mismatch"
+          "credit_grant_not_found",
+          "invalid_customer_id",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}/revoke": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeCreditGrantParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:credits:revoke",
+        "x-openrails-operation-limit": "destructive",
+        "x-openrails-errors": [
+          "credit_grant_held",
+          "credit_grant_not_found",
+          "credit_grant_unavailable",
+          "invalid_customer_id",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/transactions": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CreditTransaction"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_cursor",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/balance": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Balance"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/credit-limit": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditLimit"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      },
+      "put": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreditLimitParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditLimit"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:credits:grant",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/trust-level": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustLevel"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:read",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      },
+      "put": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustLevelParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustLevel"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
         ]
       }
     },
     "/v1/merchant/customers/{customer_id}/spend-delegations": {
-      "put": {
+      "get": {
         "tags": [
           "merchant"
         ],
@@ -9068,22 +9795,31 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CustomerSpendDelegationsDocument"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerSpendDelegationsDocument"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SpendDelegation"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -9098,18 +9834,15 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/spend-delegations:upsert": {
+      },
       "put": {
         "tags": [
           "merchant"
@@ -9128,7 +9861,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CustomerSpendDelegation"
+                "$ref": "#/components/schemas/SpendDelegationsParams"
               }
             }
           }
@@ -9139,7 +9872,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerSpendDelegation"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SpendDelegation"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -9156,8 +9907,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:update",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -9166,6 +9917,76 @@
       }
     },
     "/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": {
+      "put": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpendDelegationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendDelegation"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-errors": [
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      },
       "delete": {
         "tags": [
           "merchant"
@@ -9197,16 +10018,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -9220,633 +10033,12 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:update",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied",
+          "spend_delegation_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/invokers/{invoker}/credits": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "invoker",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/trust-level": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/credit-limit": {
-      "put": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreditLimitRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credits:grant",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreditLimitRequest"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/credits/balance": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreditAccount"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/credits/deposit": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DepositCreditsRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreditTransaction"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credits:grant",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "idempotency_key_reused",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "source_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreditTransaction"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/credits": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminGrantCreditsRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreditTransaction"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credits:grant",
-        "x-openrails-operation-limit": "grant",
-        "x-openrails-errors": [
-          "currency_unsupported",
-          "idempotency_key_reused",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/credits/{grant_id}": {
-      "delete": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "grant_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreditGrantRevocation"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credits:revoke",
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "credit_grant_held",
-          "credit_grant_not_found",
-          "credit_grant_unavailable",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/credit-transactions": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
         ]
       }
     },
@@ -9870,7 +10062,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SelfSpendLimitsDocument"
+                  "$ref": "#/components/schemas/SpendLimits"
                 }
               }
             }
@@ -9887,9 +10079,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
+          "currency_unsupported"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -9917,7 +10107,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SelfBalanceResponse"
+                  "$ref": "#/components/schemas/Balance"
                 }
               }
             }
@@ -9934,9 +10124,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
+          "currency_unsupported"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -9958,14 +10146,14 @@
             }
           },
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -9979,7 +10167,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CreditTransaction"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -9996,9 +10201,8 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
           "currency_unsupported",
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -10015,7 +10219,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceAdmitBatchRequest"
+                "$ref": "#/components/schemas/AdmitBatchParams"
               }
             }
           }
@@ -10026,8 +10230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/AdmitBatchResult"
                 }
               }
             }
@@ -10044,7 +10247,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:admissions:create",
         "x-openrails-errors": [
-          "idempotency_key_reused",
           "invalid_param"
         ],
         "x-openrails-error-sets": [
@@ -10053,27 +10255,28 @@
         ]
       }
     },
-    "/v1/merchant/wasted-spend": {
-      "post": {
+    "/v1/merchant/admissions/{request_id}": {
+      "get": {
         "tags": [
           "merchant"
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WastedSpendReport"
-              }
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
-        },
+        ],
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WastedSpendResponse"
+                  "$ref": "#/components/schemas/Admission"
                 }
               }
             }
@@ -10088,27 +10291,24 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-permission": "merchant:usage:read",
         "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "idempotency_key_reused",
-          "invalid_param"
+          "admission_not_found",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       }
     },
-    "/v1/merchant/admissions/{id}/capture": {
+    "/v1/merchant/admissions/{request_id}/capture": {
       "post": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "id",
+            "name": "request_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -10120,7 +10320,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CaptureRequest"
+                "$ref": "#/components/schemas/CaptureParams"
               }
             }
           }
@@ -10148,11 +10348,11 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:admissions:create",
         "x-openrails-errors": [
-          "authentication_required",
+          "admission_not_found",
           "idempotency_key_reused",
           "insufficient_credits",
           "invalid_param",
-          "resource_not_found"
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -10160,14 +10360,14 @@
         ]
       }
     },
-    "/v1/merchant/admissions/{id}/release": {
+    "/v1/merchant/admissions/{request_id}/release": {
       "post": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "id",
+            "name": "request_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -10181,8 +10381,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Admission"
                 }
               }
             }
@@ -10199,24 +10398,23 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:admissions:create",
         "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "resource_conflict",
-          "resource_not_found"
+          "admission_captured",
+          "admission_not_found",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
       }
     },
-    "/v1/merchant/admissions/{id}/extend": {
+    "/v1/merchant/admissions/{request_id}/extend": {
       "post": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "id",
+            "name": "request_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -10228,7 +10426,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceExtendHoldRequest"
+                "$ref": "#/components/schemas/ExtendAdmissionParams"
               }
             }
           }
@@ -10239,8 +10437,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Admission"
                 }
               }
             }
@@ -10257,9 +10454,10 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:admissions:create",
         "x-openrails-errors": [
-          "authentication_required",
+          "admission_not_found",
+          "hold_not_found",
           "invalid_param",
-          "resource_not_found"
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -10267,7 +10465,7 @@
         ]
       }
     },
-    "/v1/merchant/provider-operations": {
+    "/v1/merchant/wasted-spend": {
       "post": {
         "tags": [
           "merchant"
@@ -10276,8 +10474,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/WastedSpendParams"
               }
             }
           }
@@ -10288,8 +10485,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/WastedSpendReport"
                 }
               }
             }
@@ -10306,8 +10502,10 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:admissions:create",
         "x-openrails-errors": [
-          "insufficient_credits",
-          "invalid_param"
+          "currency_unsupported",
+          "idempotency_key_reused",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -10315,16 +10513,102 @@
         ]
       }
     },
-    "/v1/merchant/provider-operations/{operation_id}": {
+    "/v1/merchant/usage-events": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageEventParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageEvent"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageEvent"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "idempotency_key_reused",
+          "invalid_param",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/usage": {
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "operation_id",
+            "name": "customer_id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
             "schema": {
               "type": "string"
             }
@@ -10336,313 +10620,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:usage:read",
-        "x-openrails-errors": [
-          "insufficient_credits",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/provider-operations/{operation_id}/release": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "operation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "Not yet typed."
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:admissions:create",
-        "x-openrails-errors": [
-          "insufficient_credits",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/provider-operations/{operation_id}/observations": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "operation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "description": "Not yet typed."
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:admissions:create",
-        "x-openrails-errors": [
-          "insufficient_credits",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/provider-operations/{operation_id}/qualification": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "operation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:usage:read",
-        "x-openrails-errors": [
-          "insufficient_credits",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/usage/report": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UsageReport"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:admissions:create",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "idempotency_key_reused",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/usage/rollup": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServiceUsageRollupRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:usage:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/usage/resource-revenue": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServiceEndpointRevenueRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResourceRevenueResponse"
+                  "$ref": "#/components/schemas/Usage"
                 }
               }
             }
@@ -10660,7 +10638,8 @@
         "x-openrails-permission": "merchant:usage:read",
         "x-openrails-errors": [
           "currency_unsupported",
-          "invalid_param"
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -10689,6 +10668,13 @@
             }
           },
           {
+            "name": "group_by",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "to",
             "in": "query",
             "schema": {
@@ -10702,8 +10688,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Usage"
                 }
               }
             }
@@ -10720,13 +10705,269 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "authentication_required",
-          "currency_unsupported",
-          "invalid_param"
+          "currency_unsupported"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
           "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperationAuthorizationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuthorization"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-errors": [
+          "insufficient_credits",
+          "invalid_param",
+          "operation_authorization_conflict"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuthorization"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:usage:read",
+        "x-openrails-errors": [
+          "invalid_param",
+          "operation_authorization_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations/{operation_id}/release": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseOperationAuthorizationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuthorization"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-errors": [
+          "invalid_param",
+          "operation_authorization_conflict",
+          "operation_authorization_has_billing_evidence",
+          "operation_authorization_not_found",
+          "operation_authorization_not_open"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations/{operation_id}/observations": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderBillingObservationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderBillingQualification"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-errors": [
+          "insufficient_credits",
+          "invalid_param",
+          "operation_authorization_not_found",
+          "operation_authorization_not_open",
+          "provider_billing_observation_conflict",
+          "provider_billing_qualification_refused"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations/{operation_id}/qualification": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderBillingQualification"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:usage:read",
+        "x-openrails-errors": [
+          "invalid_param",
+          "provider_billing_qualification_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -15935,116 +16176,6 @@
   },
   "components": {
     "schemas": {
-      "AdminCreditBalanceResponse": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "trust_level": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "unit": {
-            "type": "string"
-          },
-          "decimal_places": {
-            "type": "integer"
-          },
-          "balance": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "held_balance": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "outstanding_owed_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "currency",
-          "display_name",
-          "unit",
-          "decimal_places",
-          "balance",
-          "held_balance",
-          "outstanding_owed_amount"
-        ]
-      },
-      "AdminCustomerSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "subject": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_seen_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "created_at",
-          "last_seen_at"
-        ]
-      },
-      "AdminGrantCreditsRequest": {
-        "type": "object",
-        "properties": {
-          "invoker": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "description": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
       "AdminOffChannelPaymentRequest": {
         "type": "object",
         "properties": {
@@ -16214,89 +16345,182 @@
           "writes_allowed"
         ]
       },
-      "AdminUserBillingProfile": {
+      "Admission": {
         "type": "object",
         "properties": {
+          "request_id": {
+            "type": "string"
+          },
           "customer_id": {
             "type": "string"
           },
-          "email": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "blocked_by": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "abuse",
+                  "budget",
+                  "money"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deny_code": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retry_after_seconds": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
             "type": "string"
           },
-          "trust_level": {
-            "type": "string"
+          "estimated_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
           },
-          "subscriptions": {
+          "start_capacity_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "state": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Subscription"
-                }
+                "type": "string",
+                "enum": [
+                  "captured",
+                  "expired",
+                  "open",
+                  "released"
+                ]
               },
               {
                 "type": "null"
               }
             ]
           },
-          "entitlements": {
+          "expires_at": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/EntitlementRecord"
-                }
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "payments": {
+          "captured_amount": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Payment"
-                }
+                "type": "string",
+                "description": "A number as a decimal string."
               },
               {
                 "type": "null"
               }
             ]
           },
-          "payment_methods": {
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "request_id",
+          "customer_id",
+          "allowed",
+          "blocked_by",
+          "deny_code",
+          "retry_after_seconds",
+          "currency",
+          "estimated_amount",
+          "start_capacity_amount",
+          "state",
+          "expires_at",
+          "captured_amount",
+          "replayed"
+        ]
+      },
+      "AdmissionVerdict": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "admission": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/PaymentMethod"
-                }
+                "$ref": "#/components/schemas/Admission"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "credit_balance": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "admission",
+          "error"
+        ]
+      },
+      "AdmitBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/AdminCreditBalanceResponse"
+                  "$ref": "#/components/schemas/AdmitParams"
                 }
               },
               {
                 "type": "null"
               }
             ]
-          },
-          "product_access": {
+          }
+        }
+      },
+      "AdmitBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/ProductAccessGrant"
+                  "$ref": "#/components/schemas/AdmissionVerdict"
                 }
               },
               {
@@ -16306,18 +16530,15 @@
           }
         },
         "required": [
-          "customer_id",
-          "subscriptions",
-          "entitlements",
-          "payments",
-          "payment_methods",
-          "credit_balance",
-          "product_access"
+          "items"
         ]
       },
-      "AdmitRequest": {
+      "AdmitParams": {
         "type": "object",
         "properties": {
+          "request_id": {
+            "type": "string"
+          },
           "customer_id": {
             "type": "string"
           },
@@ -16325,7 +16546,11 @@
             "type": "string"
           },
           "invoker_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "delegated",
+              "payer"
+            ]
           },
           "trust_level": {
             "type": "string"
@@ -16343,9 +16568,6 @@
           "accrual_rate_delta_per_hour": {
             "type": "string",
             "description": "A number as a decimal string."
-          },
-          "request_id": {
-            "type": "string"
           },
           "source": {
             "type": "string"
@@ -16776,6 +16998,49 @@
           "rows"
         ]
       },
+      "Balance": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "billing_mode": {
+            "type": "string",
+            "enum": [
+              "arrears",
+              "prepaid"
+            ]
+          },
+          "balance_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "held_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "available_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "owed_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "billing_mode",
+          "balance_amount",
+          "held_amount",
+          "available_amount",
+          "owed_amount"
+        ]
+      },
       "BillingAddress": {
         "type": "object",
         "properties": {
@@ -16909,7 +17174,7 @@
           "spend_windows": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BudgetWindowInput"
+              "$ref": "#/components/schemas/BudgetWindow"
             }
           },
           "accrual_rate_cap_per_hour": {
@@ -16936,7 +17201,7 @@
           "bad_spend_windows": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BudgetWindowInput"
+              "$ref": "#/components/schemas/BudgetWindow"
             }
           },
           "policy_currency": {
@@ -16948,34 +17213,7 @@
           "kind"
         ]
       },
-      "BillingStatus": {
-        "type": "object",
-        "properties": {
-          "has_active_subscription": {
-            "type": "boolean"
-          },
-          "subscription": {
-            "$ref": "#/components/schemas/Subscription"
-          },
-          "access": {
-            "$ref": "#/components/schemas/SubscriptionAccess"
-          },
-          "next_renewal_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "entitlements": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EntitlementRecord"
-            }
-          }
-        },
-        "required": [
-          "has_active_subscription"
-        ]
-      },
-      "BudgetWindowInput": {
+      "BudgetWindow": {
         "type": "object",
         "properties": {
           "key": {
@@ -17027,6 +17265,18 @@
           }
         }
       },
+      "CaptureParams": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/CaptureUsage"
+          }
+        }
+      },
       "CaptureReceipt": {
         "type": "object",
         "properties": {
@@ -17043,7 +17293,7 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "ledger_transfer_id": {
+          "credit_transaction_id": {
             "oneOf": [
               {
                 "type": "string"
@@ -17062,24 +17312,13 @@
           "customer_id",
           "currency",
           "amount",
-          "ledger_transfer_id",
+          "credit_transaction_id",
           "replayed"
         ]
       },
-      "CaptureRequest": {
+      "CaptureUsage": {
         "type": "object",
         "properties": {
-          "amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "event_type": {
             "type": "string"
           },
@@ -18794,45 +19033,6 @@
           }
         }
       },
-      "CreditAccount": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "billing_mode": {
-            "type": "string"
-          },
-          "balance_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "held_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "available_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "outstanding_owed_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "customer_id",
-          "currency",
-          "billing_mode",
-          "balance_amount",
-          "held_amount",
-          "available_amount",
-          "outstanding_owed_amount"
-        ]
-      },
       "CreditGrant": {
         "type": "object",
         "properties": {
@@ -18866,7 +19066,15 @@
             "description": "A number as a decimal string."
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "revoked",
+              "scheduled",
+              "spent",
+              "terminated"
+            ]
           },
           "source_type": {
             "type": "string"
@@ -18874,27 +19082,58 @@
           "source_id": {
             "type": "string"
           },
-          "reason": {
-            "type": "string"
+          "description": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "starts_at": {
             "type": "string",
             "format": "date-time"
           },
           "expires_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
             "format": "date-time"
           },
           "terminated_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "termination_reason": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replayed": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -18909,26 +19148,44 @@
           "state",
           "source_type",
           "source_id",
+          "description",
           "starts_at",
-          "created_at"
-        ]
-      },
-      "CreditGrantRevocation": {
-        "type": "object",
-        "properties": {
-          "grant": {
-            "$ref": "#/components/schemas/CreditGrant"
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "grant",
+          "expires_at",
+          "created_at",
+          "terminated_at",
+          "termination_reason",
           "replayed"
         ]
       },
-      "CreditLimitRequest": {
+      "CreditGrantParams": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "CreditLimit": {
         "type": "object",
         "properties": {
           "customer_id": {
@@ -18937,7 +19194,7 @@
           "currency": {
             "type": "string"
           },
-          "credit_limit_amount": {
+          "amount": {
             "type": "string",
             "description": "A number as a decimal string."
           }
@@ -18945,8 +19202,20 @@
         "required": [
           "customer_id",
           "currency",
-          "credit_limit_amount"
+          "amount"
         ]
+      },
+      "CreditLimitParams": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
       },
       "CreditTransaction": {
         "type": "object",
@@ -18957,49 +19226,50 @@
           "customer_id": {
             "type": "string"
           },
-          "invoker": {
-            "type": "string"
-          },
           "currency": {
             "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "expire",
+              "owed_accrual",
+              "owed_payment",
+              "owed_writeoff",
+              "reinstate",
+              "revoke",
+              "spend"
+            ]
           },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "balance_after": {
+          "credit_grant_id": {
             "oneOf": [
               {
-                "type": "string",
-                "description": "A number as a decimal string."
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "transaction_type": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "authorized": {
+          "invoker": {
             "oneOf": [
               {
-                "type": "string",
-                "description": "A number as a decimal string."
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "captured": {
+          "resource": {
             "oneOf": [
               {
-                "type": "string",
-                "description": "A number as a decimal string."
+                "type": "string"
               },
               {
                 "type": "null"
@@ -19010,66 +19280,25 @@
             "type": "string"
           },
           "source_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "description": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "string"
           },
           "created_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "replayed": {
-            "type": "boolean"
           }
         },
         "required": [
           "id",
           "customer_id",
-          "invoker",
           "currency",
+          "type",
           "amount",
-          "balance_after",
-          "transaction_type",
-          "status",
-          "authorized",
-          "captured",
+          "credit_grant_id",
+          "invoker",
+          "resource",
           "source",
           "source_id",
-          "expires_at",
-          "description",
-          "created_at",
-          "updated_at",
-          "replayed"
+          "created_at"
         ]
       },
       "CurrencyRegistry": {
@@ -19180,6 +19409,16 @@
           "id": {
             "type": "string"
           },
+          "email": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -19191,11 +19430,12 @@
         },
         "required": [
           "id",
+          "email",
           "created_at",
           "last_seen_at"
         ]
       },
-      "CustomerBillingPolicyAssignment": {
+      "CustomerBillingPolicy": {
         "type": "object",
         "properties": {
           "customer_id": {
@@ -19217,12 +19457,14 @@
           "policy_name"
         ]
       },
-      "CustomerBillingPolicyWrite": {
+      "CustomerBillingPolicyParams": {
         "type": "object",
         "properties": {
           "policy_name": {
             "oneOf": [
-              {},
+              {
+                "type": "string"
+              },
               {
                 "type": "null"
               }
@@ -19230,21 +19472,18 @@
           }
         }
       },
-      "CustomerSpendDelegation": {
+      "CustomerBillingProfile": {
         "type": "object",
         "properties": {
-          "scope": {
-            "type": "string"
+          "customer": {
+            "$ref": "#/components/schemas/Customer"
           },
-          "scope_key": {
-            "type": "string"
-          },
-          "windows": {
+          "balances": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/BudgetWindowInput"
+                  "$ref": "#/components/schemas/Balance"
                 }
               },
               {
@@ -19252,38 +19491,96 @@
               }
             ]
           },
-          "provenance": {
-            "type": "string"
+          "subscriptions": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entitlements": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/EntitlementRecord"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payments": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Payment"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_methods": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PaymentMethod"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product_access": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProductAccessGrant"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "scope",
-          "windows"
+          "customer",
+          "balances",
+          "subscriptions",
+          "entitlements",
+          "payments",
+          "payment_methods",
+          "product_access"
         ]
       },
-      "CustomerSpendDelegationsDocument": {
+      "CustomerParams": {
         "type": "object",
         "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "delegations": {
+          "email": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CustomerSpendDelegation"
-                }
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ]
           }
-        },
-        "required": [
-          "delegations"
-        ]
+        }
       },
       "Dashboard": {
         "type": "object",
@@ -19521,7 +19818,7 @@
           "success": {
             "type": "boolean"
           },
-          "amount_cents": {
+          "amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
@@ -19617,6 +19914,61 @@
           }
         }
       },
+      "Delinquency": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "current",
+              "delinquent",
+              "grace"
+            ]
+          },
+          "overdue_since": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overdue_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "overdue_invoices": {
+            "type": "integer"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "state",
+          "overdue_since",
+          "overdue_amount",
+          "overdue_invoices",
+          "entered_at",
+          "evaluated_at"
+        ]
+      },
       "DelinquencyHostEvent": {
         "type": "object",
         "properties": {
@@ -19661,51 +20013,6 @@
           "grace_days",
           "amount_floor"
         ]
-      },
-      "DepositCreditsRequest": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "description": {
-            "type": "string"
-          }
-        }
       },
       "Draft": {
         "type": "object",
@@ -20123,6 +20430,35 @@
           "orphaned"
         ]
       },
+      "ErrorDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "param": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "type",
+          "code",
+          "message"
+        ]
+      },
       "Evidence": {
         "type": "object",
         "properties": {
@@ -20141,6 +20477,15 @@
           "args",
           "summary"
         ]
+      },
+      "ExtendAdmissionParams": {
+        "type": "object",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "FindingView": {
         "type": "object",
@@ -21103,54 +21448,6 @@
           "collection_method"
         ]
       },
-      "InvokerSpendWindow": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "window_seconds": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "used": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "reserved": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "remaining": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "resets_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "scope",
-          "key",
-          "window_seconds",
-          "limit",
-          "currency",
-          "used",
-          "reserved",
-          "remaining",
-          "resets_at"
-        ]
-      },
       "Matrix": {
         "type": "object",
         "properties": {
@@ -21566,7 +21863,7 @@
           "delegated_invoker_wasted_spend_limits": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BudgetWindowInput"
+              "$ref": "#/components/schemas/BudgetWindow"
             }
           }
         }
@@ -21802,6 +22099,186 @@
             "additionalProperties": {
               "type": "string"
             }
+          }
+        }
+      },
+      "OperationAuthorization": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "record_owner": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "claim_reference": {
+            "type": "string"
+          },
+          "authorization_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorization_body_sha256": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "released",
+              "settled"
+            ]
+          },
+          "terminal_reference": {
+            "type": "string"
+          },
+          "settlement_cost_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_body_sha256": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "released_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settled_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation_id",
+          "merchant_id",
+          "customer_id",
+          "record_owner",
+          "currency",
+          "amount",
+          "claim_reference",
+          "authorization_body",
+          "authorization_body_sha256",
+          "state",
+          "terminal_reference",
+          "settlement_cost_amount",
+          "settlement_amount",
+          "settlement_body",
+          "settlement_body_sha256",
+          "created_at",
+          "released_at",
+          "settled_at",
+          "replayed"
+        ]
+      },
+      "OperationAuthorizationParams": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "record_owner": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "claim_reference": {
+            "type": "string"
+          },
+          "authorization_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorization_body_sha256": {
+            "type": "string"
           }
         }
       },
@@ -22328,51 +22805,6 @@
           "total",
           "limit",
           "offset"
-        ]
-      },
-      "PathPageOfAdminCustomerSummary": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/AdminCustomerSummary"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more",
-          "url"
         ]
       },
       "PathPageOfNotification": {
@@ -23819,6 +24251,253 @@
           "archived"
         ]
       },
+      "ProviderBillingLifecycleEvidence": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "provider_resource_id": {
+            "type": "string"
+          },
+          "provider_lifetime_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider_lifetime_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider_absent_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "provider_absence_reference": {
+            "type": "string"
+          },
+          "billing_stop_reference": {
+            "type": "string"
+          },
+          "windows_closed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "windows_closed_reference": {
+            "type": "string"
+          },
+          "lifecycle_evidence_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "provider_resource_id",
+          "provider_lifetime_start",
+          "provider_lifetime_end",
+          "provider_absent_at",
+          "provider_absence_reference",
+          "billing_stop_reference",
+          "windows_closed_at",
+          "windows_closed_reference",
+          "lifecycle_evidence_body"
+        ]
+      },
+      "ProviderBillingObservationParams": {
+        "type": "object",
+        "properties": {
+          "observation_id": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/ProviderBillingLifecycleEvidence"
+          },
+          "normalized_query": {
+            "type": "string"
+          },
+          "query_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "query_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "raw_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "records": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProviderBillingRecord"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingObservationRefusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ProviderBillingObservationRefusal": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "amount_overflow",
+              "response_too_large",
+              "schema_ambiguity",
+              "submicro_amount"
+            ]
+          }
+        }
+      },
+      "ProviderBillingQualification": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/ProviderBillingLifecycleEvidence"
+          },
+          "lifecycle_evidence_sha256": {
+            "type": "string"
+          },
+          "quiescence_seconds": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "pending",
+              "refused"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "awaiting_equal_observation",
+              "awaiting_quiescence",
+              "coverage_incomplete",
+              "decreasing_provider_cost",
+              "eligible",
+              "negative_or_corrective_record",
+              "observation_changed",
+              "provider_evidence_refused"
+            ]
+          },
+          "baseline_observation_id": {
+            "type": "string"
+          },
+          "qualified_observation_id": {
+            "type": "string"
+          },
+          "qualified_cost_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qualified_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorization": {
+            "$ref": "#/components/schemas/OperationAuthorization"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation_id",
+          "merchant_id",
+          "lifecycle",
+          "lifecycle_evidence_sha256",
+          "quiescence_seconds",
+          "state",
+          "reason",
+          "baseline_observation_id",
+          "qualified_observation_id",
+          "qualified_cost_amount",
+          "qualified_at",
+          "authorization",
+          "created_at",
+          "updated_at",
+          "replayed"
+        ]
+      },
+      "ProviderBillingRecord": {
+        "type": "object",
+        "properties": {
+          "provider_resource_id": {
+            "type": "string"
+          },
+          "bucket_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "time_billed_ms": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
+      },
       "ProviderCutover": {
         "type": "object",
         "properties": {
@@ -24462,6 +25141,14 @@
           }
         }
       },
+      "ReleaseOperationAuthorizationParams": {
+        "type": "object",
+        "properties": {
+          "release_reference": {
+            "type": "string"
+          }
+        }
+      },
       "RepriceAllPriorVersionsRequest": {
         "type": "object",
         "properties": {
@@ -24683,56 +25370,6 @@
           }
         }
       },
-      "ResourceRevenueDailyRow": {
-        "type": "object",
-        "properties": {
-          "date": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "date",
-          "currency",
-          "amount"
-        ]
-      },
-      "ResourceRevenueResponse": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "revenue_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "daily": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ResourceRevenueDailyRow"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "currency",
-          "revenue_amount",
-          "daily"
-        ]
-      },
       "Result": {
         "type": "object",
         "properties": {
@@ -24790,6 +25427,14 @@
         "type": "object",
         "properties": {
           "payment_method_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RevokeCreditGrantParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
             "type": "string"
           }
         }
@@ -25002,97 +25647,6 @@
           "dims"
         ]
       },
-      "SelfBalanceResponse": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "balance_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "currency",
-          "balance_amount"
-        ]
-      },
-      "SelfSpendLimitsDocument": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "windows": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/InvokerSpendWindow"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "currency",
-          "invoker",
-          "windows"
-        ]
-      },
-      "ServiceAdmitBatchRequest": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/AdmitRequest"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "ServiceEndpointRevenueRequest": {
-        "type": "object",
-        "properties": {
-          "resource": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "from": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "to": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "ServiceExtendHoldRequest": {
-        "type": "object",
-        "properties": {
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "ServiceExternalSubjectEntitlementsRequest": {
         "type": "object",
         "properties": {
@@ -25110,28 +25664,6 @@
             ]
           },
           "at": {
-            "type": "string"
-          }
-        }
-      },
-      "ServiceUsageRollupRequest": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "from": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "to": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "group_by": {
             "type": "string"
           }
         }
@@ -25325,6 +25857,165 @@
             "type": "string"
           }
         }
+      },
+      "SpendDelegation": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "invoker",
+              "invoker_tier",
+              "role"
+            ]
+          },
+          "scope_key": {
+            "type": "string"
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BudgetWindow"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_key",
+          "windows",
+          "provenance"
+        ]
+      },
+      "SpendDelegationParams": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BudgetWindow"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "string"
+          }
+        }
+      },
+      "SpendDelegationsParams": {
+        "type": "object",
+        "properties": {
+          "delegations": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SpendDelegation"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SpendLimits": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SpendWindow"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "invoker",
+          "windows"
+        ]
+      },
+      "SpendWindow": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "invoker",
+              "invoker_tier",
+              "role"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "window_seconds": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "used": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "reserved": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "remaining": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "resets_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "scope",
+          "key",
+          "window_seconds",
+          "limit",
+          "currency",
+          "used",
+          "reserved",
+          "remaining",
+          "resets_at"
+        ]
       },
       "StripeEngineAuthentication": {
         "type": "object",
@@ -26051,6 +26742,36 @@
           "expires_at"
         ]
       },
+      "TrustLevel": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "trust_level"
+        ]
+      },
+      "TrustLevelParams": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "trust_level": {
+            "type": "string"
+          }
+        }
+      },
       "UpdatePaymentMethodRequest": {
         "type": "object",
         "properties": {
@@ -26340,6 +27061,202 @@
           }
         }
       },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "group_by": {
+            "type": "string",
+            "enum": [
+              "event_type",
+              "function",
+              "invoker",
+              "resource",
+              "tier"
+            ]
+          },
+          "rows": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UsageRow"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "from",
+          "to",
+          "group_by",
+          "rows"
+        ]
+      },
+      "UsageEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "dimensions": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "credit_transaction_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "invoker",
+          "currency",
+          "event_type",
+          "dimensions",
+          "amount",
+          "resource",
+          "metadata",
+          "source",
+          "source_id",
+          "credit_transaction_id",
+          "occurred_at",
+          "created_at",
+          "replayed"
+        ]
+      },
+      "UsageEventParams": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "resource": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "UsageMeterOverrideDTO": {
         "type": "object",
         "properties": {
@@ -26397,49 +27314,39 @@
           }
         }
       },
-      "UsageReport": {
+      "UsageRow": {
         "type": "object",
         "properties": {
-          "customer_id": {
+          "key": {
             "type": "string"
           },
-          "invoker": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "dimensions": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer"
-            }
+          "event_count": {
+            "type": "integer"
           },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "resource": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "occurred_at": {
-            "type": "string",
-            "format": "date-time"
+          "dimensions": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "key",
+          "event_count",
+          "amount",
+          "dimensions"
+        ]
       },
       "UserPaymentObject": {
         "type": "object",
@@ -26523,7 +27430,7 @@
           "max_age_seconds"
         ]
       },
-      "WastedSpendReport": {
+      "WastedSpendParams": {
         "type": "object",
         "properties": {
           "customer_id": {
@@ -26533,7 +27440,11 @@
             "type": "string"
           },
           "invoker_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "delegated",
+              "payer"
+            ]
           },
           "currency": {
             "type": "string"
@@ -26553,51 +27464,87 @@
           }
         }
       },
-      "WastedSpendResponse": {
+      "WastedSpendReport": {
         "type": "object",
         "properties": {
           "currency": {
             "type": "string"
           },
           "policy_currency": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recorded_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
           "policy_recorded_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "forgiven_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
           "policy_forgiven_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "charged_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
           "policy_charged_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "action": {
-            "type": "string"
-          },
-          "duplicate": {
-            "type": "boolean"
+            "type": "string",
+            "enum": [
+              "charged",
+              "duplicate",
+              "forgiven",
+              "ignored",
+              "invoker_cutoff_tracked"
+            ]
           }
         },
         "required": [
           "currency",
+          "policy_currency",
           "recorded_amount",
+          "policy_recorded_amount",
           "forgiven_amount",
+          "policy_forgiven_amount",
           "charged_amount",
+          "policy_charged_amount",
           "action"
         ]
       },
@@ -26901,6 +27848,16 @@
     ]
   },
   "x-openrails-error-codes": {
+    "admission_captured": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The admission was captured; it can no longer be released."
+    },
+    "admission_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "No admission was made under this request id."
+    },
     "allowance_meter_not_found": {
       "status": 404,
       "type": "invalid_request_error",
@@ -27261,11 +28218,6 @@
       "type": "api_error",
       "meaning": "Delegated tokens cannot be verified right now; retry."
     },
-    "deposit_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "No deposit was made under this source id."
-    },
     "email_unverified": {
       "status": 403,
       "type": "authorization_error",
@@ -27319,7 +28271,7 @@
     "hold_not_found": {
       "status": 404,
       "type": "invalid_request_error",
-      "meaning": "The hold does not exist."
+      "meaning": "The admission holds nothing open: it was captured, released or lapsed."
     },
     "host_event_not_found": {
       "status": 404,

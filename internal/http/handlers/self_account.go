@@ -3,7 +3,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -39,32 +38,13 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	return payer, true
 }
 
-type SelfBalanceResponse struct {
-	Currency      string `json:"currency"`
-	BalanceAmount int64  `json:"balance_amount,string"`
-}
-
+// GetMyBalance returns the customer's own money in one currency.
 func GetMyBalance(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
-	if !ok {
-		return
-	}
-
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	snap, err := svc.GetCreditAccount(r.Request.Context(), payer, currency)
-	if err != nil {
-		writeRefusal(r, err, "balance unavailable")
-		return
-	}
-	r.SuccessJSON(SelfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
+	getBalance(r, payer)
 }
 
 type CollectionPaymentMethodRequest struct {
@@ -117,61 +97,11 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 	r.SuccessJSON(CollectionPaymentMethodResponse{Currency: currency, PaymentMethodID: req.PaymentMethodID})
 }
 
-// GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)
-// lists the authenticated subject's transactions for one currency
-// (issue #339), newest first. Same wire shape as the service-side route, scoped
-// to the delegated subject.
-func GetMyAccountTransactions(r *httprequest.Request) {
+// GetMyCreditTransactions lists the customer's own ledger in one currency.
+func GetMyCreditTransactions(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
-	if !ok {
-		return
-	}
-
-	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	items, total, err := svc.GetCustomerCreditTransactions(r.Request.Context(), payer, currency, limit, offset)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	out := make([]serviceTxnResponse, 0, len(items))
-	for _, t := range items {
-		out = append(out, serviceTxnResponse{
-			ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Amount: t.Amount,
-			Currency: t.Currency, TransactionType: customerTransactionType(t.TransactionType), Status: t.Status, Source: t.Source,
-			CreatedAt: t.CreatedAt,
-		})
-	}
-	r.SuccessJSON(map[string]any{"transactions": out, "total": total})
-}
-
-func customerTransactionType(txType string) string {
-	switch strings.ToLower(strings.TrimSpace(txType)) {
-	case "withdrawal", "credit_spend":
-		return "spend"
-	case "credit_expire", "expiry":
-		return "expiry"
-	case "owed_accrual":
-		return "arrears_accrual"
-	case "owed_payment":
-		return "arrears_payment"
-	default:
-		return txType
-	}
+	listCreditTransactions(r, payer)
 }

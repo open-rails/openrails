@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -251,26 +250,26 @@ func TestAdminCatalogOwnership(t *testing.T) {
 	require.Equal(t, []any{"database", false}, []any{source, allow})
 }
 
-func TestSelfUsageWindow(t *testing.T) {
+func TestUsageWindow(t *testing.T) {
 	now := time.Date(2040, 5, 15, 12, 30, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(now)
 	rt := &app.Runtime{Clock: clock}
 	r, _ := newTestRequest(http.MethodGet, "/usage", nil, rt)
-	from, to, ok := selfUsageWindow(r)
+	from, to, ok := usageWindow(r)
 	require.True(t, ok)
 	require.Equal(t, []time.Time{now.AddDate(0, -1, 0), now}, []time.Time{from, to}, "defaults come from the runtime clock")
 	clock.Advance(24 * time.Hour)
-	_, to, _ = selfUsageWindow(r)
+	_, to, _ = usageWindow(r)
 	require.Equal(t, now.Add(24*time.Hour), to)
 
 	r, _ = newTestRequest(http.MethodGet, "/usage?from=2030-01-01&to=2030-02-01", nil, rt)
-	from, to, ok = selfUsageWindow(r)
+	from, to, ok = usageWindow(r)
 	require.True(t, ok)
 	require.Equal(t, []any{2030, time.January, time.February}, []any{from.Year(), from.Month(), to.Month()})
 
 	for _, q := range []string{"from=junk", "to=junk", "from=2030-02-01&to=2030-01-01", "from=2030-01-01&to=2030-01-01"} {
 		r, rec := newTestRequest(http.MethodGet, "/usage?"+q, nil, rt)
-		_, _, ok := selfUsageWindow(r)
+		_, _, ok := usageWindow(r)
 		require.False(t, ok, q)
 		require.Equal(t, http.StatusBadRequest, rec.Code, q)
 	}
@@ -279,7 +278,7 @@ func TestSelfUsageWindow(t *testing.T) {
 // #335: every batch item gets its own verdict; one item's bad input, scope
 // denial, deny or backend error never fails the others, and the cause of a
 // backend error reaches the operator log without reaching the wire.
-func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
+func TestAdmitVerdictsIsolateItems(t *testing.T) {
 	var logs bytes.Buffer
 	prevOut, prevLevel := log.StandardLogger().Out, log.GetLevel()
 	log.SetOutput(&logs)
@@ -289,28 +288,35 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 	payer := func() billing.CustomerID { return billing.CustomerID(uuid.New()) }
 	allowed, broke, abusive, failing, scopedOut, holdless, reused := payer(), payer(), payer(), payer(), payer(), payer(), payer()
 	deadline := time.Now().Add(time.Hour)
-	items := []serviceAdmitRequest{
-		{CustomerID: allowed.String(), Invoker: "user:a", TrustLevel: " trusted ", EstimatedAmount: 100, ExpiresAt: &deadline, RequestID: "r1"},
-		{CustomerID: broke.String(), Invoker: "user:b", EstimatedAmount: 100, ExpiresAt: &deadline, RequestID: "r2"},
+	items := []billing.AdmitParams{
+		{CustomerID: allowed, Invoker: "user:a", TrustLevel: " trusted ", EstimatedAmount: 100, ExpiresAt: &deadline, RequestID: "r1"},
+		{CustomerID: broke, Invoker: "user:b", EstimatedAmount: 100, ExpiresAt: &deadline, RequestID: "r2"},
 		{Invoker: "user:c", RequestID: "r3"},
-		{CustomerID: abusive.String(), Invoker: "user:d", RequestID: "r4"},
-		{CustomerID: failing.String(), Invoker: "user:e", RequestID: "r5", Source: "host-four"},
-		{CustomerID: scopedOut.String(), Invoker: "user:f", RequestID: "r6"},
-		{CustomerID: allowed.String(), Invoker: "user:g", EstimatedAmount: -1, RequestID: "r7"},
-		{CustomerID: holdless.String(), Invoker: "user:h", EstimatedAmount: 100, RequestID: "r8"},
-		{CustomerID: reused.String(), Invoker: "user:i", RequestID: "r9"},
+		{CustomerID: abusive, Invoker: "user:d", RequestID: "r4"},
+		{CustomerID: failing, Invoker: "user:e", RequestID: "r5", Source: "host-four"},
+		{CustomerID: scopedOut, Invoker: "user:f", RequestID: "r6"},
+		{CustomerID: allowed, Invoker: "user:g", EstimatedAmount: -1, RequestID: "r7"},
+		{CustomerID: holdless, Invoker: "user:h", EstimatedAmount: 100, RequestID: "r8"},
+		{CustomerID: reused, Invoker: "user:i", RequestID: "r9"},
 	}
 	cause := errors.New(`ERROR: relation "billing.billing_policy_bindings" does not exist (SQLSTATE 42P01)`)
 	var seenTrust string
-	admit := func(_ context.Context, in billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
-		switch billing.CustomerID(in.CustomerID) {
+	blocked := func(by billing.AdmissionBlock, code string, retry int64) *billing.Admission {
+		out := &billing.Admission{BlockedBy: &by, DenyCode: &code}
+		if retry > 0 {
+			out.RetryAfterSeconds = &retry
+		}
+		return out
+	}
+	admit := func(_ context.Context, in billingservice.AdmitInput) (*billing.Admission, error) {
+		switch in.CustomerID {
 		case allowed:
 			seenTrust = in.TrustLevel
-			return &billingservice.AdmitResult{Allowed: true}, nil
+			return &billing.Admission{Allowed: true}, nil
 		case broke:
-			return &billingservice.AdmitResult{BlockedBy: "money", DenyCode: "insufficient_balance"}, nil
+			return blocked(billing.AdmissionBlockedByMoney, "insufficient_balance", 0), nil
 		case abusive:
-			return &billingservice.AdmitResult{BlockedBy: "abuse", RetryAfterSeconds: 7}, nil
+			return blocked(billing.AdmissionBlockedByAbuse, "failure_rate_limited", 7), nil
 		case holdless:
 			return nil, fmt.Errorf("admit: %w", billingservice.ErrHoldDeadlineRequired)
 		case reused:
@@ -319,9 +325,9 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 			return nil, cause
 		}
 	}
-	allows := func(id billingidentity.CustomerID) bool { return billing.CustomerID(id) != scopedOut }
+	allows := func(id billing.CustomerID) bool { return id != scopedOut }
 
-	out := serviceAdmitBatchVerdicts(context.Background(), items, allows, admit)
+	out := admitVerdicts(context.Background(), items, allows, admit)
 	require.Len(t, out, len(items))
 	status := make([]int, len(out))
 	for i, v := range out {
@@ -329,9 +335,9 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 	}
 	require.Equal(t, []int{200, 402, 400, 429, 500, 403, 400, 400, 409}, status)
 	require.Equal(t, "trusted", seenTrust)
-	require.Equal(t, "insufficient_balance", out[1].Result.DenyCode)
-	require.Nil(t, out[2].Result)
-	require.Equal(t, int64(7), out[3].Result.RetryAfterSeconds)
+	require.Equal(t, "insufficient_balance", *out[1].Admission.DenyCode)
+	require.Nil(t, out[2].Admission)
+	require.Equal(t, int64(7), *out[3].Admission.RetryAfterSeconds)
 	require.Equal(t, "admission check failed", out[4].Error.Message)
 	require.Equal(t, "service_credential_customer_scope_denied", out[5].Error.Code)
 	require.Equal(t, "expires_at", *out[7].Error.Param)

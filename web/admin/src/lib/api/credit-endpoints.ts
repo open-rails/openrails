@@ -1,9 +1,9 @@
 import { api } from "@/lib/api/client"
 import type {
+  CreditGrant,
   CreditGrantInput,
-  CreditGrantPage,
-  CreditRevocation,
-  CreditTransactionPage,
+  CreditTransaction,
+  ListPage,
 } from "./credit-types"
 
 const customerPath = (id: string) =>
@@ -13,16 +13,16 @@ export const listCreditGrants = (
   customer: string,
   currency: string,
   limit: number,
-  offset: number,
+  cursor: string,
   signal?: AbortSignal
 ) =>
-  api<CreditGrantPage>(`${customerPath(customer)}/credits`, {
-    query: { currency, limit, offset },
+  api<ListPage<CreditGrant>>(`${customerPath(customer)}/credit-grants`, {
+    query: { currency, limit, cursor },
     signal,
   })
 
 export const createCreditGrant = (customer: string, body: CreditGrantInput) =>
-  api<{ ID: string; Replayed: boolean }>(`${customerPath(customer)}/credits`, {
+  api<CreditGrant>(`${customerPath(customer)}/credit-grants`, {
     method: "POST",
     body,
   })
@@ -32,19 +32,19 @@ export const revokeCreditGrant = (
   grant: string,
   reason: string
 ) =>
-  api<CreditRevocation>(
-    `${customerPath(customer)}/credits/${encodeURIComponent(grant)}`,
-    { method: "DELETE", body: { reason } }
+  api<CreditGrant>(
+    `${customerPath(customer)}/credit-grants/${encodeURIComponent(grant)}/revoke`,
+    { method: "POST", body: { reason } }
   )
 
 export const listCreditTransactions = (
   customer: string,
   currency: string,
   limit: number,
-  offset: number,
+  cursor: string,
   signal?: AbortSignal
 ) =>
-  api<CreditTransactionPage>(`${customerPath(customer)}/credit-transactions`, {
-    query: { currency, limit, offset },
+  api<ListPage<CreditTransaction>>(`${customerPath(customer)}/transactions`, {
+    query: { currency, limit, cursor },
     signal,
   })

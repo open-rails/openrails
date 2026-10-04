@@ -56,7 +56,7 @@ type Report struct {
 // Run executes the workflow with the given client.
 func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, error) {
 	var r Report
-	customer, err := client.EnsureCustomer(ctx, uuid.NewString())
+	customer, err := client.EnsureCustomer(ctx, billing.CustomerID(uuid.New()), billing.CustomerParams{})
 	if err != nil {
 		return r, fmt.Errorf("ensure customer: %w", err)
 	}
@@ -66,7 +66,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err := client.SetMerchantSettings(ctx, billing.MerchantSettings{
 		BillingPolicies: []billing.BillingPolicyInput{{
 			Name: "app_window", Kind: "window_spend_cap",
-			SpendWindows: []billing.BudgetWindowInput{{Key: "hourly", WindowSeconds: 3600, Limit: 50_000}},
+			SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 50_000}},
 		}},
 		BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "app_window", Tier: "app"}},
 	}); err != nil {
@@ -81,58 +81,64 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 			r.PolicyWindows = len(policy.SpendWindows)
 		}
 	}
-	if err := client.SetCreditLimit(ctx, payer, in.Currency, 0); err != nil {
+	if _, err := client.SetCreditLimit(ctx, payer, billing.CreditLimitParams{Currency: in.Currency}); err != nil {
 		return r, fmt.Errorf("set credit limit: %w", err)
 	}
-	if r.CreditLimit, err = client.GetCreditLimit(ctx, payer, in.Currency); err != nil {
+	limit, err := client.GetCreditLimit(ctx, payer, in.Currency)
+	if err != nil {
 		return r, fmt.Errorf("read credit limit: %w", err)
 	}
+	r.CreditLimit = limit.Amount
 
-	deposit, err := client.DepositCredits(ctx, billing.DepositCreditsRequest{
-		CustomerID: &payer, Invoker: invoker, Currency: in.Currency, Amount: 100_000,
-		Source: "billingapp", SourceID: in.Run + ":deposit", Description: "prepaid balance",
+	description := "prepaid balance"
+	grant, err := client.CreateCreditGrant(ctx, payer, billing.CreditGrantParams{
+		Invoker: invoker, Currency: in.Currency, Amount: 100_000,
+		Source: "billingapp", SourceID: in.Run + ":deposit", Description: &description,
 	})
 	if err != nil {
-		return r, fmt.Errorf("deposit: %w", err)
+		return r, fmt.Errorf("credit grant: %w", err)
 	}
-	r.Deposited = deposit.Amount
+	r.Deposited = grant.Amount
 
 	expires := time.Now().Add(time.Hour)
 	job := in.Run + ":job"
-	admitted, err := client.Admit(ctx, billing.AdmitRequest{
+	admitted, err := client.Admit(ctx, []billing.AdmitParams{{
 		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypePayer, Currency: in.Currency,
 		EstimatedAmount: 10_000, ExpiresAt: &expires, RequestID: job, Source: "billingapp",
-	})
+	}})
 	if err != nil {
 		return r, fmt.Errorf("admit: %w", err)
 	}
-	r.Admitted = admitted.Allowed
-	receipt, err := client.Capture(ctx, job, 7_500, &billing.CaptureUsage{
+	r.Admitted = admitted[0].Allowed()
+	receipt, err := client.CaptureAdmission(ctx, job, billing.CaptureParams{Amount: 7_500, Usage: &billing.CaptureUsage{
 		EventType: "generation", Resource: "image", Source: "billingapp", SourceID: job,
-	})
+	}})
 	if err != nil {
 		return r, fmt.Errorf("capture: %w", err)
 	}
 	r.Captured = receipt.Amount
-	denied, err := client.Admit(ctx, billing.AdmitRequest{
+	denied, err := client.Admit(ctx, []billing.AdmitParams{{
 		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypePayer, Currency: in.Currency,
 		EstimatedAmount: 10_000_000, ExpiresAt: &expires, RequestID: in.Run + ":too-large", Source: "billingapp",
-	})
+	}})
 	if err != nil {
 		return r, fmt.Errorf("admit over balance: %w", err)
 	}
-	r.DeniedBy = denied.BlockedBy
-	r.UnknownRelease = errors.Is(client.Release(ctx, uuid.NewString()), billing.ErrNotFound)
-	balance, err := client.GetCreditAccount(ctx, payer, in.Currency)
+	if blocked := denied[0].Admission.BlockedBy; blocked != nil {
+		r.DeniedBy = string(*blocked)
+	}
+	_, releaseErr := client.ReleaseAdmission(ctx, uuid.NewString())
+	r.UnknownRelease = errors.Is(releaseErr, billing.ErrNotFound)
+	balance, err := client.GetBalance(ctx, payer, in.Currency)
 	if err != nil {
 		return r, fmt.Errorf("balance: %w", err)
 	}
 	r.Balance = balance.BalanceAmount
-	rows, err := client.UsageRollup(ctx, payer, in.Currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "resource")
+	usage, err := client.GetUsage(ctx, payer, billing.UsageParams{Currency: in.Currency, From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), GroupBy: billing.UsageByResource})
 	if err != nil {
-		return r, fmt.Errorf("usage rollup: %w", err)
+		return r, fmt.Errorf("usage: %w", err)
 	}
-	for _, row := range rows {
+	for _, row := range usage.Rows {
 		r.UsageEvents += row.EventCount
 	}
 

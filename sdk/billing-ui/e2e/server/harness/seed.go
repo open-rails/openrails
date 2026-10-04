@@ -222,7 +222,7 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 		}},
 		Transactions: []billing.DeclaredTransaction{{
 			RailSubscriptionID: railSub, TransactionID: txn, Type: "sale", Success: true,
-			AmountCents: 999, Currency: "USD", OccurredAt: started,
+			Amount: 9_990_000, Currency: "USD", OccurredAt: started,
 		}},
 	})
 	if err != nil {

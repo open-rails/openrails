@@ -29,7 +29,7 @@ func (c *Client) CheckEntitlements(ctx context.Context, customerID string, entit
 		return map[string]bool{}, nil
 	}
 	var result map[string]bool
-	err = c.do(ctx, http.MethodPost, "/v1/merchant/users/"+url.PathEscape(customer)+"/entitlements/check", struct {
+	err = c.do(ctx, http.MethodPost, "/v1/merchant/customers/"+url.PathEscape(customer)+"/entitlements/check", struct {
 		Entitlements []string  `json:"entitlements"`
 		At           time.Time `json:"at,omitzero"`
 	}{entitlements, at}, &result, requestOptions...)

@@ -459,19 +459,23 @@ func (s *Service) ListForCustomer(ctx context.Context, payer identity.CustomerID
 	return snapshots(rows), nil
 }
 
-// List returns the merchant's overdue roster (grace + delinquent, oldest debt
-// first), optionally filtered to one state. Payers in good standing are never
-// returned — the roster is the exception list, not a customer directory.
-func (s *Service) List(ctx context.Context, state State, limit int) ([]Snapshot, error) {
+// RosterPosition is a roster page's keyset position.
+type RosterPosition struct {
+	Since    time.Time `json:"s"`
+	Customer uuid.UUID `json:"c"`
+	Currency string    `json:"u"`
+}
+
+// List returns one page of the merchant's overdue roster (grace + delinquent,
+// oldest debt first), optionally filtered to one state, after the given
+// position. Payers in good standing are never returned.
+func (s *Service) List(ctx context.Context, state State, after *RosterPosition, limit int) ([]Snapshot, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("delinquency service not initialized")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
 	}
 	var filter *string
 	if state != "" {
@@ -481,12 +485,14 @@ func (s *Service) List(ctx context.Context, state State, limit int) ([]Snapshot,
 		v := string(state)
 		filter = &v
 	}
+	params := gen.ListDelinquentCustomersParams{MerchantID: tid.UUID(), State: filter, RowLimit: int64(limit)}
+	if after != nil {
+		params.AfterSince, params.AfterCustomer, params.AfterCurrency = &after.Since, &after.Customer, &after.Currency
+	}
 	var rows []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var qErr error
-		rows, qErr = s.db.Gen(ctx).ListDelinquentCustomers(ctx, gen.ListDelinquentCustomersParams{
-			MerchantID: tid.UUID(), State: filter, RowLimit: int64(limit),
-		})
+		rows, qErr = s.db.Gen(ctx).ListDelinquentCustomers(ctx, params)
 		return qErr
 	}); err != nil {
 		return nil, err

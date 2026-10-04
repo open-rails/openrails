@@ -58,9 +58,9 @@ milestone order, each verifiable before the next:
 5. **Mount routes.** Implement `Deps.Authenticate` (and `Authorize` for staff routes)
    over the host's existing auth, select route groups in `Config.HTTP`, and mount with
    `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify: an authenticated request to
-   `GET <prefix>/v1/me/status` returns the caller's own subject.
+   `GET <prefix>/v1/me/subscriptions` answers for the caller's own subject.
 6. **Backend calls.** Use the Client where the host needs admission/holds, usage,
-   or entitlement reads. Verify: `AdmitBatch` + `Capture` round-trip in a test.
+   or entitlement reads. Verify: `Admit` + `CaptureAdmission` round-trip in a test.
 7. **Checkout end-to-end.** Frontend work per
    [frontend-integration.md](frontend-integration.md). Verify: sandbox checkout →
    webhook (use [dev/local-webhooks.md](dev/local-webhooks.md) for a public URL) →

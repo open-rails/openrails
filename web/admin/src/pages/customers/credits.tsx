@@ -4,7 +4,14 @@ import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import { creditMutations, creditQueries } from "@/lib/credit-queries"
 import type { CreditGrant } from "@/lib/api/credit-types"
-import { formatDate, formatUnits, shortId } from "@/lib/format"
+import {
+  currencyScale,
+  formatDate,
+  formatNativeAmount,
+  shortId,
+} from "@/lib/format"
+import { CursorPager } from "@/components/cursor-pager"
+import { useCursorPages } from "@/lib/cursor-pages"
 import {
   canRevokeCredit,
   creditGrantInput,
@@ -34,46 +41,6 @@ import {
 const PAGE = 20
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "The request failed. Try again."
-
-export function CreditPagination({
-  total,
-  offset,
-  count,
-  busy,
-  onPage,
-}: {
-  total: number
-  offset: number
-  count: number
-  busy: boolean
-  onPage: (offset: number) => void
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 pt-3 text-xs text-muted-foreground">
-      <span>
-        {total ? `${offset + 1}–${offset + count} of ${total}` : "No records"}
-      </span>
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || offset === 0}
-          onClick={() => onPage(Math.max(0, offset - PAGE))}
-        >
-          Previous
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || offset + count >= total}
-          onClick={() => onPage(offset + PAGE)}
-        >
-          Next
-        </Button>
-      </div>
-    </div>
-  )
-}
 
 export function CustomerCreditSupportSection({
   customerId,
@@ -105,21 +72,23 @@ function CreditSupport({
 }) {
   const [currency, setCurrency] = React.useState(initialCurrency)
   const [currencyInput, setCurrencyInput] = React.useState(initialCurrency)
-  const [grantOffset, setGrantOffset] = React.useState(0)
-  const [ledgerOffset, setLedgerOffset] = React.useState(0)
-  const [grantDecimals, setGrantDecimals] = React.useState<number | null>(null)
-  const [revokeGrant, setRevokeGrant] = React.useState<{
-    grant: CreditGrant
-    decimals: number
-  } | null>(null)
+  const grantPages = useCursorPages(currency)
+  const ledgerPages = useCursorPages(currency)
+  const [granting, setGranting] = React.useState(false)
+  const [revokeGrant, setRevokeGrant] = React.useState<CreditGrant | null>(null)
   const grants = useQuery(
-    creditQueries.grants(merchant, customer, currency, PAGE, grantOffset)
+    creditQueries.grants(merchant, customer, currency, PAGE, grantPages.cursor)
   )
   const ledger = useQuery(
-    creditQueries.transactions(merchant, customer, currency, PAGE, ledgerOffset)
+    creditQueries.transactions(
+      merchant,
+      customer,
+      currency,
+      PAGE,
+      ledgerPages.cursor
+    )
   )
-  const canGrant = grants.data?.can_grant === true
-  const canRevoke = grants.data?.can_revoke === true
+  const decimals = currencyScale(currency)
 
   return (
     <Card>
@@ -128,8 +97,8 @@ function CreditSupport({
           <CardTitle className="text-sm">Credits</CardTitle>
           <Button
             size="sm"
-            disabled={!canGrant || grants.isPending}
-            onClick={() => setGrantDecimals(grants.data?.unit_decimals ?? null)}
+            disabled={decimals === undefined}
+            onClick={() => setGranting(true)}
           >
             Grant credit
           </Button>
@@ -139,11 +108,7 @@ function CreditSupport({
           onSubmit={(event) => {
             event.preventDefault()
             const value = currencyInput.trim()
-            if (value) {
-              setCurrency(value)
-              setGrantOffset(0)
-              setLedgerOffset(0)
-            }
+            if (value) setCurrency(value.toUpperCase())
           }}
         >
           <div className="grid gap-1">
@@ -159,9 +124,9 @@ function CreditSupport({
             View
           </Button>
         </form>
-        {grants.data && !canGrant && !canRevoke && (
+        {decimals === undefined && (
           <p className="text-xs text-muted-foreground">
-            You have read-only credit access.
+            {currency} is not a supported currency.
           </p>
         )}
       </CardHeader>
@@ -174,7 +139,7 @@ function CreditSupport({
             <p role="alert" className="text-sm text-destructive">
               {errorText(grants.error)}
             </p>
-          ) : !grants.data?.grants.length ? (
+          ) : !grants.data?.data.length ? (
             <p className="text-sm text-muted-foreground">
               No credit grants in this currency.
             </p>
@@ -195,7 +160,7 @@ function CreditSupport({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {grants.data.grants.map((grant) => (
+                  {grants.data.data.map((grant) => (
                     <TableRow key={grant.id}>
                       <TableCell>
                         <span title={grant.id}>{shortId(grant.id)}</span>
@@ -203,7 +168,7 @@ function CreditSupport({
                           {formatDate(grant.created_at)}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {grant.reason ?? grant.source_type}
+                          {grant.description ?? grant.source_type}
                         </div>
                       </TableCell>
                       {[
@@ -214,11 +179,7 @@ function CreditSupport({
                         grant.revoked_amount,
                       ].map((amount, index) => (
                         <TableCell key={index} className="tabular-nums">
-                          {formatUnits(
-                            amount,
-                            grant.currency,
-                            grants.data.unit_decimals
-                          )}
+                          {formatNativeAmount(amount, grant.currency)}
                         </TableCell>
                       ))}
                       <TableCell>{grant.state}</TableCell>
@@ -231,13 +192,8 @@ function CreditSupport({
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={!canRevokeCredit(grant, canRevoke)}
-                          onClick={() =>
-                            setRevokeGrant({
-                              grant,
-                              decimals: grants.data.unit_decimals,
-                            })
-                          }
+                          disabled={!canRevokeCredit(grant)}
+                          onClick={() => setRevokeGrant(grant)}
                         >
                           Revoke
                         </Button>
@@ -248,15 +204,11 @@ function CreditSupport({
               </Table>
             </div>
           )}
-          {grants.data && (
-            <CreditPagination
-              total={grants.data.total}
-              offset={grants.data.offset}
-              count={grants.data.grants.length}
-              busy={grants.isFetching}
-              onPage={setGrantOffset}
-            />
-          )}
+          <CursorPager
+            pages={grantPages}
+            nextCursor={grants.data?.next_cursor}
+            busy={grants.isFetching}
+          />
         </section>
         <section aria-label="Credit transaction ledger">
           <h3 className="mb-2 text-sm font-medium">
@@ -270,7 +222,7 @@ function CreditSupport({
             <p role="alert" className="text-sm text-destructive">
               {errorText(ledger.error)}
             </p>
-          ) : !ledger.data?.transactions.length ? (
+          ) : !ledger.data?.data.length ? (
             <p className="text-sm text-muted-foreground">
               No transactions in this currency.
             </p>
@@ -285,55 +237,42 @@ function CreditSupport({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ledger.data.transactions.map((tx) => (
+                {ledger.data.data.map((tx) => (
                   <TableRow key={tx.id}>
                     <TableCell title={tx.id}>
                       {formatDate(tx.created_at)}
                     </TableCell>
-                    <TableCell>
-                      {tx.transaction_type.replaceAll("_", " ")}
-                    </TableCell>
+                    <TableCell>{tx.type.replaceAll("_", " ")}</TableCell>
                     <TableCell className="tabular-nums">
-                      {formatUnits(
-                        tx.amount,
-                        tx.currency,
-                        ledger.data.unit_decimals
-                      )}
+                      {formatNativeAmount(tx.amount, tx.currency)}
                     </TableCell>
-                    <TableCell>{tx.source ?? "—"}</TableCell>
+                    <TableCell>{tx.source || "—"}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
-          {ledger.data && (
-            <CreditPagination
-              total={ledger.data.total}
-              offset={ledger.data.offset}
-              count={ledger.data.transactions.length}
-              busy={ledger.isFetching}
-              onPage={setLedgerOffset}
-            />
-          )}
+          <CursorPager
+            pages={ledgerPages}
+            nextCursor={ledger.data?.next_cursor}
+            busy={ledger.isFetching}
+          />
         </section>
       </CardContent>
-      {grantDecimals !== null && (
+      {granting && decimals !== undefined && (
         <GrantCreditDialog
           merchant={merchant}
           customer={customer}
           currency={currency}
-          decimals={grantDecimals}
-          allowed={canGrant}
-          onClose={() => setGrantDecimals(null)}
+          decimals={decimals}
+          onClose={() => setGranting(false)}
         />
       )}
       {revokeGrant && (
         <RevokeCreditDialog
           merchant={merchant}
           customer={customer}
-          grant={revokeGrant.grant}
-          decimals={revokeGrant.decimals}
-          allowed={canRevoke}
+          grant={revokeGrant}
           onClose={() => setRevokeGrant(null)}
         />
       )}
@@ -346,14 +285,12 @@ function GrantCreditDialog({
   customer,
   currency,
   decimals,
-  allowed,
   onClose,
 }: {
   merchant: string
   customer: string
   currency: string
   decimals: number
-  allowed: boolean
   onClose: () => void
 }) {
   const client = useQueryClient()
@@ -385,10 +322,14 @@ function GrantCreditDialog({
             e.preventDefault()
             setError("")
             try {
-              const body = creditGrantInput(
-                { amount, currency, decimals, expires, description, sourceID },
-                allowed
-              )
+              const body = creditGrantInput({
+                amount,
+                currency,
+                decimals,
+                expires,
+                description,
+                sourceID,
+              })
               await mutation.mutateAsync(body)
               toast.success("Credit granted")
               onClose()
@@ -439,7 +380,7 @@ function GrantCreditDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={!allowed || mutation.isPending}>
+            <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending ? "Granting…" : "Grant credit"}
             </Button>
           </DialogFooter>
@@ -453,15 +394,11 @@ function RevokeCreditDialog({
   merchant,
   customer,
   grant,
-  decimals,
-  allowed,
   onClose,
 }: {
   merchant: string
   customer: string
   grant: CreditGrant
-  decimals: number
-  allowed: boolean
   onClose: () => void
 }) {
   const client = useQueryClient()
@@ -482,8 +419,8 @@ function RevokeCreditDialog({
           <DialogTitle>Revoke remaining credit</DialogTitle>
           <DialogDescription>
             Revoke the unspent remainder of{" "}
-            {formatUnits(grant.remaining_amount, grant.currency, decimals)}.
-            Active holds may prevent revocation. Payment refunds are managed
+            {formatNativeAmount(grant.remaining_amount, grant.currency)}. Active
+            holds may prevent revocation. Payment refunds are managed
             separately.
           </DialogDescription>
         </DialogHeader>
@@ -494,12 +431,12 @@ function RevokeCreditDialog({
             setError("")
             try {
               const result = await mutation.mutateAsync(
-                creditRevokeInput(grant, allowed, reason)
+                creditRevokeInput(grant, reason)
               )
               toast.success(
                 result.replayed
                   ? "Credit was already revoked"
-                  : `${formatUnits(result.grant.revoked_amount, result.grant.currency, decimals)} revoked`
+                  : `${formatNativeAmount(result.revoked_amount, result.currency)} revoked`
               )
               onClose()
             } catch (error) {
@@ -534,7 +471,7 @@ function RevokeCreditDialog({
             <Button
               type="submit"
               variant="destructive"
-              disabled={!canRevokeCredit(grant, allowed) || mutation.isPending}
+              disabled={!canRevokeCredit(grant) || mutation.isPending}
             >
               {mutation.isPending ? "Revoking…" : "Revoke credit"}
             </Button>

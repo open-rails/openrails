@@ -16,7 +16,6 @@ import {
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
 import {
-  billingStatusSchema,
   cardSetupSchema,
   currencyRegistrySchema,
   hostedCheckoutLinkSchema,
@@ -36,7 +35,6 @@ import {
   subscriptionSchema,
   tierChangePreviewSchema,
   tierChangeSchema,
-  type BillingStatus,
   type CardSetup,
   type Currency,
   type HostedCheckoutLink,
@@ -564,10 +562,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     getInvoice(invoiceId: string, signal?: AbortSignal): Promise<Invoice> {
       return json(invoiceSchema, `/me/invoices/${id(invoiceId)}`, { signal })
-    },
-
-    getStatus(signal?: AbortSignal): Promise<BillingStatus> {
-      return json(billingStatusSchema, "/me/status", { signal })
     },
 
     /** Active products with their active prices. */

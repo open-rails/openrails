@@ -16,7 +16,7 @@ import (
 // Tx form rides a transaction owned by an embedding host, which alone commits
 // or rolls it back.
 
-func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.Op
 	return out, err
 }
 
-func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -44,9 +44,10 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	}
 	auth, err := s.moneyService().OpenOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationInput{
 		OperationID:             req.OperationID,
-		Payer:                   identity.CustomerID(req.Payer),
+		CustomerID:              identity.CustomerID(req.CustomerID),
 		RecordOwner:             req.RecordOwner,
-		AuthorizedUSDMicros:     req.AuthorizedUSDMicros,
+		Currency:                req.Currency,
+		Amount:                  req.Amount,
 		ClaimReference:          req.ClaimReference,
 		AuthorizationBody:       req.AuthorizationBody,
 		AuthorizationBodySHA256: req.AuthorizationBodySHA256,
@@ -90,7 +91,7 @@ func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, op
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
+func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -103,7 +104,7 @@ func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req billing
 	return out, err
 }
 
-func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
+func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -125,22 +126,23 @@ func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx
 
 func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billing.OperationAuthorization {
 	out := &billing.OperationAuthorization{
-		OperationID:                     auth.OperationID,
-		MerchantID:                      auth.MerchantID,
-		Payer:                           billing.CustomerID(auth.Payer),
-		RecordOwner:                     auth.RecordOwner,
-		AuthorizedUSDMicros:             auth.AuthorizedUSDMicros,
-		ClaimReference:                  auth.ClaimReference,
-		AuthorizationBody:               auth.AuthorizationBody,
-		AuthorizationBodySHA256:         auth.AuthorizationBodySHA256,
-		State:                           billing.OperationAuthorizationState(auth.State),
-		TerminalReference:               auth.TerminalReference,
-		SettlementProviderCostUSDMicros: auth.SettlementProviderCostUSDMicros,
-		SettlementRatedUSDMicros:        auth.SettlementRatedUSDMicros,
-		CreatedAt:                       auth.CreatedAt,
-		ReleasedAt:                      auth.ReleasedAt,
-		SettledAt:                       auth.SettledAt,
-		Replayed:                        auth.Replayed,
+		OperationID:             auth.OperationID,
+		MerchantID:              billing.MerchantID(auth.MerchantID),
+		CustomerID:              billing.CustomerID(auth.CustomerID),
+		RecordOwner:             auth.RecordOwner,
+		Currency:                auth.Currency,
+		Amount:                  auth.Amount,
+		ClaimReference:          auth.ClaimReference,
+		AuthorizationBody:       auth.AuthorizationBody,
+		AuthorizationBodySHA256: auth.AuthorizationBodySHA256,
+		State:                   billing.OperationAuthorizationState(auth.State),
+		TerminalReference:       auth.TerminalReference,
+		SettlementCostAmount:    auth.SettlementCostAmount,
+		SettlementAmount:        auth.SettlementAmount,
+		CreatedAt:               auth.CreatedAt,
+		ReleasedAt:              auth.ReleasedAt,
+		SettledAt:               auth.SettledAt,
+		Replayed:                auth.Replayed,
 	}
 	if auth.State == money.OperationAuthorizationSettled {
 		digest := billing.SHA256(auth.SettlementBodySHA256)

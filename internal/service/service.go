@@ -61,249 +61,33 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 // (money.IdempotencyConflict: which field, committed vs retried).
 var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 
-type CaptureHoldRequest struct {
-	// RequestID identifies the original admission. Amount and usage terms become
-	// immutable on the first successful capture; exact retries return its receipt.
-	RequestID string
-	Amount    int64
-
-	// Usage analytics (#311): when EventType is set, the capture ALSO appends a
-	// billing.usage_events row linked to the capture transaction (no second
-	// debit), so the platform's /budget-usage + revenue analytics can be served
-	// from OpenRails. EventType is the metered event kind; Resource is the
-	// caller-supplied what-was-it-for string; Metadata carries long-tail string
-	// dims (function_name, availability_tier, ...). Source/SourceID default to
-	// the capture's.
-	EventType string
-	// Resource is the caller-supplied free-form string for what was metered
-	// (opaque; an endpoint slug is one example). Optional.
-	Resource   string
-	Dimensions map[string]int64
-	Metadata   map[string]any
-	Source     string
-	SourceID   string
-}
-
-type CreditTransaction = billing.CreditTransaction
-
-type WithdrawCreditsRequest struct {
-	CustomerID *identity.CustomerID
-	Invoker    string
-	Currency   string
-	Amount     int64
-	Source     string
-	SourceID   *uuid.UUID
-}
-
-func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsRequest) (*CreditTransaction, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	req.Invoker = strings.TrimSpace(req.Invoker)
-	req.Source = strings.TrimSpace(req.Source)
-	if req.CustomerID == nil || req.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	if req.Invoker == "" {
-		return nil, fmt.Errorf("invoker required")
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	if req.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be > 0")
-	}
-	if req.Source == "" {
-		return nil, fmt.Errorf("source required")
-	}
-	if req.SourceID == nil || *req.SourceID == uuid.Nil {
-		return nil, fmt.Errorf("source_id required")
-	}
-	trx, err := s.moneyService().Withdraw(ctx, money.WithdrawParams{
-		CustomerID: req.CustomerID,
-		Invoker:    req.Invoker,
-		Currency:   currency,
-		Amount:     req.Amount,
-		Source:     req.Source,
-		SourceID:   req.SourceID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &CreditTransaction{
-		ID:              trx.ID,
-		CustomerID:      billing.CustomerID(trx.CustomerID).String(),
-		Invoker:         trx.Invoker,
-		Currency:        trx.Currency,
-		Amount:          trx.Amount,
-		BalanceAfter:    trx.BalanceAfter,
-		TransactionType: trx.TransactionType,
-		Status:          trx.Status,
-		Authorized:      trx.Authorized,
-		Captured:        trx.Captured,
-		Source:          trx.Source,
-		SourceID:        trx.SourceID,
-		ExpiresAt:       trx.ExpiresAt,
-		Description:     trx.Description,
-		CreatedAt:       trx.CreatedAt,
-		UpdatedAt:       trx.UpdatedAt,
-		Replayed:        trx.Replayed,
-	}, nil
-}
-
-// DepositIdempotencyKey is the reproducible coordinate for one credit deposit
-// (or#906, mirroring UsageIdempotencyKey from 704f0bd0).
-type DepositIdempotencyKey = money.IdempotencyKey
-
-// NewDepositIdempotencyKey builds a deposit key (operation bound to deposit).
-// source labels the system of record ("stripe", "admin", …); sourceID is the
-// caller's reproducible key and is the deposit's structural identity — the
-// database enforces once-only at (merchant, customer, sourceID), so the SAME
-// sourceID under a DIFFERENT source is still the same deposit (doctrine, see
-// client.go DepositCreditsRequest.SourceID).
-func NewDepositIdempotencyKey(source, sourceID string) (DepositIdempotencyKey, error) {
-	return money.NewIdempotencyKey(money.OpDeposit, source, sourceID)
-}
-
-// DepositCreditsRequest is one admin/rail credit deposit. Key is the deposit's
-// idempotency coordinate (operation=deposit); build it with
-// NewDepositIdempotencyKey(source, sourceID). It must be REPRODUCIBLE across
-// retries of the same logical deposit — a value minted per attempt passes
-// every check and double-credits.
-//
-// The deposit's structural key is the credit grant's (merchant, customer,
-// source_id), UNIQUE in the database (or#906 migration 0004). An identical
-// replay is answered with the EXISTING grant (Replayed=true); a replay whose
-// amount, currency or expiry differs is refused with ErrIdempotencyKeyReused.
-// Diagnostic source/invoker/description changes retain the original receipt.
-type DepositCreditsRequest struct {
-	CustomerID  *identity.CustomerID
-	Invoker     string
-	Currency    string
-	Amount      int64
-	Key         money.IdempotencyKey
-	ExpiresAt   *time.Time
-	Description *string
-}
-
-func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	req.Invoker = strings.TrimSpace(req.Invoker)
-	if req.CustomerID == nil || req.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	if req.Invoker == "" {
-		return nil, fmt.Errorf("invoker required")
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	if req.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be > 0")
-	}
-	if err := req.Key.RequireOperation(money.OpDeposit); err != nil {
-		return nil, err
-	}
-	depositSourceID := req.Key.SourceID()
-	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
-		CustomerID:  req.CustomerID,
-		Invoker:     req.Invoker,
-		Currency:    currency,
-		Amount:      req.Amount,
-		Source:      req.Key.Source(),
-		SourceID:    &depositSourceID,
-		ExpiresAt:   req.ExpiresAt,
-		Description: req.Description,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &CreditTransaction{
-		ID:              trx.ID,
-		CustomerID:      billing.CustomerID(trx.CustomerID).String(),
-		Invoker:         trx.Invoker,
-		Currency:        trx.Currency,
-		Amount:          trx.Amount,
-		BalanceAfter:    trx.BalanceAfter,
-		TransactionType: trx.TransactionType,
-		Status:          trx.Status,
-		Authorized:      trx.Authorized,
-		Captured:        trx.Captured,
-		Source:          trx.Source,
-		SourceID:        trx.SourceID,
-		ExpiresAt:       trx.ExpiresAt,
-		Description:     trx.Description,
-		CreatedAt:       trx.CreatedAt,
-		UpdatedAt:       trx.UpdatedAt,
-		Replayed:        trx.Replayed,
-	}, nil
-}
-
-// GetDeposit answers "what did this deposit key do" (or#906): the grant id,
-// amount, and created_at committed at the caller's key, with Replayed=true —
-// exactly what a replay POST would answer, without needing the amount. Returns
-// (nil, nil) when the key never committed. sourceID is the deposit key's
-// caller half; the operation half is fixed to deposit by this method
-// (key-qualified — or#894 deleted the keyless coordinate read as a trap).
-func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID, sourceID string) (*CreditTransaction, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if customerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	trx, err := s.moneyService().GetDepositBySourceID(ctx, customerID, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	if trx == nil {
-		return nil, nil
-	}
-	return &CreditTransaction{
-		ID:              trx.ID,
-		CustomerID:      billing.CustomerID(trx.CustomerID).String(),
-		Invoker:         trx.Invoker,
-		Currency:        trx.Currency,
-		Amount:          trx.Amount,
-		TransactionType: trx.TransactionType,
-		Status:          trx.Status,
-		Source:          trx.Source,
-		SourceID:        trx.SourceID,
-		ExpiresAt:       trx.ExpiresAt,
-		Description:     trx.Description,
-		CreatedAt:       trx.CreatedAt,
-		UpdatedAt:       trx.UpdatedAt,
-		Replayed:        trx.Replayed,
-	}, nil
-}
-
-func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*billing.CaptureReceipt, error) {
+// CaptureAdmission settles an admitted request. The first capture fixes its
+// amount and usage terms; an exact retry returns the original receipt.
+func (s *Service) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureParams) (*billing.CaptureReceipt, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	req.RequestID = strings.TrimSpace(req.RequestID)
-	if req.RequestID == "" {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
 		return nil, fmt.Errorf("request_id required")
 	}
-	return s.moneyService().CaptureAdmission(ctx, req.RequestID, req.Amount, &billing.CaptureUsage{
-		EventType: req.EventType, Resource: req.Resource, Source: req.Source, SourceID: req.SourceID,
-		Dimensions: req.Dimensions, Metadata: req.Metadata,
-	})
+	return s.moneyService().CaptureAdmission(ctx, requestID, params.Amount, params.Usage)
+}
+
+// GetAdmission reads an allowed admission and its hold.
+func (s *Service) GetAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	row, err := spendgate.New(s.rt.DB).Get(ctx, strings.TrimSpace(requestID))
+	if err != nil {
+		return nil, err
+	}
+	return admissionFromOperation(row, s.now()), nil
 }
 
 // AdmissionCustomer resolves ownership from the durable operation before route authorization.
@@ -314,114 +98,64 @@ func (s *Service) AdmissionCustomer(ctx context.Context, requestID string) (iden
 	}
 	defer release()
 	row, err := spendgate.New(s.rt.DB).Get(ctx, requestID)
-	return identity.CustomerID(row.PayerID), err
+	return identity.CustomerID(row.CustomerID), err
 }
 
-// ServiceUsageRollupRow is one grouped spend bucket (dimension value, event
-// count, summed host-priced amount).
-type ServiceUsageRollupRow = billing.UsageRollupRow
-
-// ServiceUsageRollupRequest selects a payer + window + grouping dimension.
-type ServiceUsageRollupRequest struct {
-	CustomerID *identity.CustomerID
-	Currency   string
-	From       time.Time
-	To         time.Time
-	GroupBy    string // endpoint | function | tier | user
-}
-
-// ServiceUsageRollup returns per-dimension-value spend for a payer over a
-// window (#311) — the OpenRails-sourced data behind the platform's
-// /budget-usage + revenue analytics. Service-scoped (operator API key).
-func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollupRequest) ([]ServiceUsageRollupRow, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if req.CustomerID == nil || req.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	currency, err := requireCurrency(req.Currency)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.moneyService().ServiceUsageRollup(ctx, *req.CustomerID, currency, req.From, req.To, req.GroupBy)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ServiceUsageRollupRow, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, ServiceUsageRollupRow{Key: r.Key, Currency: currency, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
-	}
-	return out, nil
-}
-
-// ResourceRevenueDailyRow is one day's revenue in internal units for an endpoint.
-type ResourceRevenueDailyRow = billing.ResourceRevenueDailyRow
-
-// ResourceRevenueDaily returns per-day revenue for a resource (typed
-// attribution column) across all payers in the merchant over [from, to) — powers
-// endpoint revenue analytics (#410).
-func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	currency, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.moneyService().ResourceRevenueDaily(ctx, resource, currency, from, to)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ResourceRevenueDailyRow, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, ResourceRevenueDailyRow{Date: r.Date, Currency: currency, Amount: r.Amount})
-	}
-	return out, nil
-}
-
-func (s *Service) ReleaseHold(ctx context.Context, requestID string) error {
+// ReleaseAdmission frees an open hold. Releasing a released admission
+// returns it unchanged.
+func (s *Service) ReleaseAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer release()
-	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("request_id required")
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, fmt.Errorf("request_id required")
 	}
 	gate := spendgate.New(s.rt.DB)
 	gate.SetClock(s.now)
-	return gate.Release(ctx, strings.TrimSpace(requestID))
+	if err := gate.Release(ctx, requestID); err != nil {
+		return nil, err
+	}
+	row, err := gate.Get(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	return admissionFromOperation(row, s.now()), nil
 }
 
-func (s *Service) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
+// ExtendAdmission moves an open hold's deadline to expiresAt.
+func (s *Service) ExtendAdmission(ctx context.Context, requestID string, expiresAt time.Time) (*billing.Admission, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer release()
-	if strings.TrimSpace(requestID) == "" {
-		return fmt.Errorf("request_id required")
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, fmt.Errorf("request_id required")
 	}
 	if expiresAt.IsZero() {
-		return ErrHoldDeadlineRequired
+		return nil, ErrHoldDeadlineRequired
 	}
 	gate := spendgate.New(s.rt.DB)
 	gate.SetClock(s.now)
-	err = gate.Extend(ctx, strings.TrimSpace(requestID), expiresAt)
+	err = gate.Extend(ctx, requestID, expiresAt)
 	if errors.Is(err, spendgate.ErrExpired) {
-		return ErrHoldDeadlinePassed
+		return nil, ErrHoldDeadlinePassed
 	}
 	if errors.Is(err, spendgate.ErrNotFound) {
-		return ErrHoldNotFound
+		return nil, ErrHoldNotFound
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	row, err := gate.Get(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	return admissionFromOperation(row, s.now()), nil
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {

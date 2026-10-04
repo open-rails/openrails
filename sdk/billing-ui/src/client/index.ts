@@ -22,7 +22,6 @@ export {
   type BillingErrorBody,
 } from "./errors"
 export type {
-  BillingStatus,
   CardSetup,
   CardSummary,
   Currency,

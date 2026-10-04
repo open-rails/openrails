@@ -92,7 +92,7 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 	cost, rated := int64(math.MaxInt64), int64(math.MaxInt64)
 	body := []byte(`{"contract":"openrails/pass-through-provider-cost"}`)
 	digest := billing.SHA256(sha256.Sum256(body))
-	merchantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	merchantID := billing.MerchantID(uuid.MustParse("11111111-1111-1111-1111-111111111111"))
 	value := billing.ProviderBillingQualification{
 		OperationID: "rental/create", MerchantID: merchantID,
 		Lifecycle: billing.ProviderBillingLifecycleEvidence{
@@ -106,15 +106,15 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 		State:                   billing.ProviderBillingQualificationEligible,
 		Reason:                  billing.ProviderBillingEligible,
 		BaselineObservationID:   "obs-1", QualifiedObservationID: "obs-2",
-		QualifiedProviderCostUSDMicros: &cost,
-		QualifiedAt:                    &when,
+		QualifiedCostAmount: &cost,
+		QualifiedAt:         &when,
 		Authorization: billing.OperationAuthorization{
 			OperationID: "rental/create", MerchantID: merchantID,
-			Payer: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
-			AuthorizedUSDMicros: math.MaxInt64, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
+			CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
+			Currency: "USD", Amount: math.MaxInt64, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
 			AuthorizationBodySHA256: billing.SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: billing.OperationAuthorizationSettled,
-			TerminalReference: "sha256:" + digest.String(), SettlementProviderCostUSDMicros: &cost,
-			SettlementRatedUSDMicros: &rated, SettlementBody: body, SettlementBodySHA256: &digest,
+			TerminalReference: "sha256:" + digest.String(), SettlementCostAmount: &cost,
+			SettlementAmount: &rated, SettlementBody: body, SettlementBodySHA256: &digest,
 			CreatedAt: when, SettledAt: &when,
 		},
 		CreatedAt: when, UpdatedAt: when,
@@ -127,7 +127,7 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 	open := billing.OperationAuthorization{State: billing.OperationAuthorizationOpen, CreatedAt: when}
 	raw, err := json.Marshal(open)
 	require.NoError(t, err)
-	for _, field := range []string{`"settlement_rated_usd_micros":null`, `"settlement_body":null`, `"settlement_body_sha256":null`} {
+	for _, field := range []string{`"settlement_amount":null`, `"settlement_body":null`, `"settlement_body_sha256":null`} {
 		require.Contains(t, string(raw), field, "unsettled authorization must encode explicit nulls")
 	}
 	var openGot billing.OperationAuthorization
@@ -165,7 +165,7 @@ func TestProviderObligationRequestsCarryNoRatedAmount(t *testing.T) {
 			walk(field.Type, path+"."+field.Name)
 		}
 	}
-	for _, request := range []any{billing.OperationAuthorizationRequest{}, billing.ReleaseOperationAuthorizationRequest{}, billing.ProviderBillingObservationRequest{}} {
+	for _, request := range []any{billing.OperationAuthorizationParams{}, billing.ReleaseOperationAuthorizationParams{}, billing.ProviderBillingObservationParams{}} {
 		walk(reflect.TypeOf(request), reflect.TypeOf(request).Name())
 	}
 }
@@ -207,7 +207,7 @@ func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	revision, amount := "before", int64(9007199254740993)
 	params := billing.MerchantConfigurationApplyParams{ApplicationID: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 		InvoiceCollectionThreshold: &amount,
-		BillingPolicies:            []billing.BillingPolicyInput{}, BillingPolicyBindings: []billing.BillingPolicyBindingInput{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindowInput{},
+		BillingPolicies:            []billing.BillingPolicyInput{}, BillingPolicyBindings: []billing.BillingPolicyBindingInput{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
 	}}
 	body, err := json.Marshal(params)
 	require.NoError(t, err)

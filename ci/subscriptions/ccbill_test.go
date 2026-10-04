@@ -62,7 +62,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 		AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
 		Customers:     []billing.DeclaredCustomer{{Customer: customerID}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "ccbill", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end}},
-		Transactions:  []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+		Transactions:  []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)

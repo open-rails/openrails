@@ -119,6 +119,8 @@ SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND state <> 'current'
   AND (sqlc.narg(state)::text IS NULL OR state = sqlc.narg(state)::text)
+  AND (sqlc.narg(after_since)::timestamptz IS NULL
+   OR (overdue_since, customer_id, currency) > (sqlc.narg(after_since)::timestamptz, sqlc.narg(after_customer)::uuid, sqlc.narg(after_currency)::text))
 ORDER BY overdue_since, customer_id, currency
 LIMIT sqlc.arg(row_limit);
 

@@ -12,29 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countCustomerCreditGrants = `-- name: CountCustomerCreditGrants :one
-
-SELECT count(*) FROM billing.grants g
-WHERE g.merchant_id = $1::uuid
-  AND g.customer_id = $2::uuid
-  AND g.currency = $3::text
-  AND g.kind = 'credit' AND g.event = 'grant'
-`
-
-type CountCustomerCreditGrantsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// Customer support reads over the existing append-only grant and money ledgers.
-func (q *Queries) CountCustomerCreditGrants(ctx context.Context, arg CountCustomerCreditGrantsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countCustomerCreditGrants, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getCustomerCreditGrant = `-- name: GetCustomerCreditGrant :one
 SELECT g.id, g.customer_id, COALESCE(g.currency, '')::text AS currency,
        COALESCE(g.amount, 0)::bigint AS amount,
@@ -110,14 +87,18 @@ func (q *Queries) GetCustomerCreditGrant(ctx context.Context, arg GetCustomerCre
 }
 
 const listCustomerCreditGrants = `-- name: ListCustomerCreditGrants :many
+
 WITH page AS (
   SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM billing.grants g
   WHERE g.merchant_id = $1::uuid
     AND g.customer_id = $2::uuid
-    AND g.currency = $3::text
+    AND ($3::text IS NULL OR g.currency = $3::text)
+    AND ($4::text IS NULL OR g.source_id = $4::text)
     AND g.kind = 'credit' AND g.event = 'grant'
+    AND ($5::timestamptz IS NULL
+     OR (g.created_at, g.id) < ($5::timestamptz, $6::uuid))
   ORDER BY g.created_at DESC, g.id DESC
-  LIMIT $5::int OFFSET $4::int
+  LIMIT $7::int
 )
 SELECT g.id, g.customer_id, COALESCE(g.currency, '')::text AS currency,
        COALESCE(g.amount, 0)::bigint AS amount,
@@ -143,9 +124,11 @@ ORDER BY g.created_at DESC, g.id DESC
 type ListCustomerCreditGrantsParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	Currency   string
-	PageOffset int32
-	PageLimit  int32
+	Currency   *string
+	SourceID   *string
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
 }
 
 type ListCustomerCreditGrantsRow struct {
@@ -168,13 +151,16 @@ type ListCustomerCreditGrantsRow struct {
 	RemainingAmount   int64
 }
 
+// Customer support reads over the existing append-only grant and money ledgers.
 func (q *Queries) ListCustomerCreditGrants(ctx context.Context, arg ListCustomerCreditGrantsParams) ([]ListCustomerCreditGrantsRow, error) {
 	rows, err := q.db.Query(ctx, listCustomerCreditGrants,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.SourceID,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

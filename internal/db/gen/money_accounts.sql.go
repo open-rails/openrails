@@ -16,13 +16,12 @@ const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     -- Same hold total as GetFinancialHeldAmount.
-    (COALESCE((SELECT SUM(oa.authorized_usd_micros)
+    (COALESCE((SELECT SUM(oa.amount)
               FROM billing.operation_authorizations oa
-              JOIN billing.ledger_accounts la ON la.merchant_id = oa.merchant_id AND la.id = oa.ledger_account_id
-             WHERE oa.merchant_id = a.merchant_id AND la.customer_id = a.customer_id AND la.currency = a.currency AND oa.state = 'open'), 0)
+             WHERE oa.merchant_id = a.merchant_id AND oa.customer_id = a.customer_id AND oa.currency = a.currency AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
-             WHERE ao.merchant_id = a.merchant_id AND ao.payer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
+             WHERE ao.merchant_id = a.merchant_id AND ao.customer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
                AND (ao.expires_at IS NULL OR ao.expires_at > $1::timestamptz)), 0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
@@ -323,7 +322,7 @@ func (q *Queries) SetMoneyAccountCreditLimit(ctx context.Context, arg SetMoneyAc
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec
 UPDATE billing.money_settings
-SET tier = $3::text, updated_at = $4
+SET tier = NULLIF($3::text, ''), updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
 

@@ -53,8 +53,8 @@ The remote Client cannot join a host database transaction and does not pretend t
 
 **Future schema if ratified.** Every item is additive, so it is deferred rather than frozen now:
 
-- `operation_authorization_extensions (merchant_id, operation_id, ordinal, requested_usd_micros, minimum_usd_micros, granted_usd_micros, created_at)` with a composite primary key, a foreign key to the authorization and forced RLS.
-- `operation_authorizations.authorized_total_usd_micros` equal to the opening amount plus grants. Holds and the settlement manifest would read the total. `authorized_usd_micros` stays the immutable opening amount.
+- `operation_authorization_extensions (merchant_id, operation_id, ordinal, currency, requested_amount, minimum_amount, granted_amount, created_at)` with a composite primary key, a foreign key to the authorization and forced RLS.
+- `operation_authorizations.authorized_total_amount` equal to the opening amount plus grants. Holds and the settlement manifest would read the total. `amount` stays the immutable opening amount.
 - Ledger transfer type `owed_repayment_from_balance` and a repaid invoice-item transition.
 - Prepaid capacity subtracting owed amounts would change behaviour but needs no schema.
 

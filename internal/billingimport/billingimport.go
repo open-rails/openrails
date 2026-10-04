@@ -33,6 +33,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -124,6 +125,11 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			}
 			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), c.Customer.UUID()); err != nil {
 				return fmt.Errorf("ensure customer %s: %w", c.Customer, err)
+			}
+			if email := strings.TrimSpace(c.Email); email != "" {
+				if err := q.SetCustomerEmail(ctx, gen.SetCustomerEmailParams{MerchantID: merchantID.UUID(), ID: c.Customer.UUID(), Email: &email}); err != nil {
+					return fmt.Errorf("customer %s email: %w", c.Customer, err)
+				}
 			}
 			seen[c.Customer.UUID()] = struct{}{}
 		}
@@ -228,12 +234,16 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if t.Type == "" {
 				typ = reconcile.TransactionTypeSale
 			}
+			minor, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount)
+			if err != nil {
+				return apperr.Invalidf("transaction %s amount: %v", t.TransactionID, err).WithParam("transactions")
+			}
 			txns = append(txns, reconcile.RemoteTransaction{
 				TransactionID:  t.TransactionID,
 				SubscriptionID: t.RailSubscriptionID,
 				Type:           typ,
 				Success:        t.Success,
-				AmountCents:    t.AmountCents,
+				AmountCents:    int64(minor),
 				Currency:       t.Currency,
 				OccurredAt:     t.OccurredAt.UTC(),
 			})

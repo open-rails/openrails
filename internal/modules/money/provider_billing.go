@@ -74,39 +74,39 @@ const (
 // bodies. RawBody may be empty when the provider response exceeded its bound.
 type ProviderBillingObservationRefusal = billing.ProviderBillingObservationRefusal
 
-type ProviderBillingObservationInput = billing.ProviderBillingObservationRequest
+type ProviderBillingObservationInput = billing.ProviderBillingObservationParams
 
 type ProviderBillingQualification struct {
-	OperationID                    string
-	MerchantID                     uuid.UUID
-	Provider                       string
-	ProviderResourceID             string
-	ProviderLifetimeStart          time.Time
-	ProviderLifetimeEnd            time.Time
-	ProviderAbsentAt               time.Time
-	ProviderAbsenceReference       string
-	BillingStopReference           string
-	WindowsClosedAt                time.Time
-	WindowsClosedReference         string
-	LifecycleEvidenceBody          []byte
-	LifecycleEvidenceSHA256        [sha256.Size]byte
-	Quiescence                     time.Duration
-	State                          ProviderBillingQualificationState
-	Reason                         ProviderBillingQualificationReason
-	BaselineObservationID          string
-	QualifiedObservationID         string
-	QualifiedProviderCostUSDMicros *int64
-	QualifiedAt                    *time.Time
-	Authorization                  *OperationAuthorization
-	CreatedAt                      time.Time
-	UpdatedAt                      time.Time
-	Replayed                       bool
+	OperationID              string
+	MerchantID               uuid.UUID
+	Provider                 string
+	ProviderResourceID       string
+	ProviderLifetimeStart    time.Time
+	ProviderLifetimeEnd      time.Time
+	ProviderAbsentAt         time.Time
+	ProviderAbsenceReference string
+	BillingStopReference     string
+	WindowsClosedAt          time.Time
+	WindowsClosedReference   string
+	LifecycleEvidenceBody    []byte
+	LifecycleEvidenceSHA256  [sha256.Size]byte
+	Quiescence               time.Duration
+	State                    ProviderBillingQualificationState
+	Reason                   ProviderBillingQualificationReason
+	BaselineObservationID    string
+	QualifiedObservationID   string
+	QualifiedCostAmount      *int64
+	QualifiedAt              *time.Time
+	Authorization            *OperationAuthorization
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	Replayed                 bool
 }
 
 type normalizedProviderBillingRecord struct {
 	ProviderResourceID string `json:"provider_resource_id"`
 	BucketStart        string `json:"bucket_start"`
-	AmountUSDMicros    int64  `json:"amount_usd_micros"`
+	Amount             int64  `json:"amount"`
 	TimeBilledMS       int64  `json:"time_billed_ms"`
 }
 
@@ -165,7 +165,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 	if err != nil {
 		return nil, err
 	}
-	payer := identity.CustomerID(authRow.PayerID)
+	payer := identity.CustomerID(authRow.CustomerID)
 	if _, err := txSvc.lockBalance(ctx, q, payer, authRow.RecordOwner, operationAuthorizationCurrency); err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		RawBodyDigest:           prepared.rawDigest[:],
 		NormalizedRecordsBytes:  prepared.normalizedRecords,
 		NormalizedRecordsDigest: nullableDigest(prepared),
-		ProviderCostUsdMicros:   prepared.providerCost,
+		CostAmount:              prepared.providerCost,
 		HasNegativeRecord:       prepared.hasNegative,
 		RefusalKind:             prepared.refusalKind,
 		CoversLifetime:          prepared.coversLifetime,
@@ -273,15 +273,15 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		return nil, err
 	}
 	qual, err = q.UpdateProviderBillingQualification(ctx, gen.UpdateProviderBillingQualificationParams{
-		State:                          string(state),
-		Reason:                         string(reason),
-		BaselineObservationID:          baselineID,
-		QualifiedObservationID:         qualifiedID,
-		QualifiedProviderCostUsdMicros: qualifiedCost,
-		QualifiedAt:                    qualifiedAt,
-		UpdatedAt:                      now,
-		MerchantID:                     merchantID.UUID(),
-		OperationID:                    in.OperationID,
+		State:                  string(state),
+		Reason:                 string(reason),
+		BaselineObservationID:  baselineID,
+		QualifiedObservationID: qualifiedID,
+		QualifiedCostAmount:    qualifiedCost,
+		QualifiedAt:            qualifiedAt,
+		UpdatedAt:              now,
+		MerchantID:             merchantID.UUID(),
+		OperationID:            in.OperationID,
 	})
 	if err != nil {
 		return nil, err
@@ -294,9 +294,9 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 			return nil, err
 		}
 		auth, err = txSvc.settlePassThroughProviderCostInTx(ctx, txDB, passThroughProviderCostSettlementInput{
-			OperationID:           in.OperationID,
-			ProviderCostUSDMicros: *qualifiedCost,
-			SettlementBody:        body,
+			OperationID:    in.OperationID,
+			CostAmount:     *qualifiedCost,
+			SettlementBody: body,
 		})
 		if err != nil {
 			return nil, err
@@ -332,13 +332,13 @@ func evaluateProviderBillingObservation(
 	if err != nil {
 		return "", "", nil, nil, nil, nil, fmt.Errorf("provider billing baseline observation: %w", err)
 	}
-	if baseline.ProviderCostUsdMicros == nil || prepared.providerCost == nil {
+	if baseline.CostAmount == nil || prepared.providerCost == nil {
 		return "", "", nil, nil, nil, nil, fmt.Errorf("provider billing baseline lacks normalized cost")
 	}
-	if *prepared.providerCost < *baseline.ProviderCostUsdMicros {
+	if *prepared.providerCost < *baseline.CostAmount {
 		return ProviderBillingQualificationRefused, ProviderBillingDecreasingProviderCost, qual.BaselineObservationID, nil, nil, nil, nil
 	}
-	if *prepared.providerCost != *baseline.ProviderCostUsdMicros ||
+	if *prepared.providerCost != *baseline.CostAmount ||
 		baseline.NormalizedQuery != in.NormalizedQuery ||
 		!baseline.QueryStart.Equal(in.QueryStart) ||
 		!baseline.QueryEnd.Equal(in.QueryEnd) ||
@@ -476,16 +476,16 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 		if record.TimeBilledMS < 0 {
 			return prepared, fmt.Errorf("provider billing record %d has negative time_billed_ms", i)
 		}
-		if (record.AmountUSDMicros > 0 && total > math.MaxInt64-record.AmountUSDMicros) ||
-			(record.AmountUSDMicros < 0 && total < math.MinInt64-record.AmountUSDMicros) {
+		if (record.Amount > 0 && total > math.MaxInt64-record.Amount) ||
+			(record.Amount < 0 && total < math.MinInt64-record.Amount) {
 			return prepared, fmt.Errorf("provider billing record %d makes total USD micros overflow", i)
 		}
-		total += record.AmountUSDMicros
-		prepared.hasNegative = prepared.hasNegative || record.AmountUSDMicros < 0
+		total += record.Amount
+		prepared.hasNegative = prepared.hasNegative || record.Amount < 0
 		records[i] = normalizedProviderBillingRecord{
 			ProviderResourceID: record.ProviderResourceID,
 			BucketStart:        record.BucketStart.UTC().Format(time.RFC3339Nano),
-			AmountUSDMicros:    record.AmountUSDMicros,
+			Amount:             record.Amount,
 			TimeBilledMS:       record.TimeBilledMS,
 		}
 	}
@@ -496,8 +496,8 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 		if records[i].ProviderResourceID != records[j].ProviderResourceID {
 			return records[i].ProviderResourceID < records[j].ProviderResourceID
 		}
-		if records[i].AmountUSDMicros != records[j].AmountUSDMicros {
-			return records[i].AmountUSDMicros < records[j].AmountUSDMicros
+		if records[i].Amount != records[j].Amount {
+			return records[i].Amount < records[j].Amount
 		}
 		return records[i].TimeBilledMS < records[j].TimeBilledMS
 	})
@@ -563,7 +563,7 @@ func replayProviderBillingObservation(row gen.BillingProviderBillingObservation,
 		{"raw_body_sha256", bytes.Equal(row.RawBodyDigest, prepared.rawDigest[:])},
 		{"normalized_records", bytes.Equal(row.NormalizedRecordsBytes, prepared.normalizedRecords)},
 		{"normalized_records_sha256", bytes.Equal(row.NormalizedRecordsDigest, nullableDigest(prepared))},
-		{"provider_cost_usd_micros", equalOptionalInt64(row.ProviderCostUsdMicros, prepared.providerCost)},
+		{"cost_amount", equalOptionalInt64(row.CostAmount, prepared.providerCost)},
 		{"negative_record", row.HasNegativeRecord == prepared.hasNegative},
 		{"refusal_kind", equalOptionalString(row.RefusalKind, prepared.refusalKind)},
 	}
@@ -584,23 +584,23 @@ func equalOptionalString(a, b *string) bool {
 }
 
 type providerBillingSettlementManifest struct {
-	Contract                       string                               `json:"contract"`
-	OperationID                    string                               `json:"operation_id"`
-	Provider                       string                               `json:"provider"`
-	ProviderResourceID             string                               `json:"provider_resource_id"`
-	ProviderLifetimeStart          string                               `json:"provider_lifetime_start"`
-	ProviderLifetimeEnd            string                               `json:"provider_lifetime_end"`
-	ProviderAbsentAt               string                               `json:"provider_absent_at"`
-	ProviderAbsenceReference       string                               `json:"provider_absence_reference"`
-	BillingStopReference           string                               `json:"billing_stop_reference"`
-	WindowsClosedAt                string                               `json:"windows_closed_at"`
-	WindowsClosedReference         string                               `json:"windows_closed_reference"`
-	LifecycleEvidenceSHA256        string                               `json:"lifecycle_evidence_sha256"`
-	BaselineObservation            providerBillingSettlementObservation `json:"baseline_observation"`
-	QualifiedObservation           providerBillingSettlementObservation `json:"qualified_observation"`
-	QualifiedProviderCostUSDMicros int64                                `json:"qualified_provider_cost_usd_micros"`
-	QuiescenceSeconds              int64                                `json:"quiescence_seconds"`
-	QualifiedAt                    string                               `json:"qualified_at"`
+	Contract                 string                               `json:"contract"`
+	OperationID              string                               `json:"operation_id"`
+	Provider                 string                               `json:"provider"`
+	ProviderResourceID       string                               `json:"provider_resource_id"`
+	ProviderLifetimeStart    string                               `json:"provider_lifetime_start"`
+	ProviderLifetimeEnd      string                               `json:"provider_lifetime_end"`
+	ProviderAbsentAt         string                               `json:"provider_absent_at"`
+	ProviderAbsenceReference string                               `json:"provider_absence_reference"`
+	BillingStopReference     string                               `json:"billing_stop_reference"`
+	WindowsClosedAt          string                               `json:"windows_closed_at"`
+	WindowsClosedReference   string                               `json:"windows_closed_reference"`
+	LifecycleEvidenceSHA256  string                               `json:"lifecycle_evidence_sha256"`
+	BaselineObservation      providerBillingSettlementObservation `json:"baseline_observation"`
+	QualifiedObservation     providerBillingSettlementObservation `json:"qualified_observation"`
+	QualifiedCostAmount      int64                                `json:"qualified_cost_amount"`
+	QuiescenceSeconds        int64                                `json:"quiescence_seconds"`
+	QualifiedAt              string                               `json:"qualified_at"`
 }
 
 type providerBillingSettlementObservation struct {
@@ -614,7 +614,7 @@ type providerBillingSettlementObservation struct {
 
 func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.BillingProviderBillingQualification) ([]byte, error) {
 	if row.BaselineObservationID == nil || row.QualifiedObservationID == nil ||
-		row.QualifiedProviderCostUsdMicros == nil || row.QualifiedAt == nil {
+		row.QualifiedCostAmount == nil || row.QualifiedAt == nil {
 		return nil, fmt.Errorf("eligible provider billing qualification is incomplete")
 	}
 	baseline, err := q.GetProviderBillingObservation(ctx, gen.GetProviderBillingObservationParams{
@@ -630,23 +630,23 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 		return nil, fmt.Errorf("load qualified provider billing evidence: %w", err)
 	}
 	body, err := json.Marshal(providerBillingSettlementManifest{
-		Contract:                       "openrails/pass-through-provider-cost",
-		OperationID:                    row.OperationID,
-		Provider:                       row.Provider,
-		ProviderResourceID:             row.ProviderResourceID,
-		ProviderLifetimeStart:          row.ProviderLifetimeStart.UTC().Format(time.RFC3339Nano),
-		ProviderLifetimeEnd:            row.ProviderLifetimeEnd.UTC().Format(time.RFC3339Nano),
-		ProviderAbsentAt:               row.ProviderAbsentAt.UTC().Format(time.RFC3339Nano),
-		ProviderAbsenceReference:       row.ProviderAbsenceReference,
-		BillingStopReference:           row.BillingStopReference,
-		WindowsClosedAt:                row.WindowsClosedAt.UTC().Format(time.RFC3339Nano),
-		WindowsClosedReference:         row.WindowsClosedReference,
-		LifecycleEvidenceSHA256:        hex.EncodeToString(row.LifecycleEvidenceDigest),
-		BaselineObservation:            providerBillingSettlementObservationFromRow(baseline),
-		QualifiedObservation:           providerBillingSettlementObservationFromRow(qualified),
-		QualifiedProviderCostUSDMicros: *row.QualifiedProviderCostUsdMicros,
-		QuiescenceSeconds:              row.QuiescenceSeconds,
-		QualifiedAt:                    row.QualifiedAt.UTC().Format(time.RFC3339Nano),
+		Contract:                 "openrails/pass-through-provider-cost",
+		OperationID:              row.OperationID,
+		Provider:                 row.Provider,
+		ProviderResourceID:       row.ProviderResourceID,
+		ProviderLifetimeStart:    row.ProviderLifetimeStart.UTC().Format(time.RFC3339Nano),
+		ProviderLifetimeEnd:      row.ProviderLifetimeEnd.UTC().Format(time.RFC3339Nano),
+		ProviderAbsentAt:         row.ProviderAbsentAt.UTC().Format(time.RFC3339Nano),
+		ProviderAbsenceReference: row.ProviderAbsenceReference,
+		BillingStopReference:     row.BillingStopReference,
+		WindowsClosedAt:          row.WindowsClosedAt.UTC().Format(time.RFC3339Nano),
+		WindowsClosedReference:   row.WindowsClosedReference,
+		LifecycleEvidenceSHA256:  hex.EncodeToString(row.LifecycleEvidenceDigest),
+		BaselineObservation:      providerBillingSettlementObservationFromRow(baseline),
+		QualifiedObservation:     providerBillingSettlementObservationFromRow(qualified),
+		QualifiedCostAmount:      *row.QualifiedCostAmount,
+		QuiescenceSeconds:        row.QuiescenceSeconds,
+		QualifiedAt:              row.QualifiedAt.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("author provider billing settlement body: %w", err)
@@ -670,30 +670,30 @@ func providerBillingQualificationFromRow(row gen.BillingProviderBillingQualifica
 	var lifecycleDigest [sha256.Size]byte
 	copy(lifecycleDigest[:], row.LifecycleEvidenceDigest)
 	return &ProviderBillingQualification{
-		OperationID:                    row.OperationID,
-		MerchantID:                     row.MerchantID,
-		Provider:                       row.Provider,
-		ProviderResourceID:             row.ProviderResourceID,
-		ProviderLifetimeStart:          row.ProviderLifetimeStart,
-		ProviderLifetimeEnd:            row.ProviderLifetimeEnd,
-		ProviderAbsentAt:               row.ProviderAbsentAt,
-		ProviderAbsenceReference:       row.ProviderAbsenceReference,
-		BillingStopReference:           row.BillingStopReference,
-		WindowsClosedAt:                row.WindowsClosedAt,
-		WindowsClosedReference:         row.WindowsClosedReference,
-		LifecycleEvidenceBody:          append([]byte(nil), row.LifecycleEvidenceBytes...),
-		LifecycleEvidenceSHA256:        lifecycleDigest,
-		Quiescence:                     time.Duration(row.QuiescenceSeconds) * time.Second,
-		State:                          ProviderBillingQualificationState(row.State),
-		Reason:                         ProviderBillingQualificationReason(row.Reason),
-		BaselineObservationID:          providerBillingOptionalString(row.BaselineObservationID),
-		QualifiedObservationID:         providerBillingOptionalString(row.QualifiedObservationID),
-		QualifiedProviderCostUSDMicros: row.QualifiedProviderCostUsdMicros,
-		QualifiedAt:                    row.QualifiedAt,
-		Authorization:                  auth,
-		CreatedAt:                      row.CreatedAt,
-		UpdatedAt:                      row.UpdatedAt,
-		Replayed:                       replayed,
+		OperationID:              row.OperationID,
+		MerchantID:               row.MerchantID,
+		Provider:                 row.Provider,
+		ProviderResourceID:       row.ProviderResourceID,
+		ProviderLifetimeStart:    row.ProviderLifetimeStart,
+		ProviderLifetimeEnd:      row.ProviderLifetimeEnd,
+		ProviderAbsentAt:         row.ProviderAbsentAt,
+		ProviderAbsenceReference: row.ProviderAbsenceReference,
+		BillingStopReference:     row.BillingStopReference,
+		WindowsClosedAt:          row.WindowsClosedAt,
+		WindowsClosedReference:   row.WindowsClosedReference,
+		LifecycleEvidenceBody:    append([]byte(nil), row.LifecycleEvidenceBytes...),
+		LifecycleEvidenceSHA256:  lifecycleDigest,
+		Quiescence:               time.Duration(row.QuiescenceSeconds) * time.Second,
+		State:                    ProviderBillingQualificationState(row.State),
+		Reason:                   ProviderBillingQualificationReason(row.Reason),
+		BaselineObservationID:    providerBillingOptionalString(row.BaselineObservationID),
+		QualifiedObservationID:   providerBillingOptionalString(row.QualifiedObservationID),
+		QualifiedCostAmount:      row.QualifiedCostAmount,
+		QualifiedAt:              row.QualifiedAt,
+		Authorization:            auth,
+		CreatedAt:                row.CreatedAt,
+		UpdatedAt:                row.UpdatedAt,
+		Replayed:                 replayed,
 	}
 }
 

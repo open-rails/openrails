@@ -5,24 +5,26 @@ import (
 	"github.com/open-rails/openrails/internal/http/handlers"
 )
 
-// customersRoutes is the merchant's view of a customer: the list, the billing
-// profile, the billing policy and whether the customer is overdue, and the
-// customer's own status summary.
+// customersRoutes is the merchant's customers: the record, its billing
+// profile and policy, and who is overdue.
 var customersRoutes = []Route{
-	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate,
-		Responses: []Reply{{200, billing.Customer{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceEnsureCustomer)},
-	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/billing-policy", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Responses: []Reply{{200, billing.CustomerBillingPolicyAssignment{}}}, Errors: codes("customer_not_found", "invalid_param"), Handler: h(handlers.ServiceGetCustomerBillingPolicy)},
-	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}/billing-policy", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate,
-		Request: handlers.CustomerBillingPolicyWrite{}, Responses: []Reply{{200, billing.CustomerBillingPolicyAssignment{}}}, Errors: codes("billing_policy_not_found", "customer_not_found", "invalid_param"), Handler: h(handlers.ServiceSetCustomerBillingPolicy)},
-	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/delinquency", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Responses: []Reply{{200, Untyped{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.ServiceGetCustomerDelinquency)},
-	{Method: GET, Path: "/v1/merchant/delinquency", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Query: params(integer("limit"), text("state")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceListDelinquency)},
 	{Method: GET, Path: "/v1/merchant/customers", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Query: params(integer("limit"), integer("offset"), text("q")), Responses: []Reply{{200, PathPage[handlers.AdminCustomerSummary]{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ListAdminCustomers)},
+		Query: params(queryOf(billing.CustomerListParams{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Customer]{}}},
+		Errors: codes("invalid_cursor"), Handler: h(handlers.ListCustomers)},
 	{Method: GET, Path: "/v1/merchant/customers/{customer_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Query: params(text("currency")), Responses: []Reply{{200, handlers.AdminUserBillingProfile{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param"), Handler: h(handlers.GetAdminUserBillingProfile)},
-	{Method: GET, Path: "/v1/me/status", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
-		Responses: []Reply{{200, billing.BillingStatus{}}}, Errors: codes("authentication_required", "catalog_scope_mismatch"), Handler: h(handlers.GetMyBillingStatus)},
+		Responses: []Reply{{200, billing.Customer{}}}, Errors: withCustomer("customer_not_found"), Handler: h(handlers.GetCustomer)},
+	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate,
+		Request: billing.CustomerParams{}, Responses: []Reply{{200, billing.Customer{}}}, Errors: withCustomer("invalid_param"), Handler: h(handlers.EnsureCustomer)},
+	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/billing-profile", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+		Responses: []Reply{{200, billing.CustomerBillingProfile{}}}, Errors: withCustomer("customer_not_found"), Handler: h(handlers.GetCustomerBillingProfile)},
+	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/billing-policy", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+		Responses: []Reply{{200, billing.CustomerBillingPolicy{}}}, Errors: withCustomer("customer_not_found"), Handler: h(handlers.GetCustomerBillingPolicy)},
+	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}/billing-policy", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate,
+		Request: billing.CustomerBillingPolicyParams{}, Responses: []Reply{{200, billing.CustomerBillingPolicy{}}},
+		Errors: withCustomer("billing_policy_not_found", "customer_not_found", "invalid_param"), Handler: h(handlers.SetCustomerBillingPolicy)},
+	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/delinquency", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+		Responses: []Reply{{200, billing.ListPage[billing.Delinquency]{}}}, Errors: withCustomer(), Handler: h(handlers.ListCustomerDelinquency)},
+	{Method: GET, Path: "/v1/merchant/delinquency", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+		Query: params(queryOf(billing.DelinquencyListParams{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Delinquency]{}}},
+		Errors: codes("invalid_cursor", "invalid_param"), Handler: h(handlers.ListDelinquency)},
 }

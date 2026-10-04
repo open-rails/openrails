@@ -28,7 +28,7 @@ describe("wire fixtures", () => {
     const client = createBillingClient({
       fetch: async () => json(422, errorFixture),
     })
-    const err = await client.getStatus().catch((e: unknown) => e)
+    const err = await client.listInvoices().catch((e: unknown) => e)
     expect(err).toBeInstanceOf(BillingError)
     expect(err).toMatchObject({
       status: 422,
@@ -136,7 +136,7 @@ describe("server errors", () => {
   it("surfaces a 500 without retrying", async () => {
     const fetch = calls(() => status(500))
     const err = await createBillingClient({ fetch })
-      .getStatus()
+      .listInvoices()
       .catch((e: unknown) => e)
     expect(err).toMatchObject({ status: 500, code: "server_error" })
     expect(isServerError(err)).toBe(true)
@@ -179,7 +179,7 @@ describe("server errors", () => {
   it("honours Retry-After only within the budget", async () => {
     const slow = calls(() => status(429, { "Retry-After": "5" }))
     await expect(
-      createBillingClient({ fetch: slow }).getStatus()
+      createBillingClient({ fetch: slow }).listInvoices()
     ).rejects.toMatchObject({ status: 429 })
     expect(slow).toHaveBeenCalledTimes(1)
     const quick = calls(() => status(503, { "Retry-After": "1" }), ok)

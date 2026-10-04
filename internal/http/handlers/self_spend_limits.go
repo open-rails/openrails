@@ -1,11 +1,13 @@
 package handlers
 
 import (
-	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -14,12 +16,6 @@ import (
 // invoker got about its budget was a denial at submit time. This returns the
 // windows it is actually metered against, with their live totals — a read over
 // the accounting admission already keeps, not a second one.
-
-type SelfSpendLimitsDocument struct {
-	Currency string                              `json:"currency"`
-	Invoker  string                              `json:"invoker"`
-	Windows  []billingservice.InvokerSpendWindow `json:"windows"`
-}
 
 // GetMySpendLimits (GET /v1/me/spend-limits?currency=) returns the spend windows
 // the AUTHENTICATED invoker is enforced against, with live used/reserved/
@@ -33,18 +29,16 @@ type SelfSpendLimitsDocument struct {
 // /v1/merchant/customers/{customer_id}/spend-delegations.
 func GetMySpendLimits(r *httprequest.Request) {
 	if addressed := addressedSpendScope(r); addressed != "" {
-		r.ErrorJSON(http.StatusBadRequest, "spend_scope_not_addressable: "+addressed+
-			" is not accepted here; /v1/me/spend-limits answers only for the authenticated invoker")
+		r.APIError(api.Coded(billing.CodeInvalidQuery, addressed+" is not accepted: /v1/me/spend-limits answers only for the authenticated invoker").WithParam(addressed))
 		return
 	}
-
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
 	principal, ok := middleware.PrincipalFromRequest(r)
 	if !ok {
-		r.ErrorJSON(http.StatusUnauthorized, "bearer principal required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return
 	}
 	// A payer's own credential is its own invoker; a delegated credential carries
@@ -54,30 +48,26 @@ func GetMySpendLimits(r *httprequest.Request) {
 		invoker = strings.TrimSpace(principal.Subject)
 	}
 	if invoker == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "invoker could not be resolved from the credential")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "invoker could not be resolved from the credential")
 		return
 	}
-
-	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	var q currencyQuery
+	if !r.BindQuery(&q) {
+		return
+	}
+	svc, ok := billingService(r)
 	if !ok {
-		return
-	}
-
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
 	windows, err := svc.InvokerSpendWindows(r.Request.Context(), payer, billingservice.InvokerSpendWindowsInput{
 		Invoker:  invoker,
-		Currency: currency,
+		Currency: q.Currency,
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "spend window lookup failed")
+		writeMoneyError(r, err, "spend window lookup failed")
 		return
 	}
-
-	r.SuccessJSON(SelfSpendLimitsDocument{Currency: currency, Invoker: invoker, Windows: windows})
+	r.SuccessJSON(billing.SpendLimits{Currency: money.NormalizeCurrency(q.Currency), Invoker: invoker, Windows: windows})
 }
 
 // addressedSpendScope names the first cross-subject addressing parameter present

@@ -1128,7 +1128,7 @@ function CustomerControlsTab() {
         setResult({
           customerID,
           currency: credit.currency || currency,
-          creditLimit: credit.credit_limit_amount,
+          creditLimit: credit.amount,
           trustLevel: trust.trust_level,
         })
         creditForm.reset()

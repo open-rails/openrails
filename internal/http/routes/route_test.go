@@ -21,7 +21,7 @@ import (
 
 // untypedBudget is how many routes still accept or answer a body no Go type
 // declares. It only goes down: a lane that types a route lowers it.
-const untypedBudget = 88
+const untypedBudget = 69
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
@@ -158,7 +158,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, pass, providers)
 	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, pass)
 	require.Len(t, subscriptions, 4)
-	require.Len(t, management, 37)
+	require.Len(t, management, 36)
 	for key := range subscriptions {
 		require.Contains(t, management, key, "each scope includes the narrower ones")
 	}

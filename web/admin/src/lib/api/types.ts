@@ -2,19 +2,11 @@
 // Money is native units at the currency registry scale; exact wires send int64
 // decimal strings (docs/money-wire.md).
 
+import type { Balance, Customer } from "./generated/wire"
+
 export type SubscriptionStatus =
   "pending" | "active" | "past_due" | "awaiting_method" | "unverified" | "cancelled"
 export type Rail = "nmi" | "ccbill" | "solana" | "stripe" | string
-
-// --- Customers (#740 list endpoint) ---
-
-export interface CustomerSummary {
-  id: string
-  subject?: string
-  email?: string
-  created_at: string
-  last_seen_at: string
-}
 
 // --- Shared Client DTOs (subscription and profile endpoints) ---
 
@@ -119,28 +111,15 @@ export interface PaymentMethodResponse {
   }[]
 }
 
-// CreditBalance amounts are exact decimal strings of native units.
-export interface CreditBalance {
-  currency: string
-  display_name: string
-  unit: string
-  decimal_places: number
-  balance: string
-  held_balance: string
-  outstanding_owed_amount: string
-}
-
 // CustomerBillingProfile composes the shared Client DTOs each dedicated
 // route serves (subscriptions, payments, entitlements, product access).
 export interface CustomerBillingProfile {
-  customer_id: string
-  email?: string
-  trust_level?: string
+  customer: Customer
+  balances: Balance[]
   subscriptions: AdminSubscription[]
   entitlements: RawEntitlement[]
   payments: PaymentObject[]
   payment_methods: PaymentMethodResponse[]
-  credit_balance: CreditBalance[]
   product_access: RawProductAccessGrant[]
 }
 

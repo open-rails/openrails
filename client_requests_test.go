@@ -45,16 +45,17 @@ func TestClientRequestShapes(t *testing.T) {
 	customer := billing.CustomerID(uuid.MustParse("7d5b4a0e-8c3f-4c1e-9b2a-1f0e2d3c4b5a")).String()
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
-		"/v1/merchant/admissions":                                  `{"items":[{"status":200,"result":{"allowed":true}}]}`,
-		"/v1/merchant/trust-level":                                 `{"currency":"USD","trust_level":"gold"}`,
-		"/v1/merchant/credits/deposit":                             `{"amount":"1"}`,
-		"/v1/merchant/users/" + customer + "/product-access":       `{"customer_id":"` + customer + `","product_id":"` + product + `","has_access":true,"data":[],"has_more":true,"next_cursor":"next"}`,
-		"/v1/merchant/users/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
+		"/v1/merchant/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
+		"/v1/merchant/customers/" + customer + "/trust-level":          `{"customer_id":"` + customer + `","currency":"USD","trust_level":"gold"}`,
+		"/v1/merchant/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
+		"/v1/merchant/customers/" + customer + "/product-access":       `{"customer_id":"` + customer + `","product_id":"` + product + `","has_access":true,"data":[],"has_more":true,"next_cursor":"next"}`,
+		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
 	})
 	key := "operation-key"
 	who := billing.CheckoutCustomerIdentity{ID: customer}
 	expires := time.Now().Add(time.Hour)
-	window := []billing.SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}}
+	window := []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}}
+	typedCustomer := billing.CustomerID(uuid.MustParse(customer))
 	cases := []struct {
 		name   string
 		call   func() error
@@ -105,7 +106,10 @@ func TestClientRequestShapes(t *testing.T) {
 			require.Equal(t, "gold", binding["tier"])
 		}},
 		{"admission carries trust level and prospective rate", func() error {
-			_, err := client.AdmitBatch(t.Context(), []billing.AdmitRequest{{CustomerID: customer, TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: &expires, RequestID: "req_1", AccrualRateDeltaPerHour: 42}})
+			verdicts, err := client.Admit(t.Context(), []billing.AdmitParams{{CustomerID: typedCustomer, TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: &expires, RequestID: "req_1", AccrualRateDeltaPerHour: 42}})
+			if err == nil && !verdicts[0].Allowed() {
+				err = errors.New("verdict not decoded")
+			}
 			return err
 		}, http.MethodPost, "/v1/merchant/admissions", "", func(t *testing.T, b map[string]any) {
 			item := b["items"].([]any)[0].(map[string]any)
@@ -113,31 +117,34 @@ func TestClientRequestShapes(t *testing.T) {
 			require.Equal(t, "42", item["accrual_rate_delta_per_hour"])
 		}},
 		{"trust level read", func() error {
-			level, err := client.GetTrustLevel(t.Context(), customer, " USD ")
-			if err == nil && level != "gold" {
-				err = errors.New("trust level not decoded: " + level)
+			level, err := client.GetTrustLevel(t.Context(), typedCustomer, " USD ")
+			if err == nil && level.TrustLevel != "gold" {
+				err = errors.New("trust level not decoded: " + level.TrustLevel)
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/trust-level", "currency=USD&customer_id=" + customer, nil},
-		{"deposit keys are opaque query values", func() error {
-			receipt, err := client.GetDeposit(t.Context(), customer, "../source/receipt?part=1&currency=JPY")
-			if err == nil && receipt.Amount != 1 {
-				err = errors.New("deposit amount not decoded")
+		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/trust-level", "currency=USD", nil},
+		{"credit grant source ids are opaque query values", func() error {
+			page, err := client.ListCreditGrants(t.Context(), typedCustomer, billing.CreditGrantListParams{SourceID: "../source/receipt?part=1&currency=JPY"})
+			if err == nil && page.Items[0].Amount != 1 {
+				err = errors.New("grant amount not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/credits/deposit", "customer_id=" + customer + "&source_id=..%2Fsource%2Freceipt%3Fpart%3D1%26currency%3DJPY", nil},
-		{"delegation document replace", func() error {
-			return client.SetCustomerSpendDelegations(t.Context(), customer, []billing.SpendDelegationInput{{Scope: "invoker", ScopeKey: "invoker-1", Windows: window}})
+		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/credit-grants", "source_id=..%2Fsource%2Freceipt%3Fpart%3D1%26currency%3DJPY", nil},
+		{"delegation replace", func() error {
+			_, err := client.SetSpendDelegations(t.Context(), typedCustomer, []billing.SpendDelegation{{Scope: billing.SpendDelegationInvoker, ScopeKey: "invoker-1", Windows: window}})
+			return err
 		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations", "", func(t *testing.T, b map[string]any) {
 			require.Len(t, b["delegations"], 1)
 		}},
-		{"delegation upsert", func() error {
-			return client.SetCustomerSpendDelegation(t.Context(), customer, billing.SpendDelegationInput{Scope: "invoker", ScopeKey: "issuer:subject", Windows: window})
-		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations:upsert", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, "issuer:subject", b["scope_key"])
+		{"delegation set at its address", func() error {
+			_, err := client.SetSpendDelegation(t.Context(), typedCustomer, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "issuer:subject", Windows: window})
+			return err
+		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/issuer:subject", "", func(t *testing.T, b map[string]any) {
+			require.NotContains(t, b, "scope_key", "the address carries scope and key")
+			require.Len(t, b["windows"], 1)
 		}},
 		{"delegation delete escapes one segment per key", func() error {
-			return client.DeleteCustomerSpendDelegation(t.Context(), customer, " invoker ", "a/b:c")
+			return client.DeleteSpendDelegation(t.Context(), typedCustomer, " invoker ", "a/b:c")
 		}, http.MethodDelete, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
 		{"access check by id", func() error {
 			got, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: customer, ProductID: product})
@@ -145,18 +152,18 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("access not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/users/" + customer + "/product-access", "product_id=" + product, nil},
+		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/product-access", "product_id=" + product, nil},
 		{"access check by key", func() error {
 			_, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: customer, ProductKey: "pro plan&x"})
 			return err
-		}, http.MethodGet, "/v1/merchant/users/" + customer + "/product-access", "product_key=pro+plan%26x", nil},
+		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/product-access", "product_key=pro+plan%26x", nil},
 		{"access batch keeps duplicates", func() error {
 			got, err := client.ProductAccess.CheckMany(t.Context(), &billing.ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{product, product}})
 			if err == nil && !got[product] {
 				err = errors.New("batch access not decoded")
 			}
 			return err
-		}, http.MethodPost, "/v1/merchant/users/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{product, product}, b["product_ids"])
 		}},
 		{"access list pages", func() error {
@@ -165,7 +172,7 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("page not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/users/" + customer + "/product-access", "cursor=cursor&limit=7", nil},
+		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/product-access", "cursor=cursor&limit=7", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,10 +224,10 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"delete rate card": func(id string) error { return c.DeleteDefaultUsageRateCard(ctx, id) },
 		"delete delegation scope": func(id string) error {
-			return c.DeleteCustomerSpendDelegation(ctx, customer, id, "key")
+			return c.DeleteSpendDelegation(ctx, billing.CustomerID(uuid.New()), billing.SpendDelegationScope(id), "key")
 		},
 		"delete delegation key": func(id string) error {
-			return c.DeleteCustomerSpendDelegation(ctx, customer, "invoker", id)
+			return c.DeleteSpendDelegation(ctx, billing.CustomerID(uuid.New()), billing.SpendDelegationInvoker, id)
 		},
 		"grant entitlement": func(id string) error {
 			_, err := c.GrantEntitlement(ctx, customer, billing.GrantEntitlementRequest{Entitlement: id})
@@ -244,10 +251,16 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreatePlanMigration(ctx, billing.PlanMigrationRequest{SourcePrice: id, TargetPrice: "b"})
 			return err
 		},
-		"deposit source":      func(id string) error { _, err := c.GetDeposit(ctx, customer, id); return err },
-		"capture":             func(id string) error { _, err := c.Capture(ctx, id, 1, nil); return err },
-		"release":             func(id string) error { return c.Release(ctx, id) },
-		"extend hold":         func(id string) error { return c.ExtendHold(ctx, id, now) },
+		"capture": func(id string) error {
+			_, err := c.CaptureAdmission(ctx, id, billing.CaptureParams{Amount: 1})
+			return err
+		},
+		"release": func(id string) error { _, err := c.ReleaseAdmission(ctx, id); return err },
+		"extend hold": func(id string) error {
+			_, err := c.ExtendAdmission(ctx, id, billing.ExtendAdmissionParams{ExpiresAt: now})
+			return err
+		},
+		"admission":           func(id string) error { _, err := c.GetAdmission(ctx, id); return err },
 		"entitlement subject": func(id string) error { _, err := c.ListEntitlements(ctx, id, now); return err },
 	}
 	// Typed identifiers: zero, malformed, or another kind's spelling.
@@ -330,7 +343,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.DeletePaymentMethod(ctx, customer, billing.PaymentMethodID{})
 			return err
 		},
-		"empty delegations customer": func() error { return c.SetCustomerSpendDelegations(ctx, noCustomer, nil) },
+		"empty delegations customer": func() error { _, err := c.SetSpendDelegations(ctx, billing.CustomerID{}, nil); return err },
 		"entitlement check": func() error {
 			_, err := c.HasEntitlement(ctx, customer, "", time.Time{})
 			return err
@@ -343,26 +356,56 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"effective tier":      func(id string) error { _, err := c.ResolveEffectiveTier(ctx, id, "group"); return err },
 		"invoice profile":     func(id string) error { _, err := c.GetCustomerInvoiceProfile(ctx, id); return err },
 		"set invoice profile": func(id string) error { return c.SetCustomerInvoiceProfile(ctx, id, billing.InvoiceProfileDTO{}) },
-		"credit account":      func(id string) error { _, err := c.GetCreditAccount(ctx, id, "USD"); return err },
-		"usage rollup":        func(id string) error { _, err := c.UsageRollup(ctx, id, "USD", now, now, "day"); return err },
-		"trust level":         func(id string) error { _, err := c.GetTrustLevel(ctx, id, "USD"); return err },
-		"set credit limit":    func(id string) error { return c.SetCreditLimit(ctx, id, "USD", 1) },
-		"credit limit":        func(id string) error { _, err := c.GetCreditLimit(ctx, id, "USD"); return err },
+
 		"access list": func(id string) error {
 			_, err := c.ProductAccess.List(ctx, &billing.ProductAccessListParams{CustomerID: id})
 			return err
 		},
-		"billing policy":     func(id string) error { _, err := c.GetCustomerBillingPolicy(ctx, id); return err },
-		"set billing policy": func(id string) error { _, err := c.SetCustomerBillingPolicy(ctx, id, nil); return err },
-		"set delegation":     func(id string) error { return c.SetCustomerSpendDelegation(ctx, id, billing.SpendDelegationInput{}) },
-		"ensure customer":    func(id string) error { _, err := c.EnsureCustomer(ctx, id); return err },
-		"deposit customer":   func(id string) error { _, err := c.GetDeposit(ctx, id, "src"); return err },
+
 		"grant customer": func(id string) error {
 			_, err := c.GrantEntitlement(ctx, id, billing.GrantEntitlementRequest{Entitlement: "pro"})
 			return err
 		},
 		"revoke customer":       func(id string) error { return c.RevokeEntitlement(ctx, id, "ent") },
 		"settled payment buyer": func(id string) error { _, err := c.HasSettledPayment(ctx, id, price.String()); return err },
+	}
+	// Typed customer ids: the zero id names nobody.
+	zero := billing.CustomerID{}
+	typedCustomerScoped := map[string]func() error{
+		"balance":          func() error { _, err := c.GetBalance(ctx, zero, "USD"); return err },
+		"usage":            func() error { _, err := c.GetUsage(ctx, zero, billing.UsageParams{Currency: "USD"}); return err },
+		"trust level":      func() error { _, err := c.GetTrustLevel(ctx, zero, "USD"); return err },
+		"set trust level":  func() error { _, err := c.SetTrustLevel(ctx, zero, billing.TrustLevelParams{}); return err },
+		"credit limit":     func() error { _, err := c.GetCreditLimit(ctx, zero, "USD"); return err },
+		"set credit limit": func() error { _, err := c.SetCreditLimit(ctx, zero, billing.CreditLimitParams{}); return err },
+		"credit grants":    func() error { _, err := c.ListCreditGrants(ctx, zero, billing.CreditGrantListParams{}); return err },
+		"create credit":    func() error { _, err := c.CreateCreditGrant(ctx, zero, billing.CreditGrantParams{}); return err },
+		"transactions": func() error {
+			_, err := c.ListCreditTransactions(ctx, zero, billing.CreditTransactionListParams{})
+			return err
+		},
+		"billing policy": func() error { _, err := c.GetCustomerBillingPolicy(ctx, zero); return err },
+		"set billing policy": func() error {
+			_, err := c.SetCustomerBillingPolicy(ctx, zero, billing.CustomerBillingPolicyParams{})
+			return err
+		},
+		"delegations": func() error { _, err := c.ListSpendDelegations(ctx, zero); return err },
+		"set delegation": func() error {
+			_, err := c.SetSpendDelegation(ctx, zero, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "k"})
+			return err
+		},
+		"customer":        func() error { _, err := c.GetCustomer(ctx, zero); return err },
+		"ensure customer": func() error { _, err := c.EnsureCustomer(ctx, zero, billing.CustomerParams{}); return err },
+		"billing profile": func() error { _, err := c.GetCustomerBillingProfile(ctx, zero); return err },
+		"delinquency":     func() error { _, err := c.ListCustomerDelinquency(ctx, zero); return err },
+		"credit grant": func() error {
+			_, err := c.GetCreditGrant(ctx, billing.CustomerID(uuid.New()), billing.CreditGrantID{})
+			return err
+		},
+		"revoke credit": func() error {
+			_, err := c.RevokeCreditGrant(ctx, billing.CustomerID(uuid.New()), billing.CreditGrantID{}, billing.RevokeCreditGrantParams{})
+			return err
+		},
 	}
 	uuidCalls := map[string]func() error{
 		"merchant invoice":      func() error { _, err := c.GetMerchantInvoice(ctx, uuid.Nil); return err },
@@ -409,6 +452,9 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		}
 	}
 	for name, call := range typed {
+		requireInvalidParam(t, name, call())
+	}
+	for name, call := range typedCustomerScoped {
 		requireInvalidParam(t, name, call())
 	}
 	for name, call := range uuidCalls {

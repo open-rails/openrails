@@ -20,7 +20,7 @@ func productAccessCustomerPath(id string) (string, error) {
 	if err != nil || customer.IsZero() {
 		return "", invalidErr("customer_id must be a nonzero UUID")
 	}
-	return "/v1/merchant/users/" + customer.String() + "/product-access", nil
+	return "/v1/merchant/customers/" + customer.String() + "/product-access", nil
 }
 
 // Check reports whether a customer currently has access to one product,
