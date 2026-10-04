@@ -9,12 +9,13 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const KindNotificationEmailSweep = "openrails.notification_email_sweep"
@@ -62,7 +63,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 	var sweepErr error
 	for _, mid := range merchantIDs {
 		progress.Mark(ctx, "notification email merchant "+mid.String())
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
+		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			var afterCreated *time.Time
 			var afterID uuid.UUID

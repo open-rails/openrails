@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // Rate cards (#638) are the ONLY metered-pricing engine (#707) and, since
@@ -30,8 +30,8 @@ type catalogRateCardRow struct {
 	Aggregation string
 	GroupBy     map[string]string
 	Filter      map[string][]string
-	Allowance   *pricing.Allowance
-	Price       pricing.RatePrice
+	Allowance   *catalog.Allowance
+	Price       catalog.RatePrice
 }
 
 func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
@@ -125,7 +125,7 @@ func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid
 				return fmt.Errorf("decode rate card %s filter: %w", row.ID, err)
 			}
 			if len(r.Allowance) > 0 {
-				var allowance pricing.Allowance
+				var allowance catalog.Allowance
 				if err := json.Unmarshal(r.Allowance, &allowance); err != nil {
 					return fmt.Errorf("decode rate card %s allowance: %w", row.ID, err)
 				}
@@ -213,7 +213,7 @@ func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uu
 	return out, err
 }
 
-func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string, source catalogRateCardRow, allowance *pricing.Allowance, from, to time.Time) (int64, error) {
+func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string, source catalogRateCardRow, allowance *catalog.Allowance, from, to time.Time) (int64, error) {
 	if allowance == nil || strings.TrimSpace(allowance.AccrueFrom) == "" {
 		return 0, nil
 	}
@@ -274,7 +274,7 @@ func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uui
 				effective = capSeconds
 			}
 			if capSeconds > 0 {
-				allowanceUnits, err := pricing.ChargeModel{Kind: pricing.ModelPerUnit, UnitAmount: cell.Included, DivideBy: capSeconds, Round: pricing.RoundDown}.Rate(effective)
+				allowanceUnits, err := catalog.ChargeModel{Kind: catalog.ModelPerUnit, UnitAmount: cell.Included, DivideBy: capSeconds, Round: catalog.RoundDown}.Rate(effective)
 				if err != nil {
 					return err
 				}
@@ -322,7 +322,7 @@ func allowanceCapSeconds(spec string) (int64, error) {
 	}
 }
 
-func rateCatalogRateCardUsage(price pricing.RatePrice, allowance *pricing.Allowance, dimValue string, quantity, includedOverride int64) (int64, error) {
+func rateCatalogRateCardUsage(price catalog.RatePrice, allowance *catalog.Allowance, dimValue string, quantity, includedOverride int64) (int64, error) {
 	cm := price.ToChargeModel()
 	if price.PerUnit != nil && price.PerUnit.Matrix != nil {
 		cellCM, ok := price.ChargeModelForCell(dimValue)
@@ -342,11 +342,11 @@ func rateCatalogRateCardUsage(price pricing.RatePrice, allowance *pricing.Allowa
 	if includedOverride > 0 {
 		included = includedOverride
 	}
-	if included <= 0 || cm.Kind != pricing.ModelPerUnit {
+	if included <= 0 || cm.Kind != catalog.ModelPerUnit {
 		return cm.Rate(quantity)
 	}
-	unitCounter := pricing.ChargeModel{
-		Kind:       pricing.ModelPerUnit,
+	unitCounter := catalog.ChargeModel{
+		Kind:       catalog.ModelPerUnit,
 		UnitAmount: 1,
 		DivideBy:   cm.DivideBy,
 		Round:      cm.Round,

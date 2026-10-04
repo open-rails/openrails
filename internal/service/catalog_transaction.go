@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // catalogMutation fences every service authoring operation in merchant-first

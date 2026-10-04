@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
@@ -27,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/signeridentity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type BillingConfig struct {
@@ -213,7 +213,7 @@ func (j StaticJWKConfig) authkitJWK() iam.JWK {
 type ProvisionMerchantRequest struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
-	MerchantID    merchant.ID
+	MerchantID    billing.MerchantID
 	Directory     *merchants.Service
 	Config        *config.Config
 	ControlPlane  *controlplane.ControlPlane
@@ -340,7 +340,7 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 }
 
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
-	slug := merchant.NormalizeSlug(req.Slug)
+	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
 	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {
 		return nil, err
@@ -451,7 +451,7 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	// merchant group with the `owner` role so host-app delegated tokens
 	// administer this merchant only. It is configured before the name is
 	// claimed, so a failure leaves nothing to repair.
-	if err := merchant.ValidateSlug(slug); err != nil {
+	if err := billing.ValidateMerchantSlug(slug); err != nil {
 		return nil, err
 	}
 	tn, err := cp.CreateMerchant(ctx, slug, "", func(ctx context.Context, tx pgx.Tx, group iam.GroupRef) error {
@@ -620,7 +620,7 @@ type resolvedManifestRailAccount = merchantbootstrap.ResolvedManifestRailAccount
 
 var resolveManifestRailAccount = merchantbootstrap.ResolveManifestRailAccount
 
-func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, id merchant.ID, mt MerchantConfig, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
+func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, id billing.MerchantID, mt MerchantConfig, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
 	return merchantbootstrap.SeedMerchantManifestSecretPlane(ctx, cfg, id, mt.MerchantDeclaration, store, transit)
 }
 

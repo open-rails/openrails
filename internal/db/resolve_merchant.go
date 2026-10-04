@@ -8,23 +8,23 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // RegisterUnboundMerchant registers a merchant (a billing bucket) from config,
 // idempotently (#480). It carries ONLY billing/rail state and NO auth. Embedded
 // boot calls it after migrations. Returns the canonical merchant id. An empty
 // slug is a no-op.
-func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnboundMerchantOptions) (merchant.ID, error) {
-	slug := merchant.NormalizeSlug(opts.Slug)
+func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnboundMerchantOptions) (billing.MerchantID, error) {
+	slug := billing.NormalizeMerchantSlug(opts.Slug)
 	if slug == "" {
-		return merchant.ID{}, nil
+		return billing.MerchantID{}, nil
 	}
 	// #567: a merchant slug must be a legal AuthKit permission-group instance
 	// slug. Embedded never creates the group, so validate here too.
-	if err := merchant.ValidateSlug(slug); err != nil {
-		return merchant.ID{}, err
+	if err := billing.ValidateMerchantSlug(slug); err != nil {
+		return billing.MerchantID{}, err
 	}
 	var displayName *string
 	if dn := strings.TrimSpace(opts.DisplayName); dn != "" {
@@ -32,12 +32,12 @@ func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnbo
 	}
 	id, err := gen.New(qx).RegisterUnboundMerchant(ctx, gen.RegisterUnboundMerchantParams{Slug: slug, DisplayName: displayName})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return merchant.ID{}, fmt.Errorf("register merchant slug %q: the name belongs to a group-bound merchant", slug)
+		return billing.MerchantID{}, fmt.Errorf("register merchant slug %q: the name belongs to a group-bound merchant", slug)
 	}
 	if err != nil {
-		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", slug, err)
+		return billing.MerchantID{}, fmt.Errorf("register merchant slug %q: %w", slug, err)
 	}
-	return merchant.ID(id), nil
+	return billing.MerchantID(id), nil
 }
 
 // RegisterUnboundMerchantOptions is the billing-only descriptor for RegisterUnboundMerchant.
@@ -53,7 +53,7 @@ type RegisterUnboundMerchantOptions struct {
 
 // RequireMerchantID verifies an explicit internal UUID without interpreting any
 // public name. Missing or deleted identities cannot report empty successful work.
-func (d *DB) RequireMerchantID(ctx context.Context, id merchant.ID) error {
+func (d *DB) RequireMerchantID(ctx context.Context, id billing.MerchantID) error {
 	if id.IsZero() {
 		return fmt.Errorf("merchant_id is required")
 	}

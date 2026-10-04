@@ -9,14 +9,13 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MerchantCreationConfig declares a hosted deployment's policy for merchant
 // names claimed by users (or#914): at creation and on rename. Operator paths
 // (Bootstrap, manifests, ownerless provisioning) are never subject to it.
 type MerchantCreationConfig struct {
-	// ReservedSlugs are reserved IN ADDITION to merchant.ReservedHostedSlugs.
+	// ReservedSlugs are reserved IN ADDITION to billing.ReservedMerchantSlugs.
 	ReservedSlugs []string
 	// ReservedEscalationRole names the root-group role whose holders may claim
 	// reserved names. Empty = reserved names are never user-claimable.
@@ -31,12 +30,12 @@ type MerchantCreationConfig struct {
 }
 
 // ReservedMerchantSlugs is the deployment's reserved namespace:
-// merchant.ReservedHostedSlugs plus MerchantCreationConfig.ReservedSlugs.
+// billing.ReservedMerchantSlugs plus MerchantCreationConfig.ReservedSlugs.
 func (c *ControlPlane) ReservedMerchantSlugs() []string {
-	out := append([]string(nil), merchant.ReservedHostedSlugs...)
+	out := append([]string(nil), billing.ReservedMerchantSlugs...)
 	if c != nil && c.merchantCreation != nil {
 		for _, r := range c.merchantCreation.ReservedSlugs {
-			out = append(out, merchant.NormalizeSlug(r))
+			out = append(out, billing.NormalizeMerchantSlug(r))
 		}
 	}
 	return out
@@ -50,7 +49,7 @@ func (c *ControlPlane) authorizeNameClaim(ctx context.Context, name, userID stri
 	if c == nil || c.merchantCreation == nil {
 		return nil
 	}
-	name = merchant.NormalizeSlug(name)
+	name = billing.NormalizeMerchantSlug(name)
 	if c.merchantCreationPattern != nil && !c.merchantCreationPattern.MatchString(name) {
 		return fmt.Errorf("%w: slug %q does not match the deployment's creation pattern", billing.ErrMerchantSlugReserved, name)
 	}
@@ -89,7 +88,7 @@ func (c *ControlPlane) EnforceMerchantCreationPolicy(ctx context.Context, name, 
 		return err
 	}
 	if admit := c.merchantCreation.Admission; admit != nil {
-		if err := admit(ctx, merchant.NormalizeSlug(name), ownerUserID); err != nil {
+		if err := admit(ctx, billing.NormalizeMerchantSlug(name), ownerUserID); err != nil {
 			return fmt.Errorf("%w: %w", billing.ErrMerchantCreationRefused, err)
 		}
 	}

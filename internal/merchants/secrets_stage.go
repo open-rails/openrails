@@ -8,9 +8,10 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/crypto"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 var ErrCredentialOperationConflict = apperr.New(http.StatusConflict, "credential_operation_conflict", "credential operation conflicts with the published revision or existing candidate")
@@ -18,10 +19,10 @@ var ErrCredentialOperationConflict = apperr.New(http.StatusConflict, "credential
 // SecretStager durably creates an immutable candidate. Repeating the same
 // operation name and value returns its original version; a different value fails.
 type SecretStager interface {
-	StageSecret(context.Context, merchant.ID, string, string) (Secret, error)
+	StageSecret(context.Context, billing.MerchantID, string, string) (Secret, error)
 }
 
-func stageSecret(ctx context.Context, store MerchantSecretStore, id merchant.ID, name, value string) (Secret, error) {
+func stageSecret(ctx context.Context, store MerchantSecretStore, id billing.MerchantID, name, value string) (Secret, error) {
 	stager, ok := store.(SecretStager)
 	if !ok {
 		return Secret{}, fmt.Errorf("%w: durable credential staging unsupported", ErrSecretBackendUnavailable)
@@ -29,7 +30,7 @@ func stageSecret(ctx context.Context, store MerchantSecretStore, id merchant.ID,
 	return stager.StageSecret(ctx, id, name, value)
 }
 
-func (v *vaultSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (v *vaultSecretStore) StageSecret(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	if err := validateSecretRef(id, name); err != nil {
 		return Secret{}, err
 	}
@@ -65,10 +66,10 @@ func (v *vaultSecretStore) StageSecret(ctx context.Context, id merchant.ID, name
 	return Secret{}, ErrSecretBackendUnavailable
 }
 
-func (c *cachedSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (c *cachedSecretStore) StageSecret(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	return stageSecret(ctx, c.inner, id, name, value)
 }
-func (s *lifecycleSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (s *lifecycleSecretStore) StageSecret(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	// Publication holds the live merchant row lock through staging and commit.
 	var result Secret
 	err := s.database.MerchantTx(merchant.WithID(ctx, id), func(ctx context.Context, tx pgx.Tx) error {
@@ -81,7 +82,7 @@ func (s *lifecycleSecretStore) StageSecret(ctx context.Context, id merchant.ID, 
 	})
 	return result, err
 }
-func (e *encryptedSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (e *encryptedSecretStore) StageSecret(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	existing, err := e.Get(ctx, id, name)
 	if err == nil {
 		if existing.Value != value || existing.Version != 1 {

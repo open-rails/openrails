@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // UnknownReconcileOptions bounds one reconcile pass over the `unknown` cohort (#633).
@@ -93,7 +92,7 @@ func reconcilableRails() []string {
 // caller (a River job) retries with exponential backoff, and no per-sub probes
 // are fanned out against a rail that just failed a bulk read. Must run inside a
 // merchant-scoped connection.
-func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, fetchers map[Provider]RailFetcher, probers map[Provider]SubscriptionProber, merchantID merchant.ID, now time.Time, opts UnknownReconcileOptions) (UnknownReconcileResult, error) {
+func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, fetchers map[Provider]RailFetcher, probers map[Provider]SubscriptionProber, merchantID billing.MerchantID, now time.Time, opts UnknownReconcileOptions) (UnknownReconcileResult, error) {
 	opts = opts.withDefaults()
 	res := UnknownReconcileResult{RailErrors: map[Provider]string{}}
 	q := database.Gen(ctx)
@@ -428,7 +427,7 @@ func evidenceStaleAction(reason string) string {
 // #835 staleness floor withheld. Best-effort, like every guard finding: the
 // floor has already done its job in memory, and failing to write the record
 // must never turn a SAFE outcome into an error that retries into an unsafe one.
-func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID merchant.ID, provider Provider, subscriptionID, reason string) {
+func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subscriptionID, reason string) {
 	action := evidenceStaleAction(reason)
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        merchantID.UUID(),
@@ -454,7 +453,7 @@ func evidenceStaleSubjectKey(provider Provider, subscriptionID string) string {
 // that withheld cancellations (#834). Best-effort: the guard has already done
 // its job in memory, and failing to write the finding must never turn a SAFE
 // outcome into an error that retries into an unsafe one.
-func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID merchant.ID, provider Provider, subject, reason string) {
+func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subject, reason string) {
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        merchantID.UUID(),
 		FindingType:       string(FindingCancellationCapped),

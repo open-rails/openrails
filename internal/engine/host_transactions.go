@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // The Tx methods run the same commands as the Client inside tx, a

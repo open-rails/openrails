@@ -11,11 +11,12 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // solanaAdapter implements providerAdapter for the official Solana Subscriptions
@@ -190,7 +191,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 // a decodable Plan account, and if so returns its rail-config map (attach).
 // Best-effort: any read/decode failure returns found=false so AutoCreate proceeds
 // to publish (a genuinely-occupied PDA then surfaces as a loud create_plan error).
-func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.PlanService, tid merchant.ID, planID uint64, symbol string) (map[string]string, bool) {
+func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.PlanService, tid billing.MerchantID, planID uint64, symbol string) (map[string]string, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		return nil, false
 	}

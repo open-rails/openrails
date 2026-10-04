@@ -61,8 +61,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/integrations/nmi/",
 		"internal/integrations/ccbill/",
 		"internal/integrations/stripeapi/",
-		"pkg/pricing/",
-		"pkg/catalog/",
+		"catalog/",
 		"internal/service/",
 		"internal/api/",
 	}

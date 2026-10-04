@@ -19,6 +19,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
@@ -27,12 +28,12 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/providerqualification"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
@@ -491,7 +492,7 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 type ProvisionMerchantRequest struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
-	MerchantID    merchant.ID
+	MerchantID    billing.MerchantID
 	Directory     *merchants.Service
 	Config        *config.Config
 	Database      *db.DB
@@ -503,7 +504,7 @@ type ProvisionMerchantRequest struct {
 }
 
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
-	slug := merchant.NormalizeSlug(req.Slug)
+	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
 	if err := ValidateMerchantDeclaration(req.Config, mt); err != nil {
 		return nil, err
@@ -696,7 +697,7 @@ func ResolveManifestCustodian(cfg *config.Config, entry CustodianEntry) (Resolve
 // SeedManifestCustodianSecrets writes one custodian's declared credentials
 // under their identity-scoped names. Seed-once/overwrite/insert posture is the
 // PSP one — a value rotated out of band is never reverted to the manifest seed.
-func SeedManifestCustodianSecrets(ctx context.Context, merchantID merchant.ID, rc ResolvedManifestCustodian, declared map[string]string, store merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions, seedOnly bool) error {
+func SeedManifestCustodianSecrets(ctx context.Context, merchantID billing.MerchantID, rc ResolvedManifestCustodian, declared map[string]string, store merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions, seedOnly bool) error {
 	for key, value := range declared {
 		name, err := merchants.CustodianSecretName(rc.kind, rc.environment, rc.accountID, key)
 		if err != nil {
@@ -728,7 +729,7 @@ func SeedManifestCustodianSecrets(ctx context.Context, merchantID merchant.ID, r
 // returns them by declared key, so the PSP pass can resolve its `custodian:`
 // reference to a row id. Custodians land BEFORE PSPs for the obvious reason:
 // psps.custodian_id is a foreign key.
-func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) (map[string]gen.BillingCustodian, error) {
+func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) (map[string]gen.BillingCustodian, error) {
 	out := map[string]gen.BillingCustodian{}
 	entries := CustodianEntries(mt.Custodians)
 	if len(entries) == 0 {
@@ -864,7 +865,7 @@ func ResolveManifestCustodianReference(rail string, account config.ProviderRailA
 	return &id, nil
 }
 
-func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, slug string, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, slug string, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	mctx := merchant.WithID(ctx, merchantID)
 	// #850: declared api_host is asserted on every apply (declarative identity,
 	// like display_name — not seed-once); omitted leaves the stored value
@@ -1039,7 +1040,7 @@ func ManifestBudgetWindows(policyName, field string, in []config.BudgetWindowCon
 // PruneManifestSecrets deletes secrets held for the merchant that the manifest
 // no longer declares (#527 --prune), reconciling the stored secret set to the
 // file. Names are derived exactly as Put derives them.
-func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore) error {
+func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID billing.MerchantID, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore) error {
 	declared := map[string]struct{}{}
 	for _, entry := range CustodianEntries(mt.Custodians) {
 		rc, err := ResolveManifestCustodian(cfg, entry)
@@ -1206,7 +1207,7 @@ func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 // values the server's boot reconcile seeds into its runtime plane. MODE-1
 // one-off processes (pull-provider CLI, #723) build their ephemeral in-memory
 // plane through it and arm per-merchant fetchers from the on-disk manifest.
-func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt config.MerchantDeclaration, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
+func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, merchantID billing.MerchantID, mt config.MerchantDeclaration, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
 	if store == nil {
 		return fmt.Errorf("merchant manifest secret plane: store is required")
 	}
@@ -1241,7 +1242,7 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, me
 	return nil
 }
 
-func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account config.ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, merchantSlug, localKey, rail string, account config.ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	ra, err := ResolveManifestRailAccount(ctx, cfg, rail, account, transit, opts.IdentityResolver)
 	if err != nil {
 		return err

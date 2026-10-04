@@ -1,7 +1,7 @@
 package billing
 
 import (
-	"github.com/open-rails/openrails/pkg/catalog"
+	"github.com/open-rails/openrails/catalog"
 )
 
 type CatalogApplyParams = catalog.Application

@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // ErrUnscopedMerchantWork is returned by AssertMerchantScope when the handle a
@@ -13,7 +14,7 @@ import (
 // match nothing (silently) or refuse with 42501 (loudly).
 type ErrUnscopedMerchantWork struct {
 	Op   string
-	Want merchant.ID
+	Want billing.MerchantID
 	Got  string
 }
 
@@ -79,7 +80,7 @@ func (d *DB) AssertMerchantScope(ctx context.Context, op string) error {
 // call an unattended per-merchant pass should make — the pin and the proof
 // travel together, so a future refactor cannot drop the pin and leave a sweep
 // silently processing nothing.
-func (d *DB) RunInMerchantScope(ctx context.Context, merchantID merchant.ID, op string, fn func(ctx context.Context) error) error {
+func (d *DB) RunInMerchantScope(ctx context.Context, merchantID billing.MerchantID, op string, fn func(ctx context.Context) error) error {
 	if merchantID.IsZero() {
 		return fmt.Errorf("db: %s requires a non-zero merchant id", op)
 	}

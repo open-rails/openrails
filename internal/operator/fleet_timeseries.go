@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // FleetTimeseries returns the weekly fleet trend series (openrails-saas #38)
@@ -17,7 +16,7 @@ import (
 // own platform merchant); zero excludes nothing. weeks outside 4..52 falls
 // back to 12. Calling without an attached control plane is a wiring error
 // (call Attach/AttachWithOptions first).
-func FleetTimeseries(ctx context.Context, a *app.App, exclude merchant.ID, weeks int) (*billing.FleetSeries, error) {
+func FleetTimeseries(ctx context.Context, a *app.App, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")

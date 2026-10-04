@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 func TestRedactStripeClientSecretsPreservesExactNumbers(t *testing.T) {
@@ -149,7 +149,7 @@ func stripeEventJSON(t *testing.T, eventType string, object any) []byte {
 func TestStripeWebhookRouting(t *testing.T) {
 	t.Parallel()
 	merchantID, pspID := uuid.New(), uuid.New()
-	ctx := db.WithPSPID(merchant.WithID(context.Background(), merchant.ID(merchantID)), pspID)
+	ctx := db.WithPSPID(merchant.WithID(context.Background(), billing.MerchantID(merchantID)), pspID)
 
 	for _, tc := range []struct {
 		eventType string

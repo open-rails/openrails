@@ -9,15 +9,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // acuKinds maps NMI's Account Updater notices to card updates.
@@ -131,7 +132,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 
 // askForNewCard queues the update-your-card notice for each membership the
 // card pays for, once per paid period.
-func (s *NMIWebhookService) askForNewCard(ctx context.Context, d *db.DB, mid merchant.ID, method uuid.UUID, now time.Time) ([]*models.NotificationQueue, error) {
+func (s *NMIWebhookService) askForNewCard(ctx context.Context, d *db.DB, mid billing.MerchantID, method uuid.UUID, now time.Time) ([]*models.NotificationQueue, error) {
 	if s.SubscriptionLifecycleService == nil {
 		return nil, fmt.Errorf("nmi account updater: no lifecycle service wired")
 	}

@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CredentialTransitionRequest identifies one account and its expected published
@@ -29,7 +29,7 @@ type CredentialTransitionRequest struct {
 // exact references. Old source material remains untouched. A host-owned snapshot
 // is a valid source. A labeled target snapshot must already contain every
 // required value; this operation never writes to host-owned memory.
-func (s *Service) TransitionProviderCredentials(ctx context.Context, id merchant.ID, rail string, req CredentialTransitionRequest, source MerchantSecretStore) (PaymentProviderConfig, error) {
+func (s *Service) TransitionProviderCredentials(ctx context.Context, id billing.MerchantID, rail string, req CredentialTransitionRequest, source MerchantSecretStore) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil || source == nil || req.OperationID == uuid.Nil || req.ExpectedRevision < 0 {
 		return PaymentProviderConfig{}, apperr.Invalidf("credential transition requires operation, revision, and host-owned stores")
 	}

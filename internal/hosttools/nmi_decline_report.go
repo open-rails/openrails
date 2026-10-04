@@ -16,19 +16,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NMIDeclineReportOptions mirrors `openrails nmi decline-report`.
 type NMIDeclineReportOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// PSP pins the NMI account; empty reads the merchant's armed one.
 	PSP string
 	// Since is required; Until defaults to now (RFC3339 or YYYY-MM-DD).

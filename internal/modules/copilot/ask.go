@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Ask-loop caps, same doctrine as #756's dashboard.Service.Ask: every cost

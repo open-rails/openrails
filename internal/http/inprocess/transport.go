@@ -13,10 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // hostPermissions is the embedded host's authority over its own merchant: the
@@ -29,20 +30,20 @@ func hostPermissions() []string {
 // NewTransport uses the same host authority and context isolation for embedded
 // clients and database-only operator commands. configuredMerchant is read on
 // each call so a runtime may be bound after constructing its client.
-func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) (http.RoundTripper, string) {
+func NewTransport(handler http.Handler, configuredMerchant func() billing.MerchantID) (http.RoundTripper, string) {
 	return newTransport(handler, configuredMerchant, "", hostPermissions())
 }
 
 // NewTransportWithResolver supports explicit per-operation merchant selectors.
 // Resolution does not grant authority; only the private capability creates a
 // host principal, and all other credentials retain normal verification.
-func NewTransportWithResolver(handler http.Handler, configuredMerchant func() merchant.ID, resolve func(context.Context, *http.Request) (billingauth.Target, error)) (http.RoundTripper, string) {
+func NewTransportWithResolver(handler http.Handler, configuredMerchant func() billing.MerchantID, resolve func(context.Context, *http.Request) (billingauth.Target, error)) (http.RoundTripper, string) {
 	transport, capability := newTransport(handler, configuredMerchant, "", hostPermissions())
 	transport.(*inprocessTransport).resolveTarget = resolve
 	return transport, capability
 }
 
-func newTransport(handler http.Handler, configuredMerchant func() merchant.ID, subject string, grants []string) (http.RoundTripper, string) {
+func newTransport(handler http.Handler, configuredMerchant func() billing.MerchantID, subject string, grants []string) (http.RoundTripper, string) {
 	// Only the constructor's private default token provider receives this
 	// per-client capability. A forwarded caller credential cannot name a mode.
 	capability := rand.Text()
@@ -57,7 +58,7 @@ func newTransport(handler http.Handler, configuredMerchant func() merchant.ID, s
 type inprocessTransport struct {
 	resolveTarget      func(context.Context, *http.Request) (billingauth.Target, error)
 	handler            http.Handler
-	configuredMerchant func() merchant.ID
+	configuredMerchant func() billing.MerchantID
 	hostCredential     string
 	subject            string
 	permissions        []string
@@ -191,7 +192,7 @@ func (w *bufferedResponse) response(req *http.Request) *http.Response {
 	}
 }
 
-func merchantMismatchMsg(bound, pinned merchant.ID) string {
+func merchantMismatchMsg(bound, pinned billing.MerchantID) string {
 	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
 }
 

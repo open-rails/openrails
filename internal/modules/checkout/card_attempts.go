@@ -9,9 +9,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CardAttemptsBlockedError refuses a card attempt while the customer is

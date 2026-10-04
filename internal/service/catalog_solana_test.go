@@ -9,12 +9,13 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,11 +39,11 @@ func newFakeChain(mints map[string]uint8) *fakeChain {
 	return &fakeChain{owner: solanago.NewWallet().PublicKey(), mints: mints, accounts: map[solanago.PublicKey][]byte{}}
 }
 
-func (c *fakeChain) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
+func (c *fakeChain) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
 	return c.owner, nil
 }
 
-func (c *fakeChain) Submit(_ context.Context, _ merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error) {
+func (c *fakeChain) Submit(_ context.Context, _ billing.MerchantID, instructions []solanago.Instruction) (solanago.Signature, error) {
 	c.submits++
 	if c.readOnly {
 		return solanago.Signature{}, fmt.Errorf("provider writes forbidden")
@@ -94,7 +95,7 @@ func solanaFixture(chain *fakeChain, network string, tokens map[string]string, r
 }
 
 func solanaCtx() context.Context {
-	return merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+	return merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
 }
 
 func recurringTerms(micros int64) autoCreateContext {

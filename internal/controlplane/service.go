@@ -20,7 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224):
@@ -83,7 +83,7 @@ func WithHostedPosture() Option {
 }
 
 // WithMerchantCreation declares the hosted policy for merchant names claimed
-// by users (or#914): the reserved names (merchant.ReservedHostedSlugs plus
+// by users (or#914): the reserved names (billing.ReservedMerchantSlugs plus
 // cfg.ReservedSlugs), the creation pattern and the admission cost gate.
 // Standalone never passes this.
 func WithMerchantCreation(cfg MerchantCreationConfig) Option {

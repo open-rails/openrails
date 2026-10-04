@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -13,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type hyperSwitchCollectionAdapter struct {
@@ -82,7 +82,7 @@ func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.B
 	return prepareUnscheduledCollection(method, req, a.charger)
 }
 
-func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil || b.Config.IsProviderReadOnly() {
 		return nil, fmt.Errorf("HyperSwitch invoice collection is not armed")
 	}

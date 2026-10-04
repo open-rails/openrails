@@ -13,8 +13,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Engine is the PULL-plane engine (#107 phase 2, #665 mirror-writer): it

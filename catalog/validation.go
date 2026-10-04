@@ -1,4 +1,4 @@
-package pricing
+package catalog
 
 import (
 	"fmt"
@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// Meter aggregations. Union of OpenMeter and Lago minus AVG and weighted_sum:
+// counters use sum/count; point-in-time gauges use max/min/latest/unique_count;
+// time-weighted "gauge" usage (GiB-months) is modeled as sum of host-emitted
+// unit-seconds + a price-level divide_by (the OpenMeter heartbeat approach),
+// so no native weighted_sum is needed.
 const (
 	AggregationSum         = "sum"
 	AggregationCount       = "count"
@@ -31,16 +36,6 @@ var (
 		"": {}, RoundHalfUp: {}, RoundUp: {}, RoundDown: {},
 	}
 )
-
-// Meter describes the event stream consumed by usage pricing.
-type Meter struct {
-	Key           string
-	EventType     string
-	ValueProperty string
-	Aggregation   string
-	Unit          string
-	GroupBy       map[string]string
-}
 
 // NormalizeKey returns the canonical merchant-scoped key used by catalog
 // resources.
@@ -109,7 +104,7 @@ func ValidateRatePrice(where string, price *RatePrice) error {
 	price.Model = strings.ToLower(strings.TrimSpace(price.Model))
 	if price.Currency != "" {
 		price.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
-		if !validPriceCurrency(price.Currency) {
+		if !validRateCurrency(price.Currency) {
 			return fmt.Errorf("%s: currency must be an ISO money currency", where)
 		}
 	}
@@ -285,7 +280,9 @@ func ValidateDimensions(
 	return nil
 }
 
-// ParseDurationSpec parses the catalog duration grammar used by allowances.
+// ParseDurationSpec parses the catalog duration grammar used by usage windows,
+// allowances and metered gauge denominators: whole hours or whole days only.
+// "once" is accepted by callers that model non-recurring prices.
 func ParseDurationSpec(value string) (time.Duration, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
@@ -353,7 +350,8 @@ func validateMatrix(where string, matrix *Matrix) error {
 	return nil
 }
 
-func validPriceCurrency(value string) bool {
+// validRateCurrency accepts a three-letter upper-case code.
+func validRateCurrency(value string) bool {
 	if len(value) != 3 {
 		return false
 	}

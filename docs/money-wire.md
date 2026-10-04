@@ -80,8 +80,8 @@ but the browser never parses a JSON float either.
 `testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
 (`web/admin/src/lib/api/wire-fixtures.test.ts`) both decode them.
-`wire_money_guard_test.go` walks the root package, `billing`, `pkg`,
-`internal` and `permissions` (all but SQLC output) and fails when a
+`wire_money_guard_test.go` walks the root package, `billing`, `catalog`
+and `internal` (all but SQLC output) and fails when a
 monetary field (any integer, float or untyped `any`/`map[string]any`/
 `json.RawMessage` whose JSON name names money) is not an int64/uint64 with
 `,string`, when a `map[string]any` literal or `m["amount"] = v` assignment

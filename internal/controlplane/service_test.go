@@ -19,8 +19,9 @@ import (
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Every refusal precedes AuthKit's construction, so none needs a database.
@@ -168,7 +169,7 @@ func TestInlineKeySource(t *testing.T) {
 // A missing or partial control plane fails closed with a typed error, never a panic.
 func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	mid := merchant.ID{1}
+	mid := billing.MerchantID{1}
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	for _, cp := range []*ControlPlane{nil, {}} {
 		require.Equal(t, APIKeyPrefix, cp.TokenPrefix())
@@ -200,9 +201,9 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 		cp.Close()
 	}
 	for _, bad := range []struct {
-		mid     merchant.ID
+		mid     billing.MerchantID
 		subject string
-	}{{merchant.ID{}, "11111111-1111-4111-8111-111111111111"}, {mid, ""}, {mid, "not-a-uuid"}} {
+	}{{billing.MerchantID{}, "11111111-1111-4111-8111-111111111111"}, {mid, ""}, {mid, "not-a-uuid"}} {
 		_, err := (&ControlPlane{}).TouchCustomer(ctx, bad.mid, "iss", bad.subject)
 		require.ErrorIs(t, err, ErrCustomerInvalid)
 	}

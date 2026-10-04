@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // A panicking provider read ends that read, never the process: batch, bulk
@@ -19,7 +19,7 @@ func TestVerifierWorkersRecoverPanics(t *testing.T) {
 
 	v := &Verifier{Retries: 1, Coalesce: time.Millisecond, BulkThreshold: 2}
 	t.Cleanup(v.Close)
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	v.Enqueue(mid, uuid.New())
 	v.Enqueue(mid, uuid.New(), uuid.New(), uuid.New())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

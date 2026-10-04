@@ -17,10 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StripeMethodSetupResponse is an owned setup resource. No payment, subscription
@@ -33,7 +33,7 @@ type StripeMethodSetupResponse struct {
 	PaymentMethodID *billing.PaymentMethodID  `json:"payment_method_id,omitempty"`
 }
 
-func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal) (merchant.ID, uuid.UUID, error) {
+func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal) (billing.MerchantID, uuid.UUID, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return mid, uuid.Nil, err

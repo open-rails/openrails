@@ -35,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hostauth"
 	"github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/permissions"
 )
 
 // A staff member's permission checks act as their own sign-in: a session
@@ -173,13 +172,13 @@ merchants:
 		return token.Value
 	}
 
-	token := delegated(permissions.MerchantRepairAlertsRead)
+	token := delegated(billing.MerchantRepairAlertsRead)
 	first := proof(http.MethodGet, path, token)
 	w := send("DPoP "+token, first)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, http.StatusUnauthorized, send("DPoP "+token, first).Code, "a proof is spent once")
 	require.Equal(t, http.StatusUnauthorized, send("Bearer "+token, "").Code, "a bound token needs its proof")
-	outside := delegated(permissions.CustomerBalanceRead)
+	outside := delegated(billing.CustomerBalanceRead)
 	require.Equal(t, http.StatusUnauthorized, send("DPoP "+outside, proof(http.MethodGet, path, outside)).Code, "a delegation beyond the stored grant is refused")
 	var customers int
 	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1", mid.UUID()).Scan(&customers))
@@ -190,7 +189,7 @@ merchants:
 		require.NoError(t, err)
 		return "Bearer " + token.Value
 	}
-	require.Equal(t, http.StatusOK, send(service(permissions.MerchantRepairAlertsRead), "").Code)
+	require.Equal(t, http.StatusOK, send(service(billing.MerchantRepairAlertsRead), "").Code)
 	require.Equal(t, http.StatusForbidden, send(service("root:*"), "").Code, "a service JWT only narrows its stored grants")
 
 	self := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "aud": "openrails", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix()})
@@ -201,7 +200,7 @@ merchants:
 
 	stranger, _ := authtest.New(t, authtest.WithConfig(func(c *authkit.Config) { c.Token.Issuer = "https://stranger.e2e.test" }),
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
-	foreign, _, err := stranger.MintServiceJWT(t.Context(), iam.ServiceJWT{Subject: "sync", Audiences: []string{"openrails"}, Permissions: []string{permissions.MerchantRepairAlertsRead}})
+	foreign, _, err := stranger.MintServiceJWT(t.Context(), iam.ServiceJWT{Subject: "sync", Audiences: []string{"openrails"}, Permissions: []string{billing.MerchantRepairAlertsRead}})
 	require.NoError(t, err)
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, send("Bearer "+foreign.Value, "").Code, "an unregistered issuer is trusted for nothing")
 
@@ -215,7 +214,7 @@ merchants:
 	app.Enabled = false
 	_, err = cp.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), app)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return send(service(permissions.MerchantRepairAlertsRead), "").Code != http.StatusOK }, 20*time.Second, 200*time.Millisecond)
+	require.Eventually(t, func() bool { return send(service(billing.MerchantRepairAlertsRead), "").Code != http.StatusOK }, 20*time.Second, 200*time.Millisecond)
 }
 
 // Operator paths: Bootstrap binds a registered merchant to a group keyed by

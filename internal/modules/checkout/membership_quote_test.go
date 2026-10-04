@@ -8,10 +8,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // The initial-membership quote is the server-side term sheet the payer
@@ -21,7 +22,7 @@ import (
 func TestInitialMembershipQuote(t *testing.T) {
 	now := time.Date(2026, 9, 21, 0, 0, 0, 123456000, time.UTC)
 	mid, customer, psp, custodian := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	ctx := merchant.WithID(t.Context(), merchant.ID(mid))
+	ctx := merchant.WithID(t.Context(), billing.MerchantID(mid))
 	quota := int(9007199254740993) // 2^53+1: a float64 round trip would change it
 	product := models.Product{ID: uuid.New(), DisplayName: "Quoted membership", EntitlementsSpec: map[string]*int{"quota": &quota}}
 	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: intPtr(720)}

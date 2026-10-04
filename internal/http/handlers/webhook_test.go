@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -28,7 +29,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/internal/webhookauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func signStripeAt(secret string, at time.Time, body []byte) string {
@@ -285,13 +285,13 @@ func TestThinStripeRejectsFetchedMismatch(t *testing.T) {
 func TestWebhookAccountResolutionFailsClosed(t *testing.T) {
 	for _, provider := range []string{"stripe", "nmi", "ccbill", "basistheory"} {
 		r, rec := newTestRequest(http.MethodPost, "/", nil, nil)
-		processResolvedMerchantWebhook(r, provider, merchant.ID(uuid.New()), " ")
+		processResolvedMerchantWebhook(r, provider, billing.MerchantID(uuid.New()), " ")
 		require.Equal(t, http.StatusBadRequest, rec.Code, provider)
 		require.Contains(t, rec.Body.String(), "account_id is required")
 	}
 	for _, tenant := range []string{"", "tenant-other"} {
 		r, rec := newTestRequest(http.MethodPost, "/", strings.NewReader(`{"id":"evt_1","type":"token.updated","tenant_id":"`+tenant+`"}`), &app.Runtime{})
-		require.False(t, processMerchantBasisTheoryWebhook(r, merchant.ID(uuid.New()), "tenant-selected"))
+		require.False(t, processMerchantBasisTheoryWebhook(r, billing.MerchantID(uuid.New()), "tenant-selected"))
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 		require.Contains(t, rec.Body.String(), "does not match payload")
 	}
@@ -392,7 +392,7 @@ func TestCCBillWebhookDispatchResolvesClientIP(t *testing.T) {
 		req.SetPathValue("provider", "ccbill")
 		req.SetPathValue("account_id", "900000-0000")
 		rt := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: tc.trusted}, TrustedProxies: iputil.ParseTrustedProxies(tc.trusted)}
-		rt.SetConfiguredMerchant(merchant.ID(uuid.New()))
+		rt.SetConfiguredMerchant(billing.MerchantID(uuid.New()))
 		rec := httptest.NewRecorder()
 		Webhook(httprequest.NewHTTP(rec, req, rt))
 		require.Equal(t, tc.want, rec.Code, "%s: %s", tc.name, rec.Body.String())

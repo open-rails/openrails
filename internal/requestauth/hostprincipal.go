@@ -3,7 +3,7 @@ package requestauth
 import (
 	"context"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // HostPrincipal is the identity an IN-PROCESS transport attaches to the request
@@ -14,7 +14,7 @@ import (
 // Permissions are authoritative; the in-process host is trusted for its own
 // merchant (same trust stance as billingauth.DelegatedPrincipal, #339).
 type HostPrincipal struct {
-	MerchantID   merchant.ID
+	MerchantID   billing.MerchantID
 	MerchantSlug string
 	Subject      string
 	Permissions  []string

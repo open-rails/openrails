@@ -10,6 +10,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/config"
@@ -17,7 +18,6 @@ import (
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/signeridentity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ReconcileBootMerchantManifest implements the standalone rows of the #723
@@ -46,7 +46,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if err != nil {
 		return err
 	}
-	rt.ApproveSolanaSigner = func(ctx context.Context, mid merchant.ID, key string) error {
+	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
 		return approveSolanaSigner(ctx, cfg, application, path, mid, key)
 	}
 	if pending {
@@ -70,7 +70,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if rt.Merchants == nil {
 		return nil
 	}
-	var declared []merchant.ID
+	var declared []billing.MerchantID
 	for _, slug := range slugs {
 		if m, err := rt.Merchants.GetBySlug(ctx, slug); err == nil {
 			declared = append(declared, m.ID)
@@ -83,7 +83,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 
 // approveSolanaSigner accepts the identity Vault now reports for key and
 // re-applies the boot manifest, provisioning it.
-func approveSolanaSigner(ctx context.Context, cfg *config.Config, application *app.App, path string, mid merchant.ID, key string) error {
+func approveSolanaSigner(ctx context.Context, cfg *config.Config, application *app.App, path string, mid billing.MerchantID, key string) error {
 	rt := application.Runtime
 	if rt.MerchantSecretBackend == nil || rt.Merchants == nil {
 		return fmt.Errorf("no Vault Transit signer is configured")

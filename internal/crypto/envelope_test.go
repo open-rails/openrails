@@ -11,26 +11,26 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // memDEKStore mirrors the DB store: the first wrapped DEK per merchant wins.
 type memDEKStore struct {
 	mu        sync.Mutex
-	data      map[merchant.ID][]byte
+	data      map[billing.MerchantID][]byte
 	puts      int
 	hideOnGet bool
 	getErr    error
 }
 
-func (m *memDEKStore) GetWrappedDEK(_ context.Context, id merchant.ID) ([]byte, bool, error) {
+func (m *memDEKStore) GetWrappedDEK(_ context.Context, id billing.MerchantID) ([]byte, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w, ok := m.data[id]
 	return w, ok && !m.hideOnGet, m.getErr
 }
 
-func (m *memDEKStore) PutWrappedDEK(_ context.Context, id merchant.ID, wrapped []byte) ([]byte, error) {
+func (m *memDEKStore) PutWrappedDEK(_ context.Context, id billing.MerchantID, wrapped []byte) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.puts++
@@ -41,7 +41,7 @@ func (m *memDEKStore) PutWrappedDEK(_ context.Context, id merchant.ID, wrapped [
 	return wrapped, nil
 }
 
-func newStore() *memDEKStore { return &memDEKStore{data: map[merchant.ID][]byte{}} }
+func newStore() *memDEKStore { return &memDEKStore{data: map[billing.MerchantID][]byte{}} }
 
 func masterKey(t *testing.T) string {
 	key := make([]byte, keySize)
@@ -60,7 +60,7 @@ func newEncryptor(t *testing.T, master string, store DEKStore) *Encryptor {
 func TestEnvelopeRoundTripAndTamperRefusal(t *testing.T) {
 	ctx := context.Background()
 	enc := newEncryptor(t, masterKey(t), newStore())
-	a, b := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	a, b := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	aad := SecretAAD(a, "psps/stripe/secret_key")
 	for _, pt := range []string{"sk_live_super_secret", "", "\x00\xff\x10"} {
 		ct, err := enc.Encrypt(ctx, a, aad, []byte(pt))
@@ -78,7 +78,7 @@ func TestEnvelopeRoundTripAndTamperRefusal(t *testing.T) {
 	require.Len(t, raw, nonceSize+len("secret")+16)
 	encode := base64.StdEncoding.EncodeToString
 	type attempt struct {
-		mid merchant.ID
+		mid billing.MerchantID
 		aad AAD
 		ct  string
 	}
@@ -90,7 +90,7 @@ func TestEnvelopeRoundTripAndTamperRefusal(t *testing.T) {
 		{a, aad, "!!!"},
 		{a, aad, encode(raw[:nonceSize-1])},
 		{a, aad, encode(raw[:len(raw)-1])},
-		{merchant.ID{}, aad, ct},
+		{billing.MerchantID{}, aad, ct},
 	}
 	for _, i := range []int{0, nonceSize - 1, nonceSize, nonceSize + 2, len(raw) - 1} {
 		tampered := append([]byte(nil), raw...)
@@ -102,7 +102,7 @@ func TestEnvelopeRoundTripAndTamperRefusal(t *testing.T) {
 		require.Error(t, err, "attempt %d", i)
 		require.Nil(t, pt)
 	}
-	_, err = enc.Encrypt(ctx, merchant.ID{}, aad, []byte("x"))
+	_, err = enc.Encrypt(ctx, billing.MerchantID{}, aad, []byte("x"))
 	require.Error(t, err)
 
 	// Length-prefixed AAD: no two (merchant, name) rows collide.
@@ -116,7 +116,7 @@ func TestEnvelopeRoundTripAndTamperRefusal(t *testing.T) {
 func TestMerchantDEKLifecycle(t *testing.T) {
 	ctx := context.Background()
 	master, store := masterKey(t), newStore()
-	a, b := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	a, b := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	aad := SecretAAD(a, "k")
 
 	enc := newEncryptor(t, master, store)
@@ -166,7 +166,7 @@ func TestEncryptorConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, disabled.Enabled())
 	require.False(t, (*Encryptor)(nil).Enabled())
-	m := merchant.ID(uuid.New())
+	m := billing.MerchantID(uuid.New())
 	_, err = disabled.Encrypt(context.Background(), m, SecretAAD(m, "k"), []byte("x"))
 	require.ErrorIs(t, err, ErrEncryptionDisabled)
 	_, err = disabled.Decrypt(context.Background(), m, SecretAAD(m, "k"), "AAAA")

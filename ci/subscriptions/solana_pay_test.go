@@ -30,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/solanafake"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #1086: Solana Pay state lives in PostgreSQL. Every replica sees a checkout's
@@ -768,7 +767,7 @@ func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 
 	var mid uuid.UUID
 	require.NoError(t, p.w.pool.QueryRow(t.Context(), p.sql(`SELECT id FROM $schema.merchants WHERE slug = $1`), p.w.slug).Scan(&mid))
-	require.NoError(t, hosttools.ResolveSolanaPayReview(t.Context(), engine.Graph(p.w.rt), merchant.ID(mid), second, "refunded in tx RefundSig"))
+	require.NoError(t, hosttools.ResolveSolanaPayReview(t.Context(), engine.Graph(p.w.rt), billing.MerchantID(mid), second, "refunded in tx RefundSig"))
 	require.NotEqual(t, "solana_pay_receipts", refusedBy(), "a resolved review no longer holds the archive")
 }
 

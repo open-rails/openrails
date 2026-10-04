@@ -21,14 +21,14 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
 	auth "github.com/open-rails/helpers/auth"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,7 +40,7 @@ type proofAuthority struct {
 }
 
 func (a proofAuthority) Can(_ context.Context, _ iam.Actor, ref iam.GroupRef, perm iam.Perm) (bool, error) {
-	return ref.ID() == a.group && perm.String() == permissions.MerchantCatalogRead, nil
+	return ref.ID() == a.group && perm.String() == billing.MerchantCatalogRead, nil
 }
 func (proofAuthority) KnownPermission(iam.Perm) bool { return true }
 
@@ -52,7 +52,7 @@ func (v proofVerifier) AuthenticateRequest(ctx context.Context, r *http.Request)
 
 type proofDirectory struct{ row merchants.Merchant }
 
-func (d proofDirectory) Get(context.Context, merchant.ID) (*merchants.Merchant, error) {
+func (d proofDirectory) Get(context.Context, billing.MerchantID) (*merchants.Merchant, error) {
 	row := d.row
 	return &row, nil
 }
@@ -84,7 +84,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	}), verify.WithPublicURL(origin))
 	require.NoError(t, verifier.AddIssuer(issuer, []string{"billing"}, verify.IssuerOptions{Keys: []iam.RemoteApplicationKey{{KID: "proof-issuer", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}}))
 	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: proofVerifier{proofAuthority{verifier, groupID}}, Authority: func(context.Context, billingauth.Requirement) (billingauth.Authority, error) {
-		return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: groupID}, Permission: permissions.MerchantCatalogRead}, nil
+		return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: groupID}, Permission: billing.MerchantCatalogRead}, nil
 	}})
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -93,7 +93,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	require.NoError(t, err)
 	x, y := base64.RawURLEncoding.EncodeToString(public[1:33]), base64.RawURLEncoding.EncodeToString(public[33:])
 	thumb := sha256.Sum256([]byte(`{"crv":"P-256","kty":"EC","x":"` + x + `","y":"` + y + `"}`))
-	delegated := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "aud": "billing", "delegated_sub": "delegated-actor", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "permissions": []string{permissions.MerchantCatalogRead}, "cnf": map[string]any{"jkt": base64.RawURLEncoding.EncodeToString(thumb[:])}})
+	delegated := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "aud": "billing", "delegated_sub": "delegated-actor", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "permissions": []string{billing.MerchantCatalogRead}, "cnf": map[string]any{"jkt": base64.RawURLEncoding.EncodeToString(thumb[:])}})
 	delegated.Header["typ"], delegated.Header["kid"] = "delegated-access+jwt", "proof-issuer"
 	access, err := delegated.SignedString(rsaKey)
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		return signed
 	}
-	target := billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store", AuthorityGroupID: groupID}
+	target := billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store", AuthorityGroupID: groupID}
 	directory := proofDirectory{row: merchants.Merchant{ID: target.MerchantID, Slug: "store", Status: merchants.StatusActive, PermissionGroupID: groupID}}
 	gate := integrationGate{auth: integration, runtime: &app.Runtime{}}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +117,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		}
 		require.Equal(t, billingauth.Delegated, identity.Kind)
 		require.Contains(t, r.RequestURI, "/v2/merchant/")
-		principal, err := gate.Authorize(r.Context(), r, permissions.MerchantCatalogRead)
+		principal, err := gate.Authorize(r.Context(), r, billing.MerchantCatalogRead)
 		if err != nil {
 			w.WriteHeader(403)
 			return
@@ -127,7 +127,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	})
 	table := &router.Table{Entries: []router.Entry{{Method: "GET", Path: "/v1/merchant/proof", Handler: handler}, {Method: "POST", Path: "/v1/merchant/proof", Handler: handler}, {Method: "GET", Path: "/v1/merchant/other", Handler: handler}}}
 	router.AddMerchantSelectorRoutes(table, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-		return merchanttarget.Resolve(ctx, r, directory, merchant.ID{}, "")
+		return merchanttarget.Resolve(ctx, r, directory, billing.MerchantID{}, "")
 	})
 	mounted := table.Handler()
 	call := func(method, path, signedProof string) int {

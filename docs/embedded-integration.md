@@ -43,6 +43,15 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
+A host imports four kinds of package; everything else is `internal/`:
+
+| Package | Holds |
+|---|---|
+| `openrails` | `New`, `NewRemote`, `Migrate`, the `*Client`, `Config`, `Deps` |
+| `billing` | request/response types, IDs (`billing.MerchantID`, `billing.ParseMerchantID`), errors and codes, permission names (`billing.MerchantAll`) |
+| `catalog` | catalog-as-code manifests and charge models (rate cards, meters, prices) |
+| `adapters/http`, `adapters/gin`, `adapters/fiber` | mount `client.Routes()` on your router |
+
 OpenRails owns its migrations and applies them through your pool; the pool's
 role owns the objects and is the role OpenRails runs as (no grants). Run it on
 every boot, before `New`:
@@ -295,7 +304,7 @@ OpenRails derives everything from it and the host writes no mapping:
   the staff and machine route groups require it. Native JWT roles never confer
   privileges.
 - The recent sign-in check (operations that move money, grant access or mint
-  credentials; `permissions.RequiresRecentSignIn`) is AuthKit's: a stale
+  credentials; `billing.RequiresRecentSignIn`) is AuthKit's: a stale
   sign-in is 403 `step_up_required` with AuthKit's challenge.
 
 **With other auth**, supply the same three as hooks (not together with `AuthKit`):

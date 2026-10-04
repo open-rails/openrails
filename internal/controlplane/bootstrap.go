@@ -9,8 +9,8 @@ import (
 	"github.com/open-rails/authkit/iam"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const BootstrapAdminAPIKeyName = "openrails-bootstrap-admin"
@@ -74,7 +74,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	if c == nil || c.Core() == nil {
 		return nil, errors.New("controlplane: core service unavailable")
 	}
-	slug := merchant.NormalizeSlug(opts.BootstrapMerchantSlug)
+	slug := billing.NormalizeMerchantSlug(opts.BootstrapMerchantSlug)
 	if slug == "" {
 		// No default merchant (#336): bootstrap must name the merchant slug to seed.
 		return nil, errors.New("controlplane: bootstrap requires a merchant slug (BootstrapMerchantSlug)")
@@ -140,7 +140,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 // bindMerchantGroup creates an unbound merchant's group and binds the
 // merchant to it in one transaction. bound is false when a concurrent caller
 // bound it first.
-func (c *ControlPlane) bindMerchantGroup(ctx context.Context, mid merchant.ID, ownerUserID string) (bound bool, err error) {
+func (c *ControlPlane) bindMerchantGroup(ctx context.Context, mid billing.MerchantID, ownerUserID string) (bound bool, err error) {
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
 		return false, err

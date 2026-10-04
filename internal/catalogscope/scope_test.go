@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOwnerScopeRequiresMerchantAuthority(t *testing.T) {
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	authorized := merchant.WithID(t.Context(), mid)
 	scope := Scope{MerchantID: mid, CatalogID: uuid.New(), OwnerSubject: "作者 / External:123"}
 
@@ -19,7 +20,7 @@ func TestOwnerScopeRequiresMerchantAuthority(t *testing.T) {
 		scope Scope
 	}{
 		"no merchant":      {t.Context(), scope},
-		"other merchant":   {merchant.WithID(t.Context(), merchant.ID(uuid.New())), scope},
+		"other merchant":   {merchant.WithID(t.Context(), billing.MerchantID(uuid.New())), scope},
 		"zero catalog":     {authorized, Scope{MerchantID: mid, OwnerSubject: "a"}},
 		"zero merchant":    {authorized, Scope{CatalogID: uuid.New(), OwnerSubject: "a"}},
 		"empty subject":    {authorized, Scope{MerchantID: mid, CatalogID: uuid.New()}},

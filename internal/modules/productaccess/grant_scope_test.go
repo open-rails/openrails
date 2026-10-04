@@ -7,8 +7,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // A caller cannot choose the merchant a grant lands under; refusal precedes persistence (nil DB).
@@ -17,6 +18,6 @@ func TestGrantInsertRefusesMissingOrForeignMerchant(t *testing.T) {
 	foreign := uuid.New()
 	g := &models.ProductAccessGrant{MerchantID: foreign}
 	require.ErrorIs(t, repo.Insert(context.Background(), g), merchant.ErrNoMerchant)
-	require.ErrorContains(t, repo.Insert(merchant.WithID(context.Background(), merchant.ID(uuid.New())), g), "does not match")
+	require.ErrorContains(t, repo.Insert(merchant.WithID(context.Background(), billing.MerchantID(uuid.New())), g), "does not match")
 	require.Equal(t, foreign, g.MerchantID, "a refused grant must not be rebound and retried silently")
 }

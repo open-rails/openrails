@@ -8,13 +8,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NMIClientResolver arms the store-scoped NMI client for one merchant write
@@ -68,7 +68,7 @@ func (a *NMIArmer) ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, s
 	if svc == nil || a.DB == nil {
 		return nil, false, nil
 	}
-	mid := merchant.ID(merchantID)
+	mid := billing.MerchantID(merchantID)
 	scope, ok, err := a.ResolveScope(ctx, mid, string(models.RailNMI), stampedAccountID)
 	if err != nil || !ok {
 		return nil, false, err
@@ -83,7 +83,7 @@ func (a *NMIArmer) ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, s
 // ResolveScope picks the account a write settles through: the stamped
 // provenance account when present, else the pull scope (active for new work,
 // else newest archived for drain).
-func (a *NMIArmer) ResolveScope(ctx context.Context, mid merchant.ID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
+func (a *NMIArmer) ResolveScope(ctx context.Context, mid billing.MerchantID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
 	svc := a.merchants()
 	if svc == nil || a.DB == nil {
 		return merchants.PSPScope{}, false, nil
@@ -105,7 +105,7 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid merchant.ID, rail strin
 }
 
 // NMIClient builds the store-armed client for scope through the one factory.
-func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+func (a *NMIArmer) NMIClient(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	svc := a.merchants()
 	if svc == nil {
 		return nil, errors.New("merchant credential store is not armed")
@@ -122,7 +122,7 @@ func (a *NMIArmer) factory() *NMIFactory {
 
 // Secret loads one scoped secret honouring the PSP row's rotation floor
 // (or#812). found=false with nil err = genuinely absent.
-func (a *NMIArmer) Secret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
+func (a *NMIArmer) Secret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool, error) {
 	svc := a.merchants()
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
@@ -147,7 +147,7 @@ func (a *NMIArmer) Secret(ctx context.Context, mid merchant.ID, scope merchants.
 
 // RequireSecret is Secret plus the fail-closed contract: a declared account
 // with a missing/unreadable secret errors, never a boot fallback.
-func (a *NMIArmer) RequireSecret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
+func (a *NMIArmer) RequireSecret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, error) {
 	value, found, err := a.Secret(ctx, mid, scope, key)
 	name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 	if err != nil {

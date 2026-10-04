@@ -9,10 +9,10 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/permissions"
 )
 
 // The merchant roles' authority is AuthKit's running catalog, not a copy:
@@ -33,16 +33,16 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		}
 		return out
 	}
-	require.Equal(t, []string{permissions.MerchantAll}, held(controlplane.MerchantOwner))
-	require.ElementsMatch(t, []string{permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate}, held(controlplane.MerchantCreator))
+	require.Equal(t, []string{billing.MerchantAll}, held(controlplane.MerchantOwner))
+	require.ElementsMatch(t, []string{billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate}, held(controlplane.MerchantCreator))
 	for _, p := range held(controlplane.MerchantViewer) {
 		require.True(t, strings.HasSuffix(p, ":read"), "viewer is read-only: %s", p)
 	}
 	ownerOnly := []string{
-		permissions.MerchantSettingsUpdate, permissions.MerchantPaymentProvidersUpdate, permissions.MerchantCatalogUpdate,
-		permissions.MerchantCreditsGrant, permissions.MerchantCreditsRevoke, permissions.MerchantCredentialsManage,
-		permissions.MerchantMembersRead, permissions.MerchantMembersManage, permissions.MerchantBillingImport,
-		permissions.MerchantBillingExport, permissions.MerchantAdmissionsCreate, permissions.MerchantCheckoutCreate,
+		billing.MerchantSettingsUpdate, billing.MerchantPaymentProvidersUpdate, billing.MerchantCatalogUpdate,
+		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantCredentialsManage,
+		billing.MerchantMembersRead, billing.MerchantMembersManage, billing.MerchantBillingImport,
+		billing.MerchantBillingExport, billing.MerchantAdmissionsCreate, billing.MerchantCheckoutCreate,
 	}
 	for _, role := range []iam.Role{controlplane.MerchantCreator, controlplane.MerchantSupport, controlplane.MerchantViewer} {
 		grants := held(role)

@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestAttachOptionsPasswordlessPolicy(t *testing.T) {
@@ -57,7 +56,7 @@ func TestAttachRefusesBeforeBuildingResources(t *testing.T) {
 // Every operator verb is a wiring error without an attached control plane;
 // none falls back to an unscoped pool.
 func TestOperatorVerbsRequireControlPlane(t *testing.T) {
-	ctx, a, id := context.Background(), &app.App{Runtime: &app.Runtime{}}, merchant.ID(uuid.New())
+	ctx, a, id := context.Background(), &app.App{Runtime: &app.Runtime{}}, billing.MerchantID(uuid.New())
 	calls := map[string]func() error{
 		"ProvisionMerchant": func() error {
 			_, err := ProvisionMerchant(ctx, a, billing.ProvisionMerchantRequest{Slug: "shop"})
@@ -75,8 +74,8 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 		"RenameMerchant":          func() error { return RenameMerchant(ctx, a, id, "shop") },
 		"SetMerchantAPIHost":      func() error { return SetMerchantAPIHost(ctx, a, id, "api.shop.example") },
 		"GetMerchantAPIHost":      func() error { _, err := GetMerchantAPIHost(ctx, a, id); return err },
-		"FleetAnalytics":          func() error { _, err := FleetAnalytics(ctx, a, merchant.ID{}, 30); return err },
-		"FleetTimeseries":         func() error { _, err := FleetTimeseries(ctx, a, merchant.ID{}, 12); return err },
+		"FleetAnalytics":          func() error { _, err := FleetAnalytics(ctx, a, billing.MerchantID{}, 30); return err },
+		"FleetTimeseries":         func() error { _, err := FleetTimeseries(ctx, a, billing.MerchantID{}, 12); return err },
 		"ListPaymentProviderConfigs": func() error {
 			_, err := ListPaymentProviderConfigs(ctx, a, id, "", "")
 			return err
@@ -114,7 +113,7 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 // stay numbers; merchant refs carry the stable UUID.
 func TestOperatorWireShapes(t *testing.T) {
 	week := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
-	id, err := merchant.ParseID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	id, err := billing.ParseMerchantID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	require.NoError(t, err)
 	roundTrip(t, billing.FleetSnapshot{
 		WindowDays: 30,

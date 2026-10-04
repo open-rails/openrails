@@ -30,8 +30,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PlanMigrationRedriveResult summarizes one re-driver pass.
@@ -78,7 +78,7 @@ func (s *PlanMigrationService) RedriveBlocked(ctx context.Context, batchSize int
 			break
 		}
 		remaining := batchSize - res.Examined
-		if err := s.reprice.repo.db.RunInMerchantScope(ctx, merchant.ID(mid), "plan-migration re-driver",
+		if err := s.reprice.repo.db.RunInMerchantScope(ctx, billing.MerchantID(mid), "plan-migration re-driver",
 			func(ctx context.Context) error { return s.redriveMerchant(ctx, res, remaining) },
 		); err != nil {
 			// Driver errors (DB unavailable mid-pass etc.) end the pass;

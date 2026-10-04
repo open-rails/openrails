@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestPullProviderWindowParsing(t *testing.T) {
@@ -81,7 +81,7 @@ func TestPullProviderSummaries(t *testing.T) {
 func TestPullProviderStdoutGuidesPrune(t *testing.T) {
 	run := reconcile.RunRecord{ID: uuid.New(), Status: "completed"}
 	res := &reconcile.RunResult{}
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	var buf bytes.Buffer
 	plan := []pullProviderPruneLog{{Provider: "nmi", Binding: reconcile.PSPBinding{AccountID: "100001"}, Result: reconcile.PruneResult{Subscriptions: 2, Payments: 1}}}
 	require.NoError(t, renderPullProviderStdout(&buf, "table", "run.log", mid, run, res, nil, plan, nil))
@@ -103,7 +103,7 @@ func TestPullProviderStdoutGuidesPrune(t *testing.T) {
 // undo-run's printed next steps are commands the CLI accepts verbatim: the
 // merchant is the exact id:<uuid> form, never a placeholder or a bare UUID.
 func TestUndoRunPrintsRunnableCommands(t *testing.T) {
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	plan := reconcile.UndoPlan{RunID: uuid.New(), Kind: reconcile.DestructiveRunKindConvergeEnforce, Restorable: map[string]int64{"subscriptions": 2}}
 	var buf bytes.Buffer
 	printUndoPlan(&buf, plan, mid)
@@ -113,7 +113,7 @@ func TestUndoRunPrintsRunnableCommands(t *testing.T) {
 	printUndoResult(&buf, reconcile.UndoResult{Plan: plan}, mid)
 	require.Contains(t, buf.String(), "openrails pull-provider --merchant id:"+mid.String()+" ")
 
-	parsed, err := merchant.ParseID(strings.TrimPrefix(merchantFlag(mid), "id:"))
+	parsed, err := billing.ParseMerchantID(strings.TrimPrefix(merchantFlag(mid), "id:"))
 	require.NoError(t, err)
 	require.Equal(t, mid, parsed)
 }

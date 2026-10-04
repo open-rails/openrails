@@ -11,8 +11,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Catalog reconciliation (issue #209) runs the shared catalog.RunDriftPass:

@@ -12,11 +12,12 @@ import (
 	"github.com/open-rails/authkit/verify"
 	helpersauth "github.com/open-rails/helpers/auth"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ResolvedDelegated is a verified browser-direct delegated access token
@@ -118,30 +119,30 @@ func (c *ControlPlane) ResolveDelegated(r *http.Request) (*ResolvedDelegated, er
 // credential acts for (#567): the active merchant bound to the application's
 // controlling group. When a Host resolver pinned a merchant onto ctx (#734),
 // it must be that one. Anything else is ErrDelegatedIssuerUnknown.
-func (c *ControlPlane) merchantForApplication(ctx context.Context, cl verify.Claims) (merchant.ID, string, error) {
+func (c *ControlPlane) merchantForApplication(ctx context.Context, cl verify.Claims) (billing.MerchantID, string, error) {
 	if cl.RemoteApplicationID == "" || cl.Group == nil {
-		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+		return billing.MerchantID{}, "", ErrDelegatedIssuerUnknown
 	}
 	return c.merchantForAppGroup(ctx, cl.Group.GroupID)
 }
 
-func (c *ControlPlane) merchantForAppGroup(ctx context.Context, groupID string) (merchant.ID, string, error) {
+func (c *ControlPlane) merchantForAppGroup(ctx context.Context, groupID string) (billing.MerchantID, string, error) {
 	if c.pool == nil {
-		return merchant.ID{}, "", errors.New("controlplane: control plane unavailable for issuer resolution")
+		return billing.MerchantID{}, "", errors.New("controlplane: control plane unavailable for issuer resolution")
 	}
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
-		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+		return billing.MerchantID{}, "", ErrDelegatedIssuerUnknown
 	}
 	mid, slug, err := c.merchantDirectoryRow(gen.New(c.pool).ListLiveMerchantsByGroupID(ctx, groupID))
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+		return billing.MerchantID{}, "", ErrDelegatedIssuerUnknown
 	case err != nil:
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	if hostMID, ok := merchant.HostMerchant(ctx); ok && hostMID != mid {
-		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
+		return billing.MerchantID{}, "", ErrDelegatedIssuerUnknown
 	}
 	return mid, slug, nil
 }

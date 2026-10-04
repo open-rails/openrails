@@ -11,7 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // OpenRails owns merchant names (#1106). merchants.slug is the name of every
@@ -35,9 +35,9 @@ func (e *RenameTooSoonError) Error() string {
 
 // Rename gives a live merchant a new name. The former name becomes an alias
 // under policy, and a name the merchant itself held before is reclaimed.
-func (s *Service) Rename(ctx context.Context, id merchant.ID, name string, policy merchant.NamingPolicy) (*Merchant, error) {
+func (s *Service) Rename(ctx context.Context, id billing.MerchantID, name string, policy merchant.NamingPolicy) (*Merchant, error) {
 	name = normalizeSlug(name)
-	if err := merchant.ValidateSlug(name); err != nil {
+	if err := billing.ValidateMerchantSlug(name); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidName, err)
 	}
 	if !policy.Enabled {
@@ -95,7 +95,7 @@ func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]Direct
 	}
 	var out []DirectoryRef
 	for _, row := range rows {
-		out = append(out, DirectoryRef{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName, GroupID: row.GroupID})
+		out = append(out, DirectoryRef{ID: billing.MerchantID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName, GroupID: row.GroupID})
 	}
 	return out, nil
 }

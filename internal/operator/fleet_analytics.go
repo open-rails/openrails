@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // FleetAnalytics returns cross-merchant operator aggregates (openrails-saas
@@ -19,7 +18,7 @@ import (
 // its own platform merchant); zero excludes nothing. windowDays outside 1..365
 // falls back to 30. Calling without an attached control plane is a wiring error
 // (call Attach/AttachWithOptions first).
-func FleetAnalytics(ctx context.Context, a *app.App, exclude merchant.ID, windowDays int) (*billing.FleetSnapshot, error) {
+func FleetAnalytics(ctx context.Context, a *app.App, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")

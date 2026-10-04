@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/httpx"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StripeWebhookPublisher owns atomic credential references for one provider account.
@@ -30,7 +30,7 @@ type ManagedStripeWebhookParams struct {
 	StripeClients       *stripeapi.Factory
 	Config              *config.Config
 	SecretStore         merchants.MerchantSecretStore
-	MerchantID          merchant.ID
+	MerchantID          billing.MerchantID
 	ProviderEnvironment string
 	PspID               string
 	SecretKey           string

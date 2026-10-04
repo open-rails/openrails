@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // AddMerchantSelectorRoutes registers the explicit-selector protocol as actual

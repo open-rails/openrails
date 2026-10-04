@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/idguard"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Provider-account cutover reports are report-only (#657): they classify one
@@ -77,7 +77,7 @@ type ProviderAccountCutoverReport struct {
 // with subscriptions.PlanProviderAccountCutover. Read-only. A subscription or
 // target PSP the merchant does not have is an error; every readiness gap is a
 // coded plan.
-func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
+func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID billing.MerchantID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
 	if Get(a) == nil {
 		return ProviderAccountCutoverReport{}, errors.New("no control plane attached (call Attach first)")
 	}
@@ -159,7 +159,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	return report, err
 }
 
-func pspRow(ctx context.Context, q *gen.Queries, merchantID merchant.ID, id uuid.UUID) (gen.BillingPsp, error) {
+func pspRow(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, id uuid.UUID) (gen.BillingPsp, error) {
 	psp, err := q.GetPSP(ctx, gen.GetPSPParams{ID: id, MerchantID: merchantID.UUID()})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

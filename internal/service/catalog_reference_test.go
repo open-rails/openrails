@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,7 +80,7 @@ func TestStripeCatalogReferencePreflight(t *testing.T) {
 // Creator-scoped callers may manage only their own catalog's ordinary fields:
 // provider/entitlement/tier authority is refused before any side effect.
 func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	ctx, err := catalogscope.WithOwner(merchant.WithID(t.Context(), mid), catalogscope.Scope{MerchantID: mid, CatalogID: uuid.New(), OwnerSubject: "作者/opaque subject?x=1"})
 	require.NoError(t, err)
 	svc := &Service{} // unwired: any DB/provider access would panic
@@ -125,6 +125,6 @@ func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
 	}
 	_, err = svc.CreateProduct(ctx, CreateProductRequest{CatalogID: billing.CatalogID(uuid.New())})
 	require.ErrorIs(t, err, catalog.ErrOwnerScope, "a creator cannot target another catalog")
-	_, err = svc.GetProduct(merchant.WithID(ctx, merchant.ID(uuid.New())), billing.ProductID(uuid.New()))
+	_, err = svc.GetProduct(merchant.WithID(ctx, billing.MerchantID(uuid.New())), billing.ProductID(uuid.New()))
 	require.ErrorIs(t, err, catalog.ErrOwnerScope, "changing the merchant must not widen a captured owner scope")
 }

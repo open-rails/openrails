@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrNoControlPlane is returned by authority checks invoked on a nil control
@@ -39,13 +38,13 @@ func (c *ControlPlane) RequestActor(r *http.Request) (iam.Actor, error) {
 // or, when empty, the requesting user's sole merchant to one bound merchant,
 // then checks perm live on that merchant's group for the request's actor. A
 // revoked session is an error joined with helpers/auth ErrRevoked.
-func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, merchantRef, perm string) (merchant.ID, string, error) {
+func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, merchantRef, perm string) (billing.MerchantID, string, error) {
 	if c == nil || c.Core() == nil {
-		return merchant.ID{}, "", ErrNoControlPlane
+		return billing.MerchantID{}, "", ErrNoControlPlane
 	}
 	actor, err := c.RequestActor(r)
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	var groupID string
 	if ref := strings.TrimSpace(merchantRef); ref == "" {
@@ -54,18 +53,18 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Re
 		groupID, err = c.merchantGroupByName(ctx, ref)
 	}
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	allowed, err := c.can(ctx, actor, iam.GroupByID(groupID), perm)
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	if !allowed {
-		return merchant.ID{}, "", billing.ErrPermissionRequired
+		return billing.MerchantID{}, "", billing.ErrPermissionRequired
 	}
 	mid, slug, err := c.merchantForGroupID(ctx, groupID)
 	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
-		return merchant.ID{}, "", billing.ErrMerchantUnresolved
+		return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
 	}
 	return mid, slug, err
 }
@@ -180,20 +179,20 @@ func (c *ControlPlane) memberships(ctx context.Context, s iam.Subject) ([]iam.Me
 
 // ResolveMerchantForGroup resolves a bound merchant by a current or former
 // name, with no authority check.
-func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, string, error) {
+func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef string) (billing.MerchantID, string, error) {
 	if c == nil || c.Core() == nil {
-		return merchant.ID{}, "", ErrNoControlPlane
+		return billing.MerchantID{}, "", ErrNoControlPlane
 	}
 	ref := strings.ToLower(strings.TrimSpace(merchantRef))
 	if ref == "" {
-		return merchant.ID{}, "", billing.ErrMerchantUnresolved
+		return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
 	}
 	mid, mslug, err := c.MerchantScope(ctx, ref)
 	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
-		return merchant.ID{}, "", billing.ErrMerchantUnresolved
+		return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
 	}
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	return mid, mslug, nil
 }

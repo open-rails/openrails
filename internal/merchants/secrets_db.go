@@ -9,7 +9,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // dbSecretStore persists per-merchant secrets in billing.merchant_secrets.
@@ -33,7 +34,7 @@ func NewDBSecretStore(pool *db.Pool) (MerchantSecretStore, error) {
 	return &dbSecretStore{database: database}, nil
 }
 
-func (d *dbSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+func (d *dbSecretStore) Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error) {
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -54,7 +55,7 @@ func (d *dbSecretStore) Get(ctx context.Context, merchantID merchant.ID, name st
 	return s, nil
 }
 
-func (d *dbSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
+func (d *dbSecretStore) Put(ctx context.Context, merchantID billing.MerchantID, name, value string) (Secret, error) {
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -72,7 +73,7 @@ func (d *dbSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, v
 	return s, nil
 }
 
-func (d *dbSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name string) error {
+func (d *dbSecretStore) Delete(ctx context.Context, merchantID billing.MerchantID, name string) error {
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return err
 	}
@@ -85,7 +86,7 @@ func (d *dbSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name
 	return nil
 }
 
-func (d *dbSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
+func (d *dbSecretStore) List(ctx context.Context, merchantID billing.MerchantID) ([]string, error) {
 	if merchantID.IsZero() {
 		return nil, validateSecretRef(merchantID, "x")
 	}
@@ -101,7 +102,7 @@ func (d *dbSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]str
 	return names, nil
 }
 
-func (d *dbSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (d *dbSecretStore) StageSecret(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	if err := validateSecretRef(id, name); err != nil {
 		return Secret{}, err
 	}

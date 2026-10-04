@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // manifestManagedSecretStore keeps provider credentials in the read-only
@@ -27,7 +27,7 @@ func isAlertWebhookSecret(name string) bool {
 	return err == nil && AlertWebhookURLSecretName(id) == name
 }
 
-func (s *manifestManagedSecretStore) Get(ctx context.Context, id merchant.ID, name string) (Secret, error) {
+func (s *manifestManagedSecretStore) Get(ctx context.Context, id billing.MerchantID, name string) (Secret, error) {
 	if isAlertWebhookSecret(name) {
 		return s.managed.Get(ctx, id, name)
 	}
@@ -36,7 +36,7 @@ func (s *manifestManagedSecretStore) Get(ctx context.Context, id merchant.ID, na
 	}
 	return s.manifest.Get(ctx, id, name)
 }
-func (s *manifestManagedSecretStore) GetAtLeastVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+func (s *manifestManagedSecretStore) GetAtLeastVersion(ctx context.Context, id billing.MerchantID, name string, version int) (Secret, error) {
 	if isAlertWebhookSecret(name) {
 		return ReadSecretRef(ctx, s.managed, id, SecretRef{Name: name, MinVersion: version})
 	}
@@ -44,19 +44,19 @@ func (s *manifestManagedSecretStore) GetAtLeastVersion(ctx context.Context, id m
 	// durable rotation watermark or read cache; preserve their existing contract.
 	return s.Get(ctx, id, name)
 }
-func (s *manifestManagedSecretStore) Put(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (s *manifestManagedSecretStore) Put(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	if !isAlertWebhookSecret(name) {
 		return Secret{}, ErrManifestSecretsReadOnly
 	}
 	return s.managed.Put(ctx, id, name, value)
 }
-func (s *manifestManagedSecretStore) Delete(ctx context.Context, id merchant.ID, name string) error {
+func (s *manifestManagedSecretStore) Delete(ctx context.Context, id billing.MerchantID, name string) error {
 	if !isAlertWebhookSecret(name) {
 		return ErrManifestSecretsReadOnly
 	}
 	return s.managed.Delete(ctx, id, name)
 }
-func (s *manifestManagedSecretStore) List(ctx context.Context, id merchant.ID) ([]string, error) {
+func (s *manifestManagedSecretStore) List(ctx context.Context, id billing.MerchantID) ([]string, error) {
 	names, err := s.managed.List(ctx, id)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func mutableSecretView(store MerchantSecretStore) MerchantSecretStore {
 	}
 }
 
-func (s *manifestManagedSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+func (s *manifestManagedSecretStore) GetVersion(ctx context.Context, id billing.MerchantID, name string, version int) (Secret, error) {
 	if isAlertWebhookSecret(name) {
 		return ReadSecretRef(ctx, s.managed, id, SecretRef{Name: name, MinVersion: version})
 	}

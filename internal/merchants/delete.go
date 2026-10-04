@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
@@ -218,7 +218,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 // not because the inventory can undo anything. See PurgeInventory.
 //
 // Was Export (#225). The old name promised a restore point that never existed.
-func (s *Service) TakePurgeInventory(ctx context.Context, id merchant.ID) (PurgeInventory, error) {
+func (s *Service) TakePurgeInventory(ctx context.Context, id billing.MerchantID) (PurgeInventory, error) {
 	m, err := s.merchantByID(ctx, id)
 	if err != nil {
 		return PurgeInventory{}, err
@@ -281,7 +281,7 @@ func (s *Service) TakePurgeInventory(ctx context.Context, id merchant.ID) (Purge
 // countMerchantOwnedRows returns per-table counts and the total. Counts are
 // deliberately unfiltered by deleted_at: a purge hard-deletes soft-deleted rows
 // too, so they are part of the blast radius.
-func (s *Service) countMerchantOwnedRows(ctx context.Context, id merchant.ID, tables []string) (map[string]int, int, error) {
+func (s *Service) countMerchantOwnedRows(ctx context.Context, id billing.MerchantID, tables []string) (map[string]int, int, error) {
 	counts := make(map[string]int, len(tables))
 	total := 0
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
@@ -418,7 +418,7 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 // cleanup stays retryable through RetrySecretCleanup and its scheduled worker.
 //
 // Re-running Delete on an already-deleted merchant returns ErrMerchantNotFound.
-func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions) error {
+func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts DeleteOptions) error {
 	m, err := s.merchantByID(ctx, id)
 	if err != nil {
 		return err

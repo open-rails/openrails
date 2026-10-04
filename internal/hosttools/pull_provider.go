@@ -18,18 +18,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
@@ -40,7 +41,7 @@ type PullProviderOptions struct {
 	NMITransport http.RoundTripper
 	PGXPool      *pgxpool.Pool
 	Config       *config.Config
-	MerchantID   merchant.ID
+	MerchantID   billing.MerchantID
 	Providers    []string
 	PSP          string
 	Since        string
@@ -80,7 +81,7 @@ type PullProviderOptions struct {
 type PullProviderReportOptions struct {
 	PGXPool    *pgxpool.Pool
 	Config     *config.Config
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	RunID      string
 	Format     string
 	Out        io.Writer
@@ -637,7 +638,7 @@ func pruneMutationRecords(provider reconcile.Provider, pr reconcile.PruneResult,
 	return out
 }
 
-func renderPullProviderStdout(w io.Writer, format, logPath string, merchantID merchant.ID, run reconcile.RunRecord, res *reconcile.RunResult, appliedChanges []reconcile.MutationRecord, pruneLogs []pullProviderPruneLog, convergeLog *pullProviderConvergeLog) error {
+func renderPullProviderStdout(w io.Writer, format, logPath string, merchantID billing.MerchantID, run reconcile.RunRecord, res *reconcile.RunResult, appliedChanges []reconcile.MutationRecord, pruneLogs []pullProviderPruneLog, convergeLog *pullProviderConvergeLog) error {
 	counts := summarizeMutations(res.PlannedChanges, appliedChanges)
 	statusCounts := findingStatusCounts(res.Findings)
 	pruneCounts := summarizePrune(pruneLogs)

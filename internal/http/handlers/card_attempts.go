@@ -11,8 +11,8 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SEC-30: every card save, checkout and confirmation consults the durable

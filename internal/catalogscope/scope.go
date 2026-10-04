@@ -8,11 +8,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 type Scope struct {
-	MerchantID   merchant.ID
+	MerchantID   billing.MerchantID
 	CatalogID    uuid.UUID
 	OwnerSubject string
 }

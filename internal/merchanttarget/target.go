@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Directory interface {
-	Get(context.Context, merchant.ID) (*merchants.Merchant, error)
+	Get(context.Context, billing.MerchantID) (*merchants.Merchant, error)
 	GetBySlug(context.Context, string) (*merchants.Merchant, error)
 }
 
@@ -36,7 +37,7 @@ func FromContext(ctx context.Context) (billingauth.Target, bool) {
 	return selection.Target, ok
 }
 
-func Resolve(ctx context.Context, r *http.Request, directory Directory, bound merchant.ID, defaultSlug string) (billingauth.Target, error) {
+func Resolve(ctx context.Context, r *http.Request, directory Directory, bound billing.MerchantID, defaultSlug string) (billingauth.Target, error) {
 	if target, ok := FromContext(ctx); ok {
 		if err := Assert(r, target); err != nil {
 			return billingauth.Target{}, err
@@ -44,12 +45,12 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 		if !bound.IsZero() && bound != target.MerchantID {
 			return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant binding mismatch"}
 		}
-		if defaultSlug != "" && merchant.NormalizeSlug(defaultSlug) != target.MerchantSlug {
+		if defaultSlug != "" && billing.NormalizeMerchantSlug(defaultSlug) != target.MerchantSlug {
 			return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant slug mismatch"}
 		}
 		return target, nil
 	}
-	var id merchant.ID
+	var id billing.MerchantID
 	var slug string
 	if r != nil {
 		rawID := strings.TrimSpace(r.Header.Get(merchant.BindingHeader))
@@ -65,7 +66,7 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 		}
 		if rawID != "" {
 			var err error
-			id, err = merchant.ParseID(rawID)
+			id, err = billing.ParseMerchantID(rawID)
 			if err != nil || id.IsZero() {
 				return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "invalid merchant ID"}
 			}
@@ -89,7 +90,7 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 	var selected *merchants.Merchant
 	var err error
 	if slug != "" {
-		if err := merchant.ValidateSlug(slug); err != nil {
+		if err := billing.ValidateMerchantSlug(slug); err != nil {
 			return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "invalid merchant slug"}
 		}
 		selected, err = directory.GetBySlug(ctx, slug)
@@ -109,7 +110,7 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 	if r != nil {
 		// Preserve the actually resolved name separately from the canonical name.
 		// Active aliases may differ; changing the header later cannot widen it.
-		*r = *r.WithContext(context.WithValue(r.Context(), contextKey{}, resolvedSelection{Target: target, slug: merchant.NormalizeSlug(slug)}))
+		*r = *r.WithContext(context.WithValue(r.Context(), contextKey{}, resolvedSelection{Target: target, slug: billing.NormalizeMerchantSlug(slug)}))
 	}
 	return target, nil
 }
@@ -125,7 +126,7 @@ func Assert(r *http.Request, target billingauth.Target) error {
 		return billingauth.GateError{Status: 400, Message: "choose one merchant selector"}
 	}
 	if rawID != "" {
-		id, err := merchant.ParseID(rawID)
+		id, err := billing.ParseMerchantID(rawID)
 		if err != nil {
 			return billingauth.GateError{Status: 400, Message: "invalid merchant ID"}
 		}
@@ -137,7 +138,7 @@ func Assert(r *http.Request, target billingauth.Target) error {
 	if captured, ok := r.Context().Value(contextKey{}).(resolvedSelection); ok && captured.Target == target && captured.slug != "" {
 		expectedSlug = captured.slug
 	}
-	if rawSlug != "" && merchant.NormalizeSlug(rawSlug) != expectedSlug {
+	if rawSlug != "" && billing.NormalizeMerchantSlug(rawSlug) != expectedSlug {
 		return billingauth.GateError{Status: 409, Message: "merchant binding mismatch"}
 	}
 	return nil

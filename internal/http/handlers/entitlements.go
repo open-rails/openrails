@@ -19,13 +19,12 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // convergeAfterMutation runs the inline Convergence Engine for one customer after
@@ -319,7 +318,7 @@ func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 // grant with no end, on top of the route's own permission.
 func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
 	if gate != nil {
-		_, err := gate.Authorize(r.Request.Context(), r.Request, permissions.MerchantAccessGrantPermanent)
+		_, err := gate.Authorize(r.Request.Context(), r.Request, billing.MerchantAccessGrantPermanent)
 		if err == nil {
 			return true
 		}
@@ -330,7 +329,7 @@ func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
 		}
 	}
 	r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeForStatus(http.StatusForbidden), "permanent_grant_forbidden",
-		"a grant with no end needs "+permissions.MerchantAccessGrantPermanent))
+		"a grant with no end needs "+billing.MerchantAccessGrantPermanent))
 	return false
 }
 

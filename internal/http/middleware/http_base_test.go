@@ -15,8 +15,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // The body cap is enforced on the whole body before any handler runs, webhook
@@ -208,9 +209,9 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 // #336: there is no default merchant; an unresolved merchant pins nothing so
 // downstream merchant.Require fails. A resolved Host also pins the host marker.
 func TestResolveMerchant(t *testing.T) {
-	id := merchant.ID(uuid.New())
-	byHost := func(want merchant.ID, err error) HTTPMiddleware {
-		return ResolveMerchantFromHostHTTP(func(_ context.Context, host string) (merchant.ID, error) {
+	id := billing.MerchantID(uuid.New())
+	byHost := func(want billing.MerchantID, err error) HTTPMiddleware {
+		return ResolveMerchantFromHostHTTP(func(_ context.Context, host string) (billing.MerchantID, error) {
 			if host != "shop.example" {
 				return id, errors.New("wrong host")
 			}
@@ -224,10 +225,10 @@ func TestResolveMerchant(t *testing.T) {
 		{ResolveMerchantHTTP(StaticMerchant(id)), true, false},
 		{byHost(id, nil), true, true},
 		{ResolveMerchantHTTP(nil), false, false},
-		{ResolveMerchantHTTP(StaticMerchant(merchant.ID{})), false, false},
+		{ResolveMerchantHTTP(StaticMerchant(billing.MerchantID{})), false, false},
 		{ResolveMerchantFromHostHTTP(nil), false, false},
 		{byHost(id, errors.New("ambiguous")), false, false},
-		{byHost(merchant.ID{}, nil), false, false},
+		{byHost(billing.MerchantID{}, nil), false, false},
 	} {
 		tc.mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got, ok := merchant.FromContext(r.Context())

@@ -23,9 +23,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type billingArchiveOptions struct {
@@ -157,30 +157,30 @@ func newBillingImportCmd() *cobra.Command {
 	return cmd
 }
 
-func (o billingArchiveOptions) validate() (merchant.ID, error) {
+func (o billingArchiveOptions) validate() (billing.MerchantID, error) {
 	mid, err := parseBillingArchiveMerchant(o.merchant)
 	if err != nil {
-		return merchant.ID{}, err
+		return billing.MerchantID{}, err
 	}
 	if (strings.TrimSpace(o.url) == "") != (strings.TrimSpace(o.tokenFile) == "") {
-		return merchant.ID{}, fmt.Errorf("--url and --token-file must be supplied together")
+		return billing.MerchantID{}, fmt.Errorf("--url and --token-file must be supplied together")
 	}
 	if o.timeout < 0 {
-		return merchant.ID{}, fmt.Errorf("--timeout cannot be negative")
+		return billing.MerchantID{}, fmt.Errorf("--timeout cannot be negative")
 	}
 	return mid, nil
 }
 
-func parseBillingArchiveMerchant(value string) (merchant.ID, error) {
+func parseBillingArchiveMerchant(value string) (billing.MerchantID, error) {
 	value = strings.TrimPrefix(strings.TrimSpace(value), "id:")
-	mid, err := merchant.ParseID(value)
+	mid, err := billing.ParseMerchantID(value)
 	if err != nil || mid.IsZero() {
-		return merchant.ID{}, fmt.Errorf("--merchant requires a nonzero exact UUID (optionally prefixed with id:)")
+		return billing.MerchantID{}, fmt.Errorf("--merchant requires a nonzero exact UUID (optionally prefixed with id:)")
 	}
 	return mid, nil
 }
 
-func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid merchant.ID) (*openrails.Client, func(), error) {
+func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid billing.MerchantID) (*openrails.Client, func(), error) {
 	clientOpts := []openrails.ClientOption{openrails.WithMerchantID(mid), openrails.WithTimeout(opts.timeout)}
 	if strings.TrimSpace(opts.url) != "" {
 		token, err := readBillingArchiveToken(opts.tokenFile)

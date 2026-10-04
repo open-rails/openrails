@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/crypto"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // encryptedSecretStore wraps any MerchantSecretStore and transparently
@@ -37,7 +37,7 @@ func NewEncryptedSecretStore(inner MerchantSecretStore, enc *crypto.Encryptor) (
 	return &encryptedSecretStore{inner: inner, enc: enc}, nil
 }
 
-func (e *encryptedSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+func (e *encryptedSecretStore) Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error) {
 	s, err := e.inner.Get(ctx, merchantID, name)
 	if err != nil {
 		return Secret{}, err
@@ -50,7 +50,7 @@ func (e *encryptedSecretStore) Get(ctx context.Context, merchantID merchant.ID, 
 	return s, nil
 }
 
-func (e *encryptedSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
+func (e *encryptedSecretStore) Put(ctx context.Context, merchantID billing.MerchantID, name, value string) (Secret, error) {
 	// Preserve the store's idempotent-rotation semantics at the PLAINTEXT level:
 	// ciphertext is non-deterministic (random nonce), so we must compare decrypted
 	// values, not ciphertext. If the plaintext is unchanged, return the existing
@@ -77,11 +77,11 @@ func (e *encryptedSecretStore) Put(ctx context.Context, merchantID merchant.ID, 
 	return stored, nil
 }
 
-func (e *encryptedSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name string) error {
+func (e *encryptedSecretStore) Delete(ctx context.Context, merchantID billing.MerchantID, name string) error {
 	return e.inner.Delete(ctx, merchantID, name)
 }
 
-func (e *encryptedSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
+func (e *encryptedSecretStore) List(ctx context.Context, merchantID billing.MerchantID) ([]string, error) {
 	// Names are stored in the clear; no decryption needed.
 	return e.inner.List(ctx, merchantID)
 }

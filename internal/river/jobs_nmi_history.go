@@ -12,13 +12,13 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -76,7 +76,7 @@ func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs
 			}
 			after = mid
 			progress.Mark(ctx, "nmi history merchant "+mid.String())
-			err := w.DB.RunInMerchantScope(ctx, merchant.ID(*mid), "nmi history", func(ctx context.Context) error {
+			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(*mid), "nmi history", func(ctx context.Context) error {
 				return w.readMerchant(ctx, *mid, now)
 			})
 			if err != nil {

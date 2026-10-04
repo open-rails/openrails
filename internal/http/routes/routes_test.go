@@ -13,6 +13,7 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -21,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/permissions"
 )
 
 // deny records every permission asked of it and refuses.
@@ -92,20 +92,20 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		asked[key] = gate.asked[0]
 	}
 
-	p := permissions.MerchantCustomerSettingsRead
-	w := permissions.MerchantCustomerSettingsUpdate
+	p := billing.MerchantCustomerSettingsRead
+	w := billing.MerchantCustomerSettingsUpdate
 	for key, perm := range map[string]string{
-		"GET /v1/merchant/billing-archive":                                                  permissions.MerchantBillingExport,
-		"POST /v1/merchant/billing-archive":                                                 permissions.MerchantBillingImport,
-		"POST /v1/import/billing":                                                           permissions.MerchantBillingImport,
-		"GET /v1/merchant/host-events":                                                      permissions.MerchantHostEventsRead,
-		"POST /v1/merchant/host-events/{id}/acknowledge":                                    permissions.MerchantHostEventsAcknowledge,
+		"GET /v1/merchant/billing-archive":                                                  billing.MerchantBillingExport,
+		"POST /v1/merchant/billing-archive":                                                 billing.MerchantBillingImport,
+		"POST /v1/import/billing":                                                           billing.MerchantBillingImport,
+		"GET /v1/merchant/host-events":                                                      billing.MerchantHostEventsRead,
+		"POST /v1/merchant/host-events/{id}/acknowledge":                                    billing.MerchantHostEventsAcknowledge,
 		"POST /v1/merchant/customers/entitlements:batch":                                    p,
 		"PUT /v1/merchant/customers/{customer_id}":                                          w,
 		"GET /v1/merchant/customers/{customer_id}":                                          p,
 		"GET /v1/merchant/customers/{customer_id}/delinquency":                              p,
 		"GET /v1/merchant/delinquency":                                                      p,
-		"GET /v1/merchant/customers/{customer_id}/payment-settlement-status":                permissions.MerchantPaymentsRead,
+		"GET /v1/merchant/customers/{customer_id}/payment-settlement-status":                billing.MerchantPaymentsRead,
 		"PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert":                 w,
 		"DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": w,
 		"DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}":                  w,
@@ -113,60 +113,60 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/merchant/customers/{customer_id}/entitlements":                            w,
 		"PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}":               w,
 		"PUT /v1/merchant/customers/{customer_id}/invoice-profile":                          w,
-		"POST /v1/merchant/customers/{customer_id}/credits":                                 permissions.MerchantCreditsGrant,
-		"DELETE /v1/merchant/customers/{customer_id}/credits/{grant_id}":                    permissions.MerchantCreditsRevoke,
-		"POST /v1/merchant/credits/deposit":                                                 permissions.MerchantCreditsGrant,
+		"POST /v1/merchant/customers/{customer_id}/credits":                                 billing.MerchantCreditsGrant,
+		"DELETE /v1/merchant/customers/{customer_id}/credits/{grant_id}":                    billing.MerchantCreditsRevoke,
+		"POST /v1/merchant/credits/deposit":                                                 billing.MerchantCreditsGrant,
 		"GET /v1/merchant/credits/deposit":                                                  p,
-		"PUT /v1/merchant/credit-limit":                                                     permissions.MerchantCreditsGrant,
-		"POST /v1/merchant/checkout-sessions":                                               permissions.MerchantCheckoutCreate,
-		"POST /v1/merchant/hosted-checkout-sessions":                                        permissions.MerchantCheckoutCreate,
+		"PUT /v1/merchant/credit-limit":                                                     billing.MerchantCreditsGrant,
+		"POST /v1/merchant/checkout-sessions":                                               billing.MerchantCheckoutCreate,
+		"POST /v1/merchant/hosted-checkout-sessions":                                        billing.MerchantCheckoutCreate,
 		"GET /v1/merchant/checkout-sessions/{id}":                                           p,
-		"POST /v1/merchant/admissions":                                                      permissions.MerchantAdmissionsCreate,
-		"POST /v1/merchant/admissions/{id}/capture":                                         permissions.MerchantAdmissionsCreate,
-		"POST /v1/merchant/provider-operations":                                             permissions.MerchantAdmissionsCreate,
-		"GET /v1/merchant/provider-operations/{operation_id}":                               permissions.MerchantUsageRead,
-		"POST /v1/merchant/usage/report":                                                    permissions.MerchantAdmissionsCreate,
-		"POST /v1/merchant/usage/rollup":                                                    permissions.MerchantUsageRead,
-		"GET /v1/merchant/payments":                                                         permissions.MerchantPaymentsRead,
-		"POST /v1/merchant/payments/{id}/refunds":                                           permissions.MerchantPaymentsRefund,
-		"POST /v1/merchant/purchase-reviews/{id}/resolve":                                   permissions.MerchantPaymentsRefund,
-		"GET /v1/merchant/subscriptions":                                                    permissions.MerchantSubscriptionsRead,
-		"POST /v1/merchant/subscriptions/{id}/cancel":                                       permissions.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/subscriptions/{id}/change-tier":                                  permissions.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/subscriptions/{id}/engine-takeover/preview":                      permissions.MerchantSubscriptionsRead,
-		"POST /v1/merchant/engine-takeovers":                                                permissions.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/catalog/reprice-all-prior-versions":                              permissions.MerchantSubscriptionsUpdate,
-		"GET /v1/merchant/invoices":                                                         permissions.MerchantInvoicesRead,
-		"POST /v1/merchant/invoices/{id}/void":                                              permissions.MerchantInvoicesUpdate,
-		"POST /v1/merchant/invoices/{id}/payments":                                          permissions.MerchantInvoicesUpdate,
-		"POST /v1/merchant/invoices/{id}/retry-collection":                                  permissions.MerchantInvoicesCollect,
-		"POST /v1/merchant/metrics/query":                                                   permissions.MerchantMetricsRead,
-		"PUT /v1/merchant/dashboard":                                                        permissions.MerchantDashboardUpdate,
-		"GET /v1/merchant/notifications":                                                    permissions.MerchantMetricsRead,
-		"POST /v1/merchant/notifications/{id}/read":                                         permissions.MerchantSettingsUpdate,
-		"GET /v1/merchant/repair-alerts":                                                    permissions.MerchantRepairAlertsRead,
-		"GET /v1/merchant/worker-health":                                                    permissions.MerchantRepairAlertsRead,
-		"GET /v1/merchant/findings/{id}":                                                    permissions.MerchantRepairAlertsRead,
-		"POST /v1/merchant/findings/{id}/resolve":                                           permissions.MerchantFindingsResolve,
-		"GET /v1/merchant/configuration":                                                    permissions.MerchantSettingsRead,
-		"POST /v1/merchant/configuration/applications":                                      permissions.MerchantSettingsUpdate,
-		"PUT /v1/merchant/webhooks/{id}/url":                                                permissions.MerchantSettingsUpdate,
-		"GET /v1/merchant/payment-providers":                                                permissions.MerchantPaymentProvidersRead,
-		"POST /v1/merchant/payment-providers/routing/dry-run":                               permissions.MerchantPaymentProvidersRead,
-		"PUT /v1/merchant/payment-providers/{provider}":                                     permissions.MerchantPaymentProvidersUpdate,
-		"DELETE /v1/merchant/payment-providers/{provider}":                                  permissions.MerchantPaymentProvidersUpdate,
-		"POST /v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive":          permissions.MerchantPaymentProvidersUpdate,
-		"GET /v1/merchant/catalog/products":                                                 permissions.MerchantCatalogRead,
-		"POST /v1/merchant/catalog/offers/lookup":                                           permissions.MerchantCatalogRead,
-		"POST /v1/merchant/catalog/applications":                                            permissions.MerchantCatalogUpdate,
-		"PUT /v1/merchant/catalog/meters/{key}":                                             permissions.MerchantCatalogUpdate,
-		"DELETE /v1/merchant/catalog/meters/{key}/rate-card":                                permissions.MerchantCatalogUpdate,
-		"POST /v1/merchant/catalog/product-archives":                                        permissions.MerchantCatalogUpdate,
-		"POST /v1/merchant/catalogs":                                                        permissions.MerchantCatalogUpdate,
-		"GET /v1/catalog":                                                                   permissions.MerchantCatalogOwnRead,
-		"PUT /v1/catalog":                                                                   permissions.MerchantCatalogOwnUpdate,
-		"POST /v1/catalog/offers/lookup":                                                    permissions.MerchantCatalogOwnRead,
-		"POST /v1/catalog/products":                                                         permissions.MerchantCatalogOwnUpdate,
+		"POST /v1/merchant/admissions":                                                      billing.MerchantAdmissionsCreate,
+		"POST /v1/merchant/admissions/{id}/capture":                                         billing.MerchantAdmissionsCreate,
+		"POST /v1/merchant/provider-operations":                                             billing.MerchantAdmissionsCreate,
+		"GET /v1/merchant/provider-operations/{operation_id}":                               billing.MerchantUsageRead,
+		"POST /v1/merchant/usage/report":                                                    billing.MerchantAdmissionsCreate,
+		"POST /v1/merchant/usage/rollup":                                                    billing.MerchantUsageRead,
+		"GET /v1/merchant/payments":                                                         billing.MerchantPaymentsRead,
+		"POST /v1/merchant/payments/{id}/refunds":                                           billing.MerchantPaymentsRefund,
+		"POST /v1/merchant/purchase-reviews/{id}/resolve":                                   billing.MerchantPaymentsRefund,
+		"GET /v1/merchant/subscriptions":                                                    billing.MerchantSubscriptionsRead,
+		"POST /v1/merchant/subscriptions/{id}/cancel":                                       billing.MerchantSubscriptionsUpdate,
+		"POST /v1/merchant/subscriptions/{id}/change-tier":                                  billing.MerchantSubscriptionsUpdate,
+		"POST /v1/merchant/subscriptions/{id}/engine-takeover/preview":                      billing.MerchantSubscriptionsRead,
+		"POST /v1/merchant/engine-takeovers":                                                billing.MerchantSubscriptionsUpdate,
+		"POST /v1/merchant/catalog/reprice-all-prior-versions":                              billing.MerchantSubscriptionsUpdate,
+		"GET /v1/merchant/invoices":                                                         billing.MerchantInvoicesRead,
+		"POST /v1/merchant/invoices/{id}/void":                                              billing.MerchantInvoicesUpdate,
+		"POST /v1/merchant/invoices/{id}/payments":                                          billing.MerchantInvoicesUpdate,
+		"POST /v1/merchant/invoices/{id}/retry-collection":                                  billing.MerchantInvoicesCollect,
+		"POST /v1/merchant/metrics/query":                                                   billing.MerchantMetricsRead,
+		"PUT /v1/merchant/dashboard":                                                        billing.MerchantDashboardUpdate,
+		"GET /v1/merchant/notifications":                                                    billing.MerchantMetricsRead,
+		"POST /v1/merchant/notifications/{id}/read":                                         billing.MerchantSettingsUpdate,
+		"GET /v1/merchant/repair-alerts":                                                    billing.MerchantRepairAlertsRead,
+		"GET /v1/merchant/worker-health":                                                    billing.MerchantRepairAlertsRead,
+		"GET /v1/merchant/findings/{id}":                                                    billing.MerchantRepairAlertsRead,
+		"POST /v1/merchant/findings/{id}/resolve":                                           billing.MerchantFindingsResolve,
+		"GET /v1/merchant/configuration":                                                    billing.MerchantSettingsRead,
+		"POST /v1/merchant/configuration/applications":                                      billing.MerchantSettingsUpdate,
+		"PUT /v1/merchant/webhooks/{id}/url":                                                billing.MerchantSettingsUpdate,
+		"GET /v1/merchant/payment-providers":                                                billing.MerchantPaymentProvidersRead,
+		"POST /v1/merchant/payment-providers/routing/dry-run":                               billing.MerchantPaymentProvidersRead,
+		"PUT /v1/merchant/payment-providers/{provider}":                                     billing.MerchantPaymentProvidersUpdate,
+		"DELETE /v1/merchant/payment-providers/{provider}":                                  billing.MerchantPaymentProvidersUpdate,
+		"POST /v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive":          billing.MerchantPaymentProvidersUpdate,
+		"GET /v1/merchant/catalog/products":                                                 billing.MerchantCatalogRead,
+		"POST /v1/merchant/catalog/offers/lookup":                                           billing.MerchantCatalogRead,
+		"POST /v1/merchant/catalog/applications":                                            billing.MerchantCatalogUpdate,
+		"PUT /v1/merchant/catalog/meters/{key}":                                             billing.MerchantCatalogUpdate,
+		"DELETE /v1/merchant/catalog/meters/{key}/rate-card":                                billing.MerchantCatalogUpdate,
+		"POST /v1/merchant/catalog/product-archives":                                        billing.MerchantCatalogUpdate,
+		"POST /v1/merchant/catalogs":                                                        billing.MerchantCatalogUpdate,
+		"GET /v1/catalog":                                                                   billing.MerchantCatalogOwnRead,
+		"PUT /v1/catalog":                                                                   billing.MerchantCatalogOwnUpdate,
+		"POST /v1/catalog/offers/lookup":                                                    billing.MerchantCatalogOwnRead,
+		"POST /v1/catalog/products":                                                         billing.MerchantCatalogOwnUpdate,
 	} {
 		require.Contains(t, asked, key)
 		require.Equal(t, perm, asked[key], key)
@@ -175,14 +175,14 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 	// Money-moving catalog archives need both catalog and refund authority.
 	gate.asked = nil
 	allowCatalog := gateFunc(func(ctx context.Context, r *http.Request, perm string) (billingauth.Principal, error) {
-		if perm == permissions.MerchantCatalogUpdate {
+		if perm == billing.MerchantCatalogUpdate {
 			return billingauth.Principal{MerchantID: merchantA}, nil
 		}
 		return gate.Authorize(ctx, r, perm)
 	})
 	rec := do(merchantSurface(rt, Options{Gate: allowCatalog}).Handler(), http.MethodPost, "/v1/merchant/catalog/product-archives", nil)
 	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Equal(t, []string{permissions.MerchantPaymentsRefund}, gate.asked)
+	require.Equal(t, []string{billing.MerchantPaymentsRefund}, gate.asked)
 
 	// Retired and control-plane-only management routes are not mounted.
 	for _, key := range routeKeys(table) {
@@ -388,7 +388,7 @@ func TestPlatformRoutes(t *testing.T) {
 	h := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: root, AdminLimiter: unlocker})
 	rec := do(h, http.MethodDelete, "/v1/platform/admin-rate-limit-lockouts/"+userB, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Equal(t, []string{permissions.RootAdminRateLimitsUnlock}, asked)
+	require.Equal(t, []string{billing.RootAdminRateLimitsUnlock}, asked)
 	require.Equal(t, &unlock{userB, userA}, unlocked)
 
 	unlocked = nil
@@ -414,11 +414,11 @@ func TestPlatformRoutes(t *testing.T) {
 
 	asked = nil
 	for path, perm := range map[string]string{
-		"GET /v1/platform/merchants":            permissions.RootMerchantsRead,
-		"GET /v1/platform/merchants/x":          permissions.RootMerchantsRead,
-		"DELETE /v1/platform/merchants/x":       permissions.RootMerchantsDelete,
-		"POST /v1/platform/merchants/x/restore": permissions.RootMerchantsRestore,
-		"GET /v1/platform/worker-health":        permissions.RootWorkerHealthRead,
+		"GET /v1/platform/merchants":            billing.RootMerchantsRead,
+		"GET /v1/platform/merchants/x":          billing.RootMerchantsRead,
+		"DELETE /v1/platform/merchants/x":       billing.RootMerchantsDelete,
+		"POST /v1/platform/merchants/x/restore": billing.RootMerchantsRestore,
+		"GET /v1/platform/worker-health":        billing.RootWorkerHealthRead,
 	} {
 		asked = nil
 		method, p, _ := strings.Cut(path, " ")

@@ -8,7 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // adminCustomerSummary is one row of the merchant customer list/search (#740).

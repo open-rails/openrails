@@ -8,10 +8,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // writeCatalogPrice atomically moves the key, writes the immutable financial
@@ -128,6 +129,6 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req CreatePriceRequest,
 }
 
 // Every catalog creation path locks the product before a price lookup key.
-func lockCatalogKey(ctx context.Context, tx pgx.Tx, mid merchant.ID, kind, key string) error {
+func lockCatalogKey(ctx context.Context, tx pgx.Tx, mid billing.MerchantID, kind, key string) error {
 	return gen.New(tx).LockCatalogKey(ctx, "catalog-"+kind+":"+mid.String()+":"+key)
 }

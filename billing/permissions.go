@@ -1,12 +1,11 @@
-// Package permissions is OpenRails' public permission-string vocabulary: the
-// merchant:* (seller) and customer:* (buyer/treasury) names its routes gate on.
-// Embedding hosts import these instead of hardcoding literals when they stamp
-// delegated principals or grant admin roles. /v1/me self-service needs no grant.
-// These strings are a stable public contract; internal/controlplane references
-// them so there is one source of truth.
-package permissions
+package billing
 
 import "strings"
+
+// Permission names: the merchant:* (seller), customer:* (buyer/treasury) and
+// root:* (platform operator) strings OpenRails routes gate on. Hosts use these
+// instead of literals when they stamp delegated principals or grant roles.
+// /v1/me self-service needs no grant. The strings are a stable public contract.
 
 // Merchant (seller) permissions.
 const (
@@ -149,8 +148,8 @@ const (
 // host-three wrote no bridge at all, so its entire self-service surface
 // silently 404'd (upstream#269). This preset is the documented DEFAULT for the
 // common AuthKit-host role shapes; a host with a different vocabulary
-// supplies its own mapping instead (see pkg/embedded/authkit
-// WithRolePermissions) — the preset is a default, never a constraint.
+// supplies its own mapping instead — the preset is a default, never a
+// constraint.
 //
 // The tiers:
 //
@@ -186,13 +185,13 @@ var (
 	}
 )
 
-// ForRoles maps a principal's host roles onto the catalog via the canonical
-// preset documented above: the union of each recognized role's tier, deduped,
-// in tier order (owner/admin, then member, then read-only). Unrecognized
+// PermissionsForRoles maps a principal's host roles onto the catalog via the
+// canonical preset documented above: the union of each recognized role's tier,
+// deduped, in tier order (owner/admin, then member, then read-only). Unrecognized
 // roles are ignored; no roles (or only unrecognized ones) yields nil, which
 // still authenticates for the grant-free /v1/me self-service surface but
 // passes no permission gate.
-func ForRoles(roles ...string) []string {
+func PermissionsForRoles(roles ...string) []string {
 	var owner, member, readOnly bool
 	for _, role := range roles {
 		switch strings.ToLower(strings.TrimSpace(role)) {

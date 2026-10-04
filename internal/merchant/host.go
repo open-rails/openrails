@@ -1,19 +1,23 @@
 package merchant
 
-import "context"
+import (
+	"context"
+
+	"github.com/open-rails/openrails/billing"
+)
 
 // HostResolver resolves the merchant that owns an inbound request Host header
 // (#734) — shared by the Host-based merchant-scoped route resolution and the
-// Host-routed webhook mount (pkg/embedded). Browser CORS no longer uses this
+// Host-routed webhook mount. Browser CORS no longer uses this
 // (#765: CORS is a static per-route-tier policy, not sourced from Host/merchant
 // resolution). Implementations MUST resolve LIVE per call: OpenRails never
 // builds a boot-time host->merchant map, so a
 // merchant registered (or reconfigured) on any node resolves immediately on
 // every other node/process sharing the same database — no restart, no cache
-// refresh required. Returns a zero ID and a non-nil error when host maps to no
+// refresh required. Returns a zero id and a non-nil error when host maps to no
 // active merchant (unknown/disabled/ambiguous host) — callers MUST fail closed
 // on error, never fall back to a default merchant.
-type HostResolver func(ctx context.Context, host string) (ID, error)
+type HostResolver func(ctx context.Context, host string) (billing.MerchantID, error)
 
 // hostMerchantCtxKey is the unexported context key for the Host-pinned
 // merchant. Deliberately distinct from the general "configured merchant"
@@ -28,23 +32,19 @@ type hostMerchantCtxKey struct{}
 // never sets this key, so any check gated on HostMerchant is a pure no-op —
 // single-merchant self-hosters see no behavior change without opting in
 // (#734).
-func WithHostMerchant(ctx context.Context, id ID) context.Context {
+func WithHostMerchant(ctx context.Context, id billing.MerchantID) context.Context {
 	return context.WithValue(ctx, hostMerchantCtxKey{}, id)
 }
 
 // HostMerchant returns the Host-pinned merchant set by WithHostMerchant, if
 // any.
-func HostMerchant(ctx context.Context) (ID, bool) {
+func HostMerchant(ctx context.Context) (billing.MerchantID, bool) {
 	if ctx == nil {
-		return ID{}, false
+		return billing.MerchantID{}, false
 	}
-	v := ctx.Value(hostMerchantCtxKey{})
-	if v == nil {
-		return ID{}, false
-	}
-	id, ok := v.(ID)
+	id, ok := ctx.Value(hostMerchantCtxKey{}).(billing.MerchantID)
 	if !ok || id.IsZero() {
-		return ID{}, false
+		return billing.MerchantID{}, false
 	}
 	return id, true
 }

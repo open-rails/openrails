@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Deterministic processor routing (or#288).

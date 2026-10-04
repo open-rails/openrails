@@ -18,9 +18,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Verdict is one gate evaluation.
@@ -84,7 +85,7 @@ func (g *Gate) CheckMerchant(ctx context.Context, merchantID uuid.UUID) Verdict 
 		return Verdict{Reason: "destructive gate not wired; refusing destructive actions (fail closed)"}
 	}
 	var v Verdict
-	mctx := merchant.WithID(ctx, merchant.ID(merchantID))
+	mctx := merchant.WithID(ctx, billing.MerchantID(merchantID))
 	if err := g.DB.RunInMerchantConn(mctx, func(sctx context.Context) error {
 		v = g.Check(sctx, merchantID)
 		return nil

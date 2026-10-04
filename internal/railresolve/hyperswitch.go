@@ -6,20 +6,20 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // HyperSwitchClient resolves one exact merchant-owned custodian credential.
 // The caller selects and locks the row, applies operation/archive policy, and
 // qualifies the concrete deployment contract before granting SDK or PSP access.
 // An archive does not itself revoke an existing obligation's custody.
-func HyperSwitchClient(ctx context.Context, cfg *config.Config, secrets merchants.MerchantSecretReader, owner merchant.ID, row gen.BillingCustodian) (*hyperswitch.Client, error) {
+func HyperSwitchClient(ctx context.Context, cfg *config.Config, secrets merchants.MerchantSecretReader, owner billing.MerchantID, row gen.BillingCustodian) (*hyperswitch.Client, error) {
 	if cfg == nil || cfg.HyperSwitch == nil || secrets == nil || owner.IsZero() || row.ID == uuid.Nil || row.MerchantID != owner.UUID() || row.Kind != models.CustodianHyperSwitch || row.Environment != config.ExpectedProviderEnvironment(cfg.IsTestMode()) {
 		return nil, hyperswitch.ErrBinding
 	}

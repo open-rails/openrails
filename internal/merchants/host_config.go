@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrAPIHostTaken indicates apiHost is already assigned to a different active
@@ -107,7 +107,7 @@ func ValidateAPIHost(host string) error {
 // multi-node requirement) — there is no boot-time host map to refresh.
 // Browser CORS is NOT configured here (#765: it's a static per-route-tier
 // policy, not per-merchant — see internal/http/middleware.PermissiveCORSHTTP).
-func (s *Service) SetHostConfig(ctx context.Context, id merchant.ID, apiHost string) error {
+func (s *Service) SetHostConfig(ctx context.Context, id billing.MerchantID, apiHost string) error {
 	if id.IsZero() {
 		return errors.New("merchants: merchant id is required")
 	}
@@ -137,7 +137,7 @@ type HostConfig struct {
 }
 
 // GetHostConfig returns id's current #734 Host configuration.
-func (s *Service) GetHostConfig(ctx context.Context, id merchant.ID) (*HostConfig, error) {
+func (s *Service) GetHostConfig(ctx context.Context, id billing.MerchantID) (*HostConfig, error) {
 	if id.IsZero() {
 		return nil, errors.New("merchants: merchant id is required")
 	}

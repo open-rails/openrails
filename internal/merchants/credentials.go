@@ -11,11 +11,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -68,7 +69,7 @@ type NMITokenizationConfig struct {
 // (issue #225). A missing individual secret is not an error — it is returned as an
 // empty field — so a merchant that has only a webhook secret (or only an API key)
 // still loads. A nil secret store yields empty credentials.
-func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (StripeCredentials, error) {
+func (s *Service) LoadStripeCredentials(ctx context.Context, id billing.MerchantID) (StripeCredentials, error) {
 	var creds StripeCredentials
 	if s.secrets == nil {
 		return creds, nil
@@ -101,7 +102,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	return creds, err
 }
 
-func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.ID, provider string) (string, error) {
+func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id billing.MerchantID, provider string) (string, error) {
 	if s.secrets == nil || id.IsZero() {
 		return "", nil
 	}
@@ -125,7 +126,7 @@ func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.I
 // LoadNMITokenizationConfig loads merchant-scoped browser tokenization config
 // for an NMI provider. Missing values return empty fields, except CollectJSURL
 // defaults to NMI's standard URL when a supported provider is selected.
-func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID, provider string) (NMITokenizationConfig, error) {
+func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id billing.MerchantID, provider string) (NMITokenizationConfig, error) {
 	var cfg NMITokenizationConfig
 	if id.IsZero() {
 		return cfg, nil
@@ -155,7 +156,7 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	return cfg, nil
 }
 
-func (s *Service) loadStripeCredentialsByRef(ctx context.Context, id merchant.ID, secretKey, webhook, thin, previous SecretRef) (StripeCredentials, error) {
+func (s *Service) loadStripeCredentialsByRef(ctx context.Context, id billing.MerchantID, secretKey, webhook, thin, previous SecretRef) (StripeCredentials, error) {
 	var creds StripeCredentials
 	var err error
 	if creds.SecretKey, err = s.secretValueRef(ctx, id, secretKey); err != nil {
@@ -177,7 +178,7 @@ func (s *Service) loadStripeCredentialsByRef(ctx context.Context, id merchant.ID
 
 // secretValueRef reads one credential at or above its recorded rotation version
 // floor (or#812). "" with a nil error means genuinely absent.
-func (s *Service) secretValueRef(ctx context.Context, id merchant.ID, ref SecretRef) (string, error) {
+func (s *Service) secretValueRef(ctx context.Context, id billing.MerchantID, ref SecretRef) (string, error) {
 	sec, err := ReadSecretRef(ctx, s.secrets, id, ref)
 	if err != nil {
 		if errors.Is(err, ErrSecretNotFound) {
@@ -280,7 +281,7 @@ func (s pspSecretScope) exported() PSPScope {
 // ActivePSPSecretName resolves the active PSP for a
 // merchant rail/environment and returns that account's scoped secret
 // name for key.
-func (s *Service) ActivePSPSecretName(ctx context.Context, id merchant.ID, rail, environment, key string) (string, bool, error) {
+func (s *Service) ActivePSPSecretName(ctx context.Context, id billing.MerchantID, rail, environment, key string) (string, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
 	if err != nil || !ok {
 		return "", ok, err
@@ -296,7 +297,7 @@ func (s *Service) ActivePSPSecretName(ctx context.Context, id merchant.ID, rail,
 // recorded on the resolved PSP row (or#812) — the form credential reads should
 // use, so a rotation performed on another node cuts over here immediately
 // instead of waiting out a per-process cache TTL.
-func (s *Service) ActivePSPSecretRef(ctx context.Context, id merchant.ID, rail, environment, key string) (SecretRef, bool, error) {
+func (s *Service) ActivePSPSecretRef(ctx context.Context, id billing.MerchantID, rail, environment, key string) (SecretRef, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
 	if err != nil || !ok {
 		return SecretRef{}, ok, err
@@ -310,7 +311,7 @@ func (s *Service) ActivePSPSecretRef(ctx context.Context, id merchant.ID, rail, 
 
 // ActivePSPScope resolves the active PSP for a merchant
 // rail/environment.
-func (s *Service) ActivePSPScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
+func (s *Service) ActivePSPScope(ctx context.Context, id billing.MerchantID, rail, environment string) (PSPScope, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
 	if err != nil || !ok {
 		return PSPScope{}, ok, err
@@ -318,7 +319,7 @@ func (s *Service) ActivePSPScope(ctx context.Context, id merchant.ID, rail, envi
 	return scope.exported(), true, nil
 }
 
-func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail, environment string) (pspSecretScope, bool, error) {
+func (s *Service) activePSPSecretScope(ctx context.Context, id billing.MerchantID, rail, environment string) (pspSecretScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return pspSecretScope{}, false, nil
 	}
@@ -395,7 +396,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 // PSPKeyArchived reports whether key names an ARCHIVED account for this
 // merchant/environment. It is the complement of PSPScopeByKey (which sees only
 // live rows) and exists so routing can say "retired" instead of "unknown".
-func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, environment string) (bool, error) {
+func (s *Service) PSPKeyArchived(ctx context.Context, id billing.MerchantID, key, environment string) (bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(key) == "" {
 		return false, nil
 	}
@@ -421,7 +422,7 @@ func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, envir
 // its manifest account key (e.g. "mobius") for the given
 // environment. This is how the payment-provider vocabulary used by the catalog
 // and checkout resolves to a concrete account.
-func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, environment string) (PSPScope, bool, error) {
+func (s *Service) PSPScopeByKey(ctx context.Context, id billing.MerchantID, key, environment string) (PSPScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(key) == "" {
 		return PSPScope{}, false, nil
 	}
@@ -449,7 +450,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 // ActivePSPScopesForRail lists every non-archived PSP declared on
 // rail/environment, newest first. Checkout uses it to accept a bare rail-kind
 // selector only when it is unambiguous (#848).
-func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, rail, environment string) ([]PSPScope, error) {
+func (s *Service) ActivePSPScopesForRail(ctx context.Context, id billing.MerchantID, rail, environment string) ([]PSPScope, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return nil, nil
 	}
@@ -475,7 +476,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 // activePSPScopes lists every non-archived PSP for merchant+environment in ONE
 // query — the whole-catalog sibling of ActivePSPScopesForRail, so the public
 // endpoint costs one round trip rather than one per known rail.
-func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environment string) ([]PSPScope, error) {
+func (s *Service) activePSPScopes(ctx context.Context, id billing.MerchantID, environment string) ([]PSPScope, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return nil, nil
 	}
@@ -500,7 +501,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 // pspSecretScopeByAccountID resolves the secret scope for a specific
 // account by its account_id (#641). Archived accounts remain addressable for
 // inbound webhooks and existing provider-bound obligations.
-func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (pspSecretScope, bool, error) {
+func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id billing.MerchantID, rail, accountID string) (pspSecretScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
 		return pspSecretScope{}, false, nil
 	}
@@ -553,7 +554,7 @@ func pspSettings(raw []byte) map[string]any {
 // account. Archived accounts stay pull-addressable so existing obligations can
 // drain (#655) — only NEW checkout/subscription work excludes them. ok=false
 // when the merchant declares no account on the rail/environment at all.
-func (s *Service) PullPSPScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
+func (s *Service) PullPSPScope(ctx context.Context, id billing.MerchantID, rail, environment string) (PSPScope, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, environment)
 	if errors.Is(err, ErrNoActivePSP) {
 		return s.newestPSPScope(ctx, id, rail, environment)
@@ -566,7 +567,7 @@ func (s *Service) PullPSPScope(ctx context.Context, id merchant.ID, rail, enviro
 
 // newestPSPScope returns the newest declared account for
 // rail/environment regardless of archived state (the #699 drain-pull leg).
-func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, environment string) (PSPScope, bool, error) {
+func (s *Service) newestPSPScope(ctx context.Context, id billing.MerchantID, rail, environment string) (PSPScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return PSPScope{}, false, nil
 	}
@@ -595,7 +596,7 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 // PSPScopeByAccountID resolves a specific declared account by
 // its rail-native account_id (#641). Archived accounts remain addressable —
 // operator pulls may target them for drain.
-func (s *Service) PSPScopeByAccountID(ctx context.Context, id merchant.ID, rail, accountID string) (PSPScope, bool, error) {
+func (s *Service) PSPScopeByAccountID(ctx context.Context, id billing.MerchantID, rail, accountID string) (PSPScope, bool, error) {
 	scope, ok, err := s.pspSecretScopeByAccountID(ctx, id, rail, accountID)
 	if err != nil || !ok {
 		return PSPScope{}, ok, err
@@ -611,7 +612,7 @@ type NMIWebhookSecrets struct {
 
 // LoadNMIWebhookSigningSecretForAccount loads the webhook secrets for a specific
 // NMI account (#641). ok=false when no such enabled account — the caller must reject.
-func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id merchant.ID, accountID string) (NMIWebhookSecrets, bool, error) {
+func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id billing.MerchantID, accountID string) (NMIWebhookSecrets, bool, error) {
 	var out NMIWebhookSecrets
 	if s.secrets == nil || id.IsZero() {
 		return out, false, nil
@@ -637,7 +638,7 @@ func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id 
 
 // LoadStripeCredentialsForAccount loads credentials for a specific Stripe account
 // by account_id (#641). ok=false when no such enabled account.
-func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id merchant.ID, accountID string) (StripeCredentials, bool, error) {
+func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id billing.MerchantID, accountID string) (StripeCredentials, bool, error) {
 	var creds StripeCredentials
 	if s.secrets == nil {
 		return creds, false, nil
@@ -669,7 +670,7 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 
 // ResolvePSPID returns the row id of an account by account_id
 // (#641), to stamp records from a per-account webhook. ok=false when none matches.
-func (s *Service) ResolvePSPID(ctx context.Context, id merchant.ID, rail, accountID string) (uuid.UUID, bool, error) {
+func (s *Service) ResolvePSPID(ctx context.Context, id billing.MerchantID, rail, accountID string) (uuid.UUID, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || strings.TrimSpace(accountID) == "" {
 		return uuid.Nil, false, nil
 	}
@@ -697,7 +698,7 @@ func (s *Service) ResolvePSPID(ctx context.Context, id merchant.ID, rail, accoun
 // be attributed, and the account whose secret validated the signature IS the
 // attribution; this derives it from that one source rather than guessing.
 // ok=false when nothing is armed on the rail.
-func (s *Service) ResolveActivePSPIDForRail(ctx context.Context, id merchant.ID, rail string) (uuid.UUID, bool, error) {
+func (s *Service) ResolveActivePSPIDForRail(ctx context.Context, id billing.MerchantID, rail string) (uuid.UUID, bool, error) {
 	scope, ok, err := s.activePSPSecretScope(ctx, id, rail, s.providerEnvironment)
 	if err != nil || !ok {
 		return uuid.Nil, false, err
@@ -709,7 +710,7 @@ func (s *Service) ResolveActivePSPIDForRail(ctx context.Context, id merchant.ID,
 // merchant that owns it.
 type PSPIdentity struct {
 	ID          uuid.UUID
-	MerchantID  merchant.ID
+	MerchantID  billing.MerchantID
 	Rail        string
 	Environment string
 	AccountID   string
@@ -825,7 +826,7 @@ func resolvePSPOwner(ctx context.Context, q *gen.Queries, rail, environment, acc
 	}
 	return PSPIdentity{
 		ID:          *row.ID,
-		MerchantID:  merchant.ID(*row.MerchantID),
+		MerchantID:  billing.MerchantID(*row.MerchantID),
 		Rail:        derefString(row.Rail),
 		Environment: derefString(row.Environment),
 		AccountID:   derefString(row.AccountID),
@@ -917,20 +918,20 @@ func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailP
 // rows survive the tombstone and still make a deployment "live".
 // billing.merchants is a global control-plane table, so this read is
 // legitimate on the base pool.
-func (s *Service) allMerchantIDs(ctx context.Context) ([]merchant.ID, error) {
+func (s *Service) allMerchantIDs(ctx context.Context) ([]billing.MerchantID, error) {
 	rows, err := gen.New(s.pool).ListAllMerchantIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]merchant.ID, 0, len(rows))
+	ids := make([]billing.MerchantID, 0, len(rows))
 	for _, id := range rows {
-		ids = append(ids, merchant.ID(id))
+		ids = append(ids, billing.MerchantID(id))
 	}
 	return ids, nil
 }
 
 // PutCredential stores/rotates a single per-merchant credential.
-func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (s *Service) PutCredential(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	if _, _, _, _, psp, _ := ParsePSPSecretName(name); psp {
 		return Secret{}, apperr.Invalidf("PSP credential writes require provider configuration publication with operation_id and expected_revision")
 	}
@@ -952,7 +953,7 @@ func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value
 }
 
 // RotateCredential is PutCredential with action="rotate".
-func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (s *Service) RotateCredential(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	return s.PutCredential(ctx, id, name, value)
 }
 
@@ -962,7 +963,7 @@ func (s *Service) RotateCredential(ctx context.Context, id merchant.ID, name, va
 // plane: a pull arms from exactly ONE PSP, so a rail with N>1 active PSPs is
 // only partially covered and its roster can never prove absence for the
 // siblings it did not read (#841).
-func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, rail, environment string) (int, error) {
+func (s *Service) CountActivePSPsForRail(ctx context.Context, id billing.MerchantID, rail, environment string) (int, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return 0, nil
 	}
@@ -1015,7 +1016,7 @@ func pspScopesFromRows(rows []gen.BillingPsp) []PSPScope {
 }
 
 // PSPScopeByID preserves the selected account across key renames and archive.
-func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.UUID) (PSPScope, bool, error) {
+func (s *Service) PSPScopeByID(ctx context.Context, id billing.MerchantID, pspID uuid.UUID) (PSPScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || pspID == uuid.Nil {
 		return PSPScope{}, false, nil
 	}

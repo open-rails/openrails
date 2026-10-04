@@ -8,11 +8,10 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // merchantGroup addresses the AuthKit group bound to an active merchant.
-func (c *ControlPlane) merchantGroup(ctx context.Context, mid merchant.ID) (iam.GroupRef, error) {
+func (c *ControlPlane) merchantGroup(ctx context.Context, mid billing.MerchantID) (iam.GroupRef, error) {
 	if c == nil || c.Core() == nil {
 		return iam.GroupRef{}, ErrNoControlPlane
 	}

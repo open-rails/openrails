@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PaymentProviderCredentialStatus is the redacted credential view returned to
@@ -95,7 +94,7 @@ func PaymentProviderDefinitions() []PaymentProviderDefinition {
 }
 
 // ListPaymentProviderConfigs returns PSP configs for a merchant.
-func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID, rail, environment, status string) ([]PaymentProviderConfig, error) {
+func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id billing.MerchantID, rail, environment, status string) ([]PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
@@ -161,7 +160,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 }
 
 // GetPaymentProviderConfig returns the active config for provider/env.
-func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
+func (s *Service) GetPaymentProviderConfig(ctx context.Context, id billing.MerchantID, rail, environment string) (PaymentProviderConfig, error) {
 	if strings.TrimSpace(environment) == "" {
 		environment = s.providerEnvironment // deployment posture (#681)
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
@@ -190,17 +189,17 @@ func claimNeedsProof(rail string) bool {
 // UpsertPaymentProviderConfig validates credentials first, then stores the
 // PSP and scoped secrets. A merchant's first claim of an account must prove
 // control through a successful credential probe.
-func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id billing.MerchantID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
 	return s.upsertPaymentProviderConfig(ctx, id, rail, req, false)
 }
 
 // OperatorUpsertPaymentProviderConfig is the operator's approved claim: the
 // deployment operator vouches for account ownership.
-func (s *Service) OperatorUpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+func (s *Service) OperatorUpsertPaymentProviderConfig(ctx context.Context, id billing.MerchantID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
 	return s.upsertPaymentProviderConfig(ctx, id, rail, req, true)
 }
 
-func (s *Service) upsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest, operatorApproved bool) (PaymentProviderConfig, error) {
+func (s *Service) upsertPaymentProviderConfig(ctx context.Context, id billing.MerchantID, rail string, req UpsertPaymentProviderConfigRequest, operatorApproved bool) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil || s.secrets == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
 	}
@@ -391,7 +390,7 @@ func (e *MultipleActiveProviderAccountsError) Error() string {
 // draining. Archiving an already-archived account is a no-op that returns the
 // current row. The only active account on the rail is refused unless
 // req.AllowLast is set.
-func (s *Service) ArchivePaymentProviderAccount(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
+func (s *Service) ArchivePaymentProviderAccount(ctx context.Context, id billing.MerchantID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
 	}
@@ -414,7 +413,7 @@ func (s *Service) ArchivePaymentProviderAccount(ctx context.Context, id merchant
 // (MultipleActiveProviderAccountsError) — the caller must then name the PSP id
 // through ArchivePaymentProviderAccount. Credentials remain so existing
 // obligations and inbound webhooks can drain; no provider call is made.
-func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
+func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id billing.MerchantID, rail, environment string) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
 	}
@@ -434,7 +433,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	return s.paymentProviderConfigWithObligations(ctx, id, row)
 }
 
-func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id merchant.ID, row gen.BillingPsp) (PaymentProviderConfig, error) {
+func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id billing.MerchantID, row gen.BillingPsp) (PaymentProviderConfig, error) {
 	statuses, err := s.paymentProviderCredentialStatuses(ctx, id, row)
 	if err != nil {
 		return PaymentProviderConfig{}, err
@@ -448,7 +447,7 @@ func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id m
 	return cfg, nil
 }
 
-func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.BillingPsp, error) {
+func (s *Service) upsertPSP(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.BillingPsp, error) {
 	// #650: reject a cross-merchant claim with a clear error before the upsert
 	// (which would otherwise fail with an opaque unique-violation).
 	queries := gen.New(s.pool)
@@ -517,18 +516,18 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 // lockRailPSPs locks every PSP row of the merchant on (rail, environment) for
 // the transaction, so two concurrent archives cannot each see the other as the
 // remaining active account and leave the rail with none.
-func lockRailPSPs(ctx context.Context, tx pgx.Tx, id merchant.ID, rail, environment string) ([]gen.BillingPsp, error) {
+func lockRailPSPs(ctx context.Context, tx pgx.Tx, id billing.MerchantID, rail, environment string) ([]gen.BillingPsp, error) {
 	return gen.New(tx).LockPSPsForRailEnvironment(ctx, gen.LockPSPsForRailEnvironmentParams{MerchantID: id.UUID(), Rail: rail, Environment: environment})
 }
 
-func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.UUID) (gen.BillingPsp, error) {
+func markPSPArchived(ctx context.Context, tx pgx.Tx, id billing.MerchantID, pspID uuid.UUID) (gen.BillingPsp, error) {
 	return gen.New(tx).ArchivePSP(ctx, gen.ArchivePSPParams{ID: pspID, MerchantID: id.UUID()})
 }
 
 // archivePSP archives the named account inside one transaction that holds the
 // rail's rows locked (in one order, so concurrent archives serialize instead
 // of deadlocking). An already-archived account is returned unchanged.
-func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, allowLast bool) (gen.BillingPsp, error) {
+func (s *Service) archivePSP(ctx context.Context, id billing.MerchantID, rail string, pspID uuid.UUID, allowLast bool) (gen.BillingPsp, error) {
 	var out gen.BillingPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		environment, err := gen.New(tx).GetPSPEnvironmentForRail(ctx, gen.GetPSPEnvironmentForRailParams{ID: pspID, MerchantID: id.UUID(), Rail: rail})
@@ -575,7 +574,7 @@ func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, p
 // archiveSoleActivePSP is the rail-level archive: exactly one active account
 // on (rail, environment) is archived; none is ErrPaymentProviderNotFound and
 // several is MultipleActiveProviderAccountsError.
-func (s *Service) archiveSoleActivePSP(ctx context.Context, id merchant.ID, rail, environment string) (gen.BillingPsp, error) {
+func (s *Service) archiveSoleActivePSP(ctx context.Context, id billing.MerchantID, rail, environment string) (gen.BillingPsp, error) {
 	var out gen.BillingPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := lockRailPSPs(ctx, tx, id, rail, environment)
@@ -605,7 +604,7 @@ func (s *Service) archiveSoleActivePSP(ctx context.Context, id merchant.ID, rail
 	return out, err
 }
 
-func (s *Service) pspOpenObligations(ctx context.Context, id merchant.ID, accountIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+func (s *Service) pspOpenObligations(ctx context.Context, id billing.MerchantID, accountIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	out := make(map[uuid.UUID]int64, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return out, nil
@@ -844,7 +843,7 @@ func unmarshalProviderEvidence(raw []byte) pspEvidence {
 
 // refuseLiveNMIUnderTestMode requires a fresh simulated result before arming
 // sandbox NMI credentials. Live or indeterminate responses refuse the arm.
-func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID, rail, environment, accountID string, credentials map[string]string) error {
+func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, credentials map[string]string) error {
 	if rail != string(models.RailNMI) {
 		return nil
 	}
@@ -892,7 +891,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 
 // storedNMIDeployment reads the declared endpoint deployment and PSP id; an
 // undeclared PSP uses the default deployment and its derived natural-key id.
-func (s *Service) storedNMIDeployment(ctx context.Context, id merchant.ID, rail, environment, accountID string) (string, uuid.UUID, error) {
+func (s *Service) storedNMIDeployment(ctx context.Context, id billing.MerchantID, rail, environment, accountID string) (string, uuid.UUID, error) {
 	pspID, _, _, _ := PSPNaturalKey(rail, environment, accountID)
 	if s.pool == nil {
 		return "", pspID, nil
@@ -916,7 +915,7 @@ func (s *Service) storedNMIDeployment(ctx context.Context, id merchant.ID, rail,
 
 // Read only the registry-bounded slots for this account. Published references
 // select exact custody; fallback names are used only for unpublished slots.
-func (s *Service) paymentProviderCredentialStatuses(ctx context.Context, id merchant.ID, row gen.BillingPsp) ([]MerchantSecretStatus, error) {
+func (s *Service) paymentProviderCredentialStatuses(ctx context.Context, id billing.MerchantID, row gen.BillingPsp) ([]MerchantSecretStatus, error) {
 	var statuses []MerchantSecretStatus
 	for _, key := range paymentProviderCredentialKeys(row.Rail) {
 		ref, err := PSPSecretRef(row.Rail, row.Environment, row.AccountID, row.Evidence, key)

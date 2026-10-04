@@ -12,8 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/metrics"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // scriptLLM plays turns (tool loop) or responses (Generate) in order, the last
@@ -155,7 +156,7 @@ func TestAskRequiresConsentAndBudget(t *testing.T) {
 	_, err = svc.Ask(context.Background(), "q")
 	require.ErrorIs(t, err, ErrAskNotConfigured)
 
-	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+	ctx := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
 	_, err = NewService(Deps{LLM: llm, AskEnabled: true, AskLimiter: denyLimiter{retry: 30 * time.Second}}).Ask(ctx, "q")
 	var limited *AskRateLimitedError
 	require.ErrorAs(t, err, &limited)

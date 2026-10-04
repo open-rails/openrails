@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -25,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/merchant"
 	admin "github.com/open-rails/openrails/web/admin"
 )
 
@@ -149,7 +149,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return fail(err)
 	}
-	var declared []merchant.ID
+	var declared []billing.MerchantID
 	if e.merchant.Slug != "" {
 		if m, err := rt.Merchants.GetBySlug(ctx, e.merchant.Slug); err == nil {
 			declared = append(declared, m.ID)
@@ -170,7 +170,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(err)
 	}
 	declaration := e.merchant
-	rt.ApproveSolanaSigner = func(ctx context.Context, mid merchant.ID, key string) error {
+	rt.ApproveSolanaSigner = func(ctx context.Context, mid billing.MerchantID, key string) error {
 		return approveSolanaSigner(ctx, application, declaration, mid, key)
 	}
 	if signerPending {
@@ -319,7 +319,7 @@ func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPC
 }
 
 // ConfiguredMerchant is the declared merchant's ID, zero when unbound.
-func (e *Engine) ConfiguredMerchant() merchant.ID { return e.App.Runtime.ConfiguredMerchant() }
+func (e *Engine) ConfiguredMerchant() billing.MerchantID { return e.App.Runtime.ConfiguredMerchant() }
 
 // Start starts OpenRails' workers on goroutines Close stops: the managed River
 // fleet and the loops that run outside River. With a host-owned fleet, compose

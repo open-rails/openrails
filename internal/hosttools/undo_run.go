@@ -10,17 +10,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // UndoRunOptions mirrors `openrails undo-run` (or#859 §5.2).
 type UndoRunOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	RunID      string
 	Actor      string
 	// Apply is false by default: an undo prints its plan and changes nothing
@@ -114,9 +115,9 @@ func encodeJSON(w io.Writer, v any) error {
 }
 
 // merchantFlag is the --merchant value every CLI command resolves exactly.
-func merchantFlag(id merchant.ID) string { return "id:" + id.String() }
+func merchantFlag(id billing.MerchantID) string { return "id:" + id.String() }
 
-func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID merchant.ID) {
+func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.MerchantID) {
 	fmt.Fprintf(w, "DRY RUN — nothing has been changed.\n\n")
 	fmt.Fprintf(w, "run %s\n", plan.RunID)
 	fmt.Fprintf(w, "  kind    : %s (%s)\n", plan.Kind, reconcile.ReversibleRunKinds[plan.Kind])
@@ -161,7 +162,7 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID merchant.ID)
 		merchantFlag(merchantID), plan.RunID, plan.ExpectedRows())
 }
 
-func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID merchant.ID) {
+func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID billing.MerchantID) {
 	fmt.Fprintf(w, "reversed run %s (kind %s)\n", res.Plan.RunID, res.Plan.Kind)
 	for _, table := range []string{"subscriptions", "payments", "checkout_sessions", "entitlements"} {
 		if n, ok := res.Restored[table]; ok {

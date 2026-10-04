@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/open-rails/openrails/catalog"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // or#909 merchant-admin negotiated price overrides: per-customer rate cards
@@ -14,11 +14,11 @@ import (
 // Admin surface — negotiated pricing is never self-serve.
 
 // adminRateOverrideRequest is the PUT body. Price is the canonical
-// pricing.RatePrice charge-model JSON (same shape the catalog speaks);
+// catalog.RatePrice charge-model JSON (same shape the catalog speaks);
 // allowance.included is the pre-overage quantity in the meter's raw unit.
 type adminRateOverrideRequest struct {
-	Price     pricing.RatePrice  `json:"price" binding:"required"`
-	Allowance *pricing.Allowance `json:"allowance"`
+	Price     catalog.RatePrice  `json:"price" binding:"required"`
+	Allowance *catalog.Allowance `json:"allowance"`
 }
 
 // PutAdminRateOverride is PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}:
@@ -29,7 +29,7 @@ func PutAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	meterKey := pricing.NormalizeKey(r.Param("meter_key"))
+	meterKey := catalog.NormalizeKey(r.Param("meter_key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return
@@ -94,7 +94,7 @@ func DeleteAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	meterKey := pricing.NormalizeKey(r.Param("meter_key"))
+	meterKey := catalog.NormalizeKey(r.Param("meter_key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return

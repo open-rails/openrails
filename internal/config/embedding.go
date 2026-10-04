@@ -3,8 +3,8 @@ package config
 import (
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // RiverOwnership says who runs OpenRails' River job fleet. The fleet is where
@@ -94,7 +94,7 @@ type CustomerRoutesConfig struct {
 // existing PSP without changing its metadata or arming it. The environment
 // follows Config.TestMode. Values are never persisted.
 type ProviderCredentialSnapshot struct {
-	MerchantID  merchant.ID
+	MerchantID  billing.MerchantID
 	Rail        string
 	AccountID   string
 	Credentials map[string]string

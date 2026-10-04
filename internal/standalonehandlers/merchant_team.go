@@ -15,10 +15,11 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // MerchantTeamManager is the control-plane surface behind the team routes.
@@ -26,20 +27,20 @@ import (
 // control plane) omits these routes at registration.
 type MerchantTeamManager interface {
 	RequestActor
-	ListMerchantTeam(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantTeamMember, error)
-	InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email string, role iam.Role, actor iam.Actor) (controlplane.MerchantTeamInviteResult, error)
-	ListMerchantTeamInvites(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantTeamInvite, error)
+	ListMerchantTeam(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantTeamMember, error)
+	InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor iam.Actor) (controlplane.MerchantTeamInviteResult, error)
+	ListMerchantTeamInvites(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantTeamInvite, error)
 	InvitesEnabled() bool
-	RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error)
-	ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID string, newRole iam.Role, actor iam.Actor) error
-	RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID string, actor iam.Actor) error
+	RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error)
+	ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor iam.Actor) error
+	RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor iam.Actor) error
 }
 
-func teamMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
+func teamMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
 		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
-		return merchant.ID{}, false
+		return billing.MerchantID{}, false
 	}
 	return mid, true
 }

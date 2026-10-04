@@ -9,8 +9,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ExportMerchantBilling completes the bounded snapshot before publishing HTTP

@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // Enterprise arrears facade (#798): the host-facing seams for negotiated rate
@@ -155,8 +155,8 @@ type UsageRateCardInput struct {
 	ProductID *uuid.UUID
 	MeterKey  string
 	Filter    map[string][]string
-	Price     pricing.RatePrice
-	Allowance *pricing.Allowance
+	Price     catalog.RatePrice
+	Allowance *catalog.Allowance
 }
 
 // SetUsageRateCard upserts an in_arrears usage rate card: the merchant
@@ -215,8 +215,8 @@ func (s *Service) deleteDefaultUsageRateCard(ctx context.Context, meterKey strin
 // merchant-default card for MeterKey when rating this payer.
 type PayerRateCardDTO struct {
 	MeterKey  string             `json:"meter_key"`
-	Price     pricing.RatePrice  `json:"price"`
-	Allowance *pricing.Allowance `json:"allowance,omitempty"`
+	Price     catalog.RatePrice  `json:"price"`
+	Allowance *catalog.Allowance `json:"allowance,omitempty"`
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 }

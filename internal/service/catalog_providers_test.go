@@ -14,14 +14,14 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 // nmiCatalogCtx carries the merchant every NMI client is bound to (#1055).
 func nmiCatalogCtx() context.Context {
-	return merchant.WithID(context.Background(), merchant.ID(uuid.MustParse("11111111-1111-1111-1111-111111111111")))
+	return merchant.WithID(context.Background(), billing.MerchantID(uuid.MustParse("11111111-1111-1111-1111-111111111111")))
 }
 
 func nmiService(psps railresolve.FixedSet) *Service {

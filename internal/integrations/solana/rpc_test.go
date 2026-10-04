@@ -19,8 +19,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/providerposture"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // rpcStub is a scripted Solana JSON-RPC node. answer returns a result value,
@@ -148,7 +148,7 @@ func TestWatchTransactionEndsOnlyOnChainTerminalOrCaller(t *testing.T) {
 
 type staticSecret string
 
-func (s staticSecret) GetSecret(context.Context, merchant.ID, string) (string, error) {
+func (s staticSecret) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
 	return string(s), nil
 }
 
@@ -158,7 +158,7 @@ func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
 	signer := NewKeypairSigner(staticSecret(key.String()), 0)
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	ix := system.NewTransferInstruction(1, key.PublicKey(), solanago.NewWallet().PublicKey()).Build()
 
 	run := func(t *testing.T, onChainErr any, presubmitErr error) (*rpcStub, *solanago.Transaction, []solanago.Signature, solanago.Signature, error) {

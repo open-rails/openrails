@@ -7,8 +7,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // BND-C1: a service JWT may only down-scope its issuer's stored authority.
@@ -18,15 +17,15 @@ func TestServiceJWTPermissionsOnlyDownScope(t *testing.T) {
 		claimed, stored []string
 		want            []string
 	}{
-		{"empty stored denies all", []string{"root:*", permissions.MerchantCustomerSettingsRead}, nil, nil},
-		{"empty claimed yields nothing", nil, []string{permissions.MerchantCustomerSettingsRead}, nil},
-		{"only granted survive", []string{permissions.MerchantCustomerSettingsRead, permissions.MerchantCustomerSettingsUpdate, "root:*"}, []string{permissions.MerchantCustomerSettingsRead}, []string{permissions.MerchantCustomerSettingsRead}},
-		{"self-asserted root stripped", []string{"root:*"}, []string{permissions.MerchantCustomerSettingsRead}, []string{}},
-		{"explicitly stored root survives", []string{"root:*"}, []string{"root:*", permissions.MerchantCustomerSettingsRead}, []string{"root:*"}},
-		{"owner glob covers concrete claims", []string{permissions.MerchantCustomerSettingsUpdate, permissions.MerchantPaymentsRefund}, []string{"merchant:*"}, []string{permissions.MerchantCustomerSettingsUpdate, permissions.MerchantPaymentsRefund}},
-		{"narrow grant cannot cover a glob claim", []string{"merchant:*"}, []string{permissions.MerchantCatalogRead}, []string{}},
-		{"segment glob", []string{permissions.MerchantPaymentsRead, permissions.MerchantPaymentsRefund}, []string{"merchant:*:read"}, []string{permissions.MerchantPaymentsRead}},
-		{"namespace never crosses", []string{permissions.MerchantCatalogRead}, []string{"customer:*", "*"}, []string{}},
+		{"empty stored denies all", []string{"root:*", billing.MerchantCustomerSettingsRead}, nil, nil},
+		{"empty claimed yields nothing", nil, []string{billing.MerchantCustomerSettingsRead}, nil},
+		{"only granted survive", []string{billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate, "root:*"}, []string{billing.MerchantCustomerSettingsRead}, []string{billing.MerchantCustomerSettingsRead}},
+		{"self-asserted root stripped", []string{"root:*"}, []string{billing.MerchantCustomerSettingsRead}, []string{}},
+		{"explicitly stored root survives", []string{"root:*"}, []string{"root:*", billing.MerchantCustomerSettingsRead}, []string{"root:*"}},
+		{"owner glob covers concrete claims", []string{billing.MerchantCustomerSettingsUpdate, billing.MerchantPaymentsRefund}, []string{"merchant:*"}, []string{billing.MerchantCustomerSettingsUpdate, billing.MerchantPaymentsRefund}},
+		{"narrow grant cannot cover a glob claim", []string{"merchant:*"}, []string{billing.MerchantCatalogRead}, []string{}},
+		{"segment glob", []string{billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund}, []string{"merchant:*:read"}, []string{billing.MerchantPaymentsRead}},
+		{"namespace never crosses", []string{billing.MerchantCatalogRead}, []string{"customer:*", "*"}, []string{}},
 		{"order follows claimed", []string{"c:x", "a:x"}, []string{"b:x", "a:x", "c:x"}, []string{"c:x", "a:x"}},
 		{"stored duplicates add nothing", []string{"a:x"}, []string{"a:x", "a:x"}, []string{"a:x"}},
 	} {
@@ -48,16 +47,16 @@ func TestCredentialPermissionGlob(t *testing.T) {
 		perm   string
 		want   bool
 	}{
-		{[]string{"merchant:*"}, permissions.MerchantCatalogUpdate, true},
-		{[]string{permissions.MerchantCatalogUpdate}, permissions.MerchantCatalogUpdate, true},
-		{[]string{permissions.MerchantCatalogUpdate}, permissions.MerchantCatalogRead, false},
-		{[]string{"merchant:*:read"}, permissions.MerchantCatalogRead, true},
-		{[]string{"merchant:*:read"}, permissions.MerchantCatalogUpdate, false},
-		{[]string{"customer:*"}, permissions.MerchantCatalogUpdate, false},
-		{[]string{"root:*"}, permissions.MerchantAdmissionsCreate, false},
-		{[]string{"*"}, permissions.MerchantCatalogUpdate, false},
-		{[]string{permissions.MerchantCustomerSettingsUpdate}, permissions.MerchantAdmissionsCreate, false},
-		{nil, permissions.MerchantCatalogUpdate, false},
+		{[]string{"merchant:*"}, billing.MerchantCatalogUpdate, true},
+		{[]string{billing.MerchantCatalogUpdate}, billing.MerchantCatalogUpdate, true},
+		{[]string{billing.MerchantCatalogUpdate}, billing.MerchantCatalogRead, false},
+		{[]string{"merchant:*:read"}, billing.MerchantCatalogRead, true},
+		{[]string{"merchant:*:read"}, billing.MerchantCatalogUpdate, false},
+		{[]string{"customer:*"}, billing.MerchantCatalogUpdate, false},
+		{[]string{"root:*"}, billing.MerchantAdmissionsCreate, false},
+		{[]string{"*"}, billing.MerchantCatalogUpdate, false},
+		{[]string{billing.MerchantCustomerSettingsUpdate}, billing.MerchantAdmissionsCreate, false},
+		{nil, billing.MerchantCatalogUpdate, false},
 	} {
 		require.Equal(t, tc.want, (&ResolvedDelegated{Permissions: tc.grants}).HasPermission(tc.perm), "delegated %v %s", tc.grants, tc.perm)
 		require.Equal(t, tc.want, (&ResolvedServiceCredential{Permissions: tc.grants}).HasPermission(tc.perm), "service %v %s", tc.grants, tc.perm)
@@ -65,7 +64,7 @@ func TestCredentialPermissionGlob(t *testing.T) {
 	}
 
 	// #569: merchant credentials are merchant-wide but never act without a merchant or subject.
-	wide := &ResolvedServiceCredential{MerchantID: merchant.ID(uuid.New())}
+	wide := &ResolvedServiceCredential{MerchantID: billing.MerchantID(uuid.New())}
 	require.True(t, wide.AllowsCustomer(uuid.New()))
 	require.False(t, wide.AllowsCustomer(uuid.Nil))
 	require.False(t, (&ResolvedServiceCredential{}).AllowsCustomer(uuid.New()))

@@ -11,8 +11,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/metrics"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MetricsExecutor executes validated metrics plans (the #733 service; an

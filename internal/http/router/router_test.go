@@ -11,10 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestMuxRegistrationAndMiddlewareChain(t *testing.T) {
@@ -96,7 +97,7 @@ func TestTableWrapRetainsChainAndAddsBrowserPreflight(t *testing.T) {
 func TestMerchantSelectorRoutes(t *testing.T) {
 	type seen struct {
 		path     string
-		merchant merchant.ID
+		merchant billing.MerchantID
 		target   billingauth.Target
 	}
 	var last *seen
@@ -119,7 +120,7 @@ func TestMerchantSelectorRoutes(t *testing.T) {
 		AddMerchantSelectorRoutes(table, "/billing", resolve)
 		return table
 	}
-	target := billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store"}
+	target := billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}
 	var resolveErr error
 	calls := 0
 	table := build(func(context.Context, *http.Request) (billingauth.Target, error) {

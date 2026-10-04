@@ -7,8 +7,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Provider-operation commands exist in two forms with identical semantics: the

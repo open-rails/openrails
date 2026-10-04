@@ -8,11 +8,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
@@ -192,7 +193,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingRailIntent, s
 
 	// Pin the intent's merchant so handler execution (and any merchant-scoped DB
 	// write it triggers, e.g. membership renewal) resolves it (#336).
-	ctx = merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+	ctx = merchant.WithID(ctx, billing.MerchantID(intent.MerchantID))
 	// or#893: and its PSP. The intent row records the account this write is
 	// addressed to, so every mirror row the handler creates — the charge, the
 	// subscription, the vaulted method — inherits that provenance instead of
@@ -363,7 +364,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		// Pin the intent's merchant for merchant-scoped verify/repair writes
 		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
 		// writes the same mirror rows the executor would have.
-		ctx := merchant.WithID(ctx, merchant.ID(intent.MerchantID))
+		ctx := merchant.WithID(ctx, billing.MerchantID(intent.MerchantID))
 		ctx = pinIntentAddress(ctx, intent)
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
 			"intent_id":   intent.ID,
@@ -695,7 +696,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingRailI
 	if !ok {
 		return r.Store.Get(ctx, id)
 	}
-	ctx = merchant.WithID(ctx, merchant.ID(in.MerchantID))
+	ctx = merchant.WithID(ctx, billing.MerchantID(in.MerchantID))
 	ctx = pinIntentAddress(ctx, in)
 	h := r.Registry.Lookup(in.IntentType)
 	out := Ambiguous("no verifier registered")

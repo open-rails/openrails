@@ -8,17 +8,17 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const providerCredentialProbeTimeout = 15 * time.Second
 
-func (s *Service) probePaymentProviderCredentials(ctx context.Context, id merchant.ID, rail, environment, accountID string, supplied map[string]string) (bool, error) {
+func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, supplied map[string]string) (bool, error) {
 	switch rail {
 	case "stripe":
 		secretKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "secret_key")
@@ -93,7 +93,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id mercha
 	return false, nil
 }
 
-func (s *Service) effectiveProviderCredential(ctx context.Context, id merchant.ID, rail, environment, accountID string, supplied map[string]string, key string) (string, bool, error) {
+func (s *Service) effectiveProviderCredential(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, supplied map[string]string, key string) (string, bool, error) {
 	if value := strings.TrimSpace(supplied[key]); value != "" {
 		return value, true, nil
 	}
@@ -112,7 +112,7 @@ func (s *Service) effectiveProviderCredential(ctx context.Context, id merchant.I
 	return value, value != "", nil
 }
 
-func (s *Service) readPublishedProviderCredential(ctx context.Context, id merchant.ID, rail, environment, account, key, name string) (Secret, error) {
+func (s *Service) readPublishedProviderCredential(ctx context.Context, id billing.MerchantID, rail, environment, account, key, name string) (Secret, error) {
 	ref := SecretRef{Name: name}
 	if s.pool != nil {
 		var row gen.BillingPsp

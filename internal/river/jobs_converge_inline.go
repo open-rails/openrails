@@ -7,9 +7,10 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // convergeCustomerInline runs the #511 Convergence Engine for one customer inline,
@@ -27,9 +28,9 @@ func convergeCustomerInline(ctx context.Context, dbi *db.DB, merchantID, custome
 	if dbi == nil || merchantID == uuid.Nil || customer == uuid.Nil {
 		return
 	}
-	mctx := merchant.WithID(ctx, merchant.ID(merchantID))
+	mctx := merchant.WithID(ctx, billing.MerchantID(merchantID))
 	if err := dbi.RunInMerchantConn(mctx, func(cctx context.Context) error {
-		_, e := converge.AfterMutation(cctx, dbi, merchant.ID(merchantID), customer, clock)
+		_, e := converge.AfterMutation(cctx, dbi, billing.MerchantID(merchantID), customer, clock)
 		return e
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{

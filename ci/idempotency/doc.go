@@ -1,3 +1,5 @@
+//go:build e2e && integration
+
 // Package idempotency is the e2e suite for durable request and webhook
 // claims (#1099) on real PostgreSQL: claim races, replay, release, stale
 // leases, expiry collection, cross-replica webhook dedupe, and the

@@ -11,8 +11,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/copilot"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CatalogCopilotAsk handles POST /v1/merchant/catalog/ask (#779): the

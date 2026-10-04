@@ -9,16 +9,17 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // KindCatalogReconciliationPull is the River kind for the alert-only catalog
@@ -92,7 +93,7 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 				continue
 			}
 			after = mid
-			merchantID := merchant.ID(*mid)
+			merchantID := billing.MerchantID(*mid)
 			progress.Mark(ctx, "catalog reconciliation merchant "+merchantID.String())
 			if err := w.DB.RunInMerchantScope(ctx, merchantID, "catalog reconciliation", func(mctx context.Context) error { return w.reconcileMerchant(mctx) }); err != nil {
 				sweepErr = preferSweepError(sweepErr, fmt.Errorf("catalog reconciliation merchant %s: %w", merchantID, err))

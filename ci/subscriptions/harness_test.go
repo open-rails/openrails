@@ -35,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/sqlschema"
-	"github.com/open-rails/openrails/permissions"
 )
 
 const (
@@ -82,7 +81,7 @@ func (p principal) Can(_ context.Context, _ auth.Scope, permission string) (bool
 	if _, gone := p.v.revoked.Load(p.id.SessionID); gone {
 		return false, errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
 	}
-	return p.id.Subject == "staff" || p.id.Subject == "support" && permission != permissions.MerchantAccessGrantPermanent, nil
+	return p.id.Subject == "staff" || p.id.Subject == "support" && permission != billing.MerchantAccessGrantPermanent, nil
 }
 
 // stepUpChallenge is the provider's step-up refusal: how to sign in again.

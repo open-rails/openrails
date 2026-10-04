@@ -21,8 +21,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 type Options struct {
@@ -200,8 +199,8 @@ func HostedCheckoutPublished(rt *app.Runtime) bool {
 func RegisterMerchantArchiveRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// Archives own their snapshot/restore transaction and its merchant pin;
 	// no outer merchant connection is held while transferring the artifact.
-	rr.Handle(http.MethodGet, "/billing-archive", h(httphandlers.ExportMerchantBilling), opts.merchantActionPermissionMW(permissions.MerchantBillingExport))
-	rr.Handle(http.MethodPost, "/billing-archive", h(httphandlers.ImportMerchantBilling), opts.merchantActionPermissionMW(permissions.MerchantBillingImport))
+	rr.Handle(http.MethodGet, "/billing-archive", h(httphandlers.ExportMerchantBilling), opts.merchantActionPermissionMW(billing.MerchantBillingExport))
+	rr.Handle(http.MethodPost, "/billing-archive", h(httphandlers.ImportMerchantBilling), opts.merchantActionPermissionMW(billing.MerchantBillingImport))
 }
 
 // RegisterServiceRoutes mounts the merchant billing surface. Access is gated by
@@ -213,16 +212,16 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
-	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsUpdate)}, dbMW...)
-	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantAdmissionsCreate)}, dbMW...)
+	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCustomerSettingsRead)}, dbMW...)
+	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCustomerSettingsUpdate)}, dbMW...)
+	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantAdmissionsCreate)}, dbMW...)
 	// Minting balance and opening a credit line are owner authority, never
 	// customer-settings editing (which support holds).
-	creditsGrantMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCreditsGrant)}, dbMW...)
-	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantUsageRead)}, dbMW...)
+	creditsGrantMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCreditsGrant)}, dbMW...)
+	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantUsageRead)}, dbMW...)
 
-	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantHostEventsRead)}, dbMW...)
-	hostEventAckMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantHostEventsAcknowledge)}, dbMW...)
+	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantHostEventsRead)}, dbMW...)
+	hostEventAckMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantHostEventsAcknowledge)}, dbMW...)
 	group.Handle(http.MethodGet, "/host-events", h(httphandlers.ServiceListHostEvents), hostEventReadMW...)
 	group.Handle(http.MethodPost, "/host-events/:id/acknowledge", h(httphandlers.ServiceAcknowledgeHostEvent), hostEventAckMW...)
 
@@ -236,7 +235,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	customers.Handle(http.MethodPut, "", h(httphandlers.ServiceEnsureCustomer), writeMW...)
 	customers.Handle(http.MethodGet, "/billing-policy", h(httphandlers.ServiceGetCustomerBillingPolicy), readMW...)
 	customers.Handle(http.MethodPut, "/billing-policy", h(httphandlers.ServiceSetCustomerBillingPolicy), writeMW...)
-	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantPaymentsRead)}, dbMW...)
+	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantPaymentsRead)}, dbMW...)
 	customers.Handle(http.MethodGet, "/payment-settlement-status", h(httphandlers.ServicePaymentSettlementStatus), paymentReadMW...)
 	customers.Handle(http.MethodGet, "/entitlements",
 		h(httphandlers.ServiceGetCustomerEntitlements),
@@ -283,7 +282,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		readMW...,
 	)
 
-	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCheckoutCreate)}, dbMW...)
+	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCheckoutCreate)}, dbMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions", h(httphandlers.ServiceCreateCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions/lookup", h(httphandlers.ServiceLookupCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/hosted-checkout-sessions", h(httphandlers.ServiceCreateHostedCheckoutSession), checkoutWriteMW...)
@@ -361,7 +360,7 @@ func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // subscriptions/payments/payment methods wholesale). No MerchantDBConnMW:
 // the import seam pins its own merchant-scoped connection.
 func RegisterImportRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	write := opts.merchantActionPermissionMW(permissions.MerchantBillingImport)
+	write := opts.merchantActionPermissionMW(billing.MerchantBillingImport)
 	rr.Handle(http.MethodPost, "/billing", h(httphandlers.ImportDeclaredBilling), write)
 }
 
@@ -373,8 +372,8 @@ func RegisterMerchantConfigRoutes(rr router.Router, rt *app.Runtime, opts Option
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	read := opts.merchantActionPermissionMW(permissions.MerchantSettingsRead)
-	write := opts.merchantActionPermissionMW(permissions.MerchantSettingsUpdate)
+	read := opts.merchantActionPermissionMW(billing.MerchantSettingsRead)
+	write := opts.merchantActionPermissionMW(billing.MerchantSettingsUpdate)
 	rr.Handle(http.MethodGet, "/configuration", h(httphandlers.GetMerchantConfiguration), read)
 	rr.Handle(http.MethodPost, "/configuration/applications", h(httphandlers.ApplyMerchantConfiguration), write)
 	rr.Handle(http.MethodGet, "/settings", h(httphandlers.ServiceGetMerchantSettings), append([]router.Middleware{read}, dbMW...)...)
@@ -409,7 +408,7 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			}
 			// Per operation, so every route serving it (v1, v2, import,
 			// catalog) asks for the same recent sign-in.
-			if permissions.RequiresRecentSignIn(perm) {
+			if billing.RequiresRecentSignIn(perm) {
 				if err := opts.Gate.RequireRecentSignIn(r.Request.Context(), r.Request, principal); err != nil {
 					abortGate(r, err)
 					return
@@ -692,7 +691,7 @@ func bearerToken(header string) string {
 func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	readActions := catalog
 	catalog = withCatalogWritePolicy(catalog, rt, opts)
-	read := opts.merchantActionPermissionMW(permissions.MerchantCatalogRead)
+	read := opts.merchantActionPermissionMW(billing.MerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
 	writeMW := append([]router.Middleware{write}, dbMW...)
@@ -737,8 +736,8 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	catalog.Handle(http.MethodPost, "/applications", h(httphandlers.MerchantApplyCatalog), writeMW...)
 	// #1058: archive a product and refund or review recent purchases. It can
 	// move money, so it also needs the refund grant.
-	archiveMW := append([]router.Middleware{write, opts.merchantActionPermissionMW(permissions.MerchantPaymentsRefund)}, dbMW...)
-	archiveReadMW := append([]router.Middleware{read, opts.merchantActionPermissionMW(permissions.MerchantPaymentsRead)}, dbMW...)
+	archiveMW := append([]router.Middleware{write, opts.merchantActionPermissionMW(billing.MerchantPaymentsRefund)}, dbMW...)
+	archiveReadMW := append([]router.Middleware{read, opts.merchantActionPermissionMW(billing.MerchantPaymentsRead)}, dbMW...)
 	catalog.Handle(http.MethodPost, "/product-archives", h(httphandlers.CreateProductArchive), archiveMW...)
 	readActions.Handle(http.MethodGet, "/product-archives/:id", h(httphandlers.GetProductArchive), archiveReadMW...)
 
@@ -764,8 +763,8 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 }
 
 func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
-	read := opts.merchantActionPermissionMW(permissions.MerchantPaymentProvidersRead)
-	write := opts.merchantActionPermissionMW(permissions.MerchantPaymentProvidersUpdate)
+	read := opts.merchantActionPermissionMW(billing.MerchantPaymentProvidersRead)
+	write := opts.merchantActionPermissionMW(billing.MerchantPaymentProvidersUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
 	writeMW := append([]router.Middleware{write}, dbMW...)
 
@@ -788,17 +787,17 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 
 func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	registerMerchantInvoiceRoutes(rr, opts, dbMW...)
-	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
-	offChannelWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
-	grantWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
-	revokeWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationDestructive, dbMW...)
-	payRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantPaymentsRead)}, dbMW...)
-	payRefund := opts.merchantAdminOperationMW(permissions.MerchantPaymentsRefund, middleware.AdminOperationDestructive, dbMW...)
-	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSubscriptionsRead)}, dbMW...)
-	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSubscriptionsUpdate)}, dbMW...)
-	tierChangeWrite := opts.merchantAdminOperationMW(permissions.MerchantSubscriptionsUpdate, middleware.AdminOperationOffChannel, dbMW...)
-	subCancel := opts.merchantAdminOperationMW(permissions.MerchantSubscriptionsUpdate, middleware.AdminOperationDestructive, dbMW...)
-	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantRepairAlertsRead)}, dbMW...)
+	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCustomerSettingsRead)}, dbMW...)
+	offChannelWrite := opts.merchantAdminOperationMW(billing.MerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	grantWrite := opts.merchantAdminOperationMW(billing.MerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
+	revokeWrite := opts.merchantAdminOperationMW(billing.MerchantCustomerSettingsUpdate, middleware.AdminOperationDestructive, dbMW...)
+	payRead := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantPaymentsRead)}, dbMW...)
+	payRefund := opts.merchantAdminOperationMW(billing.MerchantPaymentsRefund, middleware.AdminOperationDestructive, dbMW...)
+	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantSubscriptionsRead)}, dbMW...)
+	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantSubscriptionsUpdate)}, dbMW...)
+	tierChangeWrite := opts.merchantAdminOperationMW(billing.MerchantSubscriptionsUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	subCancel := opts.merchantAdminOperationMW(billing.MerchantSubscriptionsUpdate, middleware.AdminOperationDestructive, dbMW...)
+	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantRepairAlertsRead)}, dbMW...)
 
 	// #740: merchant customer list/search for the admin console.
 	rr.Handle(http.MethodGet, "/customers", h(httphandlers.ListAdminCustomers), customerRead...)
@@ -807,7 +806,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	customers.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserBillingProfile), customerRead...)
 	customers.Handle(http.MethodGet, "/payment-methods", h(httphandlers.GetAdminUserPaymentMethods), customerRead...)
 	customers.Handle(http.MethodDelete, "/payment-methods/:id", h(httphandlers.AdminDeletePaymentMethod), revokeWrite...)
-	customerWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsUpdate)}, dbMW...)
+	customerWrite := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCustomerSettingsUpdate)}, dbMW...)
 	customers.Handle(http.MethodPut, "/default-payment-method", h(httphandlers.AdminSetDefaultPaymentMethod), customerWrite...)
 	customers.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminUserPayments), payRead...)
 	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), offChannelWrite...)
@@ -819,9 +818,9 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// (merchant:credits:grant — owner-level, NOT held by the fixed support
 	// role) rather than riding customer-settings:update like its siblings:
 	// minting balance is the one grant whose blast radius is monetary.
-	creditsGrantWrite := opts.merchantAdminOperationMW(permissions.MerchantCreditsGrant, middleware.AdminOperationGrant, dbMW...)
+	creditsGrantWrite := opts.merchantAdminOperationMW(billing.MerchantCreditsGrant, middleware.AdminOperationGrant, dbMW...)
 	customers.Handle(http.MethodPost, "/credits", h(httphandlers.AdminGrantCredits), creditsGrantWrite...)
-	creditsRevokeWrite := opts.merchantAdminOperationMW(permissions.MerchantCreditsRevoke, middleware.AdminOperationDestructive, dbMW...)
+	creditsRevokeWrite := opts.merchantAdminOperationMW(billing.MerchantCreditsRevoke, middleware.AdminOperationDestructive, dbMW...)
 	customers.Handle(http.MethodGet, "/credits", h(httphandlers.ListAdminCreditGrants(opts.Gate)), customerRead...)
 	customers.Handle(http.MethodDelete, "/credits/:grant_id", h(httphandlers.RevokeAdminCreditGrant), creditsRevokeWrite...)
 	customers.Handle(http.MethodGet, "/credit-transactions", h(httphandlers.ListAdminCreditTransactions), customerRead...)
@@ -902,7 +901,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 
 	// #733 PG-first metrics API (replaces the #735-deleted ClickHouse surface):
 	// one composable query endpoint + the registry/schema doc.
-	metricsRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantMetricsRead)}, dbMW...)
+	metricsRead := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantMetricsRead)}, dbMW...)
 	metricsGrp := rr.Group("/metrics")
 	metricsGrp.Handle(http.MethodPost, "/query", h(httphandlers.MerchantMetricsQuery), metricsRead...)
 	metricsGrp.Handle(http.MethodGet, "/schema", h(httphandlers.MerchantMetricsSchema), metricsRead...)
@@ -918,7 +917,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// #741 configurable dashboard: reads share the metrics permission (a
 	// dashboard is a saved view over metrics); writes + NL generation (the
 	// LLM call costs money) need the dashboard write grant.
-	dashboardWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantDashboardUpdate)}, dbMW...)
+	dashboardWrite := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantDashboardUpdate)}, dbMW...)
 	rr.Handle(http.MethodGet, "/dashboard", h(httphandlers.GetMerchantDashboard), metricsRead...)
 	rr.Handle(http.MethodPut, "/dashboard", h(httphandlers.PutMerchantDashboard), dashboardWrite...)
 	// NL widget generation exists only when an LLM key is configured.
@@ -927,7 +926,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	}
 
 	// Outbound notification state remains available independently of destinations.
-	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSettingsUpdate)}, dbMW...)
+	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantSettingsUpdate)}, dbMW...)
 
 	notifications := rr.Group("/notifications")
 	notifications.Handle(http.MethodGet, "", h(httphandlers.ListMerchantNotifications), metricsRead...)
@@ -941,7 +940,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// #692 operator findings queue: reads share the repair surface permission;
 	// resolve executes recommendations (cancel/refund/revoke/grant) and is a
 	// distinct write grant. One item at a time — no bulk endpoint (#679).
-	findingsResolve := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantFindingsResolve)}, dbMW...)
+	findingsResolve := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantFindingsResolve)}, dbMW...)
 	findings := rr.Group("/findings")
 	findings.Handle(http.MethodGet, "", h(httphandlers.AdminListFindings), repairRead...)
 	findings.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetFinding), repairRead...)
@@ -968,10 +967,10 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 
 // registerMerchantInvoiceRoutes reuses the existing support-operation limits.
 func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
-	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantInvoicesRead)}, dbMW...)
-	update := opts.merchantAdminOperationMW(permissions.MerchantInvoicesUpdate, middleware.AdminOperationDestructive, dbMW...)
-	collect := opts.merchantAdminOperationMW(permissions.MerchantInvoicesCollect, middleware.AdminOperationOffChannel, dbMW...)
-	remittance := opts.merchantAdminOperationMW(permissions.MerchantInvoicesUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	read := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantInvoicesRead)}, dbMW...)
+	update := opts.merchantAdminOperationMW(billing.MerchantInvoicesUpdate, middleware.AdminOperationDestructive, dbMW...)
+	collect := opts.merchantAdminOperationMW(billing.MerchantInvoicesCollect, middleware.AdminOperationOffChannel, dbMW...)
+	remittance := opts.merchantAdminOperationMW(billing.MerchantInvoicesUpdate, middleware.AdminOperationOffChannel, dbMW...)
 	invoices := rr.Group("/invoices")
 	invoices.Handle(http.MethodGet, "", h(httphandlers.ListAdminInvoices(opts.Gate)), read...)
 	invoices.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminInvoice(opts.Gate)), read...)
@@ -980,8 +979,8 @@ func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...route
 	invoices.Handle(http.MethodPost, "/:id/uncollectible", h(httphandlers.MutateAdminInvoice("mark_uncollectible")), update...)
 	invoices.Handle(http.MethodPost, "/:id/payments", h(httphandlers.MutateAdminInvoice("record_payment")), remittance...)
 	invoices.Handle(http.MethodPost, "/:id/retry-collection", h(httphandlers.RetryAdminInvoiceCollection), collect...)
-	profileRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
-	profileWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
+	profileRead := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCustomerSettingsRead)}, dbMW...)
+	profileWrite := opts.merchantAdminOperationMW(billing.MerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
 	rr.Handle(http.MethodGet, "/customers/:customer_id/invoice-profile", h(httphandlers.GetAdminInvoiceProfile(opts.Gate)), profileRead...)
 	rr.Handle(http.MethodPut, "/customers/:customer_id/invoice-profile", h(httphandlers.PutAdminInvoiceProfile), profileWrite...)
 }

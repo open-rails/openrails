@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SetMerchantAPIHost sets id's canonical #734 API host through the attached
@@ -19,7 +19,7 @@ import (
 // uses for the directory row itself. Safe to call multiple times (a plain
 // UPDATE); returns merchants.ErrAPIHostTaken (errors.Is-able) when apiHost is
 // already assigned to a different active merchant.
-func SetMerchantAPIHost(ctx context.Context, a *app.App, id merchant.ID, apiHost string) error {
+func SetMerchantAPIHost(ctx context.Context, a *app.App, id billing.MerchantID, apiHost string) error {
 	cp := Get(a)
 	if cp == nil {
 		return fmt.Errorf("control plane set host: no control plane attached (call Attach first)")
@@ -36,7 +36,7 @@ func SetMerchantAPIHost(ctx context.Context, a *app.App, id merchant.ID, apiHost
 
 // GetMerchantAPIHost returns id's current #734 API host (empty when unset)
 // through the attached control plane.
-func GetMerchantAPIHost(ctx context.Context, a *app.App, id merchant.ID) (string, error) {
+func GetMerchantAPIHost(ctx context.Context, a *app.App, id billing.MerchantID) (string, error) {
 	cp := Get(a)
 	if cp == nil {
 		return "", fmt.Errorf("control plane get host: no control plane attached (call Attach first)")

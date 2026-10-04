@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ReferenceKind says what a landed transaction on a reference means.

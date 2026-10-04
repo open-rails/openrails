@@ -56,7 +56,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Runtime aggregates infrastructure clients and application services.
@@ -74,7 +73,7 @@ type Runtime struct {
 	signerIdentity dependencyState
 	// ApproveSolanaSigner, set by the embedded constructor, accepts the
 	// identity a changed Transit signer now reports (hosttools.ApproveSolanaSigner).
-	ApproveSolanaSigner func(ctx context.Context, merchantID merchant.ID, key string) error
+	ApproveSolanaSigner func(ctx context.Context, merchantID billing.MerchantID, key string) error
 	// posturePending counts loaded PSPs whose verdict is not yet known; -1
 	// until StartProviderPosture's first pass completes.
 	posturePending atomic.Int64
@@ -98,7 +97,7 @@ type Runtime struct {
 	// declarations bind before HTTP and worker startup; standalone remains zero.
 	// Atomic reads also protect privileged restore/bootstrap integration. Readers
 	// use ConfiguredMerchant rather than caching a construction-time snapshot.
-	configuredMerchant atomic.Pointer[merchant.ID]
+	configuredMerchant atomic.Pointer[billing.MerchantID]
 
 	// TrustedProxies is the boot-configured proxy-aware client-IP resolver
 	// (#746), built once from config.Config.TrustedProxies. A nil/empty
@@ -305,19 +304,19 @@ func (r *Runtime) ReserveAPIHosts(urls ...string) {
 
 // ConfiguredMerchant returns the current single-merchant binding. Zero means
 // the caller must explicitly select a merchant through its authority.
-func (r *Runtime) ConfiguredMerchant() merchant.ID {
+func (r *Runtime) ConfiguredMerchant() billing.MerchantID {
 	if r == nil {
-		return merchant.ID{}
+		return billing.MerchantID{}
 	}
 	if id := r.configuredMerchant.Load(); id != nil {
 		return *id
 	}
-	return merchant.ID{}
+	return billing.MerchantID{}
 }
 
 // SetConfiguredMerchant binds constructor and privileged restore/bootstrap
 // integrations atomically with respect to request readers.
-func (r *Runtime) SetConfiguredMerchant(id merchant.ID) {
+func (r *Runtime) SetConfiguredMerchant(id billing.MerchantID) {
 	if r == nil {
 		return
 	}

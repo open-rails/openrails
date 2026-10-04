@@ -13,13 +13,12 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // createMerchantGroup creates merchant mid's AuthKit group, keyed by mid and
 // owned by ownerUserID when set, inside tx. It is idempotent: the group of a
 // merchant that already has one is returned unchanged.
-func (c *ControlPlane) createMerchantGroup(ctx context.Context, tx pgx.Tx, mid merchant.ID, ownerUserID string) (iam.GroupRef, error) {
+func (c *ControlPlane) createMerchantGroup(ctx context.Context, tx pgx.Tx, mid billing.MerchantID, ownerUserID string) (iam.GroupRef, error) {
 	g := iam.NewGroup{ID: mid.String(), Persona: MerchantType}
 	if owner := strings.TrimSpace(ownerUserID); owner != "" {
 		s := iam.UserSubject(owner)
@@ -48,7 +47,7 @@ func (c *ControlPlane) CreateMerchant(ctx context.Context, name, ownerUserID str
 	if err != nil {
 		return nil, err
 	}
-	mid := merchant.ID(id)
+	mid := billing.MerchantID(id)
 	return directory.Provision(ctx, merchants.ProvisionRequest{ID: mid, Slug: name, PermissionGroupID: mid.String()}, func(ctx context.Context, tx pgx.Tx) error {
 		group, err := c.createMerchantGroup(ctx, tx, mid, ownerUserID)
 		if err != nil || prepare == nil {
@@ -91,8 +90,8 @@ func (c *ControlPlane) CreateOwnedMerchant(ctx context.Context, name, userID str
 	if userID == "" {
 		return nil, false, iam.ErrInsufficientAuthority
 	}
-	name = merchant.NormalizeSlug(name)
-	if err := merchant.ValidateSlug(name); err != nil {
+	name = billing.NormalizeMerchantSlug(name)
+	if err := billing.ValidateMerchantSlug(name); err != nil {
 		return nil, false, fmt.Errorf("%w: %w", merchants.ErrInvalidName, err)
 	}
 	if err := c.EnforceMerchantCreationPolicy(ctx, name, userID); err != nil {

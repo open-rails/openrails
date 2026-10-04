@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // A merchant proves it controls a domain before the domain routes to it
@@ -47,7 +47,7 @@ func (c APIHostClaim) Record() string { return ChallengeLabel + "." + c.APIHost 
 
 // ClaimAPIHost opens id's claim on host with a fresh token, replacing any
 // earlier claim. A claim routes nothing; VerifyAPIHost binds the host.
-func (s *Service) ClaimAPIHost(ctx context.Context, id merchant.ID, host string) (*APIHostClaim, error) {
+func (s *Service) ClaimAPIHost(ctx context.Context, id billing.MerchantID, host string) (*APIHostClaim, error) {
 	if id.IsZero() {
 		return nil, errors.New("merchants: merchant id is required")
 	}
@@ -77,7 +77,7 @@ func (s *Service) ClaimAPIHost(ctx context.Context, id merchant.ID, host string)
 }
 
 // APIHostClaimOf returns id's open claim, or nil.
-func (s *Service) APIHostClaimOf(ctx context.Context, id merchant.ID) (*APIHostClaim, error) {
+func (s *Service) APIHostClaimOf(ctx context.Context, id billing.MerchantID) (*APIHostClaim, error) {
 	row, err := gen.New(s.pool).GetMerchantAPIHostClaim(ctx, id.UUID())
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -93,7 +93,7 @@ func (s *Service) APIHostClaimOf(ctx context.Context, id merchant.ID) (*APIHostC
 // the host becomes id's api_host and the claim closes; a host another merchant
 // already holds is ErrAPIHostTaken, one reserved for the deployment
 // ErrAPIHostReserved.
-func (s *Service) VerifyAPIHost(ctx context.Context, id merchant.ID, reserved []string, resolver *net.Resolver) (string, error) {
+func (s *Service) VerifyAPIHost(ctx context.Context, id billing.MerchantID, reserved []string, resolver *net.Resolver) (string, error) {
 	claim, err := s.APIHostClaimOf(ctx, id)
 	if err != nil {
 		return "", err
@@ -146,7 +146,7 @@ func (s *Service) VerifyAPIHost(ctx context.Context, id merchant.ID, reserved []
 
 // ReleaseAPIHost clears id's api_host and any open claim: giving a host up
 // needs no proof.
-func (s *Service) ReleaseAPIHost(ctx context.Context, id merchant.ID) error {
+func (s *Service) ReleaseAPIHost(ctx context.Context, id billing.MerchantID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := gen.New(tx)
 		if err := q.DeleteMerchantAPIHostClaim(ctx, id.UUID()); err != nil {

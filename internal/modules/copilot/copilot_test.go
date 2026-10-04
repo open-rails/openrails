@@ -10,8 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Catalog reads and proposals run against PostgreSQL elsewhere; these are the
@@ -37,7 +38,7 @@ func (d denyLimiter) AllowAsk(context.Context, string) (bool, time.Duration, err
 }
 
 func merchantCtx() context.Context {
-	return merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+	return merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
 }
 
 func TestAskRequiresConsentAndBudget(t *testing.T) {

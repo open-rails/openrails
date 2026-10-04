@@ -2,7 +2,7 @@ package billing
 
 import (
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/pricing"
+	"github.com/open-rails/openrails/catalog"
 	"time"
 )
 
@@ -28,8 +28,8 @@ type DefaultUsageRateCardDTO struct {
 	ProductID  string              `json:"product_id"`
 	ProductKey string              `json:"product_key"`
 	Filter     map[string][]string `json:"filter"`
-	Price      pricing.RatePrice   `json:"price"`
-	Allowance  *pricing.Allowance  `json:"allowance,omitempty"`
+	Price      catalog.RatePrice   `json:"price"`
+	Allowance  *catalog.Allowance  `json:"allowance,omitempty"`
 	CreatedAt  time.Time           `json:"created_at"`
 	UpdatedAt  time.Time           `json:"updated_at"`
 }
@@ -38,8 +38,8 @@ type UsageMeterOverrideDTO struct {
 	CustomerID string             `json:"customer_id"`
 	Subject    string             `json:"subject,omitempty"`
 	Email      string             `json:"email,omitempty"`
-	Price      pricing.RatePrice  `json:"price"`
-	Allowance  *pricing.Allowance `json:"allowance,omitempty"`
+	Price      catalog.RatePrice  `json:"price"`
+	Allowance  *catalog.Allowance `json:"allowance,omitempty"`
 	CreatedAt  time.Time          `json:"created_at"`
 	UpdatedAt  time.Time          `json:"updated_at"`
 }
@@ -64,6 +64,6 @@ type UsageMeterRequest struct {
 type DefaultUsageRateCardRequest struct {
 	ProductID string              `json:"product_id"`
 	Filter    map[string][]string `json:"filter"`
-	Price     pricing.RatePrice   `json:"price"`
-	Allowance *pricing.Allowance  `json:"allowance,omitempty"`
+	Price     catalog.RatePrice   `json:"price"`
+	Allowance *catalog.Allowance  `json:"allowance,omitempty"`
 }

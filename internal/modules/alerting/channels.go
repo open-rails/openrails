@@ -15,11 +15,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/httpx"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EmailSender is the config/host seam for outbound alert email. The SendGrid-
@@ -115,7 +115,7 @@ func (d *deliverer) deliverWebhook(ctx context.Context, ch ChannelRef, alert Ale
 	if d.store.secrets == nil {
 		return DeliveryResult{Channel: label, OK: false, Detail: "webhook credentials unavailable"}
 	}
-	secret, err := merchants.ReadSecretRef(ctx, d.store.secrets, merchant.ID(wh.MerchantID), merchants.SecretRef{Name: merchants.AlertWebhookURLSecretName(wh.ID), MinVersion: wh.secretVersion})
+	secret, err := merchants.ReadSecretRef(ctx, d.store.secrets, billing.MerchantID(wh.MerchantID), merchants.SecretRef{Name: merchants.AlertWebhookURLSecretName(wh.ID), MinVersion: wh.secretVersion})
 	if err != nil || secret.Version != wh.secretVersion {
 		return DeliveryResult{Channel: label, OK: false, Detail: "webhook credential rotation is incomplete; retry the URL update"}
 	}

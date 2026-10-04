@@ -12,21 +12,22 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func apiHostMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
+func apiHostMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
 		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
-		return merchant.ID{}, false
+		return billing.MerchantID{}, false
 	}
 	if r.State == nil || r.State.Merchants == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "merchant directory service unavailable")
-		return merchant.ID{}, false
+		return billing.MerchantID{}, false
 	}
 	return mid, true
 }

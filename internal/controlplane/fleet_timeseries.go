@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Fleet timeseries (openrails-saas #38): the trend companion to FleetAnalytics
@@ -51,7 +51,7 @@ type FleetTimeseriesResult struct {
 // exclude removes one merchant from every series (the platform's own
 // self-billing book); zero excludes nothing. weeks outside 4..52 falls back
 // to 12.
-func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID, weeks int) (*FleetTimeseriesResult, error) {
+func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude billing.MerchantID, weeks int) (*FleetTimeseriesResult, error) {
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for fleet timeseries")
 	}

@@ -6,10 +6,10 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CrankService executes the recurring pull ("cranking") — one
@@ -22,7 +22,7 @@ type CrankService struct {
 }
 
 type merchantAddressSubmitter interface {
-	SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error)
+	SubmitForMerchantAddress(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error)
 }
 
 // Presubmit capabilities (#674): the production signerSubmitter persists the
@@ -30,11 +30,11 @@ type merchantAddressSubmitter interface {
 // mid-submit is resolvable by a chain read. Optional — fakes without them
 // simply skip the write-ahead.
 type presubmitSubmitter interface {
-	SubmitWithPresubmit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
 }
 
 type presubmitMerchantAddressSubmitter interface {
-	SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+	SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
 }
 
 // NewCrankService builds a CrankService over a per-merchant Submitter.
@@ -45,7 +45,7 @@ func NewCrankService(submitter Submitter) *CrankService {
 // Crank pulls amountBaseUnits for one subscription. On Solana, an underfunded
 // pull reverts atomically (no partial charge); the caller classifies the error
 // (insufficient USDC -> dunning vs operational -> retry; see #257).
-func (s *CrankService) Crank(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error) {
+func (s *CrankService) Crank(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error) {
 	return s.CrankWithPresubmit(ctx, tenantID, sub, amountBaseUnits, uuid.Nil, nil)
 }
 
@@ -54,7 +54,7 @@ func (s *CrankService) Crank(ctx context.Context, tenantID merchant.ID, sub *mod
 // Crank. memoLocalID (non-Nil = the durable pull-intent id) stamps the tx with
 // the #713 self-recognition SPL Memo, placed BEFORE the transfer — a discovery
 // hint, never money truth.
-func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error) {
+func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error) {
 	if sub == nil {
 		return "", fmt.Errorf("recurring: nil subscription")
 	}

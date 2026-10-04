@@ -9,9 +9,9 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // applyAcceptedPurchaseAccess uses the same grant ledger as ordinary purchases,

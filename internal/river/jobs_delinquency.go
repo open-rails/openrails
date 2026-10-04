@@ -9,11 +9,11 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -83,7 +83,7 @@ func (w DelinquencyWorker) Work(ctx context.Context, _ *river.Job[DelinquencyArg
 		if mid == nil {
 			continue
 		}
-		merchantID := merchant.ID(*mid)
+		merchantID := billing.MerchantID(*mid)
 		progress.Mark(ctx, "delinquency merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "delinquency evaluation", func(mctx context.Context) error {
 			res, err := svc.Evaluate(mctx, now)

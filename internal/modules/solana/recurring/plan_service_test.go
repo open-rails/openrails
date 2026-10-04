@@ -9,9 +9,9 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // testPlanCreatedAt is the cluster clock the fake chain stamps on create_plan;
@@ -24,11 +24,11 @@ type recordingSubmitter struct {
 	failATA     bool // refuse ATA creation, as a dropped transaction would
 }
 
-func (s *recordingSubmitter) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
+func (s *recordingSubmitter) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
 	return s.merchantPub, nil
 }
 
-func (s *recordingSubmitter) Submit(_ context.Context, _ merchant.ID, ins []solanago.Instruction) (solanago.Signature, error) {
+func (s *recordingSubmitter) Submit(_ context.Context, _ billing.MerchantID, ins []solanago.Instruction) (solanago.Signature, error) {
 	if s.failATA && ins[0].ProgramID().Equals(subscriptions.AssociatedTokenProgramID) {
 		return solanago.Signature{}, errors.New("transaction dropped")
 	}

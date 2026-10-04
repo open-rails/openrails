@@ -10,21 +10,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/crypto"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 const stripeKeyName = "psps/stripe/live/acct_884_test/secret_key"
 
-type memDEKStore map[merchant.ID][]byte
+type memDEKStore map[billing.MerchantID][]byte
 
-func (m memDEKStore) GetWrappedDEK(_ context.Context, id merchant.ID) ([]byte, bool, error) {
+func (m memDEKStore) GetWrappedDEK(_ context.Context, id billing.MerchantID) ([]byte, bool, error) {
 	w, ok := m[id]
 	return w, ok, nil
 }
 
-func (m memDEKStore) PutWrappedDEK(_ context.Context, id merchant.ID, wrapped []byte) ([]byte, error) {
+func (m memDEKStore) PutWrappedDEK(_ context.Context, id billing.MerchantID, wrapped []byte) ([]byte, error) {
 	if existing, ok := m[id]; ok {
 		return existing, nil
 	}
@@ -90,7 +90,7 @@ func TestSecretStoreContract(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, store := t.Context(), build(t)
-			a, b := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+			a, b := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 
 			_, err := store.Get(ctx, a, stripeKeyName)
 			require.ErrorIs(t, err, ErrSecretNotFound)
@@ -120,9 +120,9 @@ func TestSecretStoreContract(t *testing.T) {
 			require.ErrorIs(t, err, ErrSecretNotFound)
 
 			for _, bad := range []struct {
-				id   merchant.ID
+				id   billing.MerchantID
 				name string
-			}{{merchant.ID{}, stripeKeyName}, {a, ""}, {a, "psps/../../other/secret_key"}} {
+			}{{billing.MerchantID{}, stripeKeyName}, {a, ""}, {a, "psps/../../other/secret_key"}} {
 				_, err := store.Get(ctx, bad.id, bad.name)
 				require.Error(t, err)
 				_, err = store.Put(ctx, bad.id, bad.name, "x")
@@ -137,7 +137,7 @@ func TestSamePlaintextPutDoesNotRotate(t *testing.T) {
 	require.NoError(t, err)
 	// Ciphertext is randomized, so idempotency must compare plaintext.
 	for name, store := range map[string]MerchantSecretStore{"memory": NewMemorySecretStore(), "encrypted": enc} {
-		id := merchant.ID(uuid.New())
+		id := billing.MerchantID(uuid.New())
 		v1, err := store.Put(t.Context(), id, stripeKeyName, "sk_1")
 		require.NoError(t, err)
 		again, err := store.Put(t.Context(), id, stripeKeyName, "sk_1")
@@ -150,7 +150,7 @@ func TestEncryptedSecretIsSealedToItsRow(t *testing.T) {
 	ctx, inner, enc := t.Context(), NewMemorySecretStore(), newEncryptor(t)
 	store, err := NewEncryptedSecretStore(inner, enc)
 	require.NoError(t, err)
-	a, b := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	a, b := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	webhookName := "psps/stripe/live/acct_884_test/webhook_signing_secret"
 	_, err = store.Put(ctx, a, webhookName, "whsec_real")
 	require.NoError(t, err)
@@ -187,7 +187,7 @@ type countingStore struct {
 	getErr error
 }
 
-func (s *countingStore) Get(ctx context.Context, id merchant.ID, name string) (Secret, error) {
+func (s *countingStore) Get(ctx context.Context, id billing.MerchantID, name string) (Secret, error) {
 	s.gets++
 	if s.getErr != nil {
 		return Secret{}, s.getErr
@@ -196,7 +196,7 @@ func (s *countingStore) Get(ctx context.Context, id merchant.ID, name string) (S
 }
 
 func TestCachedSecretStore(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 	backend := &countingStore{MerchantSecretStore: NewMemorySecretStore()}
 	cache := NewCachedSecretStore(backend, 45*time.Second).(*cachedSecretStore)
 	now := time.Unix(1_700_000_000, 0)
@@ -245,7 +245,7 @@ func TestCachedSecretStore(t *testing.T) {
 // or a pre-rotation cache entry, and recovers once the backend catches up.
 func TestCredentialFloorRefusesBackendLagAndRecovers(t *testing.T) {
 	for _, cached := range []bool{false, true} {
-		ctx, owner := t.Context(), merchant.ID(uuid.New())
+		ctx, owner := t.Context(), billing.MerchantID(uuid.New())
 		backend := NewMemorySecretStore()
 		first, err := backend.Put(ctx, owner, stripeKeyName, "first")
 		require.NoError(t, err)
@@ -271,14 +271,14 @@ func TestCredentialFloorRefusesBackendLagAndRecovers(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, second, value)
 	}
-	_, err := ReadSecretRef(t.Context(), NewMemorySecretStore(), merchant.ID(uuid.New()), SecretRef{Name: stripeKeyName, Retired: true})
+	_, err := ReadSecretRef(t.Context(), NewMemorySecretStore(), billing.MerchantID(uuid.New()), SecretRef{Name: stripeKeyName, Retired: true})
 	require.ErrorIs(t, err, ErrSecretNotFound, "a retired credential is never read")
-	_, err = ReadSecretRef(t.Context(), NewMemorySecretStore(), merchant.ID(uuid.New()), SecretRef{Name: stripeKeyName, MinVersion: -1})
+	_, err = ReadSecretRef(t.Context(), NewMemorySecretStore(), billing.MerchantID(uuid.New()), SecretRef{Name: stripeKeyName, MinVersion: -1})
 	require.ErrorIs(t, err, ErrSecretBackendUnavailable)
 }
 
 func TestVaultSecretStore(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 	kv := newFakeVaultKV()
 	store := NewVaultSecretStore("secret", kv)
 	_, err := store.Put(ctx, id, stripeKeyName, "sk_live")
@@ -307,7 +307,7 @@ func TestVaultSecretStore(t *testing.T) {
 }
 
 func TestWriteRestrictedSecretStore(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 	solanaKey, err := PSPSecretName("solana", "live", "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9", "private_key")
 	require.NoError(t, err)
 	inner := NewMemorySecretStore()

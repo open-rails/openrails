@@ -94,7 +94,7 @@ cfg.ControlPlane = &openrails.ControlPlaneConfig{
     Auth:          openrails.AuthConfig{Issuer: "https://api.my-brand.example"},
     HostedPosture: true,
     MerchantCreation: &openrails.MerchantCreationConfig{
-        ReservedSlugs: []string{"my-brand"}, // + merchant.ReservedHostedSlugs, always
+        ReservedSlugs: []string{"my-brand"}, // + billing.ReservedMerchantSlugs, always
         FreeAllowance: 2,                    // owned merchants before a card on file is required
     },
 }
@@ -137,7 +137,7 @@ is the host's policy (openrails-saas owns its own, with its own notices).
 
 - `client.ListMerchantRetirementCandidates(ctx, req)` pages live,
   group-bound merchants created before `req.CreatedBefore`, oldest first,
-  excluding reserved slugs (`merchant.ReservedHostedSlugs` plus
+  excluding reserved slugs (`billing.ReservedMerchantSlugs` plus
   `MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
   with the merchant's own scoped queries.
 - `client.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant

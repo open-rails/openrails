@@ -7,18 +7,18 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Accepted periods, payments and original grants are history. The current
 // catalog, cancellation state and retained method are deliberately not authority
 // for rewriting that history during an offline move.
-func validateSubscriptionCollectionReferences(ctx context.Context, tx pgx.Tx, mid merchant.ID) error {
+func validateSubscriptionCollectionReferences(ctx context.Context, tx pgx.Tx, mid billing.MerchantID) error {
 	q := gen.New(tx)
 	var after *uuid.UUID
 	for {

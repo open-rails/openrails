@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 func main() {
@@ -50,7 +50,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	for _, raw := range strings.Split(ids, ",") {
-		id, err := merchant.ParseID(strings.TrimSpace(raw))
+		id, err := billing.ParseMerchantID(strings.TrimSpace(raw))
 		if err != nil {
 			return err
 		}

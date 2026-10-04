@@ -11,13 +11,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)
@@ -74,14 +74,14 @@ func TestStripeOneTimeCheckoutWire(t *testing.T) {
 // ccbillScope is a one-account PSP catalog for credential resolution.
 type ccbillScope struct{ scope merchants.PSPScope }
 
-func (c ccbillScope) ActivePSPSecretName(_ context.Context, _ merchant.ID, rail, env, key string) (string, bool, error) {
+func (c ccbillScope) ActivePSPSecretName(_ context.Context, _ billing.MerchantID, rail, env, key string) (string, bool, error) {
 	name, err := merchants.PSPSecretName(rail, env, c.scope.AccountID, key)
 	return name, err == nil, err
 }
-func (c ccbillScope) ActivePSPScope(_ context.Context, _ merchant.ID, rail, _ string) (merchants.PSPScope, bool, error) {
+func (c ccbillScope) ActivePSPScope(_ context.Context, _ billing.MerchantID, rail, _ string) (merchants.PSPScope, bool, error) {
 	return c.scope, rail == c.scope.Rail, nil
 }
-func (c ccbillScope) PSPScopeByID(_ context.Context, _ merchant.ID, id uuid.UUID) (merchants.PSPScope, bool, error) {
+func (c ccbillScope) PSPScopeByID(_ context.Context, _ billing.MerchantID, id uuid.UUID) (merchants.PSPScope, bool, error) {
 	return c.scope, id == c.scope.ID, nil
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -89,7 +89,7 @@ func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchAr
 		if mid == nil {
 			continue
 		}
-		err := w.DB.RunInMerchantScope(ctx, merchant.ID(*mid), "rebill watch", func(ctx context.Context) error {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(*mid), "rebill watch", func(ctx context.Context) error {
 			subs, err := subscriptions.NewSubscriptionRepo(w.DB).ListOverdueRebills(ctx, engineCutoff, nmiCutoff)
 			if err != nil {
 				return err

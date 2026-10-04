@@ -20,14 +20,15 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/vault"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrRailNotArmed reports that the ctx merchant has no active armed account on
@@ -104,18 +105,18 @@ func (s *MerchantsSource) Armed(ctx context.Context, rail string) (bool, error) 
 
 // scope resolves the merchant + account row. ok=false (nil err) means "no
 // account declared" — Armed treats that as unarmed; RailConfig fails closed.
-func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (merchant.ID, merchants.PSPScope, bool, error) {
+func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (billing.MerchantID, merchants.PSPScope, bool, error) {
 	rail = strings.ToLower(strings.TrimSpace(rail))
 	if rail == "" {
-		return merchant.ID{}, merchants.PSPScope{}, false, fmt.Errorf("rail is required")
+		return billing.MerchantID{}, merchants.PSPScope{}, false, fmt.Errorf("rail is required")
 	}
 	svc := s.service()
 	if svc == nil {
-		return merchant.ID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: merchants service is not armed: %w", rail, ErrRailNotArmed)
+		return billing.MerchantID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: merchants service is not armed: %w", rail, ErrRailNotArmed)
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return merchant.ID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: %w", rail, err)
+		return billing.MerchantID{}, merchants.PSPScope{}, false, fmt.Errorf("resolve rail %s: %w", rail, err)
 	}
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
 		scope, ok, err := svc.PSPScopeByAccountID(ctx, mid, rail, accountID)
@@ -140,7 +141,7 @@ func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (me
 
 // secret loads one scoped secret. found=false with nil err means genuinely
 // absent; backend errors surface as err.
-func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
+func (s *MerchantsSource) secret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool, error) {
 	svc := s.service()
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
@@ -165,7 +166,7 @@ func (s *MerchantsSource) secret(ctx context.Context, mid merchant.ID, scope mer
 	return value, true, nil
 }
 
-func (s *MerchantsSource) requireSecret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
+func (s *MerchantsSource) requireSecret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, error) {
 	value, found, err := s.secret(ctx, mid, scope, key)
 	if err != nil {
 		return "", fmt.Errorf("load %s secret %s: %w", scope.Rail, key, err)
@@ -286,7 +287,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 // custodian that cannot be fully armed is a fail-closed error, never a silent
 // downgrade to "no custody" — that would charge the card as though the gateway
 // held it, which is the wrong charge and not a degraded one.
-func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*config.ResolvedCustodian, error) {
+func (s *MerchantsSource) resolveCustody(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope) (*config.ResolvedCustodian, error) {
 	// or#880: an inline custody block on a PSP is a retired shape. It must
 	// fail here too, not only at manifest push: a stored settings blob is an
 	// ingestion plane of its own (mode 2).
@@ -318,7 +319,7 @@ func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, s
 // registry-validated settings plus its private credentials from the secret
 // store. Shared by PSP resolution and by custodian-routed webhooks, so both
 // arm from exactly the same row and the same secret names.
-func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, custodian merchants.CustodianScope) (*config.ResolvedCustodian, error) {
+func (s *MerchantsSource) custodianConfig(ctx context.Context, mid billing.MerchantID, custodian merchants.CustodianScope) (*config.ResolvedCustodian, error) {
 	d, err := custodians.Require(custodian.Kind)
 	if err != nil {
 		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
@@ -355,7 +356,7 @@ func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, 
 	return out, nil
 }
 
-func (s *MerchantsSource) custodianSecret(ctx context.Context, mid merchant.ID, custodian merchants.CustodianScope, key string) (string, bool, error) {
+func (s *MerchantsSource) custodianSecret(ctx context.Context, mid billing.MerchantID, custodian merchants.CustodianScope, key string) (string, bool, error) {
 	svc := s.service()
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil

@@ -5,10 +5,12 @@ import (
 	"fmt"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -18,7 +20,6 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -117,7 +118,7 @@ type catalogPlanAddressReader struct {
 	environment string
 }
 
-func (r catalogPlanAddressReader) MerchantAddress(ctx context.Context, id merchant.ID) (solanago.PublicKey, error) {
+func (r catalogPlanAddressReader) MerchantAddress(ctx context.Context, id billing.MerchantID) (solanago.PublicKey, error) {
 	bound, err := merchant.Require(ctx)
 	if err != nil || bound != id {
 		return solanago.PublicKey{}, fmt.Errorf("Solana catalog merchant scope mismatch")
@@ -135,7 +136,7 @@ func (r catalogPlanAddressReader) MerchantAddress(ctx context.Context, id mercha
 	}
 	return key, nil
 }
-func (catalogPlanAddressReader) Submit(context.Context, merchant.ID, []solanago.Instruction) (solanago.Signature, error) {
+func (catalogPlanAddressReader) Submit(context.Context, billing.MerchantID, []solanago.Instruction) (solanago.Signature, error) {
 	return solanago.Signature{}, solana.ErrProviderReadOnly
 }
 

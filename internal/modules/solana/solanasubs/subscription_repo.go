@@ -7,10 +7,11 @@ import (
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // SolanaSubscriptionRepo persists the on-chain state of recurring Solana
@@ -143,7 +144,7 @@ func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, lim
 		if remaining > 0 {
 			remaining -= len(out)
 		}
-		err := r.db.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(id)), func(ctx context.Context) error {
+		err := r.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(id)), func(ctx context.Context) error {
 			rows, err := r.listDueScoped(ctx, now, remaining)
 			if err != nil {
 				return err
@@ -236,7 +237,7 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 	}
 	out := make([]MerchantWallet, 0)
 	for _, id := range merchantIDs {
-		err := r.db.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(id)), func(ctx context.Context) error {
+		err := r.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(id)), func(ctx context.Context) error {
 			rows, err := r.listActiveMerchantWalletsScoped(ctx)
 			if err != nil {
 				return err
@@ -288,7 +289,7 @@ func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, li
 		if remaining > 0 {
 			remaining -= len(out)
 		}
-		err := r.db.RunInMerchantConn(merchant.WithID(ctx, merchant.ID(id)), func(ctx context.Context) error {
+		err := r.db.RunInMerchantConn(merchant.WithID(ctx, billing.MerchantID(id)), func(ctx context.Context) error {
 			rows, err := r.listActiveWithSignatureScoped(ctx, remaining)
 			if err != nil {
 				return err

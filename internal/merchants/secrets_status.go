@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ListSecretStatuses returns one status per PSP-scoped or custodian-scoped
@@ -19,7 +19,7 @@ import (
 // slots are a function of the PSPs it declared, and those per-PSP slots are
 // already reported by PaymentProviderDefinitions + PaymentProviderConfig.
 // Names are sorted so the view is stable across calls.
-func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]MerchantSecretStatus, error) {
+func (s *Service) ListSecretStatuses(ctx context.Context, id billing.MerchantID) ([]MerchantSecretStatus, error) {
 	if id.IsZero() {
 		return nil, validateSecretRef(id, "x")
 	}
@@ -83,7 +83,7 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 }
 
 // DeleteCredential deletes a merchant secret.
-func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name string) error {
+func (s *Service) DeleteCredential(ctx context.Context, id billing.MerchantID, name string) error {
 	if s.secrets == nil {
 		return errors.New("merchants: no secret store configured")
 	}
@@ -99,7 +99,7 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name str
 
 // ValidateCredential validates a supplied or stored credential value without
 // returning it. When value is empty, the current stored value is loaded.
-func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value string, stripeTester func(context.Context, string) error) error {
+func (s *Service) ValidateCredential(ctx context.Context, id billing.MerchantID, name, value string, stripeTester func(context.Context, string) error) error {
 	name = cleanSecretName(name)
 	if !SecretWritable(name) {
 		return apperr.Invalidf("merchants: unknown merchant secret %q", name)

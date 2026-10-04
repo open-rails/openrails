@@ -9,10 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Machine-readable codes of the provider-account lifecycle refusals (#655).
@@ -142,28 +143,28 @@ func decodeOptionalJSONBody(r *httprequest.Request, body any) bool {
 	return true
 }
 
-func merchantProviderPathContext(r *httprequest.Request) (*merchants.Service, merchant.ID, string, bool) {
+func merchantProviderPathContext(r *httprequest.Request) (*merchants.Service, billing.MerchantID, string, bool) {
 	svc, id, ok := merchantProviderContext(r)
 	if !ok {
-		return nil, merchant.ID{}, "", false
+		return nil, billing.MerchantID{}, "", false
 	}
 	provider := strings.TrimSpace(r.Param("provider"))
 	if provider == "" {
 		r.ErrorJSON(http.StatusBadRequest, "provider required")
-		return nil, merchant.ID{}, "", false
+		return nil, billing.MerchantID{}, "", false
 	}
 	return svc, id, provider, true
 }
 
-func merchantProviderContext(r *httprequest.Request) (*merchants.Service, merchant.ID, bool) {
+func merchantProviderContext(r *httprequest.Request) (*merchants.Service, billing.MerchantID, bool) {
 	if r.State == nil || r.State.Merchants == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "merchant provider config unavailable")
-		return nil, merchant.ID{}, false
+		return nil, billing.MerchantID{}, false
 	}
 	id, ok := merchant.FromContext(r.Request.Context())
 	if !ok {
 		r.ErrorJSON(http.StatusInternalServerError, "merchant context missing")
-		return nil, merchant.ID{}, false
+		return nil, billing.MerchantID{}, false
 	}
 	return r.State.Merchants, id, true
 }

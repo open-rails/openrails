@@ -19,6 +19,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -29,8 +30,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EmbeddedV1Prefix is the canonical API prefix for embedded mode handlers.
@@ -95,7 +96,7 @@ type Assembler struct {
 // free of AuthKit (#284) — matching the AdminChecker/ServiceCredentialResolver
 // pattern above.
 type hostMerchantResolver interface {
-	ResolveMerchantByHost(ctx context.Context, host string) (merchant.ID, error)
+	ResolveMerchantByHost(ctx context.Context, host string) (billing.MerchantID, error)
 }
 
 // HostMerchantResolverFrom derives the #734 Host->merchant resolver from an

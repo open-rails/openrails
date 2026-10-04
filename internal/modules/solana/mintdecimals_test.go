@@ -9,10 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // chainMint serves one SPL mint account layout for every address.
@@ -81,8 +82,8 @@ func TestRequireTokenDecimalsIsChainSourced(t *testing.T) {
 func TestMintDecimalsCachePerMerchantAndMint(t *testing.T) {
 	calls := 0
 	mints := NewMintDecimals(chainMint{decimals: 9, calls: &calls})
-	ctxA := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
-	ctxB := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+	ctxA := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
+	ctxB := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
 
 	for i := 0; i < 3; i++ {
 		for _, ctx := range []context.Context{ctxA, ctxB} {

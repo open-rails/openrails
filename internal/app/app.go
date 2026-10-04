@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/retry"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // App encapsulates the long-lived dependencies shared across transports.
@@ -77,7 +76,7 @@ type BootstrapOptions struct {
 	UserDirectory    billing.UserDirectory
 	UsernameResolver billing.UsernameResolver
 
-	ConfiguredMerchant merchant.ID
+	ConfiguredMerchant billing.MerchantID
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.

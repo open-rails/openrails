@@ -10,10 +10,10 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -115,7 +115,7 @@ func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rp
 // the canonical, server-resolved values from the price's Solana config (never
 // client-supplied amounts).
 type PrepareSubscribeInput struct {
-	MerchantID       merchant.ID
+	MerchantID       billing.MerchantID
 	SubscriberWallet string // the connected wallet (signer + fee payer)
 	PlanID           uint64
 	MintSymbol       string

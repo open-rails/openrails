@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/spf13/cobra"
 )
 
@@ -142,7 +141,7 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	rt := &app.Runtime{DB: database, Config: cfg, MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	table := &router.Table{}
 	httproutes.RegisterMerchantConfigRoutes(router.NewMux(table, "/v1/merchant", rt), rt, httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})})
-	transport, capability := inprocess.NewTransport(table.Handler(), func() merchant.ID { return selected.ID })
+	transport, capability := inprocess.NewTransport(table.Handler(), func() billing.MerchantID { return selected.ID })
 	client, err := openrails.NewRemote("http://openrails.invalid", openrails.WithHTTPClient(&http.Client{Transport: transport}), openrails.WithMerchantID(selected.ID), openrails.WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
 	return client, cleanup, err
 }

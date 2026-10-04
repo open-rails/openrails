@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -215,7 +215,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		if mid == nil {
 			continue
 		}
-		merchantID := merchant.ID(*mid)
+		merchantID := billing.MerchantID(*mid)
 		progress.Mark(ctx, "dunning merchant "+merchantID.String())
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's app.merchant_id, exactly as a request would.
@@ -251,7 +251,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 				// transition (past_due / grace / terminal cancel / renewal) — already
 				// on the merchant-scoped connection, so call Converge directly. Best-
 				// effort: a convergence error must not fail the dunning run.
-				if _, cerr := converge.AfterMutation(mctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
+				if _, cerr := converge.AfterMutation(mctx, w.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
 					log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
 						Warn("Dunning: inline converge failed; the sweep will reconcile")
 				}

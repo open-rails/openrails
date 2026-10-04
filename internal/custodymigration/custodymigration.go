@@ -59,13 +59,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PSPRef names a PSP by the operator-declared natural identity (#592: there is
@@ -154,7 +155,7 @@ type VaultExport struct {
 type Options struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	Export     VaultExport
 
 	// Apply=false (the default) is a DRY RUN: every read and every refusal
@@ -407,7 +408,7 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 
 type planner struct {
 	db          *db.DB
-	merchantID  merchant.ID
+	merchantID  billing.MerchantID
 	batchID     uuid.UUID
 	sourceRail  string
 	sourcePSPID uuid.UUID

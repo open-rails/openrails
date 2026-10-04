@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/pkg/pricing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 func TestInvoicePeriods(t *testing.T) {
@@ -64,19 +64,19 @@ func TestPendingInvoiceItemGuards(t *testing.T) {
 }
 
 func TestPayerRateCardOverrideKeepsDefaultMeterContract(t *testing.T) {
-	perUnit := func(amount int64) pricing.RatePrice {
-		return pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: amount}}
+	perUnit := func(amount int64) catalog.RatePrice {
+		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: amount}}
 	}
 	def := catalogRateCardRow{
 		ID: uuid.New(), MeterKey: "requests", EventType: "request.completed", ValueKey: "$.units",
-		Aggregation: pricing.AggregationSum, GroupBy: map[string]string{"region": "$.region"},
-		Filter: map[string][]string{"region": {"eu"}}, Allowance: &pricing.Allowance{Included: 5}, Price: perUnit(10_000),
+		Aggregation: catalog.AggregationSum, GroupBy: map[string]string{"region": "$.region"},
+		Filter: map[string][]string{"region": {"eu"}}, Allowance: &catalog.Allowance{Included: 5}, Price: perUnit(10_000),
 	}
 	other := catalogRateCardRow{ID: uuid.New(), MeterKey: "storage", Price: perUnit(1)}
 	override := catalogRateCardRow{
 		ID: uuid.New(), MeterKey: "requests", PayerScoped: true, EventType: "poisoned.event",
 		GroupBy: map[string]string{"poisoned": "$.poisoned"}, Filter: map[string][]string{"poisoned": {"x"}},
-		Allowance: &pricing.Allowance{Included: 20}, Price: perUnit(4_000),
+		Allowance: &catalog.Allowance{Included: 20}, Price: perUnit(4_000),
 	}
 
 	resolved, err := resolvePayerRateCardOverrides([]catalogRateCardRow{override, def, other})
@@ -122,37 +122,37 @@ func TestMeteringPageBounds(t *testing.T) {
 }
 
 func TestAllowanceSourcePrice(t *testing.T) {
-	meter := pricing.Meter{
-		Key: "runtime", Aggregation: pricing.AggregationSum,
+	meter := catalog.Meter{
+		Key: "runtime", Aggregation: catalog.AggregationSum,
 		GroupBy: map[string]string{"size": "metadata.size", "resource_id": "metadata.resource_id"},
 	}
-	matrix := func(cells map[string]pricing.MatrixCell) pricing.RatePrice {
-		return pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{
-			Matrix: &pricing.Matrix{Dimension: "size", Cells: cells},
+	matrix := func(cells map[string]catalog.MatrixCell) catalog.RatePrice {
+		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{
+			Matrix: &catalog.Matrix{Dimension: "size", Cells: cells},
 		}}
 	}
-	valid := matrix(map[string]pricing.MatrixCell{"small": {UnitAmount: 10_000, Included: 100}, "large": {UnitAmount: 1}})
+	valid := matrix(map[string]catalog.MatrixCell{"small": {UnitAmount: 10_000, Included: 100}, "large": {UnitAmount: 1}})
 	require.NoError(t, validateAllowanceSourcePrice(meter, valid, "USD"))
 
-	withMeter := func(edit func(*pricing.Meter)) pricing.Meter {
+	withMeter := func(edit func(*catalog.Meter)) catalog.Meter {
 		m := meter
 		m.GroupBy = map[string]string{"size": "metadata.size", "resource_id": "metadata.resource_id"}
 		edit(&m)
 		return m
 	}
 	for name, tt := range map[string]struct {
-		meter    pricing.Meter
-		price    pricing.RatePrice
+		meter    catalog.Meter
+		price    catalog.RatePrice
 		currency string
 	}{
-		"unsupported aggregation": {withMeter(func(m *pricing.Meter) { m.Aggregation = pricing.AggregationMax }), valid, "USD"},
+		"unsupported aggregation": {withMeter(func(m *catalog.Meter) { m.Aggregation = catalog.AggregationMax }), valid, "USD"},
 		"currency mismatch":       {meter, valid, "EUR"},
-		"non-matrix price": {meter, pricing.RatePrice{
-			Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 10_000},
+		"non-matrix price": {meter, catalog.RatePrice{
+			Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 10_000},
 		}, "USD"},
-		"missing resource dimension": {withMeter(func(m *pricing.Meter) { delete(m.GroupBy, "resource_id") }), valid, "USD"},
-		"missing matrix dimension":   {withMeter(func(m *pricing.Meter) { delete(m.GroupBy, "size") }), valid, "USD"},
-		"no included cells":          {meter, matrix(map[string]pricing.MatrixCell{"small": {UnitAmount: 10_000}}), "USD"},
+		"missing resource dimension": {withMeter(func(m *catalog.Meter) { delete(m.GroupBy, "resource_id") }), valid, "USD"},
+		"missing matrix dimension":   {withMeter(func(m *catalog.Meter) { delete(m.GroupBy, "size") }), valid, "USD"},
+		"no included cells":          {meter, matrix(map[string]catalog.MatrixCell{"small": {UnitAmount: 10_000}}), "USD"},
 	} {
 		require.ErrorIs(t, validateAllowanceSourcePrice(tt.meter, tt.price, tt.currency), ErrAllowanceSourceInvalid, name)
 	}

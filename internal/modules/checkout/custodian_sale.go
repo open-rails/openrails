@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -30,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Custodian-held card checkout collection (#795 B5): the browser tokenizes
@@ -95,7 +96,7 @@ type custodialPSP struct {
 	Custody            *config.ResolvedCustodian
 	GatewaySecurityKey string
 	// The charging PSP's exact identity and declared credential set (#1055).
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	Scope      merchants.PSPScope
 	Settings   *config.NMIProviderSettings
 }

@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // BasisTheoryWebhookHandler folds Basis Theory custody events (#795) into

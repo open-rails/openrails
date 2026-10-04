@@ -25,10 +25,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 var ErrCheckoutCaptureUnavailable = errors.New("custodian capture is unavailable")
@@ -60,7 +60,7 @@ func (s *CheckoutSessionService) captureEncryptor() (*crypto.Encryptor, error) {
 	})
 	return s.captureEncryption.cipher, s.captureEncryption.err
 }
-func captureAAD(owner merchant.ID, id uuid.UUID, state models.CheckoutCapture) crypto.AAD {
+func captureAAD(owner billing.MerchantID, id uuid.UUID, state models.CheckoutCapture) crypto.AAD {
 	// Bind both the physical row and accepted authority; copying or editing
 	// customer/custodian/session/expiry metadata cannot relocate a credential.
 	parts, _ := json.Marshal([]string{id.String(), state.CustomerID.String(), state.PSPID.String(), state.CustodianID.String(), state.AccountID, state.Environment, state.ProfileID, state.PublicAPIKey, state.APIBaseURL, state.SDKURL, state.VendorCustomerID, state.VendorSessionID, state.ExpiresAt.UTC().Format(time.RFC3339Nano)})
@@ -70,7 +70,7 @@ func captureTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
-func captureScopedID(domain string, owner merchant.ID, customer uuid.UUID, key string) uuid.UUID {
+func captureScopedID(domain string, owner billing.MerchantID, customer uuid.UUID, key string) uuid.UUID {
 	input := []byte(domain + "\x00")
 	merchantID := owner.UUID()
 	for _, part := range [][]byte{merchantID[:], customer[:], []byte(key)} {
@@ -79,13 +79,13 @@ func captureScopedID(domain string, owner merchant.ID, customer uuid.UUID, key s
 	}
 	return uuid.NewHash(sha256.New(), uuid.NameSpaceURL, input, 8)
 }
-func captureSessionID(owner merchant.ID, customer uuid.UUID, key string) uuid.UUID {
+func captureSessionID(owner billing.MerchantID, customer uuid.UUID, key string) uuid.UUID {
 	return captureScopedID("openrails/payment-method-setup/v1", owner, customer, key)
 }
-func captureCustomerReference(owner merchant.ID, customer uuid.UUID) string {
+func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) string {
 	return captureScopedID("openrails/custody-customer/v1", owner, customer, "").String()
 }
-func (s *CheckoutSessionService) captureBinding(owner merchant.ID, psp gen.BillingPsp, custodian gen.BillingCustodian) (models.CheckoutCapture, error) {
+func (s *CheckoutSessionService) captureBinding(owner billing.MerchantID, psp gen.BillingPsp, custodian gen.BillingCustodian) (models.CheckoutCapture, error) {
 	var empty models.CheckoutCapture
 	if s.config == nil || s.config.HyperSwitch == nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(s.config.IsTestMode()) {
 		return empty, ErrCheckoutCaptureUnavailable

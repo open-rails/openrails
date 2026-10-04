@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ListPaymentAttempts lists the merchant's payment attempts, newest first

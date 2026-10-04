@@ -8,14 +8,15 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -90,7 +91,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		}
 		progress.Mark(ctx, "solana reconcile subscription "+row.ID.String())
 		sig := *row.LastSignature
-		err := w.DB.RunInMerchantScope(ctx, merchant.ID(row.MerchantID), "solana reconcile pull", func(mctx context.Context) error {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "solana reconcile pull", func(mctx context.Context) error {
 			scopeMerchantID, scopeErr := merchant.Require(mctx)
 			if scopeErr != nil {
 				return scopeErr

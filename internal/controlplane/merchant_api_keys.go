@@ -14,7 +14,7 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // ErrUnknownMerchantRole indicates a role outside the merchant roles (#567:
@@ -41,7 +41,7 @@ type MerchantAPIKey struct {
 // role. A non-user principal mints as the system, after the caller enforced
 // its no-escalation rule (the route gate plus RoleCoveredBy). The
 // secret is returned once: it is never stored and never retrievable again.
-func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, name string, role iam.Role, actor iam.Actor) (MerchantAPIKey, string, error) {
+func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor iam.Actor) (MerchantAPIKey, string, error) {
 	if !slices.Contains(MerchantAPIKeyRoles(), role) {
 		return MerchantAPIKey{}, "", ErrUnknownMerchantRole
 	}
@@ -58,7 +58,7 @@ func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, 
 
 // ListMerchantAPIKeys returns every key of the merchant's group — live,
 // expired and revoked (status is the audit view) — never secret material.
-func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid merchant.ID) ([]MerchantAPIKey, error) {
+func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid billing.MerchantID) ([]MerchantAPIKey, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid merchant.ID)
 // RevokeMerchantAPIKey revokes the merchant's key id as actor (a key is never
 // revoked across merchants). It returns false when the merchant has no key
 // with that id.
-func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error) {
+func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return false, err

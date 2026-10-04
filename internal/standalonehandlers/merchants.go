@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MerchantLister is the control-plane surface behind GET /v1/merchants.
@@ -39,7 +38,7 @@ func MerchantListMine(svc MerchantLister) func(*httprequest.Request) {
 // MerchantCreator is the control-plane surface behind POST /v1/merchants.
 type MerchantCreator interface {
 	CreateOwnedMerchant(ctx context.Context, name, userID string) (*merchants.Merchant, bool, error)
-	SetMerchantDisplayName(ctx context.Context, id merchant.ID, displayName string) error
+	SetMerchantDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error
 }
 
 // MerchantCreate handles POST /v1/merchants {"name", "display_name"?}: the

@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MerchantCreationPolicy parameterizes MerchantCreationAdmission.
@@ -106,7 +105,7 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 // un-parked vaulted payment method on file with vaultMerchant (for a hosted
 // product: its PLATFORM merchant — the book that treats hosted merchants'
 // owners as customers). Runs under MerchantTx for vaultMerchant.
-func SubjectHasVaultedPaymentMethod(ctx context.Context, a *app.App, vaultMerchant merchant.ID, subjectUserID string) (bool, error) {
+func SubjectHasVaultedPaymentMethod(ctx context.Context, a *app.App, vaultMerchant billing.MerchantID, subjectUserID string) (bool, error) {
 	cp := Get(a)
 	if cp == nil || cp.Pool() == nil {
 		return false, errors.New("control plane unavailable")

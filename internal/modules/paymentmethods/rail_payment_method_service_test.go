@@ -7,16 +7,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type pspResolver map[merchant.ID]string // merchant -> armed NMI account id
+type pspResolver map[billing.MerchantID]string // merchant -> armed NMI account id
 
-func (r pspResolver) ActivePSPSecretName(_ context.Context, id merchant.ID, _, _, key string) (string, bool, error) {
+func (r pspResolver) ActivePSPSecretName(_ context.Context, id billing.MerchantID, _, _, key string) (string, bool, error) {
 	if r[id] == "" {
 		return "", false, nil
 	}
@@ -24,7 +25,7 @@ func (r pspResolver) ActivePSPSecretName(_ context.Context, id merchant.ID, _, _
 	return name, err == nil, err
 }
 
-func (r pspResolver) ActivePSPScope(_ context.Context, id merchant.ID, _, _ string) (merchants.PSPScope, bool, error) {
+func (r pspResolver) ActivePSPScope(_ context.Context, id billing.MerchantID, _, _ string) (merchants.PSPScope, bool, error) {
 	if r[id] == "" {
 		return merchants.PSPScope{}, false, nil
 	}
@@ -34,7 +35,7 @@ func (r pspResolver) ActivePSPScope(_ context.Context, id merchant.ID, _, _ stri
 
 type unavailableSecrets struct{}
 
-func (unavailableSecrets) Get(context.Context, merchant.ID, string) (merchants.Secret, error) {
+func (unavailableSecrets) Get(context.Context, billing.MerchantID, string) (merchants.Secret, error) {
 	return merchants.Secret{}, merchants.ErrSecretBackendUnavailable
 }
 
@@ -42,7 +43,7 @@ func testConfig() *config.Config {
 	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}
 }
 
-func secretsFor(t *testing.T, keys map[merchant.ID][2]string) merchants.MerchantSecretStore {
+func secretsFor(t *testing.T, keys map[billing.MerchantID][2]string) merchants.MerchantSecretStore {
 	t.Helper()
 	store := merchants.NewMemorySecretStore()
 	for id, kv := range keys {
@@ -82,10 +83,10 @@ func TestPreparePaymentMethodUpdate(t *testing.T) {
 // #788: the NMI client arms only from the ctx merchant's scoped secret; no static fallback exists.
 func TestResolveNMIClientIsMerchantScopedAndFailsClosed(t *testing.T) {
 	t.Parallel()
-	a := merchant.ID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
-	b := merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+	a := billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+	b := billing.MerchantID(uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
 	svc := &RailPaymentMethodService{
-		MerchantSecrets: secretsFor(t, map[merchant.ID][2]string{a: {"mobius-a", "merchant-a-key"}, b: {"mobius-b", "merchant-b-key"}}),
+		MerchantSecrets: secretsFor(t, map[billing.MerchantID][2]string{a: {"mobius-a", "merchant-a-key"}, b: {"mobius-b", "merchant-b-key"}}),
 		ProviderSecrets: pspResolver{a: "mobius-a", b: "mobius-b"},
 		Config:          testConfig(),
 	}
@@ -144,7 +145,7 @@ func vaultService(t *testing.T, del PaymentMethodDeleteExecutor) (*RailPaymentMe
 		SubscriptionService: subscriptionLister(nil),
 		Config:              testConfig(),
 		DeleteIntents:       del,
-		MerchantSecrets:     secretsFor(t, map[merchant.ID][2]string{dbtest.TestMerchantID: {"mobius-account", "k"}}),
+		MerchantSecrets:     secretsFor(t, map[billing.MerchantID][2]string{dbtest.TestMerchantID: {"mobius-account", "k"}}),
 		ProviderSecrets:     pspResolver{dbtest.TestMerchantID: "mobius-account"},
 	}
 	pm := &models.PaymentMethod{Custodian: models.CustodianPSP, ID: uuid.New(), CustomerID: uuid.New(), Rail: models.RailNMI, RailCustomerRef: "vault-1", RailMethodRef: "bill-1"}

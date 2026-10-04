@@ -11,11 +11,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #732 anti-credential-compromise rate ceiling — the ULTIMATE hardcoded
@@ -405,7 +406,7 @@ func (c *RateCeiling) emitFinding(ctx context.Context, merchantID uuid.UUID, fin
 	if err != nil {
 		return fmt.Errorf("marshal finding evidence: %w", err)
 	}
-	fctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), merchant.ID(merchantID)), 5*time.Second)
+	fctx, cancel := context.WithTimeout(merchant.WithID(context.Background(), billing.MerchantID(merchantID)), 5*time.Second)
 	defer cancel()
 	return c.db.MerchantTx(fctx, func(txctx context.Context, tx pgx.Tx) error {
 		_, err := gen.New(tx).UpsertReconciliationFinding(txctx, gen.UpsertReconciliationFindingParams{

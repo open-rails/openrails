@@ -1,3 +1,5 @@
+//go:build e2e && integration
+
 // Package subscriptions is the e2e membership-lifecycle contract suite:
 // engine-owned and provider-owned subscriptions on Stripe and NMI, including
 // OpenRails recovery of NMI provider-owned schedules, driven

@@ -11,10 +11,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 func TestAcceptedPurchaseMustMatchCheckoutAndBeResolved(t *testing.T) {
@@ -195,12 +195,12 @@ func replaceDigest(evidence, digest string) string {
 
 func TestRateCardPriceArchiveMatchesPersistedShape(t *testing.T) {
 	ceiling := int64(10)
-	for _, price := range []pricing.RatePrice{
-		{Model: pricing.ModelFlat, Currency: "USD", Flat: &pricing.FlatPrice{Amount: math.MaxInt64}},
-		{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 9007199254740993, DivideBy: 60, MaximumAmount: math.MaxInt64}},
-		{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{DivideBy: 60, Round: pricing.RoundUp, Matrix: &pricing.Matrix{Dimension: "size", Cells: map[string]pricing.MatrixCell{"small": {}, "large": {UnitAmount: 9007199254740993, MaximumAmount: math.MaxInt64, Included: 10}}}}},
-		{Model: pricing.ModelTiered, Currency: "USD", Tiered: &pricing.TieredPrice{Mode: pricing.TierModeGraduated, Tiers: []pricing.RateTier{{UpTo: &ceiling, UnitAmount: 100, FlatAmount: 9007199254740993}, {UnitAmount: 50}}}},
-		{Model: pricing.ModelPackage, Currency: "USD", Package: &pricing.PackagePrice{Amount: 9007199254740993, PackageSize: 100, FreeUnits: 10}},
+	for _, price := range []catalog.RatePrice{
+		{Model: catalog.ModelFlat, Currency: "USD", Flat: &catalog.FlatPrice{Amount: math.MaxInt64}},
+		{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 9007199254740993, DivideBy: 60, MaximumAmount: math.MaxInt64}},
+		{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{DivideBy: 60, Round: catalog.RoundUp, Matrix: &catalog.Matrix{Dimension: "size", Cells: map[string]catalog.MatrixCell{"small": {}, "large": {UnitAmount: 9007199254740993, MaximumAmount: math.MaxInt64, Included: 10}}}}},
+		{Model: catalog.ModelTiered, Currency: "USD", Tiered: &catalog.TieredPrice{Mode: catalog.TierModeGraduated, Tiers: []catalog.RateTier{{UpTo: &ceiling, UnitAmount: 100, FlatAmount: 9007199254740993}, {UnitAmount: 50}}}},
+		{Model: catalog.ModelPackage, Currency: "USD", Package: &catalog.PackagePrice{Amount: 9007199254740993, PackageSize: 100, FreeUnits: 10}},
 	} {
 		raw, err := json.Marshal(price)
 		if err != nil {

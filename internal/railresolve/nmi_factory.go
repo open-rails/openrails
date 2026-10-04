@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NMIFactory is the only way OpenRails builds an NMI client for a PSP (#1055):
@@ -57,7 +57,7 @@ func (f *NMIFactory) endpoints() NMIEndpoints {
 
 // Settings reads the PSP's credential set: its versioned security key, the
 // optional webhook secret and the declared endpoint deployment.
-func (f *NMIFactory) Settings(ctx context.Context, secrets merchants.MerchantSecretReader, mid merchant.ID, scope merchants.PSPScope) (*config.NMIProviderSettings, error) {
+func (f *NMIFactory) Settings(ctx context.Context, secrets merchants.MerchantSecretReader, mid billing.MerchantID, scope merchants.PSPScope) (*config.NMIProviderSettings, error) {
 	if secrets == nil {
 		return nil, errors.New("merchant credential store is not armed")
 	}
@@ -95,7 +95,7 @@ func (f *NMIFactory) Settings(ctx context.Context, secrets merchants.MerchantSec
 }
 
 // Client builds the PSP-bound client for scope.
-func (f *NMIFactory) Client(ctx context.Context, secrets merchants.MerchantSecretReader, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+func (f *NMIFactory) Client(ctx context.Context, secrets merchants.MerchantSecretReader, mid billing.MerchantID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	settings, err := f.Settings(ctx, secrets, mid, scope)
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (f *NMIFactory) Client(ctx context.Context, secrets merchants.MerchantSecre
 
 // ClientFor binds already-read settings to scope (callers that hold the
 // credential set, such as a custodian proxy, still get the same client).
-func (f *NMIFactory) ClientFor(mid merchant.ID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
+func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
 	client, err := nmi.NewAccountClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.testMode())
 	if err != nil {
 		return nil, fmt.Errorf("build NMI client for PSP %s: %w", scope.ID, err)
@@ -133,6 +133,6 @@ func (f *NMIFactory) ClientFor(mid merchant.ID, scope merchants.PSPScope, settin
 
 // ProxyPosture is the posture identity of scope's credential forwarded by a
 // custodian proxy: the same identity, deployment and destination rules.
-func (f *NMIFactory) ProxyPosture(mid merchant.ID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
+func (f *NMIFactory) ProxyPosture(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
 	return nmi.ProxyPostureClient(mid.UUID(), scope.ID, scope.AccountID, settings, f.endpoints().DirectPostURL, f.testMode())
 }

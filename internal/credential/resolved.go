@@ -3,9 +3,9 @@ package credential
 
 import (
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"strings"
 )
 
@@ -17,7 +17,7 @@ type ResolvedServiceCredential struct {
 	// presentation/audit only.
 	OwnerGroupRef string
 	// MerchantID is the OpenRails merchant (#480) the credential administers.
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// MerchantSlug is the resolved merchant's slug.
 	MerchantSlug string
 	// Permissions is the credential's granted OpenRails permission set
@@ -56,7 +56,7 @@ type ResolvedDelegated struct {
 	// receiver-side directory data, identical to MerchantSlug.
 	Merchant string
 	// MerchantID is the resolved OpenRails merchant (#223).
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// MerchantSlug is the resolved merchant's slug.
 	MerchantSlug string
 	// CustomerID is the durable OpenRails payable subject for
@@ -133,7 +133,7 @@ func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*Res
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	merchantID, err := merchant.ParseID(strings.TrimSpace(p.MerchantID))
+	merchantID, err := billing.ParseMerchantID(strings.TrimSpace(p.MerchantID))
 	if err != nil || merchantID.IsZero() {
 		return nil, billingauth.ErrDelegatedPrincipalInvalid
 	}

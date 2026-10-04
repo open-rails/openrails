@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
@@ -14,7 +15,6 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // InprocessBaseURL is the synthetic base of the embedded client. `.invalid`
@@ -67,6 +67,6 @@ func withVerificationMemo(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, requestauth.Begin(r)) })
 }
 
-func merchantMismatchMsg(bound, pinned merchant.ID) string {
+func merchantMismatchMsg(bound, pinned billing.MerchantID) string {
 	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
 }

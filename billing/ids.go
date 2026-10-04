@@ -45,6 +45,26 @@ const (
 	RebillCycleIDPrefix     = "cyc_"
 )
 
+// MerchantID is the merchant's own UUID (billing.merchants.id, never an
+// AuthKit id). Unlike the ids below it is spelled as the UUID even when zero,
+// and "" does not decode: a merchant is never optional on the wire.
+type MerchantID uuid.UUID
+
+// ParseMerchantID reads the UUID spelling of a merchant id.
+func ParseMerchantID(s string) (MerchantID, error) {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return MerchantID{}, fmt.Errorf("invalid merchant id %q: %w", s, err)
+	}
+	return MerchantID(u), nil
+}
+
+func (id MerchantID) UUID() uuid.UUID                  { return uuid.UUID(id) }
+func (id MerchantID) IsZero() bool                     { return uuid.UUID(id) == uuid.Nil }
+func (id MerchantID) String() string                   { return uuid.UUID(id).String() }
+func (id MerchantID) MarshalText() ([]byte, error)     { return uuid.UUID(id).MarshalText() }
+func (id *MerchantID) UnmarshalText(data []byte) error { return (*uuid.UUID)(id).UnmarshalText(data) }
+
 func ParseCatalogID(s string) (CatalogID, error) {
 	u, err := parsePrefixedID("catalog", CatalogIDPrefix, s)
 	return CatalogID(u), err

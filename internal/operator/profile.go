@@ -7,7 +7,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrMerchantNotFound indicates that no active merchant matched the requested
@@ -29,7 +28,7 @@ func ListUserMerchants(ctx context.Context, a *app.App, userID string) ([]billin
 // name through the attached control plane. Empty names are ignored so hosts can
 // safely retry provisioning without clearing a previously stored name. This is
 // a privileged host seam; callers must authorize the merchant ID before use.
-func SetMerchantDisplayName(ctx context.Context, a *app.App, id merchant.ID, displayName string) error {
+func SetMerchantDisplayName(ctx context.Context, a *app.App, id billing.MerchantID, displayName string) error {
 	cp := Get(a)
 	if cp == nil {
 		return fmt.Errorf("control plane set merchant display name: no control plane attached (call Attach first)")
@@ -43,7 +42,7 @@ func SetMerchantDisplayName(ctx context.Context, a *app.App, id merchant.ID, dis
 // RenameMerchant renames an active merchant as the operator: no reserved-name
 // or rename-interval check, and the former name forwards to it under the site
 // naming policy. This is a privileged host seam; callers must authorize it.
-func RenameMerchant(ctx context.Context, a *app.App, id merchant.ID, name string) error {
+func RenameMerchant(ctx context.Context, a *app.App, id billing.MerchantID, name string) error {
 	cp := Get(a)
 	if cp == nil {
 		return fmt.Errorf("control plane rename merchant: no control plane attached (call Attach first)")

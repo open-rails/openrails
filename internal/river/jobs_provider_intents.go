@@ -12,11 +12,11 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func workerNow(c clockwork.Clock) time.Time {
@@ -72,7 +72,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	}
 	delay := time.Duration(0)
 	terminal := false
-	err := w.DB.RunInMerchantScope(ctx, merchant.ID(args.MerchantID), "provider operation", func(ctx context.Context) error {
+	err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(args.MerchantID), "provider operation", func(ctx context.Context) error {
 		now := workerNow(w.Clock)
 		row, err := store.PrepareDispatch(ctx, args.IntentID, now)
 		if errors.Is(err, pgx.ErrNoRows) {

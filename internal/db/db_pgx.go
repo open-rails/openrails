@@ -10,8 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/tracelog"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/sirupsen/logrus"
 )
 
@@ -160,7 +161,7 @@ func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx
 // setMerchantLocalGUCPgx sets the merchant GUC transaction-locally
 // (set_config is_local=true) so it reverts when the tx ends and can never
 // leak onto a pooled connection.
-func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	if id.IsZero() {
 		return fmt.Errorf("db: cannot set %s GUC for a zero merchant id", MerchantGUC)
 	}
@@ -178,7 +179,7 @@ func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) erro
 // different existing pin is refused rather than overwritten: changing it
 // midway through a shared transaction would make earlier and later statements
 // observe different tenants.
-func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id merchant.ID) (context.Context, *DB, error) {
+func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id billing.MerchantID) (context.Context, *DB, error) {
 	if d == nil {
 		return ctx, nil, fmt.Errorf("db: BindMerchantTx on nil DB")
 	}

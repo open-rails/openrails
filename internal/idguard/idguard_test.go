@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // A zero id is a supplied value, never "unset": it is a coded 400 naming the
@@ -24,8 +23,8 @@ func TestGuardsRefuseZeroIdentifiers(t *testing.T) {
 		{"optional nil", "", RequireOptional("target_psp_id", nil)},
 		{"optional zero", "target_psp_id", RequireOptional("target_psp_id", &zero)},
 		{"optional set", "", RequireOptional("target_psp_id", &set)},
-		{"merchant zero", "merchant_id", RequireMerchant("merchant_id", merchant.ID{})},
-		{"merchant set", "", RequireMerchant("merchant_id", merchant.ID(set))},
+		{"merchant zero", "merchant_id", RequireMerchant("merchant_id", billing.MerchantID{})},
+		{"merchant set", "", RequireMerchant("merchant_id", billing.MerchantID(set))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.param == "" {

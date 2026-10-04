@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // tierChangeRPC is the minimal RPC surface PrepareTierChange needs (satisfied by
@@ -52,7 +52,7 @@ func NewPrepareTierChangeService(signer solanaint.Signer, rpc tierChangeRPC, net
 // terms are the canonical, server-resolved values from the new price's config;
 // the old on-chain identifiers come from the stored solana_subscriptions row.
 type PrepareTierChangeInput struct {
-	MerchantID       merchant.ID
+	MerchantID       billing.MerchantID
 	SubscriberWallet string
 	MintSymbol       string
 

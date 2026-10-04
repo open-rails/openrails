@@ -1,4 +1,5 @@
-// Package ci contains the compact API contract suite. Integration
-// scenarios are build-tagged so ordinary package checks can still enumerate
-// and compile the package without requiring PostgreSQL.
+//go:build e2e
+
+// Package ci is the end-to-end contract suite (scripts/e2e.sh). Every file is
+// build-tagged, so ordinary builds see no package here and nothing imports it.
 package ci

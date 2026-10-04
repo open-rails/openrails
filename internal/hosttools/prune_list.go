@@ -10,16 +10,17 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // PruneListOptions mirrors `openrails prune list`.
 type PruneListOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	Limit      int
 	Format     string
 	Out        io.Writer

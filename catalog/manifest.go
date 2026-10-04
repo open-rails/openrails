@@ -1,6 +1,8 @@
-// Package catalog defines merchant catalog applications and billing-definition
-// types. Apply presence-aware batches through Client.Catalog or local operator
-// tooling; both use the same database-backed transaction and replay contract.
+// Package catalog defines merchant catalog applications, billing-definition
+// types and the charge models that price them (rate cards, meters, price
+// models). Apply presence-aware batches through Client.Catalog or local
+// operator tooling; both use the same database-backed transaction and replay
+// contract.
 package catalog
 
 // Manifest is the root of a catalog-as-code document.

@@ -11,13 +11,13 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // The Convergence Engine (#511) — the single idempotent driver of the internal
@@ -75,7 +75,7 @@ const (
 // Subscription narrow it for the cheap inline path. A merchant-only scope (both
 // nil) is the exhaustive sweep / post-pull pass.
 type Scope struct {
-	Merchant     merchant.ID
+	Merchant     billing.MerchantID
 	Customer     *uuid.UUID
 	Subscription *uuid.UUID
 }
@@ -207,7 +207,7 @@ type ConvergeResult struct {
 // Best-effort: convergence failures are returned for the caller to LOG, never to
 // fail the mutation that already succeeded — the sweep is the backstop. Must run
 // on the request's merchant-scoped connection, after the mutation committed.
-func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID, customer uuid.UUID, clocks ...clockwork.Clock) (ConvergeResult, error) {
+func AfterMutation(ctx context.Context, database *db.DB, merchantID billing.MerchantID, customer uuid.UUID, clocks ...clockwork.Clock) (ConvergeResult, error) {
 	return NewConvergeEngine(database, clocks...).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
 }
 

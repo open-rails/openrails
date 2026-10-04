@@ -6,13 +6,13 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/signeridentity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // upsertMerchantConfig reconciles the constructor's merchant declaration before
@@ -20,13 +20,13 @@ import (
 // tolerateVault, a Solana vault_transit signer whose Vault is unavailable
 // reuses the identity stored for it, or (none stored yet) leaves only that PSP
 // unprovisioned; the returned flag says Vault must still confirm it.
-func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config.MerchantDeclaration, tolerateVault bool) (merchant.ID, bool, error) {
+func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config.MerchantDeclaration, tolerateVault bool) (billing.MerchantID, bool, error) {
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
-		return merchant.ID{}, false, fmt.Errorf("openrails: app database not initialized")
+		return billing.MerchantID{}, false, fmt.Errorf("openrails: app database not initialized")
 	}
 	conf := a.Config
 	if conf == nil || conf.DB == nil {
-		return merchant.ID{}, false, fmt.Errorf("openrails: config/db is required")
+		return billing.MerchantID{}, false, fmt.Errorf("openrails: config/db is required")
 	}
 	database := a.Runtime.DB
 
@@ -35,17 +35,17 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 		var err error
 		directory, err = merchants.NewDirectoryService(database.DataPool())
 		if err != nil {
-			return merchant.ID{}, false, err
+			return billing.MerchantID{}, false, err
 		}
 	}
 	bound := a.Runtime.ConfiguredMerchant()
 	if !bound.IsZero() {
-		selected, err := directory.GetBySlug(ctx, merchant.NormalizeSlug(slug))
+		selected, err := directory.GetBySlug(ctx, billing.NormalizeMerchantSlug(slug))
 		if err != nil {
-			return merchant.ID{}, false, fmt.Errorf("openrails: engine is already bound to merchant %s; cannot resolve supplied name %q: %w", bound, slug, err)
+			return billing.MerchantID{}, false, fmt.Errorf("openrails: engine is already bound to merchant %s; cannot resolve supplied name %q: %w", bound, slug, err)
 		}
 		if selected.ID != bound {
-			return merchant.ID{}, false, fmt.Errorf("openrails: one embedded engine serves one merchant; refusing second merchant %q (%s), bound to %s", slug, selected.ID, bound)
+			return billing.MerchantID{}, false, fmt.Errorf("openrails: one embedded engine serves one merchant; refusing second merchant %q (%s), bound to %s", slug, selected.ID, bound)
 		}
 		slug = selected.Slug
 	}
@@ -68,12 +68,12 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 		// Load the host-owned snapshot into this process. Metadata initialization
 		// is create-only; authorized edits and archived accounts survive restarts.
 		if a.Runtime == nil || a.Runtime.ManifestSecrets == nil {
-			return merchant.ID{}, false, fmt.Errorf("openrails: snapshot credentials require the runtime snapshot plane")
+			return billing.MerchantID{}, false, fmt.Errorf("openrails: snapshot credentials require the runtime snapshot plane")
 		}
 		req.SecretStore = a.Runtime.ManifestSecrets.Seeder()
 		backend := a.Runtime.MerchantSecretBackend
 		if backend == nil {
-			return merchant.ID{}, false, fmt.Errorf("openrails: credential backend must be initialized before provisioning")
+			return billing.MerchantID{}, false, fmt.Errorf("openrails: credential backend must be initialized before provisioning")
 		}
 		req.SolanaTransit = backend.SolanaTransit
 		if backend.SolanaTransit != nil {
@@ -83,12 +83,12 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 			req.Options.DeferPSP = fallback.Defers
 		}
 	case len(m.PSPs) > 0 || len(m.Custodians) > 0:
-		return merchant.ID{}, false, fmt.Errorf("openrails: provider credential declarations require a host snapshot; use the Client payment-provider publication operation for managed credentials")
+		return billing.MerchantID{}, false, fmt.Errorf("openrails: provider credential declarations require a host snapshot; use the Client payment-provider publication operation for managed credentials")
 	}
 
 	tn, err := boot.ProvisionMerchant(ctx, req)
 	if err != nil {
-		return merchant.ID{}, false, fmt.Errorf("openrails: upsert merchant config: %w", err)
+		return billing.MerchantID{}, false, fmt.Errorf("openrails: upsert merchant config: %w", err)
 	}
 	if a.Runtime.ConfiguredMerchant().IsZero() {
 		a.Runtime.SetConfiguredMerchant(tn.ID)
@@ -98,7 +98,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 
 // approveSolanaSigner accepts the identity Vault now reports for key and
 // re-applies the declaration, provisioning it.
-func approveSolanaSigner(ctx context.Context, a *app.App, declaration config.MerchantDeclaration, mid merchant.ID, key string) error {
+func approveSolanaSigner(ctx context.Context, a *app.App, declaration config.MerchantDeclaration, mid billing.MerchantID, key string) error {
 	if declaration.Slug == "" {
 		return fmt.Errorf("openrails: no merchant declaration to approve a signer for")
 	}

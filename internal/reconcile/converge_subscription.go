@@ -7,12 +7,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #684: the webhook fetch-and-converge entry point. A verified webhook is only
@@ -81,7 +81,7 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
 	d.Declared = snap.Provider == ProviderDeclared
 	if d.EvidenceFloored {
-		recordEvidenceStaleFinding(ctx, database.Gen(ctx), merchant.ID(sub.MerchantID), snap.Provider, sub.ID.String(), d.Reason)
+		recordEvidenceStaleFinding(ctx, database.Gen(ctx), billing.MerchantID(sub.MerchantID), snap.Provider, sub.ID.String(), d.Reason)
 	}
 	// Money truth is mirrored UNCONDITIONALLY: every fetched charge event for
 	// this subscription is imported idempotently (by transaction id), even when

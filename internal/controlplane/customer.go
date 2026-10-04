@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrCustomerInvalid indicates a delegated request cannot identify an OpenRails
@@ -20,7 +20,7 @@ var ErrCustomerInvalid = errors.New("controlplane: customer merchant and UUID su
 // delegated request and refreshes last_seen_at. Customer identity is the
 // merchant plus the host/AuthKit stable UUID subject; issuer is audit metadata
 // only and never participates in the natural key.
-func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID, issuer, subject string) (uuid.UUID, error) {
+func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID billing.MerchantID, issuer, subject string) (uuid.UUID, error) {
 	issuer = strings.TrimSpace(issuer)
 	subject = strings.TrimSpace(subject)
 	if merchantID.IsZero() || subject == "" {
@@ -66,7 +66,7 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 // (openrails-saas #18): the directory identity a hosted portal needs to scope
 // the subject's self-service billing to.
 type MerchantForSubject struct {
-	ID          merchant.ID
+	ID          billing.MerchantID
 	Slug        string
 	DisplayName string
 }
@@ -100,7 +100,7 @@ func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject stri
 	}
 	out := make([]MerchantForSubject, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, MerchantForSubject{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
+		out = append(out, MerchantForSubject{ID: billing.MerchantID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
 	}
 	return out, nil
 }

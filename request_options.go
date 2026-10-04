@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CredentialScope distinguishes merchant operations from authorized platform
@@ -49,9 +48,9 @@ func (o *requestOptions) selectMerchant(target CredentialTarget, err error) {
 // WithMerchant selects a merchant by slug for this operation only. It overrides
 // the Client's default, but never a credential or deployment restriction.
 func WithMerchant(slug string) RequestOption {
-	slug = merchant.NormalizeSlug(slug)
+	slug = billing.NormalizeMerchantSlug(slug)
 	var err error
-	if e := merchant.ValidateSlug(slug); e != nil {
+	if e := billing.ValidateMerchantSlug(slug); e != nil {
 		err = invalidErr(e.Error())
 	}
 	return func(o *requestOptions) {
@@ -75,9 +74,9 @@ func ForMerchantID(id billing.MerchantID) RequestOption {
 // omit a selector. An explicit request selector may override it. This is not
 // an authority grant or a restriction on the merchants served by the runtime.
 func WithDefaultMerchant(slug string) ClientOption {
-	slug = merchant.NormalizeSlug(slug)
+	slug = billing.NormalizeMerchantSlug(slug)
 	return func(c *Client) {
-		if err := merchant.ValidateSlug(slug); err != nil {
+		if err := billing.ValidateMerchantSlug(slug); err != nil {
 			c.setupErr = invalidErr(err.Error())
 			return
 		}

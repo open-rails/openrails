@@ -7,7 +7,7 @@ import (
 
 	auth "github.com/open-rails/helpers/auth"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Gate protects merchant-scoped routes.
@@ -15,7 +15,7 @@ type Gate interface {
 	Authorize(ctx context.Context, r *http.Request, permission string) (Principal, error)
 	// RequireRecentSignIn is nil when principal, which Authorize returned for
 	// r, may perform an operation that moves money or grants access
-	// (permissions.RequiresRecentSignIn): a machine or delegated credential,
+	// (billing.RequiresRecentSignIn): a machine or delegated credential,
 	// or a native user whose sign-in is recent. Otherwise it is the GateError
 	// to answer.
 	RequireRecentSignIn(ctx context.Context, r *http.Request, principal Principal) error
@@ -23,7 +23,7 @@ type Gate interface {
 
 // Principal is the caller identity resolved by a Gate.
 type Principal struct {
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// Kind is the credential's provenance. Only a NativeUser carries a sign-in
 	// of its own; an empty Kind is treated as one.
 	Kind PrincipalKind

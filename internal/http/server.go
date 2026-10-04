@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/cache"
@@ -21,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Dependencies struct {
@@ -385,9 +385,9 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 // control plane is mandatory); nil-safe for hand-built *Server{} unit tests
 // that skip New(). Unrelated to CORS since #765 (CORS is a static per-route
 // policy, not sourced from Host/merchant resolution).
-func (s *Server) hostMerchantResolver(ctx context.Context, host string) (merchant.ID, error) {
+func (s *Server) hostMerchantResolver(ctx context.Context, host string) (billing.MerchantID, error) {
 	if s == nil || s.controlPlane == nil {
-		return merchant.ID{}, nil
+		return billing.MerchantID{}, nil
 	}
 	return s.controlPlane.ResolveMerchantByHost(ctx, host)
 }

@@ -9,14 +9,14 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func validateSaleReferences(ctx context.Context, tx pgx.Tx, mid merchant.ID) error {
+func validateSaleReferences(ctx context.Context, tx pgx.Tx, mid billing.MerchantID) error {
 	q := gen.New(tx)
 	var after *uuid.UUID
 	for {

@@ -15,9 +15,9 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/httpx"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Deps wires the alerting service.

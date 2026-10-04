@@ -13,8 +13,8 @@ package idguard
 import (
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Invalid is the coded invalid-parameter refusal: HTTP 400, code
@@ -42,7 +42,7 @@ func RequireOptional(field string, id *uuid.UUID) error {
 }
 
 // RequireMerchant refuses a missing or zero merchant scope.
-func RequireMerchant(field string, id merchant.ID) error {
+func RequireMerchant(field string, id billing.MerchantID) error {
 	if id.IsZero() {
 		return Invalid(field, field+" is required")
 	}

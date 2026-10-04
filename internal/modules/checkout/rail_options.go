@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CheckoutRailOption is a locally ready payment-provider choice for a price.

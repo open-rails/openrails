@@ -8,5 +8,5 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 guard_root="$(cd "${1:-${repo_root}}" && pwd)"
 export OPENRAILS_BUSINESS_TIME_ROOT="${guard_root}"
 cd "${repo_root}"
-go test ./tools/businesstime -run '^TestRepositoryBusinessTimeGuard$' -count=1
+go test ./internal/businesstime -run '^TestRepositoryBusinessTimeGuard$' -count=1
 echo "business-time guardrail passed"

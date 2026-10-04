@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // ControlPlaneConfig attaches the OpenRails-owned AuthKit control plane: user
@@ -47,7 +47,7 @@ type AuthRateLimit struct {
 // (or#914). Reserved names, the pattern and the admission gate apply to
 // ProvisionMerchant with an owner and to renames.
 type MerchantCreationConfig struct {
-	// ReservedSlugs are reserved in addition to merchant.ReservedHostedSlugs.
+	// ReservedSlugs are reserved in addition to billing.ReservedMerchantSlugs.
 	ReservedSlugs []string
 	// ReservedEscalationRole names the root-group role whose holders may claim
 	// reserved names. Empty: reserved names are never user-claimable.

@@ -17,11 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -110,7 +109,7 @@ func ListAdminInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 			writeInvoiceAdminError(r, err)
 			return
 		}
-		update, collect := invoicePermission(r, gate, permissions.MerchantInvoicesUpdate), invoicePermission(r, gate, permissions.MerchantInvoicesCollect)
+		update, collect := invoicePermission(r, gate, billing.MerchantInvoicesUpdate), invoicePermission(r, gate, billing.MerchantInvoicesCollect)
 		for i := range items {
 			permittedInvoiceActions(&items[i], update, collect)
 		}
@@ -149,8 +148,8 @@ func GetAdminInvoice(gate billingauth.Gate) func(*httprequest.Request) {
 		if !ok {
 			return
 		}
-		canCollect := invoicePermission(r, gate, permissions.MerchantInvoicesCollect)
-		permittedInvoiceActions(invoice, invoicePermission(r, gate, permissions.MerchantInvoicesUpdate), canCollect)
+		canCollect := invoicePermission(r, gate, billing.MerchantInvoicesCollect)
+		permittedInvoiceActions(invoice, invoicePermission(r, gate, billing.MerchantInvoicesUpdate), canCollect)
 		methods := make([]invoicePaymentMethodOption, 0)
 		if canCollect && r.State.PaymentMethodService != nil {
 			rows, err := r.State.PaymentMethodService.GetByUserID(r.Request.Context(), invoice.CustomerID)
@@ -310,7 +309,7 @@ func GetAdminInvoiceProfile(gate billingauth.Gate) func(*httprequest.Request) {
 			writeInvoiceAdminError(r, err)
 			return
 		}
-		r.SuccessJSON(map[string]any{"customer_id": payer.UUID(), "profile": profile, "can_update": invoicePermission(r, gate, permissions.MerchantCustomerSettingsUpdate)})
+		r.SuccessJSON(map[string]any{"customer_id": payer.UUID(), "profile": profile, "can_update": invoicePermission(r, gate, billing.MerchantCustomerSettingsUpdate)})
 	}
 }
 func PutAdminInvoiceProfile(r *httprequest.Request) {

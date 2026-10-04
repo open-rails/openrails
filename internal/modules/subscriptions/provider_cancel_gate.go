@@ -13,9 +13,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrProviderCancelHeld refuses a cancel that needs the provider's billing
@@ -77,7 +77,7 @@ func raiseProviderCancelHeld(ctx context.Context, d *db.DB, sub *models.Subscrip
 	if accountDeletion {
 		action = "An account was deleted; its subscription is cancelled locally but the provider schedule still bills until destructive provider actions are armed for this merchant (the held delete then runs)."
 	}
-	ctx = merchant.WithID(ctx, merchant.ID(sub.MerchantID))
+	ctx = merchant.WithID(ctx, billing.MerchantID(sub.MerchantID))
 	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := db.NewWithPgxTx(tx).Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: sub.MerchantID, FindingType: ProviderCancelHeldFindingType, SubjectKey: sub.ID.String(),

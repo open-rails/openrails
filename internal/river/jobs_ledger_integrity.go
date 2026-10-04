@@ -10,11 +10,11 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const KindLedgerIntegrity = "openrails.ledger_integrity"
@@ -73,7 +73,7 @@ func (w LedgerIntegrityWorker) Work(ctx context.Context, job *river.Job[LedgerIn
 
 	var checked, breached int
 	for _, mid := range merchantIDs {
-		merchantID := merchant.ID(mid)
+		merchantID := billing.MerchantID(mid)
 		progress.Mark(ctx, "ledger integrity merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "ledger integrity audit", func(mctx context.Context) error {
 			// The connection is pinned to this merchant; the explicit
@@ -104,7 +104,7 @@ func (w LedgerIntegrityWorker) Work(ctx context.Context, job *river.Job[LedgerIn
 // raiseLedgerFindings files one standing finding per breach. A drifted counter
 // is a MONEY correctness fault, so it is critical: every balance read against
 // that account has been wrong since the drift appeared.
-func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid merchant.ID, report ledger.IntegrityReport) error {
+func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid billing.MerchantID, report ledger.IntegrityReport) error {
 	q := w.DB.Gen(ctx)
 	for _, b := range report.Conservation {
 		evidence, _ := json.Marshal(map[string]any{
@@ -154,7 +154,7 @@ func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid merc
 // resolveLedgerFindings closes this merchant's standing ledger findings once
 // the invariants hold again — the check is precise, so a repaired ledger must
 // go quiet rather than leave a permanently red board.
-func (w LedgerIntegrityWorker) resolveLedgerFindings(ctx context.Context, mid merchant.ID) error {
+func (w LedgerIntegrityWorker) resolveLedgerFindings(ctx context.Context, mid billing.MerchantID) error {
 	return w.DB.Gen(ctx).AutoResolveReviewFindingsByType(ctx, gen.AutoResolveReviewFindingsByTypeParams{
 		MerchantID: mid.UUID(), FindingTypes: []string{FindingLedgerConservation, FindingLedgerCounterDrift},
 	})

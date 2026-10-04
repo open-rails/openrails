@@ -6,7 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +24,7 @@ func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 	_, _, err = first.WithMerchantConn(context.Background())
 	require.Error(t, err, "a pin needs a merchant")
 
-	scope := merchant.ID(uuid.New())
+	scope := billing.MerchantID(uuid.New())
 	ctx, release, err := first.WithMerchantConn(merchant.WithID(context.Background(), scope))
 	require.NoError(t, err)
 	defer release()
@@ -37,7 +38,7 @@ func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 	defer done()
 	require.NotSame(t, first.Qx(ctx), other.Qx(otherCtx))
 
-	mismatch := merchant.WithID(ctx, merchant.ID(uuid.New()))
+	mismatch := merchant.WithID(ctx, billing.MerchantID(uuid.New()))
 	_, err = first.Qx(mismatch).Exec(mismatch, "SELECT 1")
 	require.ErrorContains(t, err, "does not match")
 	_, _, err = first.WithMerchantConn(mismatch)
@@ -50,7 +51,7 @@ func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 
 func TestIndependentMerchantPinKeepsAuthorityAndCancellation(t *testing.T) {
 	database := &DB{pool: &pgxpool.Pool{}, rw: newSchemaRewriter("billing")}
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	ctx, cancel := context.WithCancel(merchant.WithID(context.Background(), mid))
 	defer cancel()
 	pinned, release, err := database.WithMerchantConn(ctx)
@@ -72,7 +73,7 @@ func TestIndependentMerchantPinKeepsAuthorityAndCancellation(t *testing.T) {
 	}{
 		"different pool":      {&DB{pool: &pgxpool.Pool{}, rw: newSchemaRewriter("billing")}, pinned},
 		"different schema":    {&DB{pool: database.pool, rw: newSchemaRewriter("other")}, pinned},
-		"different merchant":  {database, merchant.WithID(pinned, merchant.ID(uuid.New()))},
+		"different merchant":  {database, merchant.WithID(pinned, billing.MerchantID(uuid.New()))},
 		"no merchant":         {database, context.Background()},
 		"transaction wrapper": {NewWithPgxTx(&recordingTx{}), pinned},
 		"nil database":        {nil, pinned},

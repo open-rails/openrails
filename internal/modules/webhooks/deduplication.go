@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -112,7 +113,7 @@ type dedupMarkCtxKey struct{}
 
 // dedupMark identifies the Postgres truth row for an in-flight webhook.
 type dedupMark struct {
-	merchantID merchant.ID
+	merchantID billing.MerchantID
 	op         string
 	eventID    string
 }
