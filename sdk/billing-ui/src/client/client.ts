@@ -20,8 +20,8 @@ import {
   currencyRegistrySchema,
   hostedCheckoutLinkSchema,
   paymentAuthenticationSchema,
-  invoicePageSchema,
   invoiceSchema,
+  listPageSchema,
   pageSchema,
   paymentMethodSchema,
   paymentSchema,
@@ -41,6 +41,7 @@ import {
   type PaymentAuthentication,
   type CurrencyScales,
   type Invoice,
+  type ListPage,
   type NewCard,
   type Page,
   type Payment,
@@ -79,6 +80,13 @@ export interface BillingClientOptions {
 export interface ListOptions {
   limit?: number
   offset?: number
+  signal?: AbortSignal
+}
+
+/** A cursor list read: pass the previous page's `next_cursor` for the next. */
+export interface CursorOptions {
+  limit?: number
+  cursor?: string | null
   signal?: AbortSignal
 }
 
@@ -246,8 +254,13 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
   const id = (value: string) => encodeURIComponent(value)
   const subscriptionPage = pageSchema(subscriptionSchema)
-  const methodPage = pageSchema(paymentMethodSchema)
-  const paymentPage = pageSchema(paymentSchema)
+  const methodPage = listPageSchema(paymentMethodSchema)
+  const paymentPage = listPageSchema(paymentSchema)
+  const invoicePage = listPageSchema(invoiceSchema)
+  const cursorQuery = (opts: CursorOptions, limit: number) => ({
+    limit: opts.limit ?? limit,
+    cursor: opts.cursor ?? undefined,
+  })
   const productPage = pageSchema(productSchema)
   const pricePage = pageSchema(priceSchema)
 
@@ -437,21 +450,23 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    listPaymentMethods(opts: ListOptions = {}): Promise<Page<PaymentMethod>> {
+    listPaymentMethods(
+      opts: CursorOptions = {}
+    ): Promise<ListPage<PaymentMethod>> {
       return json(methodPage, "/me/payment-methods", {
-        query: { limit: opts.limit ?? 100, offset: opts.offset },
+        query: cursorQuery(opts, 100),
         signal: opts.signal,
       })
     },
 
     /**
-     * Stores a card entered in the page: a Collect.js token
-     * (`cardSetupDriver` "collect_js") or the card itself ("card").
+     * Stores a card entered in the page with the PSP `psp_id`: a Collect.js
+     * token (`cardSetupDriver` "collect_js") or the card itself ("card").
      */
     addPaymentMethod(card: NewCard): Promise<PaymentMethod> {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",
-        body: card satisfies wire.CreatePaymentMethodRequest,
+        body: card,
       })
     },
 
@@ -463,7 +478,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       pspId: string
       idempotencyKey: string
     }): Promise<CardSetup> {
-      return json(cardSetupSchema, "/me/payment-methods/stripe-setup", {
+      return json(cardSetupSchema, "/me/payment-method-setups", {
         method: "POST",
         body: { psp_id: input.pspId, consent: true },
         headers: { "Idempotency-Key": input.idempotencyKey },
@@ -471,18 +486,16 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     getCardSetup(setupId: string, signal?: AbortSignal): Promise<CardSetup> {
-      return json(
-        cardSetupSchema,
-        `/me/payment-methods/stripe-setup/${id(setupId)}`,
-        { signal }
-      )
+      return json(cardSetupSchema, `/me/payment-method-setups/${id(setupId)}`, {
+        signal,
+      })
     },
 
     /** Verifies the setup with the provider; `payment_method_id` once saved. */
     confirmCardSetup(setupId: string): Promise<CardSetup> {
       return json(
         cardSetupSchema,
-        `/me/payment-methods/stripe-setup/${id(setupId)}/confirm`,
+        `/me/payment-method-setups/${id(setupId)}/confirm`,
         { method: "POST", body: {} }
       )
     },
@@ -514,8 +527,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return res.status === 202 ? "pending" : "removed"
     },
 
-    /** Makes the method the default collector for one currency's invoices. */
-    async setDefaultPaymentMethod(input: {
+    /** Makes the card the one that collects one currency's invoices. */
+    async setCollectionPaymentMethod(input: {
       currency: string
       paymentMethodId: string
     }): Promise<void> {
@@ -524,40 +537,25 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         body: {
           currency: input.currency.toUpperCase(),
           payment_method_id: input.paymentMethodId,
-        } satisfies wire.CollectionPaymentMethodRequest,
+        } satisfies wire.CollectionPaymentMethod,
       })
     },
 
     /** Charges and refunds, newest first. `rail` filters by rail. */
     listPayments(
-      opts: ListOptions & { rail?: string } = {}
-    ): Promise<Page<Payment>> {
+      opts: CursorOptions & { rail?: string } = {}
+    ): Promise<ListPage<Payment>> {
       return json(paymentPage, "/me/payments", {
-        query: {
-          limit: opts.limit ?? 20,
-          offset: opts.offset,
-          type: opts.rail,
-        },
+        query: { ...cursorQuery(opts, 20), rail: opts.rail },
         signal: opts.signal,
       })
     },
 
-    async listInvoices(opts: ListOptions = {}): Promise<Page<Invoice>> {
-      const page = await json(invoicePageSchema, "/me/invoices", {
-        query: { limit: opts.limit ?? 20, offset: opts.offset },
+    listInvoices(opts: CursorOptions = {}): Promise<ListPage<Invoice>> {
+      return json(invoicePage, "/me/invoices", {
+        query: cursorQuery(opts, 20),
         signal: opts.signal,
       })
-      const offset = page.offset ?? opts.offset ?? 0
-      return {
-        data: page.invoices,
-        total: page.total,
-        limit: page.limit,
-        offset,
-        has_more:
-          page.total != null
-            ? offset + page.invoices.length < page.total
-            : null,
-      }
     },
 
     getInvoice(invoiceId: string, signal?: AbortSignal): Promise<Invoice> {

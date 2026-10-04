@@ -25,22 +25,23 @@ const BRAND_PLATE: Record<string, string> = {
   diners: "DINERS",
 }
 
-function brandPlate(brand?: string): string {
+function brandPlate(brand?: string | null): string {
   const key = brand?.trim().toLowerCase() ?? ""
   return BRAND_PLATE[key] ?? "CARD"
 }
 
 // The plate is decorative; assistive tech gets the spoken brand instead.
-function brandName(brand?: string): string {
+function brandName(brand?: string | null): string {
   const value = brand?.trim()
   if (!value) return "Card"
   return value[0].toUpperCase() + value.slice(1)
 }
 
 function expiryLabel(method: SavedPaymentMethod): string | undefined {
-  if (!method.exp_month || !method.exp_year) return undefined
-  const month = String(method.exp_month).padStart(2, "0")
-  return `${month}/${String(method.exp_year).slice(-2)}`
+  const card = method.card
+  if (!card?.exp_month || !card.exp_year) return undefined
+  const month = String(card.exp_month).padStart(2, "0")
+  return `${month}/${String(card.exp_year).slice(-2)}`
 }
 
 export function SavedMethods({
@@ -70,6 +71,8 @@ export function SavedMethods({
         const id = `${idPrefix}-${method.id}`
         const active = value === method.id
         const expires = expiryLabel(method)
+        const brand = method.card?.brand
+        const last4 = method.card?.last4
         return (
           <Label
             key={method.id}
@@ -81,8 +84,8 @@ export function SavedMethods({
           >
             <RadioGroupItem id={id} value={method.id} />
             <CardBrandPlate
-              brand={method.brand}
-              fallback={brandPlate(method.brand)}
+              brand={brand ?? undefined}
+              fallback={brandPlate(brand)}
             />
             <span
               className={cn(
@@ -91,11 +94,11 @@ export function SavedMethods({
               )}
             >
               <span className="sr-only">
-                {brandName(method.brand)} card ending {method.last_four}
+                {brandName(brand)} card ending {last4}
                 {expires ? `, expires ${expires}` : ""}
               </span>
               <span aria-hidden>
-                {brandName(method.brand)} •••• {method.last_four ?? "····"}
+                {brandName(brand)} •••• {last4 ?? "····"}
                 {expires ? (
                   <span className="font-normal text-muted-foreground">
                     {" "}

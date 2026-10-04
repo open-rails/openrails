@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
@@ -24,7 +25,7 @@ var ErrStripeObjectNotFound = errors.New("stripe object not found")
 type StripePaymentMethodState struct {
 	ID         string
 	CustomerID string
-	Card       *StripeCard
+	Card       *models.Card
 }
 
 // StripeSubscriptionPaymentState is the effective card selection for one

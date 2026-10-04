@@ -195,8 +195,8 @@ WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
 -- Capture attachment never reparents an existing instrument to another payer.
 -- name: AttachCapturedPaymentMethod :one
 INSERT INTO billing.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
-VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'nmi','hyperswitch',sqlc.arg(custodian_id),sqlc.arg(vendor_customer_id),sqlc.arg(vendor_method_id),sqlc.arg(last_four),sqlc.arg(card_type),sqlc.arg(expiry_date),'pan_proxy','',sqlc.arg(now),sqlc.arg(now))
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,created_at,updated_at)
+VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),NULL,'nmi','hyperswitch',sqlc.arg(custodian_id),sqlc.arg(vendor_customer_id),sqlc.arg(vendor_method_id),sqlc.narg(card_brand)::text,sqlc.narg(card_last4)::text,sqlc.narg(card_exp_month)::smallint,sqlc.narg(card_exp_year)::smallint,'pan_proxy',sqlc.arg(now),sqlc.arg(now))
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=billing.payment_methods.id
 WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id

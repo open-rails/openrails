@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,14 +27,14 @@ type hyperSwitchCollectionAdapter struct {
 // without invoking invoice preparation or choosing an unscheduled agreement.
 // The caller rechecks method ownership against its frozen instrument and owns
 // the durable submission fence. This helper compares the retained HS binding.
-func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.BillingPaymentMethod, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
+func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.BillingPaymentMethod, psp uuid.UUID, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
 	if resolver == nil || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
 		return nil, charge.ErrInstrumentChanged
 	}
 	if err := accepted.Validate(); err != nil {
 		return nil, err
 	}
-	adapter, armed, err := resolver.ResolveCollectionAdapter(ctx, method)
+	adapter, armed, err := resolver.ResolveCollectionAdapter(ctx, method, psp)
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +62,8 @@ func (s *MoneyService) SetHyperSwitchDeployment(apiBaseURL string) error {
 	return nil
 }
 
-func collectionHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
-	return charge.FreezeHyperSwitchBinding(ctx, q, method, deployment)
+func collectionHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
+	return charge.FreezeHyperSwitchBinding(ctx, q, method, psp, deployment)
 }
 func hyperSwitchBinding(row gen.BillingCustodian, deployment string) (charge.HyperSwitchBinding, error) {
 	return charge.HyperSwitchBindingFromAccount(row, deployment)

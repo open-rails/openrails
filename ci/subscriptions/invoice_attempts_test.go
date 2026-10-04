@@ -43,10 +43,10 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(res.Job.ID)
-	invoices, _, err := client.ListMerchantInvoices(ctx, billing.MerchantInvoiceFilter{CustomerID: c.id}, 10, 0)
+	invoices, err := client.ListInvoices(ctx, billing.ListInvoicesParams{CustomerID: c.cid()})
 	require.NoError(t, err)
-	require.Len(t, invoices, 1)
-	invoice := invoices[0].ID.String()
+	require.Len(t, invoices.Items, 1)
+	invoice := invoices.Items[0].ID.String()
 
 	declining := c.saveCard("nmi", card{Brand: "visa", Last4: "0002", Decline: "202"})
 	status, out := c.call(http.MethodPost, "/invoices/"+invoice+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": declining})

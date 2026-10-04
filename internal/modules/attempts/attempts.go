@@ -285,11 +285,11 @@ func cardFromMethod(ctx context.Context, q *gen.Queries, a Attempt, row *gen.Ins
 	if err != nil {
 		return err
 	}
-	if row.CardBrand == nil && pm.CardType != nil {
-		row.CardBrand = optional(strings.ToLower(*pm.CardType))
+	if row.CardBrand == nil && pm.CardBrand != nil {
+		row.CardBrand = optional(strings.ToLower(*pm.CardBrand))
 	}
-	if row.CardLast4 == nil && pm.LastFour != nil && last4Shape.MatchString(*pm.LastFour) {
-		row.CardLast4 = pm.LastFour
+	if row.CardLast4 == nil {
+		row.CardLast4 = pm.CardLast4
 	}
 	return nil
 }

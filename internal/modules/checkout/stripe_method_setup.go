@@ -3,7 +3,6 @@ package checkout
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -286,7 +285,11 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 			anchor = existing.StoredCredentialRecurringRef == ""
 		} else if db.IsNotFound(err) {
 			now := s.now().UTC()
-			method := models.PaymentMethod{ID: methodID, CustomerID: p.CustomerID, PspID: p.PSPID, Rail: models.RailStripe, Custodian: models.CustodianPSP, RailCustomerRef: p.CustomerRef, RailMethodRef: setup.MethodRef, LastFour: &setup.LastFour, CardType: &setup.Brand, ExpiryDate: new(fmt.Sprintf("%02d/%02d", setup.ExpMonth, setup.ExpYear%100)), CreatedAt: now, UpdatedAt: now}
+			card := models.ParseCard(setup.Brand, setup.LastFour, "")
+			if setup.ExpMonth >= 1 && setup.ExpMonth <= 12 && setup.ExpYear >= 2000 {
+				card.ExpMonth, card.ExpYear = setup.ExpMonth, setup.ExpYear
+			}
+			method := models.PaymentMethod{ID: methodID, CustomerID: p.CustomerID, PspID: &p.PSPID, Rail: models.RailStripe, Custodian: models.CustodianPSP, RailCustomerRef: p.CustomerRef, RailMethodRef: setup.MethodRef, Card: card, CreatedAt: now, UpdatedAt: now}
 			if err := paymentmethods.NewPaymentMethodRepo(td).Create(ctx, &method); err != nil {
 				return err
 			}

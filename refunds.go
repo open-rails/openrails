@@ -11,8 +11,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// RefundPayment refunds a charge through its rail. The returned refund object
-// has Status "succeeded" once the provider confirmed it, or "pending" while the
+// RefundPayment refunds a charge through its rail. The returned refund has
+// Status "succeeded" once the provider confirmed it, or "pending" while the
 // durable refund operation is parked (provider write gates) or reconciling an
 // uncertain provider outcome; it settles without another call. A provider
 // refusal is a StatusError and leaves no refund recorded.
@@ -85,16 +85,16 @@ func (c *Client) GetProductArchive(ctx context.Context, id string, requestOption
 	return &out, nil
 }
 
-// ListPurchaseReviews lists purchase reviews, oldest first.
-func (c *Client) ListPurchaseReviews(ctx context.Context, filter billing.PurchaseReviewFilter, requestOptions ...RequestOption) (*billing.Page[billing.PurchaseReview], error) {
-	q := pageQuery(filter.PageOptions)
+// ListPurchaseReviews is one page of purchase reviews, oldest first.
+func (c *Client) ListPurchaseReviews(ctx context.Context, filter billing.ListPurchaseReviewsParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PurchaseReview], error) {
+	q := pageValues(nil, filter.Page)
 	if status := strings.TrimSpace(filter.Status); status != "" {
 		q.Set("status", status)
 	}
 	if archive := strings.TrimSpace(filter.ProductArchiveID); archive != "" {
 		q.Set("product_archive_id", archive)
 	}
-	var out billing.Page[billing.PurchaseReview]
+	var out billing.ListPage[billing.PurchaseReview]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/purchase-reviews?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}

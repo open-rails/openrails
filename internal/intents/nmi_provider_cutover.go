@@ -154,8 +154,8 @@ func (h *NMIProviderCutover) freeze(ctx context.Context, d *db.DB, id uuid.UUID,
 	if err != nil {
 		return p, err
 	}
-	p.SourceInstrument = charge.FreezeInstrument(sourceMethod)
-	p.TargetInstrument = charge.FreezeInstrument(targetMethod)
+	p.SourceInstrument = charge.FreezeInstrument(sourceMethod, derefUUID(sourceMethod.PspID))
+	p.TargetInstrument = charge.FreezeInstrument(targetMethod, derefUUID(targetMethod.PspID))
 	if p.SourceInstrument.Validate() != nil || p.TargetInstrument.Validate() != nil ||
 		p.SourceInstrument.CustodianHeld() || p.TargetInstrument.CustodianHeld() ||
 		p.SourceInstrument.PSPID != req.ExpectedSourcePSPID || p.TargetInstrument.PSPID != req.ExpectedTargetPSPID ||

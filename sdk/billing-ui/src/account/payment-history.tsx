@@ -87,7 +87,7 @@ export function PaymentHistory({
           </thead>
           <tbody className="divide-y divide-border">
             {payments.map((p) => {
-              const refund = p.object === "refund"
+              const refund = p.kind === "refund"
               const status = p.status || (refund ? "refunded" : "unknown")
               const amount = formatMoney(p.amount, p.currency, scales, locale)
               const refunded =

@@ -30,6 +30,24 @@ export interface Page<T> {
   has_more?: boolean | null
 }
 
+/** One page of a cursor list; `next_cursor` is null on the last page. */
+export const listPageSchema = <T extends z.ZodType>(item: T) =>
+  z.object({
+    data: z
+      .array(item)
+      .nullish()
+      .transform((v) => v ?? []),
+    next_cursor: z
+      .string()
+      .nullish()
+      .transform((v) => v ?? null),
+  })
+
+export interface ListPage<T> {
+  data: T[]
+  next_cursor: string | null
+}
+
 export const subscriptionStatusSchema = z.string()
 /** `pending | active | past_due | awaiting_method | unverified | cancelled`; kept open for new values. */
 export type SubscriptionStatus =
@@ -118,15 +136,30 @@ export type Subscription = z.infer<typeof subscriptionSchema> & {
   status: SubscriptionStatus
 }
 
+export const billingDetailsSchema = z.object({
+  name: z.string().nullish(),
+  email: z.string().nullish(),
+  phone: z.string().nullish(),
+  address: z
+    .object({
+      line1: z.string().nullish(),
+      line2: z.string().nullish(),
+      city: z.string().nullish(),
+      state: z.string().nullish(),
+      postal_code: z.string().nullish(),
+      country: z.string().nullish(),
+    })
+    .nullish(),
+})
+export type BillingDetails = z.infer<typeof billingDetailsSchema>
+
 export const paymentMethodSchema = z.object({
   id: z.string(),
-  type: z.string().nullish(),
   rail: z.string().nullish(),
+  /** The PSP holding the card; null for a card a custodian holds. */
   psp_id: z.string().nullish(),
   card: cardSummarySchema.nullish(),
-  billing_details: z
-    .object({ name: z.string().nullish(), email: z.string().nullish() })
-    .nullish(),
+  billing_details: billingDetailsSchema.nullish(),
   health: z
     .object({
       /** `valid | expiring_soon | expired` */
@@ -144,39 +177,30 @@ export const paymentMethodSchema = z.object({
       })
     )
     .nullish(),
-  /** The customer's default card: pre-selected, never charged implicitly. */
-  default: z.boolean().nullish(),
-  /** Currencies whose invoices collect from this method by default. */
-  collection_default_currencies: z.array(z.string()).nullish(),
+  /** Currencies whose invoices this card collects. */
+  collection_currencies: z.array(z.string()).nullish(),
   created_at: time.nullish(),
 })
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>
 
 export const paymentSchema = z.object({
   id: z.string(),
-  /** `charge | refund` */
-  object: z.string().nullish(),
+  /** `charge | refund | chargeback | dispute_reversal` */
+  kind: z.string(),
   /** `succeeded | pending | failed | refunded | partially_refunded` */
-  status: z.string().nullish(),
+  status: z.string(),
+  /** Negative for a refund or chargeback. */
   amount: amount,
   amount_refunded: amount.nullish(),
   currency: z.string(),
   subscription_id: z.string().nullish(),
+  price_id: z.string().nullish(),
+  /** `rail | manual | admin` */
+  channel: z.string().nullish(),
   rail: z.string().nullish(),
-  refunded: z.boolean().nullish(),
   created_at: time,
-  price: z
-    .object({
-      id: z.string().nullish(),
-      key: z.string().nullish(),
-      product: z.string().nullish(),
-      /** `one_time | recurring` */
-      type: z.string().nullish(),
-      /** Exact hours, e.g. `"720h"`. */
-      recurring: z.object({ interval: z.string().nullish() }).nullish(),
-    })
-    .nullish(),
-  /** What was bought; OpenRails newer than v0.160.0. */
+  /** What was bought. */
+  price: subscriptionPriceSchema.nullish(),
   product: subscriptionProductSchema.nullish(),
   card: cardSummarySchema.nullish(),
   /** Normalized decline of a failed payment. */
@@ -208,15 +232,6 @@ export const invoiceSchema = z.object({
 })
 export type Invoice = z.infer<typeof invoiceSchema>
 
-export const invoicePageSchema = z.object({
-  invoices: z
-    .array(invoiceSchema)
-    .nullish()
-    .transform((v) => v ?? []),
-  total: z.number().nullish(),
-  limit: z.number().nullish(),
-  offset: z.number().nullish(),
-})
 
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>
@@ -434,18 +449,18 @@ export const paymentAuthenticationSchema = z.object({
 })
 export type PaymentAuthentication = z.infer<typeof paymentAuthenticationSchema>
 
-/** What a card setup hands the server: tokenized data only, never a PAN. */
+/**
+ * What a card setup hands the server: tokenized data only, never a PAN.
+ * OpenRails reads the saved card's brand, last four and expiry from the PSP.
+ */
 interface NewCardFields {
-  /** OpenRails PSP key the card is saved with (e.g. "nmi"); required. */
-  provider: string
-  name_on_card?: string
-  country?: string
-  zip?: string
-  email?: string
-  /** Collect.js display metadata: last four digits, brand, MM/YY. */
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
+  /** The PSP the card is saved with (`psp_id` of a rail option); required. */
+  psp_id: string
+  billing_details?: {
+    name?: string
+    email?: string
+    address?: { postal_code?: string; country?: string }
+  }
 }
 
 /**

@@ -87,7 +87,7 @@ type CheckoutCustodianSaleService struct {
 
 type custodianInstrumentStore interface {
 	Create(ctx context.Context, method *models.PaymentMethod) error
-	GetByPSPMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error)
+	GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error)
 }
 
 // custodialPSP is the resolved arrangement one custodian sale charges through:
@@ -484,7 +484,7 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" {
 		return "", nil
 	}
-	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{CustodianID: db.CustodianIDFromContext(ctx), PspID: db.PSPIDFromContext(ctx),
+	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{CustodianID: db.CustodianIDFromContext(ctx),
 		MerchantID:  merchantID,
 		Custodian:   nmiproxy.Custodian,
 		Fingerprint: fingerprint,
@@ -626,7 +626,8 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 	if h.Sale.PaymentMethodService == nil {
 		return nil, errors.New("payment method service not wired")
 	}
-	if existing, err := h.Sale.PaymentMethodService.GetByPSPMethodRef(ctx, nmiproxy.Rail, token.ID); err == nil && existing != nil {
+	custodian := db.CustodianIDFromContext(ctx)
+	if existing, err := h.Sale.PaymentMethodService.GetByCustodianRef(ctx, custodian, token.ID); err == nil && existing != nil {
 		return &existing.ID, nil
 	} else if err != nil && !db.IsNotFound(err) && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return nil, err
@@ -649,16 +650,14 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 		UpdatedAt:   now,
 	}
 	if token.Card != nil {
-		method.LastFour = stringPtrIfSet(token.Card.Last4)
-		method.CardType = stringPtrIfSet(token.Card.Brand)
-		if token.Card.ExpirationMonth > 0 && token.Card.ExpirationYear > 0 {
-			exp := fmt.Sprintf("%02d/%02d", token.Card.ExpirationMonth, token.Card.ExpirationYear%100)
-			method.ExpiryDate = &exp
+		method.Card = models.ParseCard(token.Card.Brand, token.Card.Last4, "")
+		if token.Card.ExpirationMonth >= 1 && token.Card.ExpirationMonth <= 12 && token.Card.ExpirationYear >= 2000 {
+			method.Card.ExpMonth, method.Card.ExpYear = token.Card.ExpirationMonth, token.Card.ExpirationYear
 		}
 	}
 	if err := h.Sale.PaymentMethodService.Create(ctx, method); err != nil {
 		// Concurrent write of the same token: reuse the surviving row.
-		if existing, gerr := h.Sale.PaymentMethodService.GetByPSPMethodRef(ctx, nmiproxy.Rail, token.ID); gerr == nil && existing != nil {
+		if existing, gerr := h.Sale.PaymentMethodService.GetByCustodianRef(ctx, custodian, token.ID); gerr == nil && existing != nil {
 			return &existing.ID, nil
 		}
 		return nil, err

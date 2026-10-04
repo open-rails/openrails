@@ -30,19 +30,6 @@ func (o PaymentOperation) Unresolved() bool {
 	return false
 }
 
-type PayInvoiceNowRequest struct {
-	InvoiceID       uuid.UUID       `json:"-"`
-	IdempotencyKey  string          `json:"-"`
-	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
-}
-
-type InvoicePayNowResult struct {
-	Invoice   InvoiceDTO               `json:"invoice"`
-	Attempt   InvoicePaymentAttemptDTO `json:"attempt"`
-	Operation PaymentOperation         `json:"operation"`
-	Replayed  bool                     `json:"replayed"`
-}
-
 type RetrySubscriptionNowRequest struct {
 	SubscriptionID SubscriptionID `json:"-"`
 	IdempotencyKey string         `json:"-"`

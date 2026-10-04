@@ -26,7 +26,7 @@ export const es: BillingUiMessageBundle = {
     expired: "Caducada",
     expiring_soon: "Caduca pronto",
     needs_attention: "Revisar",
-    default: "Predeterminada",
+    collection: "Facturas",
   },
   interval: {
     every: {
@@ -118,9 +118,9 @@ export const es: BillingUiMessageBundle = {
     fallbackBrand: "Tarjeta",
     expires: "Caduca {date}",
     usedBy: "Usada por {names}",
-    defaultFor: "Predeterminada para {currencies}",
-    makeDefault: "Usar como predeterminada",
-    madeDefault: "Tarjeta predeterminada actualizada.",
+    collectsFor: "Paga las facturas en {currencies}",
+    useForInvoices: "Usar para facturas",
+    usedForInvoices: "Tarjeta para facturas actualizada.",
     remove: "Eliminar",
     removeLabel: "Eliminar {label}",
     removeTitle: "¿Eliminar {label}?",

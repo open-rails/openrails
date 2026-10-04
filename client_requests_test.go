@@ -265,11 +265,48 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	}
 	// Typed identifiers: zero, malformed, or another kind's spelling.
 	typed := map[string]func() error{
-		"pay invoice":        func() error { _, err := c.PayInvoiceNow(ctx, billing.PayInvoiceNowRequest{}); return err },
 		"retry subscription": func() error { _, err := c.RetrySubscriptionNow(ctx, billing.RetrySubscriptionNowRequest{}); return err },
-		"my invoice":         func() error { _, err := c.GetMyInvoice(ctx, uuid.Nil); return err },
-		"my subscription":    func() error { _, err := c.GetMySubscription(ctx, billing.SubscriptionID{}); return err },
-		"subscription":       func() error { _, err := c.GetSubscription(ctx, billing.SubscriptionID{}); return err },
+		"invoice":            func() error { _, err := c.GetInvoice(ctx, billing.InvoiceID{}); return err },
+		"void invoice":       func() error { _, err := c.VoidInvoice(ctx, billing.InvoiceID{}); return err },
+		"uncollectible invoice": func() error {
+			_, err := c.MarkInvoiceUncollectible(ctx, billing.InvoiceID{})
+			return err
+		},
+		"invoice payment": func() error {
+			_, err := c.CreateInvoicePayment(ctx, billing.InvoiceID{}, billing.CreateInvoicePaymentParams{})
+			return err
+		},
+		"invoice payments": func() error {
+			_, err := c.ListInvoicePayments(ctx, billing.InvoiceID{}, billing.PageRequest{})
+			return err
+		},
+		"retry invoice": func() error {
+			_, err := c.RetryInvoiceCollection(ctx, billing.InvoiceID{}, billing.RetryInvoiceCollectionParams{IdempotencyKey: "k"})
+			return err
+		},
+		"payment methods customer": func() error {
+			_, err := c.ListPaymentMethods(ctx, billing.CustomerID{}, billing.PageRequest{})
+			return err
+		},
+		"invoice profile customer": func() error { _, err := c.GetCustomerInvoiceProfile(ctx, billing.CustomerID{}); return err },
+		"set invoice profile customer": func() error {
+			_, err := c.SetCustomerInvoiceProfile(ctx, billing.CustomerID{}, billing.SetInvoiceProfileParams{IfAbsent: true})
+			return err
+		},
+		"settled payment customer": func() error {
+			_, err := c.GetPaymentSettlementStatus(ctx, billing.CustomerID{}, price)
+			return err
+		},
+		"settled payment price": func() error {
+			_, err := c.GetPaymentSettlementStatus(ctx, billing.CustomerID(uuid.New()), billing.PriceID{})
+			return err
+		},
+		"off-channel payment": func() error {
+			_, err := c.CreateOffChannelPayment(ctx, billing.CustomerID(uuid.New()), billing.CreateOffChannelPaymentParams{})
+			return err
+		},
+		"my subscription": func() error { _, err := c.GetMySubscription(ctx, billing.SubscriptionID{}); return err },
+		"subscription":    func() error { _, err := c.GetSubscription(ctx, billing.SubscriptionID{}); return err },
 		"cancel subscription": func() error {
 			return c.CancelSubscription(ctx, billing.SubscriptionID{}, billing.CancelSubscriptionRequest{})
 		},
@@ -295,7 +332,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ConfirmCheckoutSession(ctx, "", billing.ConfirmCheckoutSessionRequest{})
 			return err
 		},
-		"settled payment": func() error { _, err := c.HasSettledPayment(ctx, customer, noPrice); return err },
 		"access check product": func() error {
 			_, err := c.ProductAccess.Check(ctx, &billing.ProductAccessCheckParams{CustomerID: customer})
 			return err
@@ -340,7 +376,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"delete payment method": func() error {
-			_, err := c.DeletePaymentMethod(ctx, customer, billing.PaymentMethodID{})
+			_, err := c.DeletePaymentMethod(ctx, billing.CustomerID(uuid.New()), billing.PaymentMethodID{})
 			return err
 		},
 		"empty delegations customer": func() error { _, err := c.SetSpendDelegations(ctx, billing.CustomerID{}, nil); return err },
@@ -352,11 +388,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	}
 	// Every customer-scoped operation validates the customer the same way.
 	customerScoped := map[string]func(id string) error{
-		"payment methods":     func(id string) error { _, err := c.ListPaymentMethods(ctx, id, billing.PageOptions{}); return err },
-		"effective tier":      func(id string) error { _, err := c.ResolveEffectiveTier(ctx, id, "group"); return err },
-		"invoice profile":     func(id string) error { _, err := c.GetCustomerInvoiceProfile(ctx, id); return err },
-		"set invoice profile": func(id string) error { return c.SetCustomerInvoiceProfile(ctx, id, billing.InvoiceProfileDTO{}) },
-
+		"effective tier": func(id string) error { _, err := c.ResolveEffectiveTier(ctx, id, "group"); return err },
 		"access list": func(id string) error {
 			_, err := c.ProductAccess.List(ctx, &billing.ProductAccessListParams{CustomerID: id})
 			return err
@@ -366,8 +398,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.GrantEntitlement(ctx, id, billing.GrantEntitlementRequest{Entitlement: "pro"})
 			return err
 		},
-		"revoke customer":       func(id string) error { return c.RevokeEntitlement(ctx, id, "ent") },
-		"settled payment buyer": func(id string) error { _, err := c.HasSettledPayment(ctx, id, price.String()); return err },
+		"revoke customer": func(id string) error { return c.RevokeEntitlement(ctx, id, "ent") },
 	}
 	// Typed customer ids: the zero id names nobody.
 	zero := billing.CustomerID{}
@@ -408,24 +439,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 	}
 	uuidCalls := map[string]func() error{
-		"merchant invoice":      func() error { _, err := c.GetMerchantInvoice(ctx, uuid.Nil); return err },
-		"void invoice":          func() error { _, err := c.VoidInvoice(ctx, uuid.Nil); return err },
-		"uncollectible invoice": func() error { _, err := c.MarkInvoiceUncollectible(ctx, uuid.Nil); return err },
-		"record invoice payment": func() error {
-			_, err := c.RecordInvoicePayment(ctx, uuid.Nil, billing.RecordInvoicePaymentRequest{})
-			return err
-		},
-		"retry invoice": func() error {
-			_, err := c.RetryInvoiceCollection(ctx, billing.InvoiceCollectionRetryRequest{})
-			return err
-		},
-		"invoice attempts":       func() error { _, _, err := c.ListInvoicePaymentAttempts(ctx, uuid.Nil, 10, 0); return err },
 		"cancel migration":       func() error { _, err := c.CancelPlanMigration(ctx, uuid.Nil); return err },
 		"acknowledge host event": func() error { return c.AcknowledgeHostEvent(ctx, uuid.Nil) },
-		"ensure invoice profile": func() error {
-			_, err := c.EnsureCustomerInvoiceProfile(ctx, noCustomer, billing.InvoiceProfileDTO{})
-			return err
-		},
 	}
 
 	requireInvalidParam := func(t *testing.T, name string, err error) {

@@ -70,7 +70,7 @@ func (q *Queries) CountUnresolvedOperationsNamingPaymentMethod(ctx context.Conte
 }
 
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, is_default FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid
   AND custodian_id = $2::uuid
   AND custodian = $3::text
@@ -99,23 +99,21 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 	var i BillingPaymentMethod
 	err := row.Scan(
 		&i.ID,
-		&i.Rail,
-		&i.InitialTransactionID,
-		&i.LastFour,
-		&i.CardType,
-		&i.ExpiryDate,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.Rail,
 		&i.PspID,
+		&i.Custodian,
+		&i.CustodianID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
 		&i.StoredCredentialRecurringRef,
 		&i.StoredCredentialUnscheduledRef,
-		&i.Custodian,
-		&i.CustodianID,
+		&i.CardBrand,
+		&i.CardLast4,
+		&i.CardExpMonth,
+		&i.CardExpYear,
+		&i.Metadata,
 		&i.Fingerprint,
 		&i.NetworkTokenID,
 		&i.NetworkTokenStatus,
@@ -124,14 +122,15 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 		&i.ParkReason,
 		&i.ParkedAt,
 		&i.AccountUpdaterCheckedAt,
-		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const lockPaymentMethodForCustodyRemap = `-- name: LockPaymentMethodForCustodyRemap :one
 
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, is_default FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
 FOR UPDATE
@@ -151,23 +150,21 @@ func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg Lock
 	var i BillingPaymentMethod
 	err := row.Scan(
 		&i.ID,
-		&i.Rail,
-		&i.InitialTransactionID,
-		&i.LastFour,
-		&i.CardType,
-		&i.ExpiryDate,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.Rail,
 		&i.PspID,
+		&i.Custodian,
+		&i.CustodianID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
 		&i.StoredCredentialRecurringRef,
 		&i.StoredCredentialUnscheduledRef,
-		&i.Custodian,
-		&i.CustodianID,
+		&i.CardBrand,
+		&i.CardLast4,
+		&i.CardExpMonth,
+		&i.CardExpYear,
+		&i.Metadata,
 		&i.Fingerprint,
 		&i.NetworkTokenID,
 		&i.NetworkTokenStatus,
@@ -176,7 +173,8 @@ func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg Lock
 		&i.ParkReason,
 		&i.ParkedAt,
 		&i.AccountUpdaterCheckedAt,
-		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -270,10 +268,11 @@ UPDATE billing.payment_methods SET
     network_token_id = $6::text,
     network_token_status = $7::text,
     network_token_par = $8::text,
-    psp_id = COALESCE($9::uuid, psp_id),
-    last_four = COALESCE(NULLIF($10::text, ''), last_four),
-    card_type = COALESCE(NULLIF($11::text, ''), card_type),
-    expiry_date = COALESCE(NULLIF($12::text, ''), expiry_date),
+    psp_id = NULL,
+    card_brand = COALESCE($9::text, card_brand),
+    card_last4 = COALESCE($10::text, card_last4),
+    card_exp_month = COALESCE($11::smallint, card_exp_month),
+    card_exp_year = COALESCE($12::smallint, card_exp_year),
     updated_at = now()
 WHERE merchant_id = $13::uuid
   AND id = $14::uuid
@@ -289,10 +288,10 @@ type RemapPaymentMethodCustodyParams struct {
 	NetworkTokenID     string
 	NetworkTokenStatus string
 	NetworkTokenPar    string
-	ToPspID            *uuid.UUID
-	LastFour           string
-	CardType           string
-	ExpiryDate         string
+	CardBrand          *string
+	CardLast4          *string
+	CardExpMonth       *int16
+	CardExpYear        *int16
 	MerchantID         uuid.UUID
 	ID                 uuid.UUID
 	FromCustodian      string
@@ -326,10 +325,10 @@ func (q *Queries) RemapPaymentMethodCustody(ctx context.Context, arg RemapPaymen
 		arg.NetworkTokenID,
 		arg.NetworkTokenStatus,
 		arg.NetworkTokenPar,
-		arg.ToPspID,
-		arg.LastFour,
-		arg.CardType,
-		arg.ExpiryDate,
+		arg.CardBrand,
+		arg.CardLast4,
+		arg.CardExpMonth,
+		arg.CardExpYear,
 		arg.MerchantID,
 		arg.ID,
 		arg.FromCustodian,

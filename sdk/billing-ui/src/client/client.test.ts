@@ -62,7 +62,7 @@ describe("createBillingClient", () => {
     expect(headers.get("Accept-Language")).toBe("de")
   })
 
-  it("lists every status by default and pages payments by offset", async () => {
+  it("lists every status by default and pages payments by cursor", async () => {
     const server = fakeBilling()
     const client = createBillingClient({ fetch: server.fetch })
     const subs = await client.listSubscriptions()
@@ -70,9 +70,9 @@ describe("createBillingClient", () => {
     expect(server.fetch.mock.calls[0][0]).toBe(
       "/billing/v1/me/subscriptions?status=all&limit=100"
     )
-    await client.listPayments({ limit: 5, offset: 10 })
+    await client.listPayments({ limit: 5, cursor: "c1", rail: "nmi" })
     expect(server.fetch.mock.calls[1][0]).toBe(
-      "/billing/v1/me/payments?limit=5&offset=10"
+      "/billing/v1/me/payments?limit=5&cursor=c1&rail=nmi"
     )
   })
 

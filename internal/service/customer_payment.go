@@ -24,29 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// These commands are internal: the HTTP adapter establishes verified customer
-// action authority before passing the payer. The public Client always crosses
-// that same adapter, including embedded mode.
-func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, request billing.PayInvoiceNowRequest) (*billing.InvoicePayNowResult, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	var out *billing.InvoicePayNowResult
-	err = rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		result, err := s.moneyService().PayInvoiceNow(ctx, rt.IntentRunner(), payer, money.InvoiceCollectionRetryRequest{InvoiceID: request.InvoiceID, PaymentMethodID: request.PaymentMethodID.UUID(), IdempotencyKey: request.IdempotencyKey})
-		if err != nil {
-			return err
-		}
-		if err := customerPaymentRefusal(result.Operation); err != nil {
-			return err
-		}
-		out = &billing.InvoicePayNowResult{Invoice: invoiceToDTO(result.Invoice), Attempt: invoicePaymentAttemptToDTO(result.Attempt), Operation: billing.PaymentOperation{ID: result.Operation.ID, Status: result.Operation.Status}, Replayed: result.Replayed}
-		return nil
-	})
-	return out, err
-}
-
 func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request billing.RetrySubscriptionNowRequest, principal billingauth.DelegatedPrincipal) (*billing.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
@@ -95,46 +72,6 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		return nil
 	})
 	return out, err
-}
-
-func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*billing.PaymentRecovery, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	invoice, err := s.moneyService().GetInvoiceByID(ctx, payer, id)
-	if err != nil {
-		return nil, err
-	}
-	out := &billing.PaymentRecovery{}
-	if invoice.CollectionIntentID != nil {
-		row, err := intents.NewStore(s.rt.DB).Get(ctx, *invoice.CollectionIntentID)
-		if err != nil {
-			return nil, err
-		}
-		out.Operation = &billing.PaymentOperation{ID: row.ID, Status: row.Status}
-		out.BlockedReason = "payment_in_progress"
-	} else if invoice.AmountDue <= 0 || (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible") {
-		out.BlockedReason = "invoice_not_payable"
-	} else {
-		out.Retryable = true
-		// Existing attempts are the invoice's authoritative collection history. Read
-		// only its newest payer-scoped attempt; a later pending/settled attempt does
-		// not inherit an older decline.
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return nil, err
-		}
-		attempts, err := s.rt.DB.Gen(ctx).ListInvoicePaymentAttemptsByPayer(ctx, gen.ListInvoicePaymentAttemptsByPayerParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), InvoiceID: id, Limit: 1})
-		if err != nil {
-			return nil, err
-		}
-		if len(attempts) > 0 && attempts[0].Status == "failed" && attempts[0].Rail != nil && attempts[0].FailureCode != nil {
-			out.LastFailureReason = decline.ReasonFor(*attempts[0].Rail, *attempts[0].FailureCode)
-		}
-	}
-	return out, nil
 }
 
 func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*billing.PaymentRecovery, error) {

@@ -1,0 +1,42 @@
+{
+  "id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  "customer_id": "22222222-2222-2222-2222-222222222222",
+  "rail": "nmi",
+  "psp_id": "55555555-5555-5555-5555-555555555555",
+  "card": {
+    "brand": "visa",
+    "last4": "4242",
+    "exp_month": 12,
+    "exp_year": 2030
+  },
+  "billing_details": {
+    "name": "Ada Lovelace",
+    "email": null,
+    "phone": null,
+    "address": {
+      "line1": null,
+      "line2": null,
+      "city": null,
+      "state": null,
+      "postal_code": "80202",
+      "country": "US"
+    }
+  },
+  "health": {
+    "expiry_status": "valid",
+    "last_charged_at": "2026-09-16T00:00:00.123456789Z",
+    "last_charge_outcome": "succeeded",
+    "active": true
+  },
+  "subscriptions": [
+    {
+      "id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "display_name": "Pro",
+      "created_at": "2026-09-16T00:00:00.123456789Z"
+    }
+  ],
+  "collection_currencies": [
+    "USD"
+  ],
+  "created_at": "2026-09-16T00:00:00.123456789Z"
+}

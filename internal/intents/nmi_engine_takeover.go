@@ -152,8 +152,8 @@ func (h *NMIEngineTakeover) freeze(ctx context.Context, d *db.DB, sub *models.Su
 	if err != nil {
 		return p, err
 	}
-	instrument := charge.FreezeInstrument(method)
-	if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.Custodian != models.CustodianPSP {
+	instrument := charge.FreezeInstrument(method, sub.PspID)
+	if method.CustomerID != sub.CustomerID || !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.Custodian != models.CustodianPSP {
 		return p, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverNoAgreement, "saved payment method is not this subscription's NMI vault card")
 	}
 	if err := charge.ValidateEngineInstrument(method.Rail, instrument, nil, true); err != nil {

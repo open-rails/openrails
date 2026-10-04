@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"sort"
-	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -34,161 +32,125 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 	}
 }
 
-func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObject {
+// PaymentToAPI is a payment on the wire; refunds, when not nil, are the
+// reversals of a charge and set its refunded amount.
+func PaymentToAPI(p *models.Payment, refunds []*models.Payment) billing.Payment {
 	var amountRefunded int64
-	var refundObjects []api.PaymentObject
+	out := make([]billing.Payment, 0, len(refunds))
 	for _, r := range refunds {
-		if refundStatusCountsTowardAPIAmount(r.Status) {
-			if r.Amount < 0 {
-				amountRefunded += -r.Amount
-			} else {
-				amountRefunded += r.Amount
-			}
+		if r.Status == "completed" {
+			amountRefunded += abs(r.Amount)
 		}
-		refundObjects = append(refundObjects, PaymentToAPI(r, nil))
+		out = append(out, paymentView(r, 0))
 	}
-	payment := paymentToAPIWithRefundTotal(p, amountRefunded)
+	payment := paymentView(p, amountRefunded)
 	if refunds != nil {
-		if refundObjects == nil {
-			refundObjects = []api.PaymentObject{}
-		}
-		payment.Refunds = &api.PaymentRefundsList{Object: "list", Data: refundObjects}
+		payment.Refunds = out
 	}
 	return payment
 }
 
-// paymentToAPIWithRefundTotal keeps status derivation identical for detailed
-// payments and customer history, without loading unbounded refund objects.
-func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.PaymentObject {
-	var subID *billing.SubscriptionID
+func abs(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// paymentView is a payment on the wire, given the completed refunds against
+// it. A charge refunded in full reads refunded, in part partially_refunded.
+func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
+	out := billing.Payment{
+		ID:             billing.PaymentID(p.ID),
+		Kind:           paymentKind(p),
+		Status:         paymentStatus(p.Status),
+		Amount:         p.Amount,
+		AmountRefunded: amountRefunded,
+		Currency:       p.Currency,
+		CustomerID:     billing.CustomerID(p.CustomerID),
+		PriceID:        billing.PriceID(p.PriceID),
+		Channel:        billing.ChannelRail,
+		TransactionID:  p.TransactionID,
+		CreatedAt:      p.CreatedAt,
+	}
 	if p.SubscriptionID != nil {
-		s := billing.SubscriptionID(*p.SubscriptionID)
-		subID = &s
-	}
-	object := "charge"
-	status := paymentAPIStatus(p.Status)
-	captured := status == "succeeded" || status == "refunded" || status == "partially_refunded"
-	if p.RefundedPaymentID != nil || p.Amount < 0 {
-		object = "refund"
-		captured = false
-	}
-	refunded := amountRefunded >= p.Amount && p.Amount > 0
-	if object == "charge" && status != "failed" && refunded {
-		status = "refunded"
-	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
-		status = "partially_refunded"
-	}
-	payment := api.PaymentObject{ID: billing.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (billing.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, CreatedAt: p.CreatedAt}
-	if p.RefundedPaymentID != nil {
-		original := billing.PaymentID(*p.RefundedPaymentID)
-		payment.RefundedPaymentID = &original
-		payment.Reason = adminRefundMetadataString(p.Metadata, "admin_refund_reason")
+		id := billing.SubscriptionID(*p.SubscriptionID)
+		out.SubscriptionID = &id
 	}
 	if p.Price != nil {
-		priceObj := PriceToAPI(p.Price)
-		payment.Price = &priceObj
-		payment.Product = p.Price.Product.Summary()
+		out.Price = priceSummary(p.Price)
+		if p.Price.Product != nil {
+			out.Product = p.Price.Product.Summary()
+		}
 	}
-	return payment
-}
-
-type UserPaymentObject struct {
-	ID             billing.PaymentID       `json:"id"`
-	Object         string                  `json:"object"`
-	Status         string                  `json:"status,omitempty"`
-	Amount         int64                   `json:"amount,string"`
-	AmountRefunded int64                   `json:"amount_refunded,string"`
-	Currency       string                  `json:"currency"`
-	CustomerID     string                  `json:"customer_id"`
-	SubscriptionID *billing.SubscriptionID `json:"subscription_id,omitempty"`
-	Rail           string                  `json:"rail"`
-	Refunded       bool                    `json:"refunded"`
-	Captured       bool                    `json:"captured,omitempty"`
-	CreatedAt      time.Time               `json:"created_at"`
-	Price          *api.PriceObject        `json:"price,omitempty"`
-	Product        *billing.ProductSummary `json:"product,omitempty"`
-	Card           *paymentCardJSON        `json:"card,omitempty"`
-	// Failure explains a failed charge in customer terms.
-	Failure *billing.PaymentFailure `json:"failure,omitempty"`
-}
-
-// paymentCardJSON is the card snapshot for a single payment (the card used for
-// that charge), served from the DB. No Stripe fetch.
-type paymentCardJSON struct {
-	Brand string `json:"brand,omitempty"`
-	Last4 string `json:"last4,omitempty"`
-}
-
-func paymentCardFromModel(p *models.Payment) *paymentCardJSON {
-	brand, last4 := "", ""
+	switch channel := models.Channel(p.Rail); channel {
+	case models.ChannelManual, models.ChannelAdmin:
+		out.Channel = billing.PaymentChannel(channel)
+	default:
+		rail := string(p.Rail)
+		out.Rail = &rail
+	}
+	if p.PspID != nil {
+		psp := p.PspID.String()
+		out.PSPID = &psp
+	}
+	card := models.Card{}
 	if p.CardBrand != nil {
-		brand = *p.CardBrand
+		card.Brand = *p.CardBrand
 	}
 	if p.CardLast4 != nil {
-		last4 = *p.CardLast4
+		card.Last4 = *p.CardLast4
 	}
-	if brand == "" && last4 == "" {
-		return nil
+	out.Card = card.Details()
+	if p.RefundedPaymentID != nil {
+		original := billing.PaymentID(*p.RefundedPaymentID)
+		out.RefundedPaymentID = &original
+		if reason := adminRefundMetadataString(p.Metadata, "admin_refund_reason"); reason != "" {
+			out.Reason = &reason
+		}
 	}
-	return &paymentCardJSON{Brand: brand, Last4: last4}
+	if out.Kind == billing.PaymentCharge && out.Status == billing.PaymentSucceeded && amountRefunded > 0 {
+		out.Status = billing.PaymentPartiallyRefunded
+		if amountRefunded >= p.Amount {
+			out.Status = billing.PaymentRefunded
+		}
+	}
+	if out.Status == billing.PaymentFailed {
+		code := ""
+		if p.FailureCode != nil {
+			code = *p.FailureCode
+		}
+		failure := decline.Classify(string(p.Rail), code).Reason.Failure()
+		out.Failure = &failure
+	}
+	return out
 }
 
-func PaymentToUserAPI(p *models.Payment, amountRefunded int64) UserPaymentObject {
-	payment := paymentToAPIWithRefundTotal(p, amountRefunded)
-	return UserPaymentObject{
-		ID:             payment.ID,
-		Object:         payment.Object,
-		Status:         payment.Status,
-		Amount:         payment.Amount,
-		AmountRefunded: payment.AmountRefunded,
-		Currency:       payment.Currency,
-		CustomerID:     payment.CustomerID,
-		SubscriptionID: payment.SubscriptionID,
-		Rail:           payment.Rail,
-		Refunded:       payment.Refunded,
-		Captured:       payment.Captured,
-		CreatedAt:      payment.CreatedAt,
-		Price:          payment.Price,
-		Product:        payment.Product,
-		Card:           paymentCardFromModel(p),
-		Failure:        paymentFailure(p, payment.Status),
-	}
+func priceSummary(p *models.Price) *billing.SubscriptionPrice {
+	return &billing.SubscriptionPrice{ID: billing.PriceID(p.ID).String(), Key: p.Key, ProductID: billing.ProductID(p.ProductID).String(), UnitAmount: p.Amount,
+		Currency: p.Currency, AutoRenew: p.AutoRenew, AccessDurationHours: p.AccessDurationHours, Archived: p.Archived}
 }
 
-func paymentFailure(p *models.Payment, status string) *billing.PaymentFailure {
-	if status != "failed" {
-		return nil
+func paymentKind(p *models.Payment) billing.PaymentKind {
+	switch {
+	case p.ReversalKind != nil && *p.ReversalKind != "":
+		return billing.PaymentKind(*p.ReversalKind)
+	case p.RefundedPaymentID != nil || p.Amount < 0:
+		return billing.PaymentRefund
 	}
-	code := ""
-	if p.FailureCode != nil {
-		code = *p.FailureCode
-	}
-	failure := decline.Classify(string(p.Rail), code).Reason.Failure()
-	return &failure
+	return billing.PaymentCharge
 }
 
-func refundStatusCountsTowardAPIAmount(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", "completed":
-		return true
-	default:
-		return false
-	}
-}
-
-func paymentAPIStatus(status string) string {
+func paymentStatus(status string) billing.PaymentStatus {
 	switch status {
-	case "completed", "":
-		return "succeeded"
-	case "pending":
-		return "pending"
-	case "failed":
-		return "failed"
+	case "completed":
+		return billing.PaymentSucceeded
 	case "refunded":
-		return "refunded"
-	default:
-		return status
+		return billing.PaymentRefunded
+	case "failed":
+		return billing.PaymentFailed
 	}
+	return billing.PaymentPending
 }
 
 func PriceToAPI(p *models.Price) api.PriceObject {

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -68,7 +69,7 @@ func (s *Store) enqueueNMIMethodDelete(ctx context.Context, p EnqueueParams) (ge
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != customer || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.PspID != p.PspID || method.Rail != p.Provider || method.RailCustomerRef != terms.RailCustomerRef || method.RailMethodRef != terms.RailMethodRef {
+		if method.CustomerID != customer || method.Custodian != models.CustodianPSP || method.CustodianID != nil || !charge.ChargeableOn(method, p.PspID) || method.Rail != p.Provider || method.RailCustomerRef != terms.RailCustomerRef || method.RailMethodRef != terms.RailMethodRef {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if err := deletionMethodUnused(ctx, q, p.MerchantID, method.ID, 0); err != nil {

@@ -25,7 +25,7 @@ export type BillingChange =
       type:
         | "payment_method.added"
         | "payment_method.removed"
-        | "payment_method.default_changed"
+        | "payment_method.collection_changed"
       paymentMethodId: string
     }
 

@@ -201,7 +201,7 @@ describe("plan change", () => {
 })
 
 describe("usePaymentMethods", () => {
-  it("adds, sets a currency default and removes", async () => {
+  it("adds, sets a currency's collection card and removes", async () => {
     const server = fakeBilling({ methods: [paymentMethod()] })
     const onChange = vi.fn()
     const { result } = setup(() => usePaymentMethods(), server, { onChange })
@@ -209,19 +209,19 @@ describe("usePaymentMethods", () => {
 
     await act(async () => {
       await result.current.add({
-        provider: "nmi",
+        psp_id: "psp_nmi",
         payment_token: "tok",
-        name_on_card: "A",
+        billing_details: { name: "A" },
       })
     })
     await waitFor(() => expect(result.current.methods).toHaveLength(2))
 
     await act(async () => {
-      await result.current.setDefault("pm_2", "usd")
+      await result.current.setCollection("pm_2", "usd")
     })
     expect(
       result.current.methods!.find((m) => m.id === "pm_2")
-        ?.collection_default_currencies
+        ?.collection_currencies
     ).toEqual(["USD"])
 
     server.fail["DELETE /me/payment-methods/pm_1"] = apiError(
@@ -242,14 +242,14 @@ describe("usePaymentMethods", () => {
     )
     expect(onChange.mock.calls.map(([c]) => c.type)).toEqual([
       "payment_method.added",
-      "payment_method.default_changed",
+      "payment_method.collection_changed",
       "payment_method.removed",
     ])
   })
 })
 
 describe("usePayments", () => {
-  it("pages by offset using has_more", async () => {
+  it("pages by cursor", async () => {
     const server = fakeBilling({
       payments: Array.from({ length: 3 }, (_, i) =>
         payment({ id: `pay_${i}` })

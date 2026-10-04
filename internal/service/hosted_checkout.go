@@ -27,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
 // Hosted checkout (#1124). A session is minted for one signed-in customer and
@@ -494,40 +493,32 @@ func hostedAppOrigin(cfg *config.Config, successURL string) string {
 }
 
 // hostedSavedMethods are the buyer's saved cards on the session's card
-// options, display data only.
+// options, display data only: a PSP-held card on its PSP's option, a card a
+// custodian holds on the first card option of its rail.
 func hostedSavedMethods(ctx context.Context, rt *app.Runtime, session hostedcheckout.Session) ([]billing.HostedCheckoutSavedMethod, error) {
-	byPSP := map[string]hostedcheckout.Option{}
+	var cards []hostedcheckout.Option
 	for _, option := range session.Offer.Options {
 		if hostedcheckout.TakesCards(option.Driver) {
-			byPSP[option.PSPID] = option
+			cards = append(cards, option)
 		}
 	}
-	if len(byPSP) == 0 {
+	if len(cards) == 0 {
 		return nil, nil
 	}
-	methods, _, err := rt.PaymentMethodService.ListByUserID(ctx, session.CustomerID.String(), 100, 0)
+	page, err := rt.PaymentMethodService.ListPage(ctx, session.CustomerID, billing.PageRequest{Limit: billing.MaxPageLimit})
 	if err != nil {
 		return nil, fmt.Errorf("list saved payment methods: %w", err)
 	}
 	var out []billing.HostedCheckoutSavedMethod
-	for _, method := range methods {
-		option, ok := byPSP[method.PspID.String()]
-		if !ok || !strings.EqualFold(option.Rail, string(method.Rail)) {
-			continue
-		}
-		item := billing.HostedCheckoutSavedMethod{ID: billing.PaymentMethodID(method.ID).String(), OptionID: option.ID, Rail: option.Rail}
-		if method.CardType != nil {
-			item.Brand = strings.TrimSpace(*method.CardType)
-		}
-		if method.LastFour != nil {
-			item.LastFour = strings.TrimSpace(*method.LastFour)
-		}
-		if method.ExpiryDate != nil {
-			if month, year, err := sharedformat.ParseExpiry(*method.ExpiryDate); err == nil {
-				item.ExpMonth, item.ExpYear = &month, &year
+	for _, method := range page.Items {
+		for _, option := range cards {
+			psp, err := uuid.Parse(option.PSPID)
+			if err != nil || !strings.EqualFold(option.Rail, string(method.Rail)) || !method.ChargeableOn(psp) {
+				continue
 			}
+			out = append(out, billing.HostedCheckoutSavedMethod{ID: billing.PaymentMethodID(method.ID).String(), OptionID: option.ID, Rail: option.Rail, Card: method.Card.Details()})
+			break
 		}
-		out = append(out, item)
 	}
 	return out, nil
 }

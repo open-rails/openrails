@@ -598,14 +598,7 @@ func describePaymentMethod(subscription *models.Subscription) string {
 	}
 
 	pm := subscription.PaymentMethod
-	cardType := ""
-	if pm.CardType != nil {
-		cardType = strings.TrimSpace(*pm.CardType)
-	}
-	lastFour := ""
-	if pm.LastFour != nil {
-		lastFour = strings.TrimSpace(*pm.LastFour)
-	}
+	cardType, lastFour := pm.Card.Brand, pm.Card.Last4
 
 	parts := make([]string, 0, 2)
 	if cardType != "" {

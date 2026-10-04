@@ -32,40 +32,22 @@ type StripeCardDetails struct {
 	ExpYear  int    `json:"exp_year"`
 }
 
-// StripeCard is a normalized card snapshot extracted from a Stripe payload.
-type StripeCard struct {
-	Brand  string
-	Last4  string
-	Expiry string // "MM/YY", empty if exp unknown
-}
-
 // NormalizeStripeCard returns nil when there is no usable card (no last4).
-func NormalizeStripeCard(d StripeCardDetails) *StripeCard {
-	last4 := strings.TrimSpace(d.Last4)
-	if last4 == "" {
+func NormalizeStripeCard(d StripeCardDetails) *models.Card {
+	card := models.ParseCard(d.Brand, d.Last4, "")
+	if card.Last4 == "" {
 		return nil
 	}
-	card := &StripeCard{Brand: TitleCaseBrand(d.Brand), Last4: last4}
-	if d.ExpMonth > 0 && d.ExpYear > 0 {
-		card.Expiry = fmt.Sprintf("%02d/%02d", d.ExpMonth, d.ExpYear%100)
+	if d.ExpMonth >= 1 && d.ExpMonth <= 12 && d.ExpYear >= 2000 {
+		card.ExpMonth, card.ExpYear = d.ExpMonth, d.ExpYear
 	}
-	return card
-}
-
-// TitleCaseBrand title-cases the first rune of a Stripe brand string ("visa" ->
-// "Visa"); it leaves the rest as-is and returns the input unchanged when empty.
-func TitleCaseBrand(brand string) string {
-	b := strings.TrimSpace(brand)
-	if b == "" {
-		return b
-	}
-	return strings.ToUpper(b[:1]) + b[1:]
+	return &card
 }
 
 // SnapshotPaymentCard fills card_brand/card_last4 on any matching Stripe payment
 // rows that don't yet have them. Idempotent and order-independent: whichever of
 // charge.succeeded / invoice.paid / the backfill completes last fills the gap.
-func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, card *StripeCard) error {
+func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, card *models.Card) error {
 	if database == nil || card == nil || len(txnIDs) == 0 {
 		return nil
 	}
@@ -146,7 +128,7 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 	if source.CardLast4 == nil || strings.TrimSpace(*source.CardLast4) == "" {
 		return nil
 	}
-	card := &StripeCard{Last4: strings.TrimSpace(*source.CardLast4)}
+	card := &models.Card{Last4: strings.TrimSpace(*source.CardLast4)}
 	if source.CardBrand != nil {
 		card.Brand = strings.TrimSpace(*source.CardBrand)
 	}
@@ -178,8 +160,8 @@ func UpsertStripeCardForCustomer(
 	database *db.DB,
 	customers *RailCustomerService,
 	clock clockwork.Clock,
-	customerID, paymentMethodID, initialTxnID string,
-	card *StripeCard,
+	customerID, paymentMethodID string,
+	card *models.Card,
 ) (*models.PaymentMethod, error) {
 	customerID = strings.TrimSpace(customerID)
 	paymentMethodID = strings.TrimSpace(paymentMethodID)
@@ -212,20 +194,15 @@ func UpsertStripeCardForCustomer(
 	switch {
 	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
-			ID:                   uuidutil.NewV7(),
-			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
-			Rail:                 models.RailStripe,
-			PspID:                pspID,
-			RailCustomerRef:      customerID,
-			RailMethodRef:        paymentMethodID,
-			InitialTransactionID: strings.TrimSpace(initialTxnID),
-			CardType:             &card.Brand,
-			LastFour:             &card.Last4,
-			CreatedAt:            now,
-			UpdatedAt:            now,
-		}
-		if card.Expiry != "" {
-			pm.ExpiryDate = &card.Expiry
+			ID:              uuidutil.NewV7(),
+			CustomerID:      identity.CustomerIDFromString(userID).UUID(),
+			Rail:            models.RailStripe,
+			PspID:           &pspID,
+			RailCustomerRef: customerID,
+			RailMethodRef:   paymentMethodID,
+			Card:            *card,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 		// Stamp the payable merchant subject alongside the legacy user_id (#317).
 		if pm.CustomerID, err = db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
@@ -254,11 +231,7 @@ func UpsertStripeCardForCustomer(
 			}
 			pm.RailCustomerRef = customerID
 		}
-		pm.CardType = &card.Brand
-		pm.LastFour = &card.Last4
-		if card.Expiry != "" {
-			pm.ExpiryDate = &card.Expiry
-		}
+		pm.Card = *card
 		pm.UpdatedAt = now
 		if err := methods.Update(ctx, pm); err != nil {
 			return nil, fmt.Errorf("update stripe payment method: %w", err)

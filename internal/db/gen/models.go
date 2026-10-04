@@ -886,51 +886,54 @@ type BillingPaymentAttempt struct {
 	EnrichedAt *time.Time
 }
 
-// Generalized payment method table supporting multiple rails.
+// A customer's stored payment instrument.
 type BillingPaymentMethod struct {
-	ID uuid.UUID
-	// Payment rail type: nmi, ccbill, stripe, etc.
-	Rail                 string
-	InitialTransactionID string
-	LastFour             *string
-	CardType             *string
-	ExpiryDate           *string
-	Metadata             []byte
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	MerchantID           uuid.UUID
-	CustomerID           uuid.UUID
-	// PSP that vaulted this payment method. Required.
-	PspID uuid.UUID
-	// Customer-scope rail handle (e.g. NMI customer_vault_id); '' when the customer scope lives in rail_customer_accounts (Stripe).
-	RailCustomerRef string
-	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
-	RailMethodRef string
-	// Rail-scoped stored-credential replay reference for the RECURRING card-network agreement (NMI: gateway transactionid of the initial recurring CIT, replayed as initial_transaction_id on recurring MITs). Empty = not captured yet.
-	StoredCredentialRecurringRef string
-	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
-	StoredCredentialUnscheduledRef string
-	// Who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	// Rail the instrument is charged on: nmi or stripe.
+	Rail string
+	// The PSP that holds the instrument when custodian = psp. NULL for a card a third-party custodian holds: routing picks the PSP for each charge.
+	PspID *uuid.UUID
+	// Who holds the instrument: psp (the processor itself), basis_theory or hyperswitch (a third-party vault proxied to the processor at charge time).
 	Custodian   string
 	CustodianID *uuid.UUID
-	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.
+	// Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in rail_customer_accounts (Stripe).
+	RailCustomerRef string
+	// Instrument-scope handle: NMI billing_id, Stripe pm_, or the custodian token.
+	RailMethodRef string
+	// Replay reference of the recurring card-network agreement (NMI: the transactionid of its initial customer-initiated charge). Empty until captured; written once.
+	StoredCredentialRecurringRef string
+	// Replay reference of the unscheduled card-network agreement. Empty until captured; written once.
+	StoredCredentialUnscheduledRef string
+	// Card brand as the provider or custodian reports it.
+	CardBrand *string
+	// Last four digits of the card number.
+	CardLast4 *string
+	// Expiry month, 1-12; the card is valid through the end of that month.
+	CardExpMonth *int16
+	// Four-digit expiry year.
+	CardExpYear *int16
+	// Billing details the customer entered with the card.
+	Metadata []byte
+	// Custodian-issued stable fingerprint of the card number, for dedup; empty when the custodian issues none.
 	Fingerprint string
-	// BT network-token uuid; '' = not provisioned.
+	// Custodian network token id; empty when none is provisioned.
 	NetworkTokenID string
-	// NT lifecycle status: ''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).
+	// Network token lifecycle status; empty when none is provisioned.
 	NetworkTokenStatus string
-	// Payment account reference from NT provisioning.
+	// Payment account reference from network token provisioning.
 	NetworkTokenPar string
-	// Per-instrument charge routing: pan_proxy (detokenized FPAN through the vault proxy) | network_token (DPAN; gated off on NMI gateways).
+	// How a custodian card reaches the processor: pan_proxy or network_token.
 	ChargeVia string
-	// Instrument park marker (cancellation-last-resort): non-empty = vault-side problem (token deleted/expired, closed account); charges fail loudly, operator notified, subscriptions NEVER terminally cancelled by this.
+	// Non-empty when the instrument is parked (vault-side problem): charges fail loudly and nothing is canceled because of it.
 	ParkReason string
-	// When the instrument was parked; NULL = not parked.
+	// When the instrument was parked; NULL when it is not.
 	ParkedAt *time.Time
-	// When this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.
+	// When the instrument was last submitted to an account-updater batch; NULL when never.
 	AccountUpdaterCheckedAt *time.Time
-	// The customer's default payment method: exactly one per (merchant, customer) with a usable method.
-	IsDefault bool
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 // Changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op.
@@ -939,7 +942,7 @@ type BillingPaymentMethodUpdate struct {
 	MerchantID      uuid.UUID
 	PaymentMethodID uuid.UUID
 	CustomerID      uuid.UUID
-	PspID           uuid.UUID
+	PspID           *uuid.UUID
 	Source          string
 	Kind            string
 	EventRef        string

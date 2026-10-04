@@ -6,17 +6,6 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
-export type AdminOffChannelPaymentRequest = {
-  price_id?: string
-  transaction_id?: string
-  amount?: string
-  currency?: string
-  purchased_at?: string
-  discount_code?: string
-  discount_reason?: string
-  discount_metadata?: Record<string, unknown>
-}
-
 export type AdminRateOverrideRequest = {
   price?: RatePrice
   allowance?: Allowance | null
@@ -183,19 +172,19 @@ export type Balance = {
 }
 
 export type BillingAddress = {
-  line1?: string
-  line2?: string
-  city?: string
-  state?: string
-  postal_code?: string
-  country?: string
+  line1: string | null
+  line2: string | null
+  city: string | null
+  state: string | null
+  postal_code: string | null
+  country: string | null
 }
 
 export type BillingDetails = {
-  name?: string
-  email?: string
-  phone?: string
-  address?: BillingAddress
+  name: string | null
+  email: string | null
+  phone: string | null
+  address: BillingAddress | null
 }
 
 export type BillingImportResult = {
@@ -268,10 +257,10 @@ export type CaptureUsage = {
 }
 
 export type CardDetails = {
-  brand?: string
-  last4?: string
-  exp_month?: number
-  exp_year?: number
+  brand: string | null
+  last4: string | null
+  exp_month: number | null
+  exp_year: number | null
 }
 
 export type CardEntry = {
@@ -598,12 +587,7 @@ export type CheckoutSessionResponse = {
   metadata?: Record<string, string>
 }
 
-export type CollectionPaymentMethodRequest = {
-  currency?: string
-  payment_method_id?: string
-}
-
-export type CollectionPaymentMethodResponse = {
+export type CollectionPaymentMethod = {
   currency: string
   payment_method_id: string
 }
@@ -656,32 +640,27 @@ export type CreateHostedCheckoutSessionRequest = {
   success_url?: string
 }
 
-export type CreatePaymentMethodRequest = {
+export type CreateInvoicePaymentParams = {
+  amount?: string
+  reference?: string
+}
+
+export type CreateOffChannelPaymentParams = {
+  price_id?: string
+  transaction_id?: string
+  amount?: string
+  currency?: string
+  purchased_at?: string
+  discount_code?: string
+  discount_reason?: string
+  discount_metadata?: Record<string, unknown>
+}
+
+export type CreatePaymentMethodParams = {
+  psp_id?: string
   payment_token?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  phone?: string
-  email?: string
-  company?: string
-  address2?: string
-  provider?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
   card?: CardEntry
-  card_number?: unknown
-  number?: unknown
-  pan?: unknown
-  primary_account_number?: unknown
-  cvv?: unknown
-  cvc?: unknown
-  cvn?: unknown
-  security_code?: unknown
-  verification_value?: unknown
+  billing_details?: BillingDetails
 }
 
 export type CreatePaymentMethodSessionRequest = {
@@ -915,11 +894,8 @@ export type DeclaredPaymentMethod = {
   psp?: PSPRef
   rail_customer_ref?: string
   rail_method_ref?: string
-  initial_transaction_id?: string
   recurring_transaction_id?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
+  card?: CardDetails
   created_at?: string
 }
 
@@ -1275,11 +1251,7 @@ export type HostedCheckoutSavedMethod = {
   id: string
   option_id: string
   rail: string
-  brand?: string
-  last_four?: string
-  exp_month?: number
-  exp_year?: number
-  default?: boolean
+  card: CardDetails | null
 }
 
 export type HostedCheckoutSession = {
@@ -1308,22 +1280,11 @@ export type HostedCheckoutSessionLink = {
   expires_at: string
 }
 
-export type InvoiceCollectionRetryResult = {
-  invoice: InvoiceDTO
-  attempt: InvoicePaymentAttemptDTO
-  replayed: boolean
-}
-
-export type InvoiceContactDTO = {
-  name?: string
-  email: string
-}
-
-export type InvoiceDTO = {
-  recovery?: PaymentRecovery
+export type Invoice = {
   id: string
+  customer_id: string
   currency: string
-  invoice_number?: string
+  invoice_number: string | null
   period_from: string
   period_to: string
   usage_total: string
@@ -1335,65 +1296,77 @@ export type InvoiceDTO = {
   total_amount: string
   amount_paid: string
   amount_due: string
-  line_items: InvoiceLineItemDTO[] | null
-  money_movements?: Record<string, string>
-  po_number?: string
-  tax?: Record<string, unknown>
-  billing_contacts?: InvoiceContactDTO[]
-  memo?: string
-  status: string
-  collection_method: string
-  issued_at?: string
-  due_at?: string
-  paid_at?: string
-  voided_at?: string
-  uncollectible_at?: string
-  finalized_at?: string
-  external_invoice_id?: string
+  line_items: InvoiceLineItem[] | null
+  money_movements: Record<string, string> | null
+  po_number: string | null
+  tax: Record<string, unknown> | null
+  billing_contacts: InvoiceContact[] | null
+  memo: string | null
+  status: "draft" | "open" | "paid" | "past_due" | "uncollectible" | "voided"
+  collection_method: "charge_automatically" | "send_invoice"
+  issued_at: string | null
+  due_at: string | null
+  paid_at: string | null
+  voided_at: string | null
+  uncollectible_at: string | null
+  finalized_at: string | null
+  external_invoice_id: string | null
   collection_failure_count: number
-  collection_failed_at?: string
-  next_collection_attempt_at?: string
-  last_collection_failure_code?: string
-  collection_intent_id?: string
+  collection_failed_at: string | null
+  next_collection_attempt_at: string | null
+  last_collection_failure_code: string | null
+  recovery: PaymentRecovery | null
+  available_actions: ("mark_uncollectible" | "record_payment" | "retry_collection" | "void")[] | null
   created_at: string
 }
 
-export type InvoiceLineItemDTO = {
+export type InvoiceCollection = {
+  invoice: Invoice
+  payment: InvoicePayment
+  replayed: boolean
+}
+
+export type InvoiceContact = {
+  name: string
+  email: string
+}
+
+export type InvoiceLineItem = {
   event_type: string
   amount: string
   count: number
-  dimensions?: Record<string, number>
+  dimensions: Record<string, number> | null
 }
 
-export type InvoicePayNowResult = {
-  invoice: InvoiceDTO
-  attempt: InvoicePaymentAttemptDTO
+export type InvoicePayNow = {
+  invoice: Invoice
+  payment: InvoicePayment
   operation: PaymentOperation
   replayed: boolean
 }
 
-export type InvoicePaymentAttemptDTO = {
+export type InvoicePayment = {
   id: string
   invoice_id: string
   currency: string
   amount: string
-  status: string
-  payment_method_id?: string
-  rail?: string
-  rail_payment_id?: string
-  failure_code?: string
-  failure_reason?: string
+  status: "attempted" | "failed" | "settled"
+  payment_method_id: string | null
+  rail: string | null
+  transaction_id: string | null
+  failure_code: string | null
+  failure_reason: string | null
   attempted_at: string
-  settled_at?: string
+  settled_at: string | null
 }
 
-export type InvoiceProfileDTO = {
+export type InvoiceProfile = {
   net_terms_days: number
-  collection_method: string
-  po_number?: string
-  tax?: Record<string, unknown>
-  billing_contacts?: InvoiceContactDTO[]
-  memo?: string
+  collection_method: "charge_automatically" | "send_invoice"
+  po_number: string
+  tax: Record<string, unknown> | null
+  billing_contacts: InvoiceContact[] | null
+  memo: string
 }
 
 export type Matrix = {
@@ -1433,48 +1406,6 @@ export type MerchantConfigurationState = {
   display_name: string
   api_host: string
   settings: MerchantSettings
-}
-
-export type MerchantInvoiceDTO = {
-  recovery?: PaymentRecovery
-  id: string
-  currency: string
-  invoice_number?: string
-  period_from: string
-  period_to: string
-  usage_total: string
-  deposits_total: string
-  owed_accrued: string
-  owed_paid: string
-  closing_balance: string
-  subtotal_amount: string
-  total_amount: string
-  amount_paid: string
-  amount_due: string
-  line_items: InvoiceLineItemDTO[] | null
-  money_movements?: Record<string, string>
-  po_number?: string
-  tax?: Record<string, unknown>
-  billing_contacts?: InvoiceContactDTO[]
-  memo?: string
-  status: string
-  collection_method: string
-  issued_at?: string
-  due_at?: string
-  paid_at?: string
-  voided_at?: string
-  uncollectible_at?: string
-  finalized_at?: string
-  external_invoice_id?: string
-  collection_failure_count: number
-  collection_failed_at?: string
-  next_collection_attempt_at?: string
-  last_collection_failure_code?: string
-  collection_intent_id?: string
-  created_at: string
-  unit_decimals: number
-  customer_id: string
-  available_actions: ("mark_uncollectible" | "record_payment" | "retry_collection" | "void")[] | null
 }
 
 export type MerchantProfileInput = {
@@ -1622,24 +1553,6 @@ export type PackagePrice = {
   free_units?: number
 }
 
-export type PageOfPaymentAttempt = {
-  object: string
-  data: PaymentAttempt[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
-export type PageOfPaymentMethod = {
-  object: string
-  data: PaymentMethod[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
 export type PageOfProductObject = {
   object: string
   data: ProductObject[] | null
@@ -1658,24 +1571,6 @@ export type PageOfPublicPrice = {
   has_more: boolean
 }
 
-export type PageOfPurchaseReview = {
-  object: string
-  data: PurchaseReview[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
-export type PageOfRebillCycle = {
-  object: string
-  data: RebillCycle[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
 export type PageOfSubscription = {
   object: string
   data: Subscription[] | null
@@ -1687,13 +1582,6 @@ export type PageOfSubscription = {
 
 export type PaginatedResponseOfCatalogDriftEventView = {
   items: CatalogDriftEventView[] | null
-  total: number
-  limit: number
-  offset: number
-}
-
-export type PaginatedResponseOfMerchantInvoiceDTO = {
-  items: MerchantInvoiceDTO[] | null
   total: number
   limit: number
   offset: number
@@ -1737,16 +1625,6 @@ export type PathPageOfNotification = {
   url: string
 }
 
-export type PathPageOfPayment = {
-  object: string
-  data: Payment[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
-}
-
 export type PathPageOfPlatformMerchantItem = {
   object: string
   data: PlatformMerchantItem[] | null
@@ -1767,17 +1645,7 @@ export type PathPageOfSubscription = {
   url: string
 }
 
-export type PathPageOfUserPaymentObject = {
-  object: string
-  data: UserPaymentObject[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
-}
-
-export type PayInvoiceNowRequest = {
+export type PayInvoiceParams = {
   payment_method_id?: string
 }
 
@@ -1791,65 +1659,61 @@ export type PayerRateCardDTO = {
 
 export type Payment = {
   id: string
-  object: string
-  status?: string
+  kind: "charge" | "chargeback" | "dispute_reversal" | "refund"
+  status: "failed" | "partially_refunded" | "pending" | "refunded" | "succeeded"
   amount: string
   amount_refunded: string
   currency: string
   customer_id: string
-  subscription_id?: string
-  rail: string
+  subscription_id: string | null
+  price_id: string
+  price: SubscriptionPrice | null
+  product: ProductSummary | null
+  channel: "admin" | "manual" | "rail"
+  rail: string | null
+  psp_id: string | null
   transaction_id: string
-  refunded: boolean
-  captured?: boolean
-  refunds?: PaymentList
-  product?: ProductSummary
-  refunded_payment_id?: string
-  reason?: string
+  card: CardDetails | null
+  failure: PaymentFailure | null
+  refunded_payment_id: string | null
+  reason: string | null
+  refunds: Payment[] | null
   created_at: string
-  price?: PublicPrice
 }
 
 export type PaymentAttempt = {
   id: string
-  object: string
   kind: string
   owner: string
   card_entry: string
   source: string
   observed_via: string
   category: string
-  reason?: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
-  action?: string
-  response_code?: string
-  response_text?: string
-  issuer_code?: string
-  issuer_text?: string
-  avs_result?: string
-  cvv_result?: string
-  card_brand?: string
-  card_last4?: string
-  card_bin?: string
-  token_type?: string
-  transaction_id?: string
+  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
+  action: string
+  response_code: string
+  response_text: string
+  issuer_code: string
+  issuer_text: string
+  avs_result: string
+  cvv_result: string
+  card: CardDetails | null
+  card_bin: string
+  token_type: string
+  transaction_id: string
   rail: string
   psp_id: string
   customer_id: string
   amount: string
-  currency?: string
+  currency: string
   attempted_at: string
-  checkout_id?: string
-  checkout_target?: string
-  cycle_id?: string
-  subscription_id?: string
-  payment_method_id?: string
-  payment_id?: string
-  enriched_at?: string
-}
-
-export type PaymentCardJSON = {
-  brand?: string
-  last4?: string
+  checkout_id: string
+  checkout_target: string
+  cycle_id: string | null
+  subscription_id: string | null
+  payment_method_id: string | null
+  payment_id: string | null
+  enriched_at: string | null
 }
 
 export type PaymentFailure = {
@@ -1858,32 +1722,23 @@ export type PaymentFailure = {
   field?: string
 }
 
-export type PaymentList = {
-  object: string
-  data: Payment[] | null
-}
-
 export type PaymentMethod = {
-  psp_id: string
   id: string
-  object: string
-  type: string
+  customer_id: string
   rail: string
-  customer?: string
-  billing_details?: BillingDetails
-  card?: CardDetails
-  metadata?: Record<string, string>
+  psp_id: string | null
+  card: CardDetails | null
+  billing_details: BillingDetails | null
+  health: PaymentMethodHealth
+  subscriptions: PaymentMethodSubscription[] | null
+  collection_currencies: string[] | null
   created_at: string
-  health?: PaymentMethodHealth
-  subscriptions?: PaymentMethodSubscription[]
-  collection_default_currencies?: string[]
-  default: boolean
 }
 
 export type PaymentMethodHealth = {
-  expiry_status?: string
-  last_charged_at?: string
-  last_charge_outcome?: string
+  expiry_status: "expired" | "expiring_soon" | "valid" | null
+  last_charged_at: string | null
+  last_charge_outcome: "failed" | "succeeded" | null
   active: boolean
 }
 
@@ -1893,10 +1748,14 @@ export type PaymentMethodRef = {
   rail_method_ref?: string
 }
 
+export type PaymentMethodSetupParams = {
+  psp_id?: string
+  consent?: boolean
+}
+
 export type PaymentMethodSubscription = {
   id: string
   display_name: string
-  description: string
   created_at: string
 }
 
@@ -1919,6 +1778,10 @@ export type PaymentSettledEvent = {
   subscription_id?: string
   amount: string
   currency: string
+}
+
+export type PaymentSettlementStatus = {
+  settled: boolean
 }
 
 export type PendingAction = {
@@ -2217,7 +2080,6 @@ export type PublicPrice = {
 
 export type PurchaseReview = {
   id: string
-  object: string
   status: string
   product_archive_id: string
   product_id: string
@@ -2292,7 +2154,6 @@ export type RateTier = {
 
 export type RebillCycle = {
   id: string
-  object: string
   subscription_id: string
   customer_id: string
   psp_id: string
@@ -2303,12 +2164,12 @@ export type RebillCycle = {
   currency: string
   first_outcome: string
   outcome: string
-  missed_at?: string
-  miss_reason?: string
-  collected_at?: string
-  recovered_by?: string
+  missed_at: string | null
+  miss_reason: string
+  collected_at: string | null
+  recovered_by: string
   closes_at: string
-  attempts?: PaymentAttempt[]
+  attempts: PaymentAttempt[] | null
 }
 
 export type Recommendation = {
@@ -2317,12 +2178,7 @@ export type Recommendation = {
   alternatives?: Recommendation[]
 }
 
-export type RecordInvoicePaymentRequest = {
-  amount?: string
-  reference?: string
-}
-
-export type RefundRequest = {
+export type RefundPaymentParams = {
   amount?: string
   full?: boolean
   reason?: string
@@ -2331,6 +2187,12 @@ export type RefundRequest = {
 
 export type ReleaseOperationAuthorizationParams = {
   release_reference?: string
+}
+
+export type ReplacePaymentMethodCardParams = {
+  payment_token?: string
+  card?: CardEntry
+  billing_details?: BillingDetails
 }
 
 export type RepriceAllPriorVersionsRequest = {
@@ -2404,6 +2266,10 @@ export type Result = {
   rows: unknown[][] | null
   compare_range?: RangeOut
   compare_rows?: unknown[][]
+}
+
+export type RetryInvoiceCollectionParams = {
+  payment_method_id?: string
 }
 
 export type RetrySubscriptionNowRequest = {
@@ -2601,7 +2467,7 @@ export type Subscription = {
   product?: ProductSummary
   scheduled_price?: SubscriptionPrice
   scheduled_product?: ProductSummary
-  card?: SubscriptionCard
+  card?: CardDetails
   cancel_portal_url?: string
   access?: SubscriptionAccess
   created_at: string
@@ -2617,13 +2483,6 @@ export type SubscriptionAccess = {
   rail?: string
   start_at: string
   end_at?: string
-}
-
-export type SubscriptionCard = {
-  brand?: string
-  last4?: string
-  exp_month?: number
-  exp_year?: number
 }
 
 export type SubscriptionPrice = {
@@ -2742,34 +2601,6 @@ export type TrustLevelParams = {
   trust_level?: string
 }
 
-export type UpdatePaymentMethodRequest = {
-  payment_token?: string
-  name_on_card?: string | null
-  address1?: string | null
-  city?: string | null
-  state?: string | null
-  zip?: string | null
-  country?: string | null
-  phone?: string | null
-  email?: string | null
-  company?: string | null
-  address2?: string | null
-  provider?: string | null
-  last_four?: string | null
-  card_type?: string | null
-  expiry_date?: string | null
-  card?: CardEntry
-  card_number?: unknown
-  number?: unknown
-  pan?: unknown
-  primary_account_number?: unknown
-  cvv?: unknown
-  cvc?: unknown
-  cvn?: unknown
-  security_code?: unknown
-  verification_value?: unknown
-}
-
 export type UpdatePriceRequest = {
   psp_links?: Record<string, Record<string, string>>
   replace_psp_links?: boolean
@@ -2868,25 +2699,6 @@ export type UsageRow = {
   event_count: number
   amount: string
   dimensions: Record<string, number> | null
-}
-
-export type UserPaymentObject = {
-  id: string
-  object: string
-  status?: string
-  amount: string
-  amount_refunded: string
-  currency: string
-  customer_id: string
-  subscription_id?: string
-  rail: string
-  refunded: boolean
-  captured?: boolean
-  created_at: string
-  price?: PublicPrice
-  product?: ProductSummary
-  card?: PaymentCardJSON
-  failure?: PaymentFailure
 }
 
 export type VerificationPressure = {

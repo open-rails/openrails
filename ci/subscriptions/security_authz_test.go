@@ -83,7 +83,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			_, missing := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString(), "currency": "USD"})
 			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
 			if rail == "nmi" {
-				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
+				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"payment_token": w.nmi.Tokenize(mastercard)})
 				refused(t, status, body, "replace Alice's card")
 			}
 			w.settle()
@@ -254,9 +254,9 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	_, err = r.client.Products.Retrieve(ctx, price.ProductID)
 	require.ErrorIs(t, err, billing.ErrNotFound)
-	list, err := r.client.ListPayments(ctx, billing.PaymentFilter{CustomerID: e.c.id})
+	list, err := r.client.ListPayments(ctx, billing.ListPaymentsParams{CustomerID: e.c.cid()})
 	require.NoError(t, err)
-	require.Empty(t, list.Data)
+	require.Empty(t, list.Items)
 
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
 	_, err = r.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
@@ -323,13 +323,13 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = customerRemote.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "customer-refund"})
 	require.Error(t, err)
-	_, err = customerRemote.ListPayments(ctx, billing.PaymentFilter{})
+	_, err = customerRemote.ListPayments(ctx, billing.ListPaymentsParams{})
 	require.Error(t, err)
 
 	w.settle()
 	got, err := w.client[embedded].GetPayment(ctx, payment.ID)
 	require.NoError(t, err)
-	require.False(t, got.Refunded)
+	require.Zero(t, got.AmountRefunded)
 	require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
 	for _, entry := range e.providerLedger() {
 		require.Zero(t, entry.Refunded)

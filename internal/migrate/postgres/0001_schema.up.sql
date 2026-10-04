@@ -1355,72 +1355,10 @@ CREATE TRIGGER immutable_catalog_application_receipt BEFORE UPDATE OR DELETE ON 
 -- Payment methods
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION billing.payment_method_default_candidate(p_merchant uuid, p_customer uuid) RETURNS uuid
-    LANGUAGE sql STABLE
-    AS $$
-    SELECT pm.id FROM billing.payment_methods pm
-    LEFT JOIN LATERAL (
-        SELECT max(p.purchased_at) AS used_at
-        FROM billing.subscriptions s
-        JOIN billing.payments p ON p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-            AND p.deleted_at IS NULL AND p.status = 'completed'
-        WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
-    ) used ON true
-    WHERE pm.merchant_id = p_merchant AND pm.customer_id = p_customer AND pm.park_reason = ''
-    ORDER BY used.used_at DESC NULLS LAST,
-        (CASE WHEN regexp_replace(coalesce(pm.expiry_date, ''), '\D', '', 'g') !~ '^(0[1-9]|1[0-2])[0-9]{2}$' THEN 0
-              WHEN make_date(2000 + substr(regexp_replace(pm.expiry_date, '\D', '', 'g'), 3, 2)::int,
-                             substr(regexp_replace(pm.expiry_date, '\D', '', 'g'), 1, 2)::int, 1) + interval '1 month' <= now() THEN 1
-              ELSE 0 END),
-        pm.created_at DESC, pm.id DESC
-    LIMIT 1
-$$;
-
--- A parked method is never default.
-CREATE FUNCTION billing.payment_methods_default_usable() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    IF NEW.park_reason <> '' THEN
-        NEW.is_default := false;
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
--- At commit, a customer whose methods changed keeps exactly one default. The
--- customer lock serializes concurrent commits, so two first saves end with one.
-CREATE FUNCTION billing.payment_methods_ensure_default() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-DECLARE
-    m uuid;
-    c uuid;
-    pick uuid;
-BEGIN
-    FOR m, c IN
-        SELECT DISTINCT x.merchant_id, x.customer_id FROM (
-            SELECT NEW.merchant_id AS merchant_id, NEW.customer_id AS customer_id WHERE TG_OP <> 'DELETE'
-            UNION ALL
-            SELECT OLD.merchant_id, OLD.customer_id WHERE TG_OP <> 'INSERT'
-        ) x
-    LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('openrails.default_payment_method:' || m::text || ':' || c::text, 0));
-        IF NOT EXISTS (SELECT 1 FROM billing.payment_methods WHERE merchant_id = m AND customer_id = c AND is_default) THEN
-            pick := billing.payment_method_default_candidate(m, c);
-            IF pick IS NOT NULL THEN
-                UPDATE billing.payment_methods SET is_default = true WHERE merchant_id = m AND id = pick;
-            END IF;
-        END IF;
-    END LOOP;
-    RETURN NULL;
-END;
-$$;
-
 CREATE FUNCTION billing.guard_provider_cutover_card() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
- IF TG_OP = 'UPDATE' AND (to_jsonb(NEW) - 'is_default' - 'updated_at') = (to_jsonb(OLD) - 'is_default' - 'updated_at') THEN
+ IF TG_OP = 'UPDATE' AND (to_jsonb(NEW) - 'updated_at') = (to_jsonb(OLD) - 'updated_at') THEN
    RETURN NEW;
  END IF;
  IF EXISTS(SELECT 1 FROM billing.rail_intents i
@@ -1436,24 +1374,21 @@ END $$;
 
 CREATE TABLE billing.payment_methods (
     id uuid DEFAULT uuidv7() NOT NULL,
-    rail character varying(50) NOT NULL,
-    initial_transaction_id character varying(255) NOT NULL,
-    last_four character varying(4),
-    card_type character varying(50),
-    expiry_date character varying(5),
-    metadata jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    psp_id uuid NOT NULL,
+    rail text NOT NULL,
+    psp_id uuid,
+    custodian text DEFAULT 'psp'::text NOT NULL,
+    custodian_id uuid,
     rail_customer_ref text DEFAULT ''::text NOT NULL,
     rail_method_ref text DEFAULT ''::text NOT NULL,
     stored_credential_recurring_ref text DEFAULT ''::text NOT NULL,
     stored_credential_unscheduled_ref text DEFAULT ''::text NOT NULL,
-    custodian text DEFAULT 'psp'::text NOT NULL,
-    custodian_id uuid,
-    CONSTRAINT payment_methods_custodian_identity CHECK ((custodian = 'psp') = (custodian_id IS NULL)),
+    card_brand text,
+    card_last4 text,
+    card_exp_month smallint,
+    card_exp_year smallint,
+    metadata jsonb,
     fingerprint text DEFAULT ''::text NOT NULL,
     network_token_id text DEFAULT ''::text NOT NULL,
     network_token_status text DEFAULT ''::text NOT NULL,
@@ -1462,28 +1397,39 @@ CREATE TABLE billing.payment_methods (
     park_reason text DEFAULT ''::text NOT NULL,
     parked_at timestamp with time zone,
     account_updater_checked_at timestamp with time zone,
-    is_default boolean DEFAULT false NOT NULL,
-    CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text]))),
-    CONSTRAINT payment_methods_default_usable CHECK (NOT is_default OR park_reason = '')
+    CONSTRAINT payment_methods_custodian_identity CHECK ((custodian = 'psp') = (custodian_id IS NULL)),
+    CONSTRAINT payment_methods_psp_custody CHECK ((custodian = 'psp') = (psp_id IS NOT NULL)),
+    CONSTRAINT payment_methods_card_last4_check CHECK (card_last4 ~ '^[0-9]{4}$'),
+    CONSTRAINT payment_methods_card_exp_month_check CHECK (card_exp_month BETWEEN 1 AND 12),
+    CONSTRAINT payment_methods_card_exp_year_check CHECK (card_exp_year BETWEEN 2000 AND 2199),
+    CONSTRAINT payment_methods_card_expiry_pair CHECK ((card_exp_month IS NULL) = (card_exp_year IS NULL)),
+    CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
+    CONSTRAINT payment_methods_network_token_status_check CHECK ((network_token_status = ANY (ARRAY[''::text, 'active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
 );
-COMMENT ON TABLE billing.payment_methods IS 'Generalized payment method table supporting multiple rails.';
-COMMENT ON COLUMN billing.payment_methods.rail IS 'Payment rail type: nmi, ccbill, stripe, etc.';
-COMMENT ON COLUMN billing.payment_methods.psp_id IS 'PSP that vaulted this payment method. Required.';
-COMMENT ON COLUMN billing.payment_methods.rail_customer_ref IS 'Customer-scope rail handle (e.g. NMI customer_vault_id); '''' when the customer scope lives in rail_customer_accounts (Stripe).';
-COMMENT ON COLUMN billing.payment_methods.rail_method_ref IS 'Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).';
-COMMENT ON COLUMN billing.payment_methods.stored_credential_recurring_ref IS 'Rail-scoped stored-credential replay reference for the RECURRING card-network agreement (NMI: gateway transactionid of the initial recurring CIT, replayed as initial_transaction_id on recurring MITs). Empty = not captured yet.';
-COMMENT ON COLUMN billing.payment_methods.stored_credential_unscheduled_ref IS 'Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.';
-COMMENT ON COLUMN billing.payment_methods.custodian IS 'Who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.';
-COMMENT ON COLUMN billing.payment_methods.fingerprint IS 'Custodian-issued stable fingerprint of the underlying PAN (Basis Theory''s default fingerprint expression), for dedup/lookup. '''' = the custodian issues none.';
-COMMENT ON COLUMN billing.payment_methods.network_token_id IS 'BT network-token uuid; '''' = not provisioned.';
-COMMENT ON COLUMN billing.payment_methods.network_token_status IS 'NT lifecycle status: ''''|active|inactive|suspended|deleted (webhook-folded; never touches PAN-side expiry).';
-COMMENT ON COLUMN billing.payment_methods.network_token_par IS 'Payment account reference from NT provisioning.';
-COMMENT ON COLUMN billing.payment_methods.charge_via IS 'Per-instrument charge routing: pan_proxy (detokenized FPAN through the vault proxy) | network_token (DPAN; gated off on NMI gateways).';
-COMMENT ON COLUMN billing.payment_methods.park_reason IS 'Instrument park marker (cancellation-last-resort): non-empty = vault-side problem (token deleted/expired, closed account); charges fail loudly, operator notified, subscriptions NEVER terminally cancelled by this.';
-COMMENT ON COLUMN billing.payment_methods.parked_at IS 'When the instrument was parked; NULL = not parked.';
-COMMENT ON COLUMN billing.payment_methods.account_updater_checked_at IS 'When this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.';
-COMMENT ON COLUMN billing.payment_methods.is_default IS 'The customer''s default payment method: exactly one per (merchant, customer) with a usable method.';
+COMMENT ON TABLE billing.payment_methods IS 'A customer''s stored payment instrument.';
+COMMENT ON COLUMN billing.payment_methods.rail IS 'Rail the instrument is charged on: nmi or stripe.';
+COMMENT ON COLUMN billing.payment_methods.psp_id IS 'The PSP that holds the instrument when custodian = psp. NULL for a card a third-party custodian holds: routing picks the PSP for each charge.';
+COMMENT ON COLUMN billing.payment_methods.rail_customer_ref IS 'Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in rail_customer_accounts (Stripe).';
+COMMENT ON COLUMN billing.payment_methods.rail_method_ref IS 'Instrument-scope handle: NMI billing_id, Stripe pm_, or the custodian token.';
+COMMENT ON COLUMN billing.payment_methods.stored_credential_recurring_ref IS 'Replay reference of the recurring card-network agreement (NMI: the transactionid of its initial customer-initiated charge). Empty until captured; written once.';
+COMMENT ON COLUMN billing.payment_methods.stored_credential_unscheduled_ref IS 'Replay reference of the unscheduled card-network agreement. Empty until captured; written once.';
+COMMENT ON COLUMN billing.payment_methods.custodian IS 'Who holds the instrument: psp (the processor itself), basis_theory or hyperswitch (a third-party vault proxied to the processor at charge time).';
+COMMENT ON COLUMN billing.payment_methods.card_brand IS 'Card brand as the provider or custodian reports it.';
+COMMENT ON COLUMN billing.payment_methods.card_last4 IS 'Last four digits of the card number.';
+COMMENT ON COLUMN billing.payment_methods.card_exp_month IS 'Expiry month, 1-12; the card is valid through the end of that month.';
+COMMENT ON COLUMN billing.payment_methods.card_exp_year IS 'Four-digit expiry year.';
+COMMENT ON COLUMN billing.payment_methods.metadata IS 'Billing details the customer entered with the card.';
+COMMENT ON COLUMN billing.payment_methods.fingerprint IS 'Custodian-issued stable fingerprint of the card number, for dedup; empty when the custodian issues none.';
+COMMENT ON COLUMN billing.payment_methods.network_token_id IS 'Custodian network token id; empty when none is provisioned.';
+COMMENT ON COLUMN billing.payment_methods.network_token_status IS 'Network token lifecycle status; empty when none is provisioned.';
+COMMENT ON COLUMN billing.payment_methods.network_token_par IS 'Payment account reference from network token provisioning.';
+COMMENT ON COLUMN billing.payment_methods.charge_via IS 'How a custodian card reaches the processor: pan_proxy or network_token.';
+COMMENT ON COLUMN billing.payment_methods.park_reason IS 'Non-empty when the instrument is parked (vault-side problem): charges fail loudly and nothing is canceled because of it.';
+COMMENT ON COLUMN billing.payment_methods.parked_at IS 'When the instrument was parked; NULL when it is not.';
+COMMENT ON COLUMN billing.payment_methods.account_updater_checked_at IS 'When the instrument was last submitted to an account-updater batch; NULL when never.';
 
 ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_pkey PRIMARY KEY (merchant_id, id);
@@ -1492,12 +1438,12 @@ ALTER TABLE ONLY billing.payment_methods
 
 CREATE INDEX idx_payment_methods_custodian_method_ref ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text);
 CREATE INDEX idx_payment_methods_custodian_network_token ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
+CREATE INDEX idx_payment_methods_customer ON billing.payment_methods USING btree (merchant_id, customer_id, created_at DESC, id DESC);
 CREATE INDEX idx_payment_methods_method_ref ON billing.payment_methods USING btree (rail, rail_method_ref);
 CREATE INDEX idx_payment_methods_psp ON billing.payment_methods USING btree (psp_id);
 CREATE INDEX ix_payment_methods_account_updater_due ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref <> ''::text));
 CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint <> ''::text);
 CREATE UNIQUE INDEX uq_payment_methods_psp_instrument ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT;
-CREATE UNIQUE INDEX uq_payment_methods_customer_default ON billing.payment_methods USING btree (merchant_id, customer_id) WHERE is_default;
 
 ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -1510,19 +1456,13 @@ ALTER TABLE ONLY billing.payment_methods
 
 CREATE TRIGGER guard_provider_cutover_card BEFORE UPDATE OR DELETE ON billing.payment_methods
 FOR EACH ROW EXECUTE FUNCTION billing.guard_provider_cutover_card();
-CREATE TRIGGER trg_payment_methods_default_usable BEFORE INSERT OR UPDATE OF park_reason, is_default ON billing.payment_methods
-    FOR EACH ROW EXECUTE FUNCTION billing.payment_methods_default_usable();
-CREATE CONSTRAINT TRIGGER trg_payment_methods_ensure_default
-    AFTER INSERT OR DELETE OR UPDATE OF is_default, park_reason, customer_id ON billing.payment_methods
-    DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION billing.payment_methods_ensure_default();
 
 CREATE TABLE billing.payment_method_updates (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     payment_method_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    psp_id uuid NOT NULL,
+    psp_id uuid,
     source text NOT NULL,
     kind text NOT NULL,
     event_ref text NOT NULL,
@@ -1532,6 +1472,7 @@ CREATE TABLE billing.payment_method_updates (
     CONSTRAINT payment_method_updates_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT payment_method_updates_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
     CONSTRAINT payment_method_updates_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT payment_method_updates_payment_method_fk FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_payment_method_updates_source CHECK (source IN ('nmi_acu', 'bt_account_updater', 'customer')),
     CONSTRAINT chk_payment_method_updates_kind CHECK (kind IN ('updated', 'closed_account', 'contact_customer')),
     CONSTRAINT chk_payment_method_updates_event_ref CHECK (event_ref <> '')
@@ -2094,8 +2035,9 @@ ALTER TABLE ONLY billing.payments
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
 
+CREATE INDEX idx_payments_customer ON billing.payments USING btree (merchant_id, customer_id, created_at DESC, id DESC);
 CREATE INDEX idx_payments_destructive_run ON billing.payments USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_payments_merchant_created ON billing.payments USING btree (merchant_id, created_at DESC);
+CREATE INDEX idx_payments_merchant_created ON billing.payments USING btree (merchant_id, created_at DESC, id DESC);
 CREATE INDEX idx_payments_merchant_purchased ON billing.payments USING btree (merchant_id, purchased_at);
 CREATE INDEX idx_payments_merchant_rail_transaction ON billing.payments USING btree (merchant_id, rail, transaction_id);
 CREATE INDEX idx_payments_metadata_nmi_order ON billing.payments USING btree (merchant_id, ((metadata ->> 'nmi_subscription_order_id'::text))) WHERE ((metadata ->> 'nmi_subscription_order_id'::text) IS NOT NULL);
@@ -3500,7 +3442,7 @@ ALTER TABLE ONLY billing.invoices
 CREATE INDEX ix_invoices_collection_due ON billing.invoices USING btree (merchant_id, next_collection_attempt_at, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0) AND (collection_method = 'charge_automatically'::text));
 CREATE INDEX ix_invoices_merchant_status_period ON billing.invoices USING btree (merchant_id, status, period_from DESC, id DESC);
 CREATE INDEX ix_invoices_open_due ON billing.invoices USING btree (merchant_id, customer_id, currency, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0));
-CREATE INDEX ix_invoices_payer ON billing.invoices USING btree (merchant_id, customer_id, period_from DESC);
+CREATE INDEX ix_invoices_payer ON billing.invoices USING btree (merchant_id, customer_id, period_from DESC, id DESC);
 CREATE UNIQUE INDEX uq_invoices_period ON billing.invoices USING btree (merchant_id, customer_id, currency, period_from, period_to);
 CREATE INDEX ix_invoices_collection_intent ON billing.invoices USING btree (merchant_id, collection_intent_id) WHERE (collection_intent_id IS NOT NULL);
 

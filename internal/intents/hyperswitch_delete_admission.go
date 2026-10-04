@@ -109,7 +109,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		if err != nil {
 			return err
 		}
-		operation, err = scoped.enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: models.CustodianHyperSwitch, CustodianID: *pm.CustodianID, IntentType: TypeHyperSwitchMethodDelete, IdempotencyKey: key, Origin: origin, Actor: actor, OriginReason: "user payment-method delete", NextAttemptAt: h.Clock.Now().UTC(), Payload: HyperSwitchMethodDeletePayload{CustomerID: pm.CustomerID, PaymentMethodID: pm.ID, DetachOnly: aliases.Total > 1, Instrument: charge.FreezeInstrument(current), Binding: binding, Environment: account.Environment}})
+		operation, err = scoped.enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: models.CustodianHyperSwitch, CustodianID: *pm.CustodianID, IntentType: TypeHyperSwitchMethodDelete, IdempotencyKey: key, Origin: origin, Actor: actor, OriginReason: "user payment-method delete", NextAttemptAt: h.Clock.Now().UTC(), Payload: HyperSwitchMethodDeletePayload{CustomerID: pm.CustomerID, PaymentMethodID: pm.ID, DetachOnly: aliases.Total > 1, Instrument: charge.FreezeCustody(current), Binding: binding, Environment: account.Environment}})
 		if err != nil {
 			return err
 		}

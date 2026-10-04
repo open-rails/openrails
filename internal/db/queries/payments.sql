@@ -102,13 +102,14 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id
 
 -- Customer history needs completed display totals, not pending refund reservations.
 -- Scope ownership through the original charge before aggregating linked refunds.
--- name: GetCustomerPaymentRefundTotals :many
+-- name: GetPaymentRefundTotals :many
+-- Completed refunds against each listed charge, including refunds outside the
+-- page the charges came from.
 SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
 FROM billing.payments original
 JOIN billing.payments refund ON refund.refunded_payment_id = original.id
     AND refund.merchant_id = sqlc.arg(merchant_id)::uuid
 WHERE original.merchant_id = sqlc.arg(merchant_id)::uuid
-    AND original.customer_id = sqlc.arg(customer_id)::uuid
     AND original.id = ANY(sqlc.arg(payment_ids)::uuid[])
     AND original.amount > 0 AND original.refunded_payment_id IS NULL
     AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
@@ -182,22 +183,6 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND status = 'pending'
   AND deleted_at IS NULL;
 
--- name: CountPaymentsByCustomer :one
-SELECT count(*) FROM billing.payments purch
-WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND purch.customer_id = sqlc.arg(customer_id)::uuid
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL;
-
--- name: ListPaymentsByCustomerPaged :many
-SELECT * FROM billing.payments purch
-WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND purch.customer_id = sqlc.arg(customer_id)::uuid
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL
-ORDER BY purch.purchased_at DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
-
 -- name: HasCompletedPaymentAtOrAfterPeriodEnd :one
 SELECT EXISTS (
     SELECT 1
@@ -222,47 +207,24 @@ LIMIT 1;
 UPDATE billing.payments SET status = 'failed' WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
--- name: CountPaymentsFiltered :one
-SELECT count(*) FROM billing.payments purch
-WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
-  AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
-  AND (sqlc.narg(subscription_id)::uuid IS NULL OR purch.subscription_id = sqlc.narg(subscription_id)::uuid)
-  AND (sqlc.narg(rail)::text IS NULL OR purch.rail::text = sqlc.narg(rail)::text)
-  AND (sqlc.narg(transaction_id)::text IS NULL OR purch.transaction_id = sqlc.narg(transaction_id)::text)
-  AND (sqlc.narg(purchased_after)::timestamptz IS NULL OR purch.purchased_at >= sqlc.narg(purchased_after)::timestamptz)
-  AND (sqlc.narg(purchased_before)::timestamptz IS NULL OR purch.purchased_at <= sqlc.narg(purchased_before)::timestamptz)
-  AND (sqlc.narg(min_amount)::bigint IS NULL OR purch.amount >= sqlc.narg(min_amount)::bigint)
-  AND (sqlc.narg(max_amount)::bigint IS NULL OR purch.amount <= sqlc.narg(max_amount)::bigint)
-  AND (sqlc.narg(status)::text IS NULL OR purch.status::text = sqlc.narg(status)::text)
-  AND (NOT sqlc.arg(refunds_only)::boolean OR purch.refunded_payment_id IS NOT NULL)
-  AND purch.deleted_at IS NULL;
-
--- name: ListPaymentsFiltered :many
--- Sorting is static SQL over a validated (sort_by, sort_desc) pair via the
--- CASE pattern — no identifier interpolation (#334 escape-hatch rule).
-SELECT * FROM billing.payments purch
-WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
-  AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
-  AND (sqlc.narg(subscription_id)::uuid IS NULL OR purch.subscription_id = sqlc.narg(subscription_id)::uuid)
-  AND (sqlc.narg(rail)::text IS NULL OR purch.rail::text = sqlc.narg(rail)::text)
-  AND (sqlc.narg(transaction_id)::text IS NULL OR purch.transaction_id = sqlc.narg(transaction_id)::text)
-  AND (sqlc.narg(purchased_after)::timestamptz IS NULL OR purch.purchased_at >= sqlc.narg(purchased_after)::timestamptz)
-  AND (sqlc.narg(purchased_before)::timestamptz IS NULL OR purch.purchased_at <= sqlc.narg(purchased_before)::timestamptz)
-  AND (sqlc.narg(min_amount)::bigint IS NULL OR purch.amount >= sqlc.narg(min_amount)::bigint)
-  AND (sqlc.narg(max_amount)::bigint IS NULL OR purch.amount <= sqlc.narg(max_amount)::bigint)
-  AND (sqlc.narg(status)::text IS NULL OR purch.status::text = sqlc.narg(status)::text)
-  AND (NOT sqlc.arg(refunds_only)::boolean OR purch.refunded_payment_id IS NOT NULL)
-  AND purch.deleted_at IS NULL
-ORDER BY
-    CASE WHEN sqlc.arg(sort_by)::text = 'amount'       AND NOT sqlc.arg(sort_desc)::boolean THEN purch.amount END ASC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'amount'       AND sqlc.arg(sort_desc)::boolean     THEN purch.amount END DESC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'purchased_at' AND NOT sqlc.arg(sort_desc)::boolean THEN purch.purchased_at END ASC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'purchased_at' AND sqlc.arg(sort_desc)::boolean     THEN purch.purchased_at END DESC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'created_at'   AND NOT sqlc.arg(sort_desc)::boolean THEN purch.created_at END ASC,
-    CASE WHEN sqlc.arg(sort_by)::text = 'created_at'   AND sqlc.arg(sort_desc)::boolean     THEN purch.created_at END DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+-- name: ListPaymentsPage :many
+-- One page of payments, newest first, after a (created_at, id) cursor; every
+-- filter is optional. kind is charge, refund, chargeback or dispute_reversal.
+SELECT * FROM billing.payments p
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND COALESCE(p.metadata ->> 'nmi_subscription_order_id', '') = ''
+  AND p.deleted_at IS NULL
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR p.subscription_id = sqlc.narg(subscription_id)::uuid)
+  AND (sqlc.narg(price_id)::uuid IS NULL OR p.price_id = sqlc.narg(price_id)::uuid)
+  AND (sqlc.narg(rail)::text IS NULL OR p.rail = sqlc.narg(rail)::text)
+  AND (sqlc.narg(transaction_id)::text IS NULL OR p.transaction_id = sqlc.narg(transaction_id)::text)
+  AND (sqlc.narg(kind)::text IS NULL OR COALESCE(p.reversal_kind,
+        CASE WHEN p.refunded_payment_id IS NOT NULL OR p.amount < 0 THEN 'refund' ELSE 'charge' END) = sqlc.narg(kind)::text)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (p.created_at, p.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: MatchChargebackPayments :many
 -- NMI chargeback reconciliation (webhooks/nmi.go): candidate charges
@@ -276,7 +238,7 @@ SELECT p.id AS payment_id,
        (p.amount / 10000)::bigint AS amount_cents,
        p.currency AS currency,
        p.purchased_at AS purchased_at,
-       COALESCE(pm.last_four, '')::text AS card_last4
+       COALESCE(pm.card_last4, '')::text AS card_last4
 FROM billing.payments p
 LEFT JOIN billing.subscriptions sub ON sub.id = p.subscription_id
   AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
@@ -287,7 +249,7 @@ LEFT JOIN LATERAL (
   SELECT cpm.id FROM billing.payment_methods cpm
   WHERE p.subscription_id IS NULL
     AND cpm.merchant_id = p.merchant_id AND cpm.customer_id = p.customer_id AND cpm.psp_id = p.psp_id
-    AND RIGHT(regexp_replace(COALESCE(cpm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+    AND cpm.card_last4 = sqlc.arg(last4)::text
   LIMIT 1) customer_card ON true
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid
   AND (p.subscription_id IS NULL OR sub.id IS NOT NULL)
@@ -296,7 +258,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id
   AND p.rail = sqlc.arg(rail)
   AND p.amount > 0
   AND p.amount = sqlc.arg(amount_cents)::bigint * 10000
-  AND (RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+  AND (pm.card_last4 = sqlc.arg(last4)::text
     OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
     OR customer_card.id IS NOT NULL)
   AND p.purchased_at >= sqlc.arg(from_at)::timestamptz

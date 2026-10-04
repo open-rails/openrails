@@ -19,7 +19,7 @@ import (
 // saveFrom submits one NMI card save for c to replica r from client address ip.
 func (c *customer) saveFrom(r *world, ip string, cd card) int {
 	c.w.t.Helper()
-	body, err := json.Marshal(map[string]any{"provider": "nmi", "payment_token": r.nmi.Tokenize(cd), "name_on_card": "Card Tester"})
+	body, err := json.Marshal(map[string]any{"psp_id": r.psp["nmi"], "payment_token": r.nmi.Tokenize(cd), "billing_details": map[string]any{"name": "Card Tester"}})
 	require.NoError(c.w.t, err)
 	req, err := http.NewRequestWithContext(c.w.t.Context(), http.MethodPost, r.server.URL+mountPrefix+"/v1/me/payment-methods", bytes.NewReader(body))
 	require.NoError(c.w.t, err)
@@ -55,7 +55,7 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 		c := a.newCustomer()
 		for i := range 6 {
 			r := f.replicas[i%2]
-			require.Equal(t, http.StatusBadRequest, c.saveFrom(r, fmt.Sprintf("198.51.100.%d", i+1), refusedCard), "attempt %d reaches the gateway", i)
+			require.Equal(t, http.StatusBadGateway, c.saveFrom(r, fmt.Sprintf("198.51.100.%d", i+1), refusedCard), "attempt %d reaches the gateway", i)
 		}
 		require.Equal(t, 6, f.refusedSaves())
 		for _, r := range []*world{a, b} {
@@ -73,9 +73,9 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 		require.Equal(t, 6, f.refusedSaves(), "blocked attempts never reach the gateway")
 
 		f.advance(16 * time.Minute)
-		require.Equal(t, http.StatusOK, c.saveFrom(b, "198.51.100.99", visa), "the burst block lifts with its window")
+		require.Equal(t, http.StatusCreated, c.saveFrom(b, "198.51.100.99", visa), "the burst block lifts with its window")
 		for i := range 4 {
-			require.Equal(t, http.StatusBadRequest, c.saveFrom(f.replicas[i%2], "203.0.113.7", refusedCard))
+			require.Equal(t, http.StatusBadGateway, c.saveFrom(f.replicas[i%2], "203.0.113.7", refusedCard))
 			f.advance(4 * time.Minute)
 		}
 		f.advance(16 * time.Minute)
@@ -87,11 +87,11 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 		f := newFleet(t, 2)
 		for i := range 6 {
 			c := f.replicas[0].newCustomer()
-			require.Equal(t, http.StatusBadRequest, c.saveFrom(f.replicas[i%2], "192.0.2.10", refusedCard))
+			require.Equal(t, http.StatusBadGateway, c.saveFrom(f.replicas[i%2], "192.0.2.10", refusedCard))
 		}
 		fresh := f.replicas[1].newCustomer()
 		require.Equal(t, http.StatusTooManyRequests, fresh.saveFrom(f.replicas[1], "192.0.2.10", visa), "one address testing cards through many accounts is blocked")
-		require.Equal(t, http.StatusOK, fresh.saveFrom(f.replicas[0], "192.0.2.11", visa), "another address is not")
+		require.Equal(t, http.StatusCreated, fresh.saveFrom(f.replicas[0], "192.0.2.11", visa), "another address is not")
 		require.Equal(t, 6, f.refusedSaves())
 	})
 	t.Run("merchant_attack", func(t *testing.T) {
@@ -100,11 +100,11 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 		var last *customer
 		for i := range 100 {
 			last = f.replicas[0].newCustomer()
-			require.Equal(t, http.StatusBadRequest, last.saveFrom(f.replicas[i%2], fmt.Sprintf("10.%d.%d.1", i/200, i%200), refusedCard))
+			require.Equal(t, http.StatusBadGateway, last.saveFrom(f.replicas[i%2], fmt.Sprintf("10.%d.%d.1", i/200, i%200), refusedCard))
 		}
 		require.Equal(t, http.StatusTooManyRequests, last.saveFrom(f.replicas[1], "10.9.9.9", visa), "in attack mode one recent refusal blocks")
 		clean := f.replicas[1].newCustomer()
-		require.Equal(t, http.StatusOK, clean.saveFrom(f.replicas[0], "10.9.9.10", visa), "a customer with no refusals still saves a card")
+		require.Equal(t, http.StatusCreated, clean.saveFrom(f.replicas[0], "10.9.9.10", visa), "a customer with no refusals still saves a card")
 		require.Equal(t, 100, f.refusedSaves())
 	})
 }

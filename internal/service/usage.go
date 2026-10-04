@@ -117,7 +117,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 // metered rating sweep rates reported usage through the catalog rate cards
 // (allowances + per-period watermarks) and the resulting statement is
 // finalized as an invoice (#797 public export). Idempotent per window.
-func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*InvoiceDTO, error) {
+func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*billing.Invoice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -138,6 +138,6 @@ func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return nil, err
 	}
-	dto := invoiceToDTO(inv)
-	return &dto, nil
+	out := InvoiceView(inv)
+	return &out, nil
 }

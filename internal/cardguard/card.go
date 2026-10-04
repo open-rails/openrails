@@ -227,6 +227,14 @@ func (c *Card) LastFour() string {
 	return ""
 }
 
+// ExpiryMonthYear is the expiry month (1-12) and four-digit year.
+func (c *Card) ExpiryMonthYear() (month, year int) {
+	if s := c.secret(); s != nil {
+		return s.month, s.year
+	}
+	return 0, 0
+}
+
 // Expiry is MM/YY.
 func (c *Card) Expiry() string {
 	if s := c.secret(); s != nil {

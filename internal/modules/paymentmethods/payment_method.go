@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 type PaymentMethodService struct {
@@ -30,13 +30,6 @@ var (
 	// which sends the operator hunting for credentials that were never needed.
 	ErrPaymentMethodsUnsupportedOnRail = errors.New("payment methods are not managed by OpenRails on this rail")
 )
-
-// knownRail reports whether the name is a declared rail (as opposed to a
-// merchant PSP key, which resolves through the PSP catalog).
-func knownRail(rail models.Rail) bool {
-	_, ok := rails.Lookup(rail)
-	return ok
-}
 
 // RailPaymentMethodsUnsupported builds the honest per-rail refusal, naming
 // where the instrument actually lives.
@@ -86,22 +79,17 @@ func (s *PaymentMethodService) LatestCharges(ctx context.Context, methods []*mod
 	return s.repo.LatestChargeByMethodIDs(ctx, ids)
 }
 
-func (s *PaymentMethodService) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
-	if userID == "" {
-		return nil, 0, errors.New("user ID is required")
+// ListPage is one page of a customer's methods, newest first.
+func (s *PaymentMethodService) ListPage(ctx context.Context, customerID uuid.UUID, page billing.PageRequest) (billing.ListPage[*models.PaymentMethod], error) {
+	if customerID == uuid.Nil {
+		return billing.ListPage[*models.PaymentMethod]{}, errors.New("customer ID is required")
 	}
-	if limit < 1 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	return s.repo.ListPage(ctx, customerID, page)
+}
 
-	items, total, err := s.repo.ListByUserID(ctx, userID, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, total, nil
+// GetByCustodianRef finds a custodian-held card by its custodian token.
+func (s *PaymentMethodService) GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
+	return s.repo.GetByCustodianRef(ctx, custodianID, methodRef)
 }
 
 // GetByRailMethodRef finds a payment method by its instrument-scope rail handle

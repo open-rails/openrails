@@ -318,8 +318,7 @@ func importLegacyBook(t *testing.T, w *world, n int) []*legacy {
 		tx := w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID
 		ref := billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
 		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customerID})
-		book.PaymentMethods = append(book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef,
-			InitialTransactionID: tx, RecurringTransactionID: tx, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"})
+		book.PaymentMethods = append(book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef, RecurringTransactionID: tx, Card: declaredCard(visa)})
 		book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: fmt.Sprintf("book-%d-%s", i, railSub), Customer: customerID, Price: priceID,
 			Rail: "nmi", RailSubscriptionID: railSub, StartedAt: start, PaidThrough: &end, PaymentMethod: &ref})
 		book.Transactions = append(book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: tx, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start})

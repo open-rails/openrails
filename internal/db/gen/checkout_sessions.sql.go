@@ -49,26 +49,26 @@ func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg Accep
 
 const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
 INSERT INTO billing.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
-VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,$8,$9,$10,'pan_proxy','',$11,$11)
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,created_at,updated_at)
+VALUES($1,$2,$3,NULL,'nmi','hyperswitch',$4,$5,$6,$7::text,$8::text,$9::smallint,$10::smallint,'pan_proxy',$11,$11)
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=billing.payment_methods.id
 WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
   AND billing.payment_methods.custodian='hyperswitch'
-RETURNING id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, is_default
+RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at
 `
 
 type AttachCapturedPaymentMethodParams struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
-	PspID            uuid.UUID
 	CustodianID      *uuid.UUID
 	VendorCustomerID string
 	VendorMethodID   string
-	LastFour         *string
-	CardType         *string
-	ExpiryDate       *string
+	CardBrand        *string
+	CardLast4        *string
+	CardExpMonth     *int16
+	CardExpYear      *int16
 	Now              time.Time
 }
 
@@ -78,35 +78,33 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 		arg.ID,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.PspID,
 		arg.CustodianID,
 		arg.VendorCustomerID,
 		arg.VendorMethodID,
-		arg.LastFour,
-		arg.CardType,
-		arg.ExpiryDate,
+		arg.CardBrand,
+		arg.CardLast4,
+		arg.CardExpMonth,
+		arg.CardExpYear,
 		arg.Now,
 	)
 	var i BillingPaymentMethod
 	err := row.Scan(
 		&i.ID,
-		&i.Rail,
-		&i.InitialTransactionID,
-		&i.LastFour,
-		&i.CardType,
-		&i.ExpiryDate,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.Rail,
 		&i.PspID,
+		&i.Custodian,
+		&i.CustodianID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
 		&i.StoredCredentialRecurringRef,
 		&i.StoredCredentialUnscheduledRef,
-		&i.Custodian,
-		&i.CustodianID,
+		&i.CardBrand,
+		&i.CardLast4,
+		&i.CardExpMonth,
+		&i.CardExpYear,
+		&i.Metadata,
 		&i.Fingerprint,
 		&i.NetworkTokenID,
 		&i.NetworkTokenStatus,
@@ -115,7 +113,8 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 		&i.ParkReason,
 		&i.ParkedAt,
 		&i.AccountUpdaterCheckedAt,
-		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

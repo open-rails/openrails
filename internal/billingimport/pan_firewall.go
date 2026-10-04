@@ -53,9 +53,16 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 		}
 	}
 	for i, method := range book.PaymentMethods {
+		var brand, last4 string
+		if method.Card != nil && method.Card.Brand != nil {
+			brand = *method.Card.Brand
+		}
+		if method.Card != nil && method.Card.Last4 != nil {
+			last4 = *method.Card.Last4
+		}
 		if err := scan(fmt.Sprintf("payment_methods[%d]", i),
 			method.Rail, method.PSP.Key, method.RailCustomerRef, method.RailMethodRef,
-			method.InitialTransactionID, method.RecurringTransactionID, method.LastFour, method.CardType, method.ExpiryDate,
+			method.RecurringTransactionID, brand, last4,
 		); err != nil {
 			return err
 		}

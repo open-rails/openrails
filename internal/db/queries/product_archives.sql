@@ -52,16 +52,14 @@ FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text AND id = sqlc.arg(id)::uuid;
 
 -- name: ListPurchaseReviews :many
+-- One page of purchase reviews, oldest first, after a (created_at, id) cursor.
 SELECT id, status, evidence, operator_notes, created_at, resolved_at
 FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
   AND status = ANY(sqlc.arg(statuses)::text[])
   AND (sqlc.arg(product_archive_id)::text = '' OR evidence -> 'local' ->> 'product_archive_id' = sqlc.arg(product_archive_id)::text)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (created_at, id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at, id
-LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+LIMIT sqlc.arg(row_limit)::int;
 
--- name: CountPurchaseReviews :one
-SELECT count(*) FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
-  AND status = ANY(sqlc.arg(statuses)::text[])
-  AND (sqlc.arg(product_archive_id)::text = '' OR evidence -> 'local' ->> 'product_archive_id' = sqlc.arg(product_archive_id)::text);

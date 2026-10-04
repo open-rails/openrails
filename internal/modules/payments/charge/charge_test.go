@@ -79,8 +79,8 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 		require.Equal(t, tc.ok, tc.in.Validate() == nil, tc.name)
 	}
 
-	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: psp, Custodian: models.CustodianPSP, RailCustomerRef: " vault ", RailMethodRef: "billing", StoredCredentialRecurringRef: " rec ", StoredCredentialUnscheduledRef: "unsch"}
-	frozen := FreezeInstrument(method)
+	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: &psp, Custodian: models.CustodianPSP, RailCustomerRef: " vault ", RailMethodRef: "billing", StoredCredentialRecurringRef: " rec ", StoredCredentialUnscheduledRef: "unsch"}
+	frozen := FreezeInstrument(method, psp)
 	require.Equal(t, "vault", frozen.RailCustomerRef)
 	require.Equal(t, "rec", frozen.StoredCredentialRecurringRef)
 	require.False(t, frozen.CustodianHeld())
@@ -95,7 +95,7 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 	require.ErrorIs(t, frozen.Matches(changed, AgreementUnscheduled), ErrInstrumentChanged)
 
 	for name, mutate := range map[string]func(*gen.BillingPaymentMethod){
-		"account":  func(m *gen.BillingPaymentMethod) { m.PspID = uuid.New() },
+		"account":  func(m *gen.BillingPaymentMethod) { other := uuid.New(); m.PspID = &other },
 		"customer": func(m *gen.BillingPaymentMethod) { m.RailCustomerRef = "vault2" },
 		"method":   func(m *gen.BillingPaymentMethod) { m.RailMethodRef = "billing2" },
 		"custody": func(m *gen.BillingPaymentMethod) {
@@ -107,6 +107,16 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 		mutate(&m)
 		require.True(t, errors.Is(frozen.Matches(m, AgreementRecurring), ErrInstrumentChanged), name)
 	}
+
+	// A card a custodian holds names no PSP: any PSP routing picks charges it,
+	// and a PSP-held card only through its own PSP.
+	custodial := method
+	custodial.PspID, custodial.Custodian, custodial.CustodianID = nil, models.CustodianBasisTheory, &custodian
+	require.True(t, ChargeableOn(custodial, uuid.New()))
+	require.NoError(t, FreezeInstrument(custodial, psp).Matches(custodial, AgreementRecurring))
+	require.True(t, ChargeableOn(method, psp))
+	require.False(t, ChargeableOn(method, uuid.New()))
+	require.ErrorIs(t, FreezeInstrument(method, uuid.New()).Matches(method, AgreementRecurring), ErrInstrumentChanged)
 }
 
 func TestHyperSwitchBindingIsCanonical(t *testing.T) {

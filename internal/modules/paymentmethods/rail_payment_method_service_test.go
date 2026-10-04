@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -70,14 +71,20 @@ func TestNMINameParts(t *testing.T) {
 
 func TestPreparePaymentMethodUpdate(t *testing.T) {
 	t.Parallel()
-	token, last4, brand, expiry := "  token-1  ", "4242", "Visa", "12-2030"
-	req := &UpdatePaymentMethodRequest{PaymentToken: &token, LastFour: &last4, CardType: &brand, ExpiryDate: &expiry}
+	token := "  token-1  "
+	req := &UpdatePaymentMethodRequest{PaymentToken: &token}
 	require.NoError(t, preparePaymentMethodUpdate(req))
 	require.Equal(t, "token-1", *req.PaymentToken)
-	require.Equal(t, "12/30", *req.ExpiryDate)
 
-	bare := "token-1"
-	require.EqualError(t, preparePaymentMethodUpdate(&UpdatePaymentMethodRequest{PaymentToken: &bare}), "last_four and expiry_date are required from the tokenization response")
+	blank := " "
+	require.EqualError(t, preparePaymentMethodUpdate(&UpdatePaymentMethodRequest{PaymentToken: &blank}), "payment_token is required")
+}
+
+func TestVaultedCardReadsTheGatewayRecord(t *testing.T) {
+	t.Parallel()
+	card := vaultedCard(nmi.V5BillingCardData{CardNumber: "4xxxxxxxxxxx1111", CardExp: "1230"}, nil)
+	require.Equal(t, models.Card{Brand: "visa", Last4: "1111", ExpMonth: 12, ExpYear: 2030}, card)
+	require.Equal(t, models.Card{Brand: "mastercard", Last4: "4444"}, vaultedCard(nmi.V5BillingCardData{CardType: "MasterCard", CardNumber: "5xxxxxxxxxxx4444", CardExp: "13/30"}, nil))
 }
 
 // #788: the NMI client arms only from the ctx merchant's scoped secret; no static fallback exists.
@@ -156,7 +163,7 @@ func vaultService(t *testing.T, del PaymentMethodDeleteExecutor) (*RailPaymentMe
 func TestPaymentMethodIntentOutcomes(t *testing.T) {
 	t.Parallel()
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	token, last4, brand, expiry := "token-1", "4242", "Visa", "12/30"
+	token := "token-1"
 	update := func(out PaymentMethodUpdateOutcome) (*models.PaymentMethod, *models.PaymentMethod, error) {
 		svc, pm := vaultService(t, nil)
 		svc.UpdateIntents = updateExecutor{out: out}
@@ -164,7 +171,7 @@ func TestPaymentMethodIntentOutcomes(t *testing.T) {
 			out.Method = pm
 			svc.UpdateIntents = updateExecutor{out: out}
 		}
-		got, err := svc.UpdatePaymentMethod(ctx, pm, &UpdatePaymentMethodRequest{PaymentToken: &token, LastFour: &last4, CardType: &brand, ExpiryDate: &expiry})
+		got, err := svc.UpdatePaymentMethod(ctx, pm, &UpdatePaymentMethodRequest{PaymentToken: &token})
 		return pm, got, err
 	}
 	pm, got, err := update(PaymentMethodUpdateOutcome{Done: true})

@@ -58,8 +58,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
 	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
 		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
-		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef,
-			InitialTransactionID: paid.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"}},
+		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef, Card: declaredCard(visa)}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
 		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},

@@ -129,11 +129,11 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                   notHTTPInternalRow,
 	"internal/service/service_definition_catalog_admin.go:CatalogPage.Limit limit":                                           notMoneyPageSize,
 
-	"billing/invoices.go:InvoiceDTO.Tax tax": notMoneyTaxFacts,
+	"billing/invoices.go:Invoice.Tax tax": notMoneyTaxFacts,
 
 	"internal/modules/subscriptions/stripe_tier_change.go:func parseStripeScheduleState.Price price": notHTTPProviderWire,
 
-	"billing/invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
+	"billing/invoices.go:InvoiceProfile.Tax tax": notMoneyTaxFacts,
 
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
@@ -170,9 +170,7 @@ const (
 // whose value is not a string: each is stored JSONB, a provider's own wire, a
 // log context or a page size — never served by a route. Same shrink-only rule.
 var pendingDynamicMoney = map[string]string{
-	"internal/http/handlers/admin_payments.go:func GetAdminUserPayments \"limit\"":                       notMoneyPageSize,
 	"internal/http/handlers/admin_payments.go:func adminRefundMetadata \"admin_refund_amount\"":          notHTTPStoredMetadata,
-	"internal/http/handlers/self_usage_invoices.go:func GetMyInvoices \"limit\"":                         notMoneyPageSize,
 	"internal/http/request/request.go:func SuccessJSONPaginated \"limit\"":                               notMoneyPageSize,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                       notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                              notMoneyPurgeInventory,

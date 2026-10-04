@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
@@ -27,8 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -104,23 +102,21 @@ func (s *RailPaymentMethodService) Clock() clockwork.Clock {
 
 type CreatePaymentMethodRequest struct {
 	PaymentToken string
-	Provider     string
-	NameOnCard   string
-	FirstName    string
-	LastName     string
-	Address1     string
-	City         string
-	State        string
-	Zip          string
-	Country      string
-	Phone        string
-	Email        string
-	Company      string
-	Address2     string
-	LastFour     string
-	CardType     string
-	ExpiryDate   string
-	Metadata     map[string]any
+	// PSPID is the PSP the card is saved with.
+	PSPID      uuid.UUID
+	NameOnCard string
+	FirstName  string
+	LastName   string
+	Address1   string
+	City       string
+	State      string
+	Zip        string
+	Country    string
+	Phone      string
+	Email      string
+	Company    string
+	Address2   string
+	Metadata   map[string]any
 	// AttemptTarget and AttemptOwner place the card's verification in its
 	// checkout (#1110): the price being bought, or attempts.CardSave.
 	AttemptTarget string
@@ -146,9 +142,6 @@ type UpdatePaymentMethodRequest struct {
 	Email        *string
 	Company      *string
 	Address2     *string
-	LastFour     *string
-	CardType     *string
-	ExpiryDate   *string
 
 	// Card replaces PaymentToken for a PSP whose card_entry is server (#1129).
 	// AttemptKey is the caller's retry identity for that replacement: a card
@@ -214,7 +207,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	defer func() {
 		log.WithFields(log.Fields{
 			"operation":            "payment_method_create",
-			"provider":             strings.TrimSpace(strings.ToLower(req.Provider)),
+			"psp_id":               req.PSPID.String(),
 			"provider_duration_ms": providerDuration.Milliseconds(),
 			"database_duration_ms": databaseDuration.Milliseconds(),
 			"total_duration_ms":    time.Since(startedAt).Milliseconds(),
@@ -222,41 +215,24 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		}).Info("Payment method create timing")
 	}()
 
-	psp := strings.TrimSpace(strings.ToLower(req.Provider))
-	if psp == "" {
-		return nil, errors.New("provider is required")
+	if req.PSPID == uuid.Nil {
+		return nil, ErrPSPRequired
 	}
-
-	// or#896: refuse an unsupported RAIL honestly before credential resolution.
-	// A reserved gateway name (stripe/ccbill/solana) resolves to itself, so the
-	// old code reported "PSP 'stripe' is not configured" — a misconfiguration
-	// message for a surface that does not exist on that rail.
-	if rail := models.Rail(psp); knownRail(rail) && !rails.SupportsPaymentMethodCRUD(rail) {
-		return nil, RailPaymentMethodsUnsupported(psp)
-	}
-
-	client, scope, err := s.resolveNMIClientByName(ctx, psp)
+	client, scope, err := s.resolveNMIClientForPSP(ctx, req.PSPID)
 	if err != nil {
-		if errors.Is(err, ErrPaymentMethodsUnsupportedOnRail) {
+		if errors.Is(err, ErrPaymentMethodsUnsupportedOnRail) || errors.Is(err, ErrPSPUnavailable) {
 			return nil, err
 		}
-		return nil, fmt.Errorf("PSP '%s' is not configured: %w", psp, err)
+		return nil, fmt.Errorf("PSP %s is not configured: %w", req.PSPID, err)
 	}
-	rail := psp
-	var pspID *uuid.UUID
-	if scope != nil {
-		rail = scope.Rail
-		if scope.ID != uuid.Nil {
-			id := scope.ID
-			pspID = &id
-		}
-	}
+	rail := scope.Rail
+	pspID := &scope.ID
 
 	if req.Card != nil {
 		if strings.TrimSpace(req.PaymentToken) != "" {
 			return nil, ErrCardWithToken
 		}
-		if scope == nil || pspID == nil || cardEntry(*scope) != config.CardEntryServer {
+		if cardEntry(*scope) != config.CardEntryServer {
 			return nil, ErrCardEntryNotEnabled
 		}
 	}
@@ -361,17 +337,12 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		RailCustomerRef: nmiResponse.CustomerVaultID,
 		RailMethodRef:   nmiResponse.BillingID,
 
-		InitialTransactionID:         "",
 		StoredCredentialRecurringRef: agreementRef,
 		CreatedAt:                    s.now(),
 		UpdatedAt:                    s.now(),
-		LastFour:                     stringPtrOrNil(firstNonEmpty(sanitizeLastFour(nmiResponse.Card.CardNumber), sanitizeLastFour(req.LastFour))),
-		ExpiryDate:                   stringPtrOrNil(firstNonEmpty(nmiCardExpiry(nmiResponse.Card.CardExp), sanitizeExpiryDate(req.ExpiryDate))),
-		CardType:                     stringPtrOrNil(firstNonEmpty(sanitizeCardType(nmiResponse.Card.CardType), sanitizeCardType(req.CardType), nmi.CardBrandFromMaskedPAN(nmiResponse.Card.CardNumber))),
+		Card:                         vaultedCard(nmiResponse.Card, req.Card),
 		Metadata:                     metadata,
-	}
-	if pspID != nil {
-		pm.PspID = *pspID
+		PspID:                        pspID,
 	}
 
 	databaseStartedAt := time.Now()
@@ -386,7 +357,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 	databaseDuration = time.Since(databaseStartedAt)
 	s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Approved: true, TransactionID: agreementRef, PaymentMethodID: &methodID, Step: "verify",
-		Answer: decline.Evidence{CardBrand: normalize.FromPtr(pm.CardType), CardLast4: normalize.FromPtr(pm.LastFour)}, TokenType: charge.TokenTypePSPToken})
+		Answer: decline.Evidence{CardBrand: pm.Card.Brand, CardLast4: pm.Card.Last4}, TokenType: charge.TokenTypePSPToken})
 
 	outcome = "success"
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")
@@ -482,8 +453,6 @@ func (s *RailPaymentMethodService) vaultCard(ctx context.Context, client *nmi.NM
 				resp.BillingID, resp.Card = strings.TrimSpace(entry.ID), entry.PaymentDetails
 			}
 		}
-		// The card names itself when the gateway's record does not.
-		req.LastFour, req.ExpiryDate, req.CardType = card.LastFour(), card.Expiry(), card.Brand()
 		return resp, nil
 	case out.Refused:
 		code := decline.NMILocalizationID(out.ResponseCode)
@@ -562,52 +531,43 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 	return nil, nil, errors.New("missing client")
 }
 
-// resolveNMIClientByName resolves the client for a PSP key or a bare rail
-// name: a declared PSP key pins its own account; a rail resolves to the
-// active armed account. Returns the resolved scope (nil when only static
-// resolution was possible).
-func (s *RailPaymentMethodService) resolveNMIClientByName(ctx context.Context, name string) (*nmi.NMIClient, *merchants.PSPScope, error) {
-	name = strings.TrimSpace(strings.ToLower(name))
-	if name == "" {
-		return nil, nil, errors.New("psp is required")
+var (
+	// ErrPSPRequired: a card is saved with a named PSP.
+	ErrPSPRequired = errors.New("psp_id is required")
+	// ErrPSPUnavailable: the PSP is unknown, archived or of another
+	// environment; new cards are not saved with it.
+	ErrPSPUnavailable = errors.New("the PSP does not take new cards")
+)
+
+// resolveNMIClientForPSP arms the client of the live PSP a new card is saved
+// with.
+func (s *RailPaymentMethodService) resolveNMIClientForPSP(ctx context.Context, pspID uuid.UUID) (*nmi.NMIClient, *merchants.PSPScope, error) {
+	if s == nil || s.DB == nil {
+		return nil, nil, errors.New("PSP lookup unavailable")
 	}
-	var keyResolver merchants.PSPKeyResolver
-	if s != nil {
-		if kr, ok := s.ProviderScopes.(merchants.PSPKeyResolver); ok {
-			keyResolver = kr
-		} else if kr, ok := s.ProviderSecrets.(merchants.PSPKeyResolver); ok {
-			keyResolver = kr
-		}
-	}
-	if keyResolver != nil {
-		if tid, err := merchant.Require(ctx); err == nil {
-			env := config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
-			scope, found, err := keyResolver.PSPScopeByKey(ctx, tid, name, env)
-			if err != nil {
-				return nil, nil, fmt.Errorf("resolve PSP %q: %w", name, err)
-			}
-			if found {
-				if !rails.SupportsPaymentMethodCRUD(models.Rail(scope.Rail)) {
-					// or#896: honest unsupported-surface refusal, not a
-					// credential complaint about a PSP that resolved fine.
-					return nil, nil, RailPaymentMethodsUnsupported(scope.Rail)
-				}
-				client, err := s.resolveNMIClientForScope(ctx, scope)
-				if err != nil {
-					return nil, nil, err
-				}
-				return client, &scope, nil
-			}
-		}
-	}
-	client, pspID, err := s.resolveNMIClient(ctx, name)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if pspID != nil {
-		return client, &merchants.PSPScope{ID: *pspID, Rail: name}, nil
+	row, err := s.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: pspID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrPSPUnavailable
 	}
-	return client, nil, nil
+	if err != nil {
+		return nil, nil, err
+	}
+	if row.Archived || row.Environment != config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config)) {
+		return nil, nil, ErrPSPUnavailable
+	}
+	if !rails.SupportsPaymentMethodCRUD(models.Rail(row.Rail)) {
+		return nil, nil, RailPaymentMethodsUnsupported(row.Rail)
+	}
+	scope := merchants.PSPScopeFromRow(row)
+	client, err := s.resolveNMIClientForScope(ctx, scope)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, &scope, nil
 }
 
 func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context, scope merchants.PSPScope) (*nmi.NMIClient, error) {
@@ -629,56 +589,16 @@ func nmiNameParts(firstName, lastName, nameOnCard string) (string, string) {
 	return cardholdername.Parts(nameOnCard, firstName, lastName)
 }
 
-func sanitizeLastFour(value string) string {
-	digits := strings.Builder{}
-	for _, r := range value {
-		if unicode.IsDigit(r) {
-			digits.WriteRune(r)
-		}
+// vaultedCard is the saved card's display facts: the card itself when the
+// server received it, else what the gateway reports for the vault entry.
+func vaultedCard(reported nmi.V5BillingCardData, entered *cardguard.Card) models.Card {
+	brand := firstNonEmpty(strings.TrimSpace(reported.CardType), nmi.CardBrandFromMaskedPAN(reported.CardNumber))
+	card := models.ParseCard(brand, reported.CardNumber, reported.CardExp)
+	if entered != nil {
+		month, year := entered.ExpiryMonthYear()
+		card = models.Card{Brand: firstNonEmpty(entered.Brand(), card.Brand), Last4: entered.LastFour(), ExpMonth: month, ExpYear: year}
 	}
-	out := digits.String()
-	if len(out) > 4 {
-		out = out[len(out)-4:]
-	}
-	if len(out) != 4 {
-		return ""
-	}
-	return out
-}
-
-func sanitizeCardType(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 30 {
-		return ""
-	}
-	for _, r := range value {
-		if !unicode.IsLetter(r) && r != ' ' && r != '-' {
-			return ""
-		}
-	}
-	return value
-}
-
-func sanitizeExpiryDate(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 7 {
-		return ""
-	}
-	for _, r := range value {
-		if !unicode.IsDigit(r) && r != '/' && r != '-' {
-			return ""
-		}
-	}
-	return value
-}
-
-// nmiCardExpiry normalizes the gateway's MMYY expiry to MM/YY.
-func nmiCardExpiry(value string) string {
-	value = sanitizeExpiryDate(value)
-	if len(value) == 4 && !strings.ContainsAny(value, "/-") {
-		return value[:2] + "/" + value[2:]
-	}
-	return value
+	return card
 }
 
 func firstNonEmpty(values ...string) string {
@@ -688,13 +608,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func stringPtrOrNil(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }
 
 var (
@@ -773,7 +686,7 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	}
 	defer req.Card.Zero()
 	if req.Card != nil {
-		entry, err := s.CardEntryForPSP(ctx, pm.PspID)
+		entry, err := s.CardEntryForPSP(ctx, pm.HoldingPSP())
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrPaymentMethodProviderUnavailable, err)
 		}
@@ -784,7 +697,7 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	if err := preparePaymentMethodUpdate(req); err != nil {
 		return nil, err
 	}
-	if _, _, err := s.resolveNMIClient(ctx, rail, &pm.PspID); err != nil {
+	if _, _, err := s.resolveNMIClient(ctx, rail, pm.PspID); err != nil {
 		return nil, fmt.Errorf("%w: rail '%s' is not configured: %w", ErrPaymentMethodProviderUnavailable, rail, err)
 	}
 	if s.UpdateIntents == nil {
@@ -820,31 +733,6 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 		return &PaymentMethodUpdateValidationError{Message: "payment_token is required"}
 	}
 	req.PaymentToken = &token
-
-	lastFour := ""
-	if req.LastFour != nil {
-		lastFour = sanitizeLastFour(*req.LastFour)
-	}
-	cardType := ""
-	if req.CardType != nil {
-		cardType = sanitizeCardType(*req.CardType)
-	}
-	expiry := ""
-	if req.ExpiryDate != nil {
-		expiry = normalizeReplacementExpiry(*req.ExpiryDate)
-	}
-	if req.Card != nil {
-		// The card names itself; nothing the caller says about it is used.
-		lastFour, cardType, expiry = req.Card.LastFour(), req.Card.Brand(), req.Card.Expiry()
-	}
-	// The brand is display metadata; the vault record derives it from the
-	// masked number when the tokenizer omits it.
-	if lastFour == "" || expiry == "" {
-		return &PaymentMethodUpdateValidationError{Message: "last_four and expiry_date are required from the tokenization response"}
-	}
-	req.LastFour = &lastFour
-	req.CardType = &cardType
-	req.ExpiryDate = &expiry
 	if req.NameOnCard != nil {
 		canonical := cardholdername.Canonical(*req.NameOnCard, "", "")
 		req.NameOnCard = &canonical
@@ -853,14 +741,6 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 		req.LastName = &last
 	}
 	return nil
-}
-
-func normalizeReplacementExpiry(value string) string {
-	month, year, err := sharedformat.ParseExpiry(value)
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%02d/%02d", month, year%100)
 }
 
 // ErrPaymentMethodDeleteProcessing: the durable vault-delete intent could not confirm
@@ -991,7 +871,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 	// entry (the vault survives for the sibling cards; NMI refuses to empty a
 	// vault, so the LAST row's delete is the whole-vault delete).
 	if s.DB != nil && strings.TrimSpace(pm.RailCustomerRef) != "" {
-		n, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.PspID, pm.RailCustomerRef, pm.ID)
+		n, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.HoldingPSP(), pm.RailCustomerRef, pm.ID)
 		if err != nil {
 			return false, nil, fmt.Errorf("failed to check payment method sharing: %w", err)
 		}
@@ -1004,7 +884,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 		return shared, nil, fmt.Errorf("%w: shared NMI customer %s has no billing id for this method", ErrPaymentMethodDeleteUnsafe, pm.RailCustomerRef)
 	}
 
-	client, _, err = s.resolveNMIClient(ctx, rail, &pm.PspID)
+	client, _, err = s.resolveNMIClient(ctx, rail, pm.PspID)
 	if err != nil {
 		return shared, nil, fmt.Errorf("%w: rail %q: %w", ErrPaymentMethodProviderUnavailable, rail, err)
 	}
@@ -1090,7 +970,7 @@ func (s *RailPaymentMethodService) ResolveClientForPaymentMethod(ctx context.Con
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
 	}
-	client, _, err := s.resolveNMIClient(ctx, rail, &pm.PspID)
+	client, _, err := s.resolveNMIClient(ctx, rail, pm.PspID)
 	return client, err
 }
 

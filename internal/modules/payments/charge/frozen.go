@@ -24,6 +24,15 @@ type FrozenInstrument struct {
 	RailMethodRef                  string     `json:"rail_method_ref"`
 }
 
+// ChargeableOn reports whether a charge through psp can use the method: the
+// PSP holding a PSP-held card, or any PSP for one a custodian holds.
+func ChargeableOn(method gen.BillingPaymentMethod, psp uuid.UUID) bool {
+	if method.Custodian != "" && method.Custodian != models.CustodianPSP {
+		return true
+	}
+	return method.PspID != nil && *method.PspID == psp
+}
+
 // ErrInstrumentChanged: the payment method no longer matches the
 // instrument its operation froze. Raised before any provider traffic.
 var ErrInstrumentChanged = errors.New("payment method no longer matches the operation's frozen instrument")
@@ -32,13 +41,30 @@ var ErrInstrumentChanged = errors.New("payment method no longer matches the oper
 // It says nothing about any earlier call or durable submission marker.
 var ErrNotDispatched = errors.New("charge refused before provider dispatch")
 
-// FreezeInstrument freezes a saved method's instrument.
-func FreezeInstrument(method gen.BillingPaymentMethod) FrozenInstrument {
+// FreezeInstrument freezes a saved method's instrument for a charge through
+// psp: the PSP that holds a PSP-held card, or the one routing picked for a
+// card a third-party custodian holds.
+func FreezeInstrument(method gen.BillingPaymentMethod, psp uuid.UUID) FrozenInstrument {
 	return FrozenInstrument{
-		PSPID: method.PspID, Custodian: method.Custodian, CustodianID: method.CustodianID,
+		PSPID: psp, Custodian: method.Custodian, CustodianID: method.CustodianID,
 		StoredCredentialRecurringRef: strings.TrimSpace(method.StoredCredentialRecurringRef), StoredCredentialUnscheduledRef: strings.TrimSpace(method.StoredCredentialUnscheduledRef),
 		RailCustomerRef: strings.TrimSpace(method.RailCustomerRef), RailMethodRef: strings.TrimSpace(method.RailMethodRef),
 	}
+}
+
+// FreezeCustody freezes who holds a saved method and how it is addressed
+// there, for an operation on the instrument itself (a delete) that no PSP
+// takes.
+func FreezeCustody(method gen.BillingPaymentMethod) FrozenInstrument {
+	return FreezeInstrument(method, uuid.Nil)
+}
+
+// ValidateCustody checks a frozen instrument's custody alone.
+func (i FrozenInstrument) ValidateCustody() error {
+	if !slices.Contains(models.Custodians(), i.Custodian) || (i.Custodian == models.CustodianPSP) != (i.CustodianID == nil) {
+		return fmt.Errorf("frozen instrument custody %q is incomplete", i.Custodian)
+	}
+	return nil
 }
 
 func (i FrozenInstrument) Validate() error {
@@ -56,7 +82,7 @@ func (i FrozenInstrument) Validate() error {
 func (i FrozenInstrument) CustodianHeld() bool { return i.Custodian != models.CustodianPSP }
 
 func (i FrozenInstrument) Matches(method gen.BillingPaymentMethod, agreement Agreement) error {
-	cur := FreezeInstrument(method)
+	cur := FreezeInstrument(method, i.PSPID)
 	switch agreement {
 	case AgreementRecurring:
 		if i.StoredCredentialRecurringRef != cur.StoredCredentialRecurringRef {
@@ -71,7 +97,8 @@ func (i FrozenInstrument) Matches(method gen.BillingPaymentMethod, agreement Agr
 	}
 	sameCustodian := (cur.CustodianID == nil && i.CustodianID == nil) ||
 		(cur.CustodianID != nil && i.CustodianID != nil && *cur.CustodianID == *i.CustodianID)
-	if cur.PSPID != i.PSPID || cur.Custodian != i.Custodian || !sameCustodian ||
+	heldElsewhere := method.Custodian == models.CustodianPSP && (method.PspID == nil || *method.PspID != i.PSPID)
+	if heldElsewhere || cur.Custodian != i.Custodian || !sameCustodian ||
 		cur.RailCustomerRef != i.RailCustomerRef || cur.RailMethodRef != i.RailMethodRef {
 		return fmt.Errorf("%w: payment method %s", ErrInstrumentChanged, method.ID)
 	}

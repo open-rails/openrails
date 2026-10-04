@@ -20,6 +20,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
@@ -518,7 +519,7 @@ func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *s
 	_ = json.Unmarshal(raw, &evidence)
 	local := evidence.Local
 	review := billing.PurchaseReview{
-		ID: id.String(), Object: "purchase_review", ProductArchiveID: local["product_archive_id"], ProductKey: local["product_key"],
+		ID: id.String(), ProductArchiveID: local["product_archive_id"], ProductKey: local["product_key"],
 		CustomerID: local["customer_id"], Currency: local["currency"], Detail: local["detail"], CreatedAt: created, ResolvedAt: resolved,
 	}
 	review.ProductID, _ = billing.ParseProductID(local["product_id"])
@@ -560,34 +561,34 @@ func ListPurchaseReviews(r *httprequest.Request) {
 	}
 	findingStatuses, ok := statuses[strings.TrimSpace(r.Query("status"))]
 	if !ok {
-		r.ErrorJSON(http.StatusBadRequest, `status must be "open", "refunded" or "dismissed"`)
+		r.APIError(api.Coded(billing.CodeInvalidQuery, `status must be "open", "refunded" or "dismissed"`).WithParam("status"))
 		return
 	}
-	limit := min(max(parseIntDefault(r.Query("limit"), 50), 1), 200)
-	offset := max(parseIntDefault(r.Query("offset"), 0), 0)
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		writeRefusal(r, err, "invalid cursor")
+		return
+	}
 	archive := strings.TrimSpace(r.Query("product_archive_id"))
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		r.InternalError("purchase reviews unavailable", err)
 		return
 	}
-	q := r.State.DB.Gen(ctx)
-	total, err := q.CountPurchaseReviews(ctx, gen.CountPurchaseReviewsParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, Statuses: findingStatuses, ProductArchiveID: archive})
-	if err != nil {
-		r.InternalError("purchase reviews could not be counted", err)
-		return
-	}
-	rows, err := q.ListPurchaseReviews(ctx, gen.ListPurchaseReviewsParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, Statuses: findingStatuses,
-		ProductArchiveID: archive, PageLimit: int64(limit), PageOffset: int64(offset)})
+	rows, err := r.State.DB.Gen(ctx).ListPurchaseReviews(ctx, gen.ListPurchaseReviewsParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, Statuses: findingStatuses,
+		ProductArchiveID: archive, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(page.Limit)})
 	if err != nil {
 		r.InternalError("purchase reviews could not be listed", err)
 		return
 	}
-	reviews := make([]billing.PurchaseReview, 0, len(rows))
-	for _, row := range rows {
-		reviews = append(reviews, purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt))
-	}
-	r.JSON(http.StatusOK, billing.Page[billing.PurchaseReview]{Object: "list", Data: reviews, Total: total, Limit: limit, Offset: offset, HasMore: int64(offset+len(reviews)) < total})
+	cut := pagination.Cut(rows, page.Limit, func(row gen.ListPurchaseReviewsRow) any { return pagination.TimeID{At: row.CreatedAt, ID: row.ID} })
+	r.SuccessJSON(pagination.Map(cut, func(row gen.ListPurchaseReviewsRow) billing.PurchaseReview {
+		return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt)
+	}))
 }
 
 // ResolvePurchaseReview refunds (approve) or dismisses (ignore) one review

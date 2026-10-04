@@ -238,11 +238,11 @@ Mounting gives your users these routes under `/billing`:
 | `POST /billing/v1/me/subscriptions/{id}/change-tier`, `/change-tier/preview` | upgrade or downgrade, with a proration preview |
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
 | `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
-| `GET /billing/v1/me/payment-methods` | their saved cards, default first |
+| `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
 | `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
 | `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
-| `PUT /billing/v1/me/default-payment-method` | choose the default card |
-| `POST /billing/v1/me/payment-methods/stripe-setup` | save a card through Stripe (plus `GET` and `/confirm`) |
+| `PUT /billing/v1/me/collection-payment-method` | choose the card that pays one currency's invoices |
+| `POST /billing/v1/me/payment-method-setups` | save a card through Stripe (plus `GET` and `/confirm`) |
 | `GET /billing/v1/me/payment-operations/{id}/authentication` | finish a 3-D Secure challenge (plus `/confirm`) |
 | `POST /billing/v1/me/billing-portal` | open Stripe's billing portal (when a Stripe PSP is declared) |
 | `GET /billing/v1/me/payments` | payment and refund history |
@@ -288,7 +288,7 @@ export function App() {
       <BillingProvider client={billing}>
         <UpgradeButton />
         {/* Subscriptions (cancel, resume, change card), saved cards and payment history. */}
-        <AccountBilling plansHref="/plans" defaultCurrency="USD" />
+        <AccountBilling plansHref="/plans" collectionCurrency="USD" />
       </BillingProvider>
     </BillingUiProvider>
   )

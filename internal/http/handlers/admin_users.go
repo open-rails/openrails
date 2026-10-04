@@ -5,7 +5,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/query"
@@ -99,15 +98,13 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 	}
 	if r.State.PaymentMethodService != nil {
 		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, subject); err == nil && len(pms) > 0 {
-			// Collection defaults enrich this section; a loader failure keeps
-			// the methods without them rather than failing the profile.
-			methods := paymentMethodsToAPI(pms, paymentMethodCharges(r, pms))
-			stampDefaultPaymentMethod(r, pms, methods)
-			if err := applyCollectionDefaults(r, customerID, pms, methods); err != nil {
-				log.WithError(err).WithField("customer_id", subject).
-					Warn("failed to load collection payment method defaults; profile payment methods returned without them")
+			// The cards are a section of the profile, not its point: a read
+			// failure leaves the section empty rather than failing the profile.
+			if methods, err := paymentMethodsView(r, customerID, pms); err == nil {
+				profile.PaymentMethods = methods
+			} else {
+				log.WithError(err).WithField("customer_id", subject).Warn("failed to read payment methods; profile returned without them")
 			}
-			profile.PaymentMethods = methods
 		}
 	}
 	if svc := productAccessService(r); svc != nil {
@@ -116,32 +113,6 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 		}
 	}
 	r.SuccessJSON(profile)
-}
-
-func GetAdminUserPaymentMethods(r *httprequest.Request) {
-	var path adminUserPath
-	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if r.State.PaymentMethodService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
-		return
-	}
-	limit, offset, ok := invoicePage(r)
-	if !ok {
-		return
-	}
-	pms, total, err := r.State.PaymentMethodService.ListByUserID(r.Request.Context(), path.UserID, limit, offset)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment methods")
-		return
-	}
-	methods, ok := paymentMethodsWithCollectionDefaults(r, identity.CustomerIDFromString(path.UserID), pms)
-	if !ok {
-		return
-	}
-	r.SuccessJSON(api.NewList(methods, total, limit, offset))
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {

@@ -120,10 +120,9 @@ func TestRailHasRemoteCustomer(t *testing.T) {
 
 func TestStripeCardNormalization(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, &StripeCard{Brand: "Visa", Last4: "4242", Expiry: "03/30"}, NormalizeStripeCard(StripeCardDetails{Brand: " visa ", Last4: " 4242 ", ExpMonth: 3, ExpYear: 2030}))
-	require.Equal(t, &StripeCard{Brand: "Amex", Last4: "0005"}, NormalizeStripeCard(StripeCardDetails{Brand: "amex", Last4: "0005", ExpMonth: 3}))
+	require.Equal(t, &models.Card{Brand: "visa", Last4: "4242", ExpMonth: 3, ExpYear: 2030}, NormalizeStripeCard(StripeCardDetails{Brand: " visa ", Last4: " 4242 ", ExpMonth: 3, ExpYear: 2030}))
+	require.Equal(t, &models.Card{Brand: "amex", Last4: "0005"}, NormalizeStripeCard(StripeCardDetails{Brand: "amex", Last4: "0005", ExpMonth: 3}))
 	require.Nil(t, NormalizeStripeCard(StripeCardDetails{Brand: "visa", ExpMonth: 1, ExpYear: 2030}))
-	require.Equal(t, "", TitleCaseBrand("  "))
 	require.Equal(t, []string{"ch_1", "pi_1"}, compactStrings(" ch_1 ", "", "pi_1", "ch_1"))
 }
 

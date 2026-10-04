@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -63,28 +65,27 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 		httprequest.NewHTTP(rec, wire, &app.Runtime{}).BindJSON(into)
 		return rec
 	}
-	var create CreatePaymentMethodRequest
-	require.Empty(t, bind(`{"provider":"nmi",`+cardBody+`}`, &create).Body.String())
+	var create billing.CreatePaymentMethodParams
+	require.Empty(t, bind(`{"psp_id":"`+uuid.NewString()+`",`+cardBody+`}`, &create).Body.String())
 	require.Equal(t, []string{"visa", "1111", "10/27"}, []string{create.Card.Brand(), create.Card.LastFour(), create.Card.Expiry()})
-	require.NoError(t, create.rejectRawCardFields())
-	var update UpdatePaymentMethodRequest
+	var update billing.ReplacePaymentMethodCardParams
 	require.Empty(t, bind(`{`+cardBody+`}`, &update).Body.String())
 	require.NotNil(t, update.Card)
 	var session CheckoutSessionCreateRequest
 	require.Empty(t, bind(`{"price_key":"k","payment":{"rail":"nmi",`+cardBody+`}}`, &session).Body.String())
 	require.NotNil(t, session.Payment.Card)
 
-	for _, into := range []any{new(CreatePaymentMethodRequest), new(UpdatePaymentMethodRequest)} {
-		rec := bind(`{"provider":"nmi"}`, into)
-		require.Equal(t, http.StatusBadRequest, rec.Code)
-		require.Contains(t, rec.Body.String(), "paymenttoken is invalid")
-	}
+	// A card number in a field of its own is an unknown field, never echoed.
+	rec := bind(`{"psp_id":"x","card_number":"4111111111111111"}`, new(billing.CreatePaymentMethodParams))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "unknown_field")
+	require.NotContains(t, rec.Body.String(), "4111")
 	for body, message := range map[string]string{
 		`{"card":{"number":"4111111111111112","exp_month":10,"exp_year":2027,"cvc":"999"}}`: "card number is invalid",
 		`{"card":{"number":"4111111111111111","exp_month":10,"exp_year":2027}}`:             "card cvc is invalid",
 		`{"card":"[card]"}`: "card was redacted in transit",
 	} {
-		rec := bind(body, new(CreatePaymentMethodRequest))
+		rec := bind(body, new(billing.CreatePaymentMethodParams))
 		require.Equal(t, http.StatusBadRequest, rec.Code, body)
 		require.Contains(t, rec.Body.String(), message, body)
 		require.NotContains(t, rec.Body.String(), "4111", body)

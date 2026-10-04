@@ -420,11 +420,13 @@ func TestPriceLinkIsProviderScoped(t *testing.T) {
 func TestSavedMethodMustBelongToTargetPSP(t *testing.T) {
 	id := uuid.New()
 	target := railTarget{Scope: &merchants.PSPScope{ID: id}}
-	require.NoError(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: id}, target))
-	require.ErrorIs(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: uuid.New()}, target), ErrPaymentMethodStale)
+	other := uuid.New()
+	require.NoError(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: &id}, target))
+	require.ErrorIs(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: &other}, target), ErrPaymentMethodStale)
 	require.ErrorIs(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{}, target), ErrPaymentMethodStale)
+	require.NoError(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{Custodian: models.CustodianBasisTheory}, target), "a custodian's card is charged through the PSP routing picks")
 	require.Error(t, paymentMethodMatchesTargetPSP(nil, target))
-	require.Error(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: id}, railTarget{}))
+	require.Error(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: &id}, railTarget{}))
 }
 
 func TestCheckoutRequiresProviderWrites(t *testing.T) {

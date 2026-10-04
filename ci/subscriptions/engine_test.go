@@ -343,7 +343,7 @@ func (e *engineCase) replaceCard(c card) {
 		e.method = method
 		return
 	}
-	e.c.must(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"provider": "nmi", "payment_token": e.w.nmi.Tokenize(c), "last_four": c.Last4, "card_type": c.Brand, "expiry_date": "12/35"})
+	e.c.must(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"payment_token": e.w.nmi.Tokenize(c)})
 	e.w.settle()
 }
 
@@ -546,7 +546,7 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				w.settle()
 				got, err := w.client[tp].GetPayment(t.Context(), renewal.ID)
 				require.NoError(t, err)
-				require.True(t, got.Refunded)
+				require.Equal(t, billing.PaymentRefunded, got.Status)
 				require.Equal(t, got.Amount, got.AmountRefunded)
 				var refunded int64
 				for _, entry := range e.providerLedger() {

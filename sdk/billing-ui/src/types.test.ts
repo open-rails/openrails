@@ -20,7 +20,7 @@ describe("checkoutSessionSchema", () => {
       "solana_pay",
       "redirect",
     ])
-    expect(parsed.saved_methods?.[0].exp_year).toBe(2030)
+    expect(parsed.saved_methods?.[0].card?.exp_year).toBe(2030)
     expect(parsed.expires_at).toBe("2026-09-16T00:00:00.123456789Z")
   })
 

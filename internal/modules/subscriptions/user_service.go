@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/lifecycle"
 	"net/http"
 	"time"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/lifecycle"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -256,21 +257,6 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 		}
 	}
 	return nil
-}
-
-// GetUserPayments retrieves one-off purchases for a user
-func (s *UserSubscriptionService) GetUserPayments(ctx context.Context, userID string, queryOpts *query.QueryOptions[payments.GetPaymentsFilters]) ([]*models.Payment, int64, error) {
-	if queryOpts.Filters.CustomerID == "" {
-		queryOpts.Filters.CustomerID = userID
-	}
-
-	purchases, total, err := s.PaymentService.GetPayments(ctx, *queryOpts)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get purchases: %w", err)
-	}
-	queryOpts.SetTotal(total)
-
-	return purchases, total, nil
 }
 
 // GetUserNotifications retrieves notifications for a user

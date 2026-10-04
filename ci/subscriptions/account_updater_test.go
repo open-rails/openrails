@@ -86,7 +86,7 @@ func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 	w.runRenewals()
 	require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "the NMI-owned membership collects")
 	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the engine membership collects")
-	require.Equal(t, "1881", w.methodRow(e.method, "last_four"), "the stored card takes the details NMI now holds")
+	require.Equal(t, "1881", w.methodRow(e.method, "card_last4"), "the stored card takes the details NMI now holds")
 }
 
 // NMI cannot update a card and asks for the customer: the member is asked

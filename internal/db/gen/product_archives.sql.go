@@ -12,32 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countPurchaseReviews = `-- name: CountPurchaseReviews :one
-SELECT count(*) FROM billing.reconciliation_findings
-WHERE merchant_id = $1::uuid AND finding_type = $2::text
-  AND status = ANY($3::text[])
-  AND ($4::text = '' OR evidence -> 'local' ->> 'product_archive_id' = $4::text)
-`
-
-type CountPurchaseReviewsParams struct {
-	MerchantID       uuid.UUID
-	FindingType      string
-	Statuses         []string
-	ProductArchiveID string
-}
-
-func (q *Queries) CountPurchaseReviews(ctx context.Context, arg CountPurchaseReviewsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPurchaseReviews,
-		arg.MerchantID,
-		arg.FindingType,
-		arg.Statuses,
-		arg.ProductArchiveID,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getProductArchiveByID = `-- name: GetProductArchiveByID :one
 SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
 FROM billing.product_archive_operations o
@@ -305,8 +279,10 @@ FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND finding_type = $2::text
   AND status = ANY($3::text[])
   AND ($4::text = '' OR evidence -> 'local' ->> 'product_archive_id' = $4::text)
+  AND ($5::timestamptz IS NULL
+       OR (created_at, id) > ($5::timestamptz, $6::uuid))
 ORDER BY created_at, id
-LIMIT $6 OFFSET $5
+LIMIT $7::int
 `
 
 type ListPurchaseReviewsParams struct {
@@ -314,8 +290,9 @@ type ListPurchaseReviewsParams struct {
 	FindingType      string
 	Statuses         []string
 	ProductArchiveID string
-	PageOffset       int64
-	PageLimit        int64
+	AfterAt          *time.Time
+	AfterID          *uuid.UUID
+	RowLimit         int32
 }
 
 type ListPurchaseReviewsRow struct {
@@ -327,14 +304,16 @@ type ListPurchaseReviewsRow struct {
 	ResolvedAt    *time.Time
 }
 
+// One page of purchase reviews, oldest first, after a (created_at, id) cursor.
 func (q *Queries) ListPurchaseReviews(ctx context.Context, arg ListPurchaseReviewsParams) ([]ListPurchaseReviewsRow, error) {
 	rows, err := q.db.Query(ctx, listPurchaseReviews,
 		arg.MerchantID,
 		arg.FindingType,
 		arg.Statuses,
 		arg.ProductArchiveID,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

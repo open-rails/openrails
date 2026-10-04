@@ -64,13 +64,13 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 			// Another customer's method is indistinguishable from a missing one.
 			return apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "payment method not found")
 		}
-		if method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
+		if !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
 			return charge.ErrInstrumentChanged
 		}
-		if err := charge.FreezeInstrument(observed).Matches(method, charge.AgreementRecurring); err != nil {
+		if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method, charge.AgreementRecurring); err != nil {
 			return err
 		}
-		psp, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: method.PspID})
+		psp, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: sub.PspID})
 		if err != nil {
 			return err
 		}
@@ -82,7 +82,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 			if s.Config == nil || s.Config.HyperSwitch == nil {
 				return errors.New("HyperSwitch deployment is unavailable")
 			}
-			frozen, err := charge.FreezeHyperSwitchBinding(ctx, q, method, s.Config.HyperSwitch.APIBaseURL)
+			frozen, err := charge.FreezeHyperSwitchBinding(ctx, q, method, sub.PspID, s.Config.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}
@@ -95,7 +95,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 				return apperr.Conflictf("payment custodian is archived")
 			}
 		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), binding, true); err != nil {
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, sub.PspID), binding, true); err != nil {
 			return apperr.Conflictf("replacement card requires a qualified recurring agreement")
 		}
 		if method.Rail == "stripe" && !stripeEngineID(method.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(method.StoredCredentialRecurringRef, "seti_") {

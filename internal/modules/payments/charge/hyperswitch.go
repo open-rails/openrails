@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -43,12 +44,13 @@ func (b HyperSwitchBinding) Validate() error {
 }
 
 // FreezeHyperSwitchBinding reads the same account/custodian rows under admission
-// locks for invoices, recurring obligations and initial memberships.
-func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, deployment string) (HyperSwitchBinding, error) {
+// locks for invoices, recurring obligations and initial memberships; psp is
+// the PSP the charge goes through.
+func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (HyperSwitchBinding, error) {
 	if deployment == "" || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
 		return HyperSwitchBinding{}, fmt.Errorf("%w: HyperSwitch custody is not configured", ErrInstrumentChanged)
 	}
-	accounts, err := q.GetCollectionCustodianAccountsForShare(ctx, gen.GetCollectionCustodianAccountsForShareParams{MerchantID: method.MerchantID, PspID: method.PspID, CustodianID: *method.CustodianID})
+	accounts, err := q.GetCollectionCustodianAccountsForShare(ctx, gen.GetCollectionCustodianAccountsForShareParams{MerchantID: method.MerchantID, PspID: psp, CustodianID: *method.CustodianID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return HyperSwitchBinding{}, ErrInstrumentChanged
 	}

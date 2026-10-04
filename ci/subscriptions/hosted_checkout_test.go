@@ -431,7 +431,8 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 		saved := session.read()["saved_methods"].([]any)
 		require.Len(t, saved, 1, "the buyer's saved cards, display data only")
 		card := saved[0].(map[string]any)
-		require.Equal(t, []any{method, session.option("nmi"), "nmi", "4242"}, []any{card["id"], card["option_id"], card["rail"], card["last_four"]})
+		shown, _ := card["card"].(map[string]any)
+		require.Equal(t, []any{method, session.option("nmi"), "nmi", "4242"}, []any{card["id"], card["option_id"], card["rail"], shown["last4"]})
 
 		other := app.newCustomer().saveCard("nmi", mastercard)
 		status, out := session.pay(map[string]any{"option_id": session.option("nmi"), "payment_method_id": other})

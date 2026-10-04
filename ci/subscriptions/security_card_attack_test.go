@@ -23,7 +23,7 @@ import (
 // the status and body.
 func (c *customer) cardSave(ip string, cd card) (int, string) {
 	c.w.t.Helper()
-	return c.cardSaveJSON(ip, map[string]any{"provider": "nmi", "payment_token": c.w.nmi.Tokenize(cd), "name_on_card": "Card Holder"})
+	return c.cardSaveJSON(ip, map[string]any{"psp_id": c.w.psp["nmi"], "payment_token": c.w.nmi.Tokenize(cd), "billing_details": map[string]any{"name": "Card Holder"}})
 }
 
 // cardSaveJSON submits a card save request body for c from client address ip.
@@ -73,7 +73,7 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	// one subject is challenged and every attempt reaches the gateway.
 	for i := range 100 {
 		status, body := attacked.newCustomer().cardSave(ip(i), refusedCard)
-		require.Equal(t, http.StatusBadRequest, status, "decline %d: %s", i, body)
+		require.Equal(t, http.StatusBadGateway, status, "decline %d: %s", i, body)
 	}
 
 	status, body := attacked.newCustomer().cardSave(ip(100), visa)
@@ -85,7 +85,7 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	status, body = bystander.staff(http.MethodGet, "/v1/merchant/findings")
 	require.Equal(t, http.StatusOK, status, "another merchant's API is untouched: %s", body)
 	status, body = bystander.newCustomer().cardSave(ip(101), visa)
-	require.Equal(t, http.StatusOK, status, "another merchant's card routes are untouched: %s", body)
+	require.Equal(t, http.StatusCreated, status, "another merchant's card routes are untouched: %s", body)
 }
 
 // SEC: without a captcha (the embedded default: Redis on, no captcha keys),
@@ -114,7 +114,7 @@ func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 		for i := range 100 {
 			tester = w.newCustomer()
 			status, body := tester.cardSave(ip(i), refusedCard)
-			require.Equal(t, http.StatusBadRequest, status, "decline %d: %s", i, body)
+			require.Equal(t, http.StatusBadGateway, status, "decline %d: %s", i, body)
 		}
 		status, body := tester.cardSave(ip(99), refusedCard)
 		require.Equal(t, http.StatusTooManyRequests, status, "in attack mode one recent decline blocks: %s", body)
@@ -122,7 +122,7 @@ func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 		require.Equal(t, 100, w.nmi.RefusedSaves(), "a blocked attempt never reaches the gateway")
 
 		status, body = w.newCustomer().cardSave(ip(100), visa)
-		require.Equal(t, http.StatusOK, status, "a fresh buyer saves a card: %s", body)
+		require.Equal(t, http.StatusCreated, status, "a fresh buyer saves a card: %s", body)
 		buyer.subscribe(embedded, "nmi", price.ID, "vip", method) // confirms a checkout with the saved card
 		require.True(t, buyer.entitled("vip"))
 	})
@@ -142,7 +142,7 @@ func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 			for i, c := range few {
 				for range 5 {
 					status, body := c.cardSave(ip(200+i), refusedCard)
-					require.Equal(t, http.StatusBadRequest, status, "round %d, customer %d: %s", round, i, body)
+					require.Equal(t, http.StatusBadGateway, status, "round %d, customer %d: %s", round, i, body)
 				}
 			}
 			w.advance(16 * time.Minute)
@@ -151,8 +151,8 @@ func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 
 		c := w.newCustomer()
 		status, body := c.cardSave(ip(300), refusedCard)
-		require.Equal(t, http.StatusBadRequest, status, body)
+		require.Equal(t, http.StatusBadGateway, status, body)
 		status, body = c.cardSave(ip(300), visa)
-		require.Equal(t, http.StatusOK, status, "a customer who just declined once is not blocked: %s", body)
+		require.Equal(t, http.StatusCreated, status, "a customer who just declined once is not blocked: %s", body)
 	})
 }

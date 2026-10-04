@@ -346,7 +346,7 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 		})
 		switch {
 		case lerr == nil:
-			currentTargetPSP = locked.PspID
+			currentTargetPSP = derefUUID(locked.PspID)
 			if ref = strings.TrimSpace(locked.RailCustomerRef); ref == "" {
 				refused = ptr(Terminal("target payment method has no rail customer ref; cannot repoint billing"))
 				return nil
@@ -464,7 +464,7 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 		{"subscription_id", sub.ID},
 		{"subscription.psp_id", sub.PspID},
 		{"payment_method_id", newPM.ID},
-		{"payment_method.psp_id", newPM.PspID},
+		{"payment_method.psp_id", newPM.HoldingPSP()},
 	} {
 		if err := idguard.Require(check.field, check.id); err != nil {
 			return PaymentSourceUpdateOutcome{}, err
@@ -552,7 +552,7 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 			RailSubscriptionID: sub.RailSubscriptionID,
 			NewPaymentMethodID: target.ID,
 			NewRailCustomerRef: newRailCustomerRef,
-			NewPspID:           target.PspID,
+			NewPspID:           target.HoldingPSP(),
 			OldPaymentMethodID: oldPMID,
 			OldRailCustomerRef: oldRailCustomerRef,
 		},

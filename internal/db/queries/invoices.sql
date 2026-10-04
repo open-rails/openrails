@@ -353,18 +353,18 @@ WHERE merchant_id = $1
   AND id = sqlc.arg(attempt_id)
   AND status = 'attempted';
 
--- name: ListInvoicePaymentAttemptsByPayer :many
+-- name: ListInvoicePaymentsPage :many
+-- One page of an invoice's payments, newest first, after a (created_at, id)
+-- cursor.
 SELECT p.*
 FROM billing.invoice_payments p
-JOIN billing.invoices i
-  ON i.merchant_id = p.merchant_id
- AND i.customer_id = p.customer_id
- AND i.id = p.invoice_id
-WHERE p.merchant_id = $1
-  AND p.customer_id = $2
-  AND p.invoice_id = $3
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND p.customer_id = sqlc.arg(customer_id)::uuid
+  AND p.invoice_id = sqlc.arg(invoice_id)::uuid
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (p.created_at, p.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY p.created_at DESC, p.id DESC
-LIMIT $4 OFFSET $5;
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: CountInvoicePaymentAttemptsByPayer :one
 SELECT count(*)
@@ -428,16 +428,6 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
   AND status IN ('open', 'past_due')
   AND collection_intent_id IS NULL
 RETURNING *;
-
--- name: ListInvoicesByPayer :many
-SELECT * FROM billing.invoices
-WHERE merchant_id = $1 AND customer_id = $2
-ORDER BY period_from DESC
-LIMIT $3::int OFFSET $4::int;
-
--- name: CountInvoicesByPayer :one
-SELECT count(*) FROM billing.invoices
-WHERE merchant_id = $1 AND customer_id = $2;
 
 -- name: GetInvoiceForPayer :one
 SELECT * FROM billing.invoices

@@ -9,8 +9,7 @@ import (
 // Reason and Action are the one decline classifier's; the codes and texts
 // are the PSP's verbatim. Amount is native units ("0" for a verification).
 type PaymentAttempt struct {
-	ID     PaymentAttemptID `json:"id"`
-	Object string           `json:"object"`
+	ID PaymentAttemptID `json:"id"`
 	// Kind is verify, initial, upgrade, rebill, dunning_retry, customer_retry
 	// or invoice.
 	Kind string `json:"kind"`
@@ -24,43 +23,43 @@ type PaymentAttempt struct {
 	Source       string        `json:"source"`
 	ObservedVia  string        `json:"observed_via"`
 	Category     string        `json:"category"`
-	Reason       DeclineReason `json:"reason,omitempty"`
-	Action       string        `json:"action,omitempty"`
-	ResponseCode string        `json:"response_code,omitempty"`
-	ResponseText string        `json:"response_text,omitempty"`
+	Reason       DeclineReason `json:"reason"`
+	Action       string        `json:"action"`
+	ResponseCode string        `json:"response_code"`
+	ResponseText string        `json:"response_text"`
 	// IssuerCode and IssuerText are the issuer's raw answer, once enriched.
-	IssuerCode    string `json:"issuer_code,omitempty"`
-	IssuerText    string `json:"issuer_text,omitempty"`
-	AVSResult     string `json:"avs_result,omitempty"`
-	CVVResult     string `json:"cvv_result,omitempty"`
-	CardBrand     string `json:"card_brand,omitempty"`
-	CardLast4     string `json:"card_last4,omitempty"`
-	CardBIN       string `json:"card_bin,omitempty"`
-	TokenType     string `json:"token_type,omitempty"`
-	TransactionID string `json:"transaction_id,omitempty"`
-	Rail          string `json:"rail"`
+	IssuerCode string `json:"issuer_code"`
+	IssuerText string `json:"issuer_text"`
+	AVSResult  string `json:"avs_result"`
+	CVVResult  string `json:"cvv_result"`
+	// Card is the card the PSP answered for; CardBIN its leading digits.
+	Card          *CardDetails `json:"card"`
+	CardBIN       string       `json:"card_bin"`
+	TokenType     string       `json:"token_type"`
+	TransactionID string       `json:"transaction_id"`
+	Rail          string       `json:"rail"`
 	// PSPID is the provider account's plain UUID.
-	PSPID       string    `json:"psp_id"`
-	CustomerID  string    `json:"customer_id"`
-	Amount      int64     `json:"amount,string"`
-	Currency    string    `json:"currency,omitempty"`
-	AttemptedAt time.Time `json:"attempted_at"`
+	PSPID       string     `json:"psp_id"`
+	CustomerID  CustomerID `json:"customer_id"`
+	Amount      int64      `json:"amount,string"`
+	Currency    string     `json:"currency"`
+	AttemptedAt time.Time  `json:"attempted_at"`
 	// CheckoutID groups one buyer's attempts on one target (a price or
 	// card_save, CheckoutTarget) until it is approved.
-	CheckoutID      string           `json:"checkout_id,omitempty"`
-	CheckoutTarget  string           `json:"checkout_target,omitempty"`
-	CycleID         *RebillCycleID   `json:"cycle_id,omitempty"`
-	SubscriptionID  *SubscriptionID  `json:"subscription_id,omitempty"`
-	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
-	PaymentID       *PaymentID       `json:"payment_id,omitempty"`
-	EnrichedAt      *time.Time       `json:"enriched_at,omitempty"`
+	CheckoutID      string           `json:"checkout_id"`
+	CheckoutTarget  string           `json:"checkout_target"`
+	CycleID         *RebillCycleID   `json:"cycle_id"`
+	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
+	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
+	PaymentID       *PaymentID       `json:"payment_id"`
+	EnrichedAt      *time.Time       `json:"enriched_at"`
 }
 
-// PaymentAttemptFilter selects attempts, newest first; every field is
+// ListPaymentAttemptsParams selects attempts, newest first; every field is
 // optional, and a list matches any of its values. Since and Until bound
 // attempted_at to [Since, Until).
-type PaymentAttemptFilter struct {
-	PageOptions
+type ListPaymentAttemptsParams struct {
+	Page                                                   PageRequest
 	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
 	Source, ObservedVia, AVSResult, CVVResult              []string
 	// PSPID, CustomerID and CheckoutID are plain UUIDs.
@@ -76,9 +75,8 @@ type PaymentAttemptFilter struct {
 // days past due.
 type RebillCycle struct {
 	ID             RebillCycleID  `json:"id"`
-	Object         string         `json:"object"`
 	SubscriptionID SubscriptionID `json:"subscription_id"`
-	CustomerID     string         `json:"customer_id"`
+	CustomerID     CustomerID     `json:"customer_id"`
 	PSPID          string         `json:"psp_id"`
 	Rail           string         `json:"rail"`
 	Owner          string         `json:"owner"`
@@ -88,22 +86,23 @@ type RebillCycle struct {
 	// FirstOutcome is approved, declined, error, missed or pending.
 	FirstOutcome string     `json:"first_outcome"`
 	Outcome      string     `json:"outcome"`
-	MissedAt     *time.Time `json:"missed_at,omitempty"`
-	MissReason   string     `json:"miss_reason,omitempty"`
-	CollectedAt  *time.Time `json:"collected_at,omitempty"`
+	MissedAt     *time.Time `json:"missed_at"`
+	MissReason   string     `json:"miss_reason"`
+	CollectedAt  *time.Time `json:"collected_at"`
 	// RecoveredBy is what collected a cycle whose first outcome failed:
 	// dunning_retry, customer_retry, updated_card or late_provider_charge.
-	RecoveredBy string    `json:"recovered_by,omitempty"`
+	RecoveredBy string    `json:"recovered_by"`
 	ClosesAt    time.Time `json:"closes_at"`
-	// Attempts are the cycle's attempts, oldest first (GetRebillCycle only).
-	Attempts []PaymentAttempt `json:"attempts,omitempty"`
+	// Attempts are the cycle's attempts, oldest first: read with a single
+	// cycle, null in lists.
+	Attempts []PaymentAttempt `json:"attempts"`
 }
 
-// RebillCycleFilter selects cycles, latest due first; every field is
+// ListRebillCyclesParams selects cycles, latest due first; every field is
 // optional, and a list matches any of its values. DueSince and DueUntil bound
 // due_at to [DueSince, DueUntil).
-type RebillCycleFilter struct {
-	PageOptions
+type ListRebillCyclesParams struct {
+	Page                                     PageRequest
 	Owner, FirstOutcome, MissReason, Outcome []string
 	// PSPID is the provider account's plain UUID.
 	PSPID              string

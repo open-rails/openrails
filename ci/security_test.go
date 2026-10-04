@@ -98,10 +98,10 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	access, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: userID, ProductID: product.ID})
 	require.NoError(t, err)
 	require.False(t, access.HasAccess, "the refunded product is not owned")
-	payments, err := client.ListPayments(t.Context(), billing.PaymentFilter{CustomerID: userID})
+	payments, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
 	require.NoError(t, err)
 	var charged int
-	for _, p := range payments.Data {
+	for _, p := range payments.Items {
 		if p.Amount > 0 {
 			charged++
 		}

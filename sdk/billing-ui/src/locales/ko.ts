@@ -26,7 +26,7 @@ export const ko: BillingUiMessageBundle = {
     expired: "만료됨",
     expiring_soon: "곧 만료",
     needs_attention: "확인 필요",
-    default: "기본",
+    collection: "청구서",
   },
   interval: {
     every: {
@@ -115,9 +115,9 @@ export const ko: BillingUiMessageBundle = {
     fallbackBrand: "카드",
     expires: "유효기간 {date}",
     usedBy: "{names}에서 사용 중",
-    defaultFor: "{currencies} 기본",
-    makeDefault: "기본으로 설정",
-    madeDefault: "기본 카드를 업데이트했습니다.",
+    collectsFor: "{currencies} 청구서 결제",
+    useForInvoices: "청구서에 사용",
+    usedForInvoices: "청구서 카드를 업데이트했습니다.",
     remove: "삭제",
     removeLabel: "{label} 삭제",
     removeTitle: "{label}을(를) 삭제할까요?",

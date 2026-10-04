@@ -93,8 +93,7 @@ func (b *legacyBook) add(r *bookRow) *bookRow {
 	sale := w.nmi.AddScheduleSale(r.schedule, start)
 	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: r.vault, RailMethodRef: w.nmi.Vault(r.vault).BillingID}
 	if r.declared && newVault {
-		b.book.PaymentMethods = append(b.book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: r.vault, RailMethodRef: method.RailMethodRef,
-			InitialTransactionID: sale.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"})
+		b.book.PaymentMethods = append(b.book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: r.vault, RailMethodRef: method.RailMethodRef, Card: declaredCard(visa)})
 	}
 	b.book.Customers = append(b.book.Customers, billing.DeclaredCustomer{Customer: customerID})
 	paid := r.paid
@@ -184,7 +183,7 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			sharedID, err := billing.ParseCustomerID(shared.c.id)
 			require.NoError(t, err)
 			b.book.PaymentMethods = append(b.book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: sharedID, Rail: "nmi", RailCustomerRef: shared.vault, RailMethodRef: second,
-				LastFour: mastercard.Last4, CardType: mastercard.Brand, ExpiryDate: "12/35"})
+				Card: declaredCard(mastercard)})
 			yearlyRow := b.add(&bookRow{source: "yearly", tier: yearly, c: shared.c, vault: shared.vault, paid: now.Add(200 * day)})
 			last := now.Add(-12 * time.Hour)
 			// Mid-dunning inside the grace window: NMI's failed renewal is

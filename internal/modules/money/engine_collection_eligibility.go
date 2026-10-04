@@ -70,13 +70,13 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if err != nil {
 		return readFailure(err)
 	}
-	if err := charge.FreezeInstrument(observed).Matches(method, charge.AgreementRecurring); err != nil {
+	if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method, charge.AgreementRecurring); err != nil {
 		return unusable(err)
 	}
-	if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" {
+	if method.CustomerID != sub.CustomerID || !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != "" {
 		return unusable(errors.New("engine recurring method is not qualified for this obligation"))
 	}
-	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: sub.MerchantID, ID: method.PspID})
+	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: sub.MerchantID, ID: sub.PspID})
 	if err != nil {
 		return readFailure(err)
 	}
@@ -92,11 +92,11 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 			return unusable(errors.New("archived custodian cannot admit a new engine renewal"))
 		}
 	}
-	binding, err = engineCollectionBinding(ctx, q, method, s.hyperSwitchDeployment)
+	binding, err = engineCollectionBinding(ctx, q, method, sub.PspID, s.hyperSwitchDeployment)
 	if err != nil {
 		return unsupported(err)
 	}
-	if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
+	if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, sub.PspID), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
 		return unusable(err)
 	}
 	return method, binding, nil

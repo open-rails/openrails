@@ -491,7 +491,7 @@ func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, 
 			// An old detach event cannot override current attached provider
 			// truth. Preserve the method and converge the provider's current
 			// defaults without creating a detached finding.
-			if _, err := payments.UpsertStripeCardForCustomer(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, truth.CustomerID, truth.ID, truth.ID, truth.Card); err != nil {
+			if _, err := payments.UpsertStripeCardForCustomer(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, truth.CustomerID, truth.ID, truth.Card); err != nil {
 				return err
 			}
 			if err := s.convergeStripeCustomerPaymentState(ctx, txdb, truth.CustomerID); err != nil {
@@ -525,7 +525,7 @@ func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, 
 						ctx,
 						stripePaymentStateLockKey(
 							merchantID.UUID(),
-							method.PspID,
+							method.HoldingPSP(),
 							stripeCustomerLockSubject,
 							customerID,
 						),
@@ -665,7 +665,7 @@ func recordStripeDetachedPaymentMethodFinding(ctx context.Context, database *db.
 	}
 	evidence, err := json.Marshal(map[string]any{
 		"provider":          string(models.RailStripe),
-		"psp_id":            method.PspID.String(),
+		"psp_id":            method.HoldingPSP().String(),
 		"payment_method_id": method.ID.String(),
 		"rail_method_ref":   method.RailMethodRef,
 		"customer_id":       method.CustomerID.String(),
@@ -677,7 +677,7 @@ func recordStripeDetachedPaymentMethodFinding(ctx context.Context, database *db.
 	if _, err := database.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        merchantID.UUID(),
 		FindingType:       "consistency.stripe_payment_method_detached",
-		SubjectKey:        method.PspID.String() + ":" + method.RailMethodRef,
+		SubjectKey:        method.HoldingPSP().String() + ":" + method.RailMethodRef,
 		Severity:          "high",
 		Status:            "requires_review",
 		RecommendedAction: &action,

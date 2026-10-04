@@ -159,6 +159,24 @@ export const nmiBillingSchema = z
 
 export type NMIBilling = z.infer<typeof nmiBillingSchema>
 
+/** A card form's billing fields as a saved card's billing details. */
+export function billingDetailsOf(billing: {
+  name_on_card?: string
+  email?: string
+  zip?: string
+  country?: string
+}) {
+  const address = {
+    ...(billing.zip ? { postal_code: billing.zip } : {}),
+    ...(billing.country ? { country: billing.country } : {}),
+  }
+  return {
+    ...(billing.name_on_card ? { name: billing.name_on_card } : {}),
+    ...(billing.email ? { email: billing.email } : {}),
+    ...(Object.keys(address).length > 0 ? { address } : {}),
+  }
+}
+
 export const emptyNMIBilling: NMIBilling = {
   name_on_card: "",
   country: "",

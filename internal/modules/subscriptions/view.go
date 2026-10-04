@@ -5,7 +5,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
 // View projects a customer's own subscription onto the shared DTO, with the
@@ -54,25 +53,9 @@ func subscriptionPriceView(p *models.Price) *billing.SubscriptionPrice {
 
 // subscriptionCardView is the card on the subscription's payment method, from
 // the linked payment_methods row alone: never a provider fetch.
-func subscriptionCardView(pm *models.PaymentMethod) *billing.SubscriptionCard {
+func subscriptionCardView(pm *models.PaymentMethod) *billing.CardDetails {
 	if pm == nil {
 		return nil
 	}
-	card := &billing.SubscriptionCard{}
-	if pm.CardType != nil {
-		card.Brand = *pm.CardType
-	}
-	if pm.LastFour != nil {
-		card.Last4 = *pm.LastFour
-	}
-	if card.Brand == "" && card.Last4 == "" {
-		return nil
-	}
-	if pm.ExpiryDate != nil {
-		if month, year, err := sharedformat.ParseExpiry(*pm.ExpiryDate); err == nil {
-			card.ExpMonth = &month
-			card.ExpYear = &year
-		}
-	}
-	return card
+	return pm.Card.Details()
 }

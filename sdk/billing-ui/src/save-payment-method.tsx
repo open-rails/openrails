@@ -15,6 +15,7 @@ import {
 } from "./components/stripe-card"
 import { useMessages } from "./i18n/context"
 import {
+  billingDetailsOf,
   emptyNMIBilling,
   initialCountry,
   nmiBillingSchema,
@@ -101,7 +102,11 @@ function TokenizedSetup({
     setError(undefined)
     let method
     try {
-      method = await client.addPaymentMethod({ ...card, provider: psp.key })
+      method = await client.addPaymentMethod({
+        psp_id: psp.psp_id,
+        payment_token: card.payment_token,
+        billing_details: billingDetailsOf(card),
+      })
     } catch (cause) {
       setError(describe(m, cause))
       setFormKey((key) => key + 1)
@@ -169,9 +174,9 @@ function NativeCardSetup({
     setError(undefined)
     try {
       const method = await client.addPaymentMethod({
-        ...parsed.data,
-        provider: psp.key,
+        psp_id: psp.psp_id,
         card: entered,
+        billing_details: billingDetailsOf(parsed.data),
       })
       notify({ type: "payment_method.added", paymentMethodId: method.id })
       onSaved(method.id)

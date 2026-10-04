@@ -252,8 +252,8 @@ type RecordRefundAction struct {
 // method (PS-7).
 type AdoptPaymentMethodAction struct {
 	PaymentMethodID uuid.UUID
-	LastFour        string
-	ExpiryDate      string
+	// Card is the rail's record: its last four and expiry are adopted.
+	Card models.Card
 }
 
 // GrantEntitlementsAction grants subscription-sourced entitlement windows

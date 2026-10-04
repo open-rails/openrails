@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/query"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -38,8 +38,6 @@ func (s *PaymentService) now() time.Time {
 	}
 	return time.Now()
 }
-
-type GetPaymentsFilters = PaymentFilters
 
 func NewPaymentService(db *db.DB, clocks ...clockwork.Clock) *PaymentService {
 	return &PaymentService{repo: NewPaymentRepo(db), clock: timeutil.FirstClock(clocks...)}
@@ -367,21 +365,9 @@ func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, ori
 	return s.repo.LinkRefundedPayment(ctx, paymentID, originalPaymentID)
 }
 
-func (s *PaymentService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
-	return s.repo.GetPaginatedByUserID(ctx, userID, page, pageSize)
-}
-
-func (s *PaymentService) GetPayments(ctx context.Context, queryOpts query.QueryOptions[GetPaymentsFilters]) ([]*models.Payment, int64, error) {
-	repoOpts := query.QueryOptions[PaymentFilters]{
-		Filters:  queryOpts.Filters,
-		Limit:    queryOpts.Limit,
-		Offset:   queryOpts.Offset,
-		Page:     queryOpts.Page,
-		PageSize: queryOpts.PageSize,
-		All:      queryOpts.All,
-	}
-
-	return s.repo.GetPayments(ctx, repoOpts)
+// ListPage is one page of payments, newest first.
+func (s *PaymentService) ListPage(ctx context.Context, p billing.ListPaymentsParams) (billing.ListPage[*models.Payment], error) {
+	return s.repo.ListPage(ctx, p)
 }
 
 func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
@@ -392,8 +378,7 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 	return s.repo.MarkFailed(ctx, id)
 }
 
-// GetCustomerPaymentRefundTotals reports completed refunds for the customer's
-// visible charges, including refunds outside the requested history page.
-func (s *PaymentService) GetCustomerPaymentRefundTotals(ctx context.Context, userID string, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
-	return s.repo.GetCustomerPaymentRefundTotals(ctx, userID, paymentIDs)
+// RefundTotals reports the completed refunds against each listed charge.
+func (s *PaymentService) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	return s.repo.RefundTotals(ctx, paymentIDs)
 }

@@ -153,12 +153,12 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	writes := len(w.nmi.Calls())
 	const refusal = "card must be tokenized by the payment provider before calling OpenRails"
 
-	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "Card Holder"})
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Card Holder"}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	_, message := errorOf(body)
 	require.Equal(t, refusal, message)
 
-	status, body = c.call(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa)})
+	status, body = c.call(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	_, message = errorOf(body)
 	require.Equal(t, refusal, message)
@@ -174,7 +174,7 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	require.Contains(t, message, refusal)
 
 	// The fields a card number used to be pasted into are refused as before.
-	status, body = c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(visa), "card_number": entryVisa})
+	status, body = c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "card_number": entryVisa})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	_, message = errorOf(body)
 	require.Equal(t, "card_number must be tokenized by the payment provider before calling OpenRails", message)
@@ -194,11 +194,11 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 	price := w.permanent("content:post")
 
 	for name, body := range map[string]map[string]any{
-		"card and token":           {"provider": "nmi", "card": entryCard(entryVisa), "payment_token": "tok-1234"},
-		"number in another field":  {"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "4111 1111 1111 1111"},
-		"number as a bare field":   {"provider": "nmi", "card": entryCard(entryVisa), "card_number": entryVisa},
-		"number failing its check": {"provider": "nmi", "card": map[string]any{"number": "4111111111111112", "exp_month": 10, "exp_year": 2027, "cvc": entryCVC}},
-		"card without a code":      {"provider": "nmi", "card": map[string]any{"number": entryVisa, "exp_month": 10, "exp_year": 2027}},
+		"card and token":           {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "payment_token": "tok-1234"},
+		"number in another field":  {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "4111 1111 1111 1111"}},
+		"number as a bare field":   {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "card_number": entryVisa},
+		"number failing its check": {"psp_id": w.psp["nmi"], "card": map[string]any{"number": "4111111111111112", "exp_month": 10, "exp_year": 2027, "cvc": entryCVC}},
+		"card without a code":      {"psp_id": w.psp["nmi"], "card": map[string]any{"number": entryVisa, "exp_month": 10, "exp_year": 2027}},
 	} {
 		status, out := c.call(http.MethodPost, "/payment-methods", "", body)
 		require.Equal(t, http.StatusBadRequest, status, "%s: %v", name, out)
@@ -231,7 +231,7 @@ func TestServerCardEntrySettlesALostAnswerByReadingTheGateway(t *testing.T) {
 	t.Parallel()
 	w := serverEntryWorld(t)
 	c := w.newCustomer()
-	save := map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "Card Holder"}
+	save := map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Card Holder"}}
 
 	// The gateway vaulted the card; only its answer was lost.
 	w.nmi.DropSaleResponses(1)
@@ -258,9 +258,9 @@ func TestServerCardEntrySettlesALostAnswerByReadingTheGateway(t *testing.T) {
 	require.Equal(t, []string{"succeeded", "failed_terminal"}, w.intentStatuses("nmi_card_vault"))
 	require.Len(t, w.cardVaults("add_customer"), 1)
 	require.Len(t, w.nmi.Vaults(), 1)
-	page, err := w.client[embedded].ListPaymentMethods(t.Context(), c.id, billing.PageOptions{Limit: 100})
+	page, err := w.client[embedded].ListPaymentMethods(t.Context(), c.cid(), billing.PageRequest{Limit: 100})
 	require.NoError(t, err)
-	require.Len(t, page.Data, 1, "only the settled card is saved")
+	require.Len(t, page.Items, 1, "only the settled card is saved")
 	require.Empty(t, w.nmi.Unexpected())
 }
 
@@ -289,7 +289,7 @@ func TestServerCardEntryRemovesAVaultThatSurfacesLate(t *testing.T) {
 			}
 			return serve(), nil
 		})
-	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "Card Holder"})
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Card Holder"}})
 	require.Equal(t, http.StatusConflict, status, "%v", body)
 	require.Empty(t, w.nmi.Vaults())
 
@@ -299,9 +299,9 @@ func TestServerCardEntryRemovesAVaultThatSurfacesLate(t *testing.T) {
 	w.wake()
 	require.Equal(t, []string{"failed_terminal"}, w.intentStatuses("nmi_card_vault"))
 	require.Empty(t, w.nmi.Vaults(), "the unreferenced vault is removed")
-	page, err := w.client[embedded].ListPaymentMethods(t.Context(), c.id, billing.PageOptions{Limit: 100})
+	page, err := w.client[embedded].ListPaymentMethods(t.Context(), c.cid(), billing.PageRequest{Limit: 100})
 	require.NoError(t, err)
-	require.Empty(t, page.Data)
+	require.Empty(t, page.Items)
 	require.Empty(t, w.nmi.Unexpected())
 }
 
@@ -417,10 +417,8 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	traces := cardTraces(entryVisa, entryMastercard)
 
 	// Save a card: the customer route a payment-method panel posts to.
-	saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "Card Holder",
-		"address1": "1 Main St", "city": "Springfield", "state": "IL", "zip": "62701", "country": "US",
-		// What a caller says about the card is ignored: the card names itself.
-		"last_four": "0000", "card_type": "amex", "expiry_date": "01/99"}))
+	saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa),
+		"billing_details": map[string]any{"name": "Card Holder", "address": map[string]any{"line1": "1 Main St", "city": "Springfield", "state": "IL", "postal_code": "62701", "country": "US"}}}))
 	method := saved["id"].(string)
 	shown, _ := saved["card"].(map[string]any)
 	require.Equal(t, []any{"visa", "1111", float64(10), float64(2027)}, []any{shown["brand"], shown["last4"], shown["exp_month"], shown["exp_year"]}, "%v", saved)
@@ -469,7 +467,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	require.Len(t, w.cardVaults("add_customer"), 4, "each new card was vaulted once")
 
 	// Card update: the saved card is replaced by another, entered the same way.
-	replaced := unwrap(c.must(http.MethodPut, "/payment-methods/"+method, "replace-"+uuid.NewString(), map[string]any{"provider": "nmi", "card": entryCard(entryMastercard)}))
+	replaced := unwrap(c.must(http.MethodPut, "/payment-methods/"+method, "replace-"+uuid.NewString(), map[string]any{"card": entryCard(entryMastercard)}))
 	w.settle()
 	shown, _ = replaced["card"].(map[string]any)
 	require.Equal(t, []any{"mastercard", "1111"}, []any{shown["brand"], shown["last4"]}, "%v", replaced)
@@ -487,19 +485,19 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	status, refusedPay := w.relayPay(declined, post.ID, "declined-"+uuid.NewString(), map[string]any{"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", refusedPay)
 	w.nmi.Issue(entryVisa, card{Decline: "vault"})
-	status, body := declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa)})
+	status, body := declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadGateway, status, "a gateway rejection, as a rejected sale is: %v", body)
 	w.nmi.Issue(entryVisa, card{})
-	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "payment_token": "tok-1234"})
+	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "payment_token": "tok-1234"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	w.nmi.LoseSales(1)
-	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa)})
+	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusConflict, status, "%v", body)
 	w.advance(5 * time.Minute)
 	w.wake()
-	page, err := w.client[embedded].ListPaymentMethods(t.Context(), declined.id, billing.PageOptions{Limit: 100})
+	page, err := w.client[embedded].ListPaymentMethods(t.Context(), declined.cid(), billing.PageRequest{Limit: 100})
 	require.NoError(t, err)
-	require.Empty(t, page.Data, "no refused, declined or lost card is saved")
+	require.Empty(t, page.Items, "no refused, declined or lost card is saved")
 	require.Empty(t, w.nmi.Unexpected())
 
 	// The wall. The scan is proven able to find a card first: the same search

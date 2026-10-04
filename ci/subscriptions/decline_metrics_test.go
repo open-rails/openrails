@@ -166,16 +166,16 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	c := w.client[embedded]
 	ctx := t.Context()
 
-	cycles, err := c.ListRebillCycles(ctx, billing.RebillCycleFilter{SubscriptionID: e.sub})
+	cycles, err := c.ListRebillCycles(ctx, billing.ListRebillCyclesParams{SubscriptionID: e.sub})
 	require.NoError(t, err)
-	require.Len(t, cycles.Data, 1)
-	cycle := cycles.Data[0]
+	require.Len(t, cycles.Items, 1)
+	cycle := cycles.Items[0]
 	require.Equal(t, []string{"engine", "declined", "collected", "dunning_retry"}, []string{cycle.Owner, cycle.FirstOutcome, cycle.Outcome, cycle.RecoveredBy})
 	require.NotNil(t, cycle.CollectedAt)
 	for outcome, n := range map[string]int{"collected": 1, "open": 0, "lost": 0, "open,lost": 0, "lost,collected": 1} {
-		page, err := c.ListRebillCycles(ctx, billing.RebillCycleFilter{SubscriptionID: e.sub, Outcome: strings.Split(outcome, ",")})
+		page, err := c.ListRebillCycles(ctx, billing.ListRebillCyclesParams{SubscriptionID: e.sub, Outcome: strings.Split(outcome, ",")})
 		require.NoError(t, err)
-		require.Len(t, page.Data, n, outcome)
+		require.Len(t, page.Items, n, outcome)
 	}
 
 	full, err := c.GetRebillCycle(ctx, cycle.ID)
@@ -184,19 +184,19 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	require.Equal(t, []string{"rebill", "dunning_retry", "dunning_retry"}, []string{full.Attempts[0].Kind, full.Attempts[1].Kind, full.Attempts[2].Kind})
 	require.Equal(t, billing.DeclineInsufficientFunds, full.Attempts[0].Reason)
 
-	attempts, err := c.ListPaymentAttempts(ctx, billing.PaymentAttemptFilter{CycleID: cycle.ID})
+	attempts, err := c.ListPaymentAttempts(ctx, billing.ListPaymentAttemptsParams{CycleID: cycle.ID})
 	require.NoError(t, err)
-	require.Equal(t, int64(3), attempts.Total)
-	require.Equal(t, full.Attempts[2].ID, attempts.Data[0].ID, "newest first")
-	one, err := c.GetPaymentAttempt(ctx, attempts.Data[0].ID)
+	require.Len(t, attempts.Items, 3)
+	require.Equal(t, full.Attempts[2].ID, attempts.Items[0].ID, "newest first")
+	one, err := c.GetPaymentAttempt(ctx, attempts.Items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, "approved", one.Category)
 	require.Equal(t, cycle.ID, *one.CycleID)
 
-	declined, err := c.ListPaymentAttempts(ctx, billing.PaymentAttemptFilter{Category: []string{"issuer_soft"}, Kind: []string{"dunning_retry"}})
+	declined, err := c.ListPaymentAttempts(ctx, billing.ListPaymentAttemptsParams{Category: []string{"issuer_soft"}, Kind: []string{"dunning_retry"}})
 	require.NoError(t, err)
-	require.Len(t, declined.Data, 1)
-	failed, err := c.ListPaymentAttempts(ctx, billing.PaymentAttemptFilter{CycleID: cycle.ID, Kind: []string{"rebill", "dunning_retry"}, Category: []string{"issuer_soft", "issuer_hard"}})
+	require.Len(t, declined.Items, 1)
+	failed, err := c.ListPaymentAttempts(ctx, billing.ListPaymentAttemptsParams{CycleID: cycle.ID, Kind: []string{"rebill", "dunning_retry"}, Category: []string{"issuer_soft", "issuer_hard"}})
 	require.NoError(t, err)
-	require.Len(t, failed.Data, 2, "the cycle's two declines")
+	require.Len(t, failed.Items, 2, "the cycle's two declines")
 }

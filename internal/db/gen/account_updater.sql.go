@@ -268,7 +268,7 @@ func (q *Queries) ListAccountUpdaterWorkMerchants(ctx context.Context, arg ListA
 }
 
 const listDueAccountUpdaterInstruments = `-- name: ListDueAccountUpdaterInstruments :many
-SELECT pm.id, pm.rail_method_ref, pm.expiry_date
+SELECT pm.id, pm.rail_method_ref, pm.card_exp_month, pm.card_exp_year
 FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1
   AND pm.custodian_id = $2::uuid
@@ -300,7 +300,8 @@ type ListDueAccountUpdaterInstrumentsParams struct {
 type ListDueAccountUpdaterInstrumentsRow struct {
 	ID            uuid.UUID
 	RailMethodRef string
-	ExpiryDate    *string
+	CardExpMonth  *int16
+	CardExpYear   *int16
 }
 
 // The batch membership for ONE merchant: custodian-held instruments backing a
@@ -323,7 +324,12 @@ func (q *Queries) ListDueAccountUpdaterInstruments(ctx context.Context, arg List
 	var items []ListDueAccountUpdaterInstrumentsRow
 	for rows.Next() {
 		var i ListDueAccountUpdaterInstrumentsRow
-		if err := rows.Scan(&i.ID, &i.RailMethodRef, &i.ExpiryDate); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.RailMethodRef,
+			&i.CardExpMonth,
+			&i.CardExpYear,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

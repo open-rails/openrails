@@ -68,8 +68,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
 -- the attempt that collected it and when it closes: collected, the subscription
 -- cancelled, or 15 days past due (the dunning window is at most 14), whichever
 -- is first. Outcome is collected, lost (closed by now uncollected) or open; a
--- text filter matches any of its values. The metrics rebill_cycles family
--- derives the same facts.
+-- text filter matches any of its values; a page continues after its cursor.
+-- The metrics rebill_cycles family derives the same facts.
 WITH cf AS (
     SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
            c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
@@ -97,7 +97,7 @@ WITH cf AS (
      WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
        AND (sqlc.narg(id)::uuid IS NULL OR c.id = sqlc.narg(id)::uuid)
 )
-SELECT cf.*, count(*) OVER () AS total
+SELECT cf.*
 FROM cf
 WHERE (sqlc.narg(owners)::text[] IS NULL OR cf.owner = ANY(sqlc.narg(owners)::text[]))
   AND (sqlc.narg(first_outcomes)::text[] IS NULL OR cf.first_outcome = ANY(sqlc.narg(first_outcomes)::text[]))
@@ -110,8 +110,10 @@ WHERE (sqlc.narg(owners)::text[] IS NULL OR cf.owner = ANY(sqlc.narg(owners)::te
         WHEN cf.won_at IS NOT NULL THEN 'collected'
         WHEN cf.closed_at <= sqlc.arg(now)::timestamptz THEN 'lost'
         ELSE 'open' END = ANY(sqlc.narg(outcomes)::text[]))
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (cf.due_at, cf.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY cf.due_at DESC, cf.id DESC
-LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
+LIMIT sqlc.arg(row_limit)::int;
 
 -- #1118: cycles due before the retention cutoff whose attempts are all gone,
 -- batched like the attempt purge that runs first.

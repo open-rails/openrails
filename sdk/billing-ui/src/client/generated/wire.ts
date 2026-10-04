@@ -17,19 +17,19 @@ export type Balance = {
 }
 
 export type BillingAddress = {
-  line1?: string
-  line2?: string
-  city?: string
-  state?: string
-  postal_code?: string
-  country?: string
+  line1: string | null
+  line2: string | null
+  city: string | null
+  state: string | null
+  postal_code: string | null
+  country: string | null
 }
 
 export type BillingDetails = {
-  name?: string
-  email?: string
-  phone?: string
-  address?: BillingAddress
+  name: string | null
+  email: string | null
+  phone: string | null
+  address: BillingAddress | null
 }
 
 export type CancelSubscriptionRequest = {
@@ -37,10 +37,10 @@ export type CancelSubscriptionRequest = {
 }
 
 export type CardDetails = {
-  brand?: string
-  last4?: string
-  exp_month?: number
-  exp_year?: number
+  brand: string | null
+  last4: string | null
+  exp_month: number | null
+  exp_year: number | null
 }
 
 export type CardEntry = {
@@ -168,12 +168,7 @@ export type CheckoutSessionResponse = {
   metadata?: Record<string, string>
 }
 
-export type CollectionPaymentMethodRequest = {
-  currency?: string
-  payment_method_id?: string
-}
-
-export type CollectionPaymentMethodResponse = {
+export type CollectionPaymentMethod = {
   currency: string
   payment_method_id: string
 }
@@ -182,32 +177,11 @@ export type ConfirmSolanaCancelRequest = {
   signature?: string
 }
 
-export type CreatePaymentMethodRequest = {
+export type CreatePaymentMethodParams = {
+  psp_id?: string
   payment_token?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  phone?: string
-  email?: string
-  company?: string
-  address2?: string
-  provider?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
   card?: CardEntry
-  card_number?: unknown
-  number?: unknown
-  pan?: unknown
-  primary_account_number?: unknown
-  cvv?: unknown
-  cvc?: unknown
-  cvn?: unknown
-  security_code?: unknown
-  verification_value?: unknown
+  billing_details?: BillingDetails
 }
 
 export type CreditTransaction = {
@@ -335,11 +309,7 @@ export type HostedCheckoutSavedMethod = {
   id: string
   option_id: string
   rail: string
-  brand?: string
-  last_four?: string
-  exp_month?: number
-  exp_year?: number
-  default?: boolean
+  card: CardDetails | null
 }
 
 export type HostedCheckoutSession = {
@@ -368,16 +338,11 @@ export type HostedCheckoutSessionLink = {
   expires_at: string
 }
 
-export type InvoiceContactDTO = {
-  name?: string
-  email: string
-}
-
-export type InvoiceDTO = {
-  recovery?: PaymentRecovery
+export type Invoice = {
   id: string
+  customer_id: string
   currency: string
-  invoice_number?: string
+  invoice_number: string | null
   period_from: string
   period_to: string
   usage_total: string
@@ -389,56 +354,62 @@ export type InvoiceDTO = {
   total_amount: string
   amount_paid: string
   amount_due: string
-  line_items: InvoiceLineItemDTO[] | null
-  money_movements?: Record<string, string>
-  po_number?: string
-  tax?: Record<string, unknown>
-  billing_contacts?: InvoiceContactDTO[]
-  memo?: string
-  status: string
-  collection_method: string
-  issued_at?: string
-  due_at?: string
-  paid_at?: string
-  voided_at?: string
-  uncollectible_at?: string
-  finalized_at?: string
-  external_invoice_id?: string
+  line_items: InvoiceLineItem[] | null
+  money_movements: Record<string, string> | null
+  po_number: string | null
+  tax: Record<string, unknown> | null
+  billing_contacts: InvoiceContact[] | null
+  memo: string | null
+  status: "draft" | "open" | "paid" | "past_due" | "uncollectible" | "voided"
+  collection_method: "charge_automatically" | "send_invoice"
+  issued_at: string | null
+  due_at: string | null
+  paid_at: string | null
+  voided_at: string | null
+  uncollectible_at: string | null
+  finalized_at: string | null
+  external_invoice_id: string | null
   collection_failure_count: number
-  collection_failed_at?: string
-  next_collection_attempt_at?: string
-  last_collection_failure_code?: string
-  collection_intent_id?: string
+  collection_failed_at: string | null
+  next_collection_attempt_at: string | null
+  last_collection_failure_code: string | null
+  recovery: PaymentRecovery | null
+  available_actions: ("mark_uncollectible" | "record_payment" | "retry_collection" | "void")[] | null
   created_at: string
 }
 
-export type InvoiceLineItemDTO = {
+export type InvoiceContact = {
+  name: string
+  email: string
+}
+
+export type InvoiceLineItem = {
   event_type: string
   amount: string
   count: number
-  dimensions?: Record<string, number>
+  dimensions: Record<string, number> | null
 }
 
-export type InvoicePayNowResult = {
-  invoice: InvoiceDTO
-  attempt: InvoicePaymentAttemptDTO
+export type InvoicePayNow = {
+  invoice: Invoice
+  payment: InvoicePayment
   operation: PaymentOperation
   replayed: boolean
 }
 
-export type InvoicePaymentAttemptDTO = {
+export type InvoicePayment = {
   id: string
   invoice_id: string
   currency: string
   amount: string
-  status: string
-  payment_method_id?: string
-  rail?: string
-  rail_payment_id?: string
-  failure_code?: string
-  failure_reason?: string
+  status: "attempted" | "failed" | "settled"
+  payment_method_id: string | null
+  rail: string | null
+  transaction_id: string | null
+  failure_code: string | null
+  failure_reason: string | null
   attempted_at: string
-  settled_at?: string
+  settled_at: string | null
 }
 
 export type Message = {
@@ -502,15 +473,6 @@ export type NotificationData = {
   metadata?: Record<string, unknown>
 }
 
-export type PageOfPaymentMethod = {
-  object: string
-  data: PaymentMethod[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
 export type PageOfProductObject = {
   object: string
   data: ProductObject[] | null
@@ -549,44 +511,32 @@ export type PathPageOfSubscription = {
   url: string
 }
 
-export type PathPageOfUserPaymentObject = {
-  object: string
-  data: UserPaymentObject[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
-}
-
-export type PayInvoiceNowRequest = {
+export type PayInvoiceParams = {
   payment_method_id?: string
 }
 
 export type Payment = {
   id: string
-  object: string
-  status?: string
+  kind: "charge" | "chargeback" | "dispute_reversal" | "refund"
+  status: "failed" | "partially_refunded" | "pending" | "refunded" | "succeeded"
   amount: string
   amount_refunded: string
   currency: string
   customer_id: string
-  subscription_id?: string
-  rail: string
+  subscription_id: string | null
+  price_id: string
+  price: SubscriptionPrice | null
+  product: ProductSummary | null
+  channel: "admin" | "manual" | "rail"
+  rail: string | null
+  psp_id: string | null
   transaction_id: string
-  refunded: boolean
-  captured?: boolean
-  refunds?: PaymentList
-  product?: ProductSummary
-  refunded_payment_id?: string
-  reason?: string
+  card: CardDetails | null
+  failure: PaymentFailure | null
+  refunded_payment_id: string | null
+  reason: string | null
+  refunds: Payment[] | null
   created_at: string
-  price?: PublicPrice
-}
-
-export type PaymentCardJSON = {
-  brand?: string
-  last4?: string
 }
 
 export type PaymentFailure = {
@@ -595,39 +545,34 @@ export type PaymentFailure = {
   field?: string
 }
 
-export type PaymentList = {
-  object: string
-  data: Payment[] | null
-}
-
 export type PaymentMethod = {
-  psp_id: string
   id: string
-  object: string
-  type: string
+  customer_id: string
   rail: string
-  customer?: string
-  billing_details?: BillingDetails
-  card?: CardDetails
-  metadata?: Record<string, string>
+  psp_id: string | null
+  card: CardDetails | null
+  billing_details: BillingDetails | null
+  health: PaymentMethodHealth
+  subscriptions: PaymentMethodSubscription[] | null
+  collection_currencies: string[] | null
   created_at: string
-  health?: PaymentMethodHealth
-  subscriptions?: PaymentMethodSubscription[]
-  collection_default_currencies?: string[]
-  default: boolean
 }
 
 export type PaymentMethodHealth = {
-  expiry_status?: string
-  last_charged_at?: string
-  last_charge_outcome?: string
+  expiry_status: "expired" | "expiring_soon" | "valid" | null
+  last_charged_at: string | null
+  last_charge_outcome: "failed" | "succeeded" | null
   active: boolean
+}
+
+export type PaymentMethodSetupParams = {
+  psp_id?: string
+  consent?: boolean
 }
 
 export type PaymentMethodSubscription = {
   id: string
   display_name: string
-  description: string
   created_at: string
 }
 
@@ -741,6 +686,12 @@ export type PublicPrice = {
   providers?: string[]
   metadata?: Record<string, string>
   created_at: string
+}
+
+export type ReplacePaymentMethodCardParams = {
+  payment_token?: string
+  card?: CardEntry
+  billing_details?: BillingDetails
 }
 
 export type RetrySubscriptionNowRequest = {
@@ -868,7 +819,7 @@ export type Subscription = {
   product?: ProductSummary
   scheduled_price?: SubscriptionPrice
   scheduled_product?: ProductSummary
-  card?: SubscriptionCard
+  card?: CardDetails
   cancel_portal_url?: string
   access?: SubscriptionAccess
   created_at: string
@@ -884,13 +835,6 @@ export type SubscriptionAccess = {
   rail?: string
   start_at: string
   end_at?: string
-}
-
-export type SubscriptionCard = {
-  brand?: string
-  last4?: string
-  exp_month?: number
-  exp_year?: number
 }
 
 export type SubscriptionPrice = {
@@ -976,34 +920,6 @@ export type TokenQuote = {
   expires_at: string
 }
 
-export type UpdatePaymentMethodRequest = {
-  payment_token?: string
-  name_on_card?: string | null
-  address1?: string | null
-  city?: string | null
-  state?: string | null
-  zip?: string | null
-  country?: string | null
-  phone?: string | null
-  email?: string | null
-  company?: string | null
-  address2?: string | null
-  provider?: string | null
-  last_four?: string | null
-  card_type?: string | null
-  expiry_date?: string | null
-  card?: CardEntry
-  card_number?: unknown
-  number?: unknown
-  pan?: unknown
-  primary_account_number?: unknown
-  cvv?: unknown
-  cvc?: unknown
-  cvn?: unknown
-  security_code?: unknown
-  verification_value?: unknown
-}
-
 export type UpdateSubscriptionPaymentMethodRequest = {
   payment_method_id?: string
 }
@@ -1022,23 +938,4 @@ export type UsageRow = {
   event_count: number
   amount: string
   dimensions: Record<string, number> | null
-}
-
-export type UserPaymentObject = {
-  id: string
-  object: string
-  status?: string
-  amount: string
-  amount_refunded: string
-  currency: string
-  customer_id: string
-  subscription_id?: string
-  rail: string
-  refunded: boolean
-  captured?: boolean
-  created_at: string
-  price?: PublicPrice
-  product?: ProductSummary
-  card?: PaymentCardJSON
-  failure?: PaymentFailure
 }

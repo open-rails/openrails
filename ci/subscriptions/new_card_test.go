@@ -38,9 +38,9 @@ func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*bil
 
 func (h hostedPay) methods() []billing.PaymentMethod {
 	h.w.t.Helper()
-	page, err := h.w.client[embedded].ListPaymentMethods(h.w.t.Context(), h.c.id, billing.PageOptions{Limit: 100})
+	page, err := h.w.client[embedded].ListPaymentMethods(h.w.t.Context(), h.c.cid(), billing.PageRequest{Limit: 100})
 	require.NoError(h.w.t, err)
-	return page.Data
+	return page.Items
 }
 
 func (h hostedPay) subscriptions() []billing.Subscription {

@@ -101,7 +101,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	if err != nil {
 		return out, err
 	}
-	if target.Scope == nil || method.PspID != target.Scope.ID || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || method.ParkReason != "" {
+	if target.Scope == nil || !charge.ChargeableOn(method, target.Scope.ID) || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || method.ParkReason != "" {
 		return out, errors.New("sale instrument does not match customer and provider")
 	}
 	now := purchase.now().UTC().Truncate(time.Microsecond)
@@ -121,7 +121,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	if entitlements == nil {
 		entitlements = map[string]*int{}
 	}
-	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
+	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method, target.Scope.ID), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
 	if req.acceptedPurchase != nil {
 		out.PaymentID = req.acceptedPurchase.PaymentID
 		id, err := billing.ParseCheckoutSessionID(req.CheckoutSessionID)

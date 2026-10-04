@@ -241,10 +241,10 @@ WITH cf AS (
                           WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
       LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
-     WHERE c.merchant_id = $12::uuid
-       AND ($13::uuid IS NULL OR c.id = $13::uuid)
+     WHERE c.merchant_id = $13::uuid
+       AND ($14::uuid IS NULL OR c.id = $14::uuid)
 )
-SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by, count(*) OVER () AS total
+SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by
 FROM cf
 WHERE ($1::text[] IS NULL OR cf.owner = ANY($1::text[]))
   AND ($2::text[] IS NULL OR cf.first_outcome = ANY($2::text[]))
@@ -257,8 +257,10 @@ WHERE ($1::text[] IS NULL OR cf.owner = ANY($1::text[]))
         WHEN cf.won_at IS NOT NULL THEN 'collected'
         WHEN cf.closed_at <= $9::timestamptz THEN 'lost'
         ELSE 'open' END = ANY($8::text[]))
+  AND ($10::timestamptz IS NULL
+       OR (cf.due_at, cf.id) < ($10::timestamptz, $11::uuid))
 ORDER BY cf.due_at DESC, cf.id DESC
-LIMIT $11::bigint OFFSET $10::bigint
+LIMIT $12::int
 `
 
 type ListRebillCyclesParams struct {
@@ -271,8 +273,9 @@ type ListRebillCyclesParams struct {
 	DueUntil       *time.Time
 	Outcomes       []string
 	Now            time.Time
-	PageOffset     int64
-	PageLimit      int64
+	AfterAt        *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
 	MerchantID     uuid.UUID
 	ID             *uuid.UUID
 }
@@ -293,15 +296,14 @@ type ListRebillCyclesRow struct {
 	FirstOutcome   string
 	ClosedAt       time.Time
 	RecoveredBy    string
-	Total          int64
 }
 
 // The merchant's rebill cycles, latest due first, each with its first attempt,
 // the attempt that collected it and when it closes: collected, the subscription
 // cancelled, or 15 days past due (the dunning window is at most 14), whichever
 // is first. Outcome is collected, lost (closed by now uncollected) or open; a
-// text filter matches any of its values. The metrics rebill_cycles family
-// derives the same facts.
+// text filter matches any of its values; a page continues after its cursor.
+// The metrics rebill_cycles family derives the same facts.
 func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesParams) ([]ListRebillCyclesRow, error) {
 	rows, err := q.db.Query(ctx, listRebillCycles,
 		arg.Owners,
@@ -313,8 +315,9 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 		arg.DueUntil,
 		arg.Outcomes,
 		arg.Now,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -341,7 +344,6 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 			&i.FirstOutcome,
 			&i.ClosedAt,
 			&i.RecoveredBy,
-			&i.Total,
 		); err != nil {
 			return nil, err
 		}

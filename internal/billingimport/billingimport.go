@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -185,20 +186,22 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				if created.IsZero() {
 					created = asOf
 				}
+				brand, last4, month, year := models.CardFromDetails(pm.Card).Columns()
 				if _, err := q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-					ID:                   id,
-					MerchantID:           merchantID.UUID(),
-					CustomerID:           pm.Customer.UUID(),
-					Rail:                 pm.Rail,
-					RailCustomerRef:      pm.RailCustomerRef,
-					RailMethodRef:        pm.RailMethodRef,
-					PspID:                pmPSP,
-					InitialTransactionID: pm.InitialTransactionID,
-					LastFour:             nilIfEmpty(pm.LastFour),
-					CardType:             nilIfEmpty(pm.CardType),
-					ExpiryDate:           nilIfEmpty(pm.ExpiryDate),
-					CreatedAt:            created,
-					UpdatedAt:            created,
+					ID:              id,
+					MerchantID:      merchantID.UUID(),
+					CustomerID:      pm.Customer.UUID(),
+					Rail:            pm.Rail,
+					RailCustomerRef: pm.RailCustomerRef,
+					RailMethodRef:   pm.RailMethodRef,
+					PspID:           &pmPSP,
+					Custodian:       models.CustodianPSP,
+					CardBrand:       brand,
+					CardLast4:       last4,
+					CardExpMonth:    month,
+					CardExpYear:     year,
+					CreatedAt:       created,
+					UpdatedAt:       created,
 				}); err != nil {
 					return fmt.Errorf("create payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 				}

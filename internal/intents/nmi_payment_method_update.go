@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -73,7 +74,9 @@ type NMIPaymentMethodUpdatePayload struct {
 	Email           string    `json:"email,omitempty"`
 	Company         string    `json:"company,omitempty"`
 	Address2        string    `json:"address2,omitempty"`
-	TargetCard      nmiCard   `json:"target_card"`
+	// TargetCard is the replacement card's facts when the server received the
+	// card itself; empty for a token, whose card only NMI reports.
+	TargetCard nmiCard `json:"target_card"`
 
 	// CardEntry: the server received the replacement card itself (#1129). The
 	// request that carried it stages it; the intent keeps only TargetCard.
@@ -92,6 +95,9 @@ type nmiCard struct {
 func (c nmiCard) complete() bool {
 	return c.LastFour != "" && c.ExpiryDate != ""
 }
+
+// model is the card as a stored method's display facts.
+func (c nmiCard) model() models.Card { return models.ParseCard(c.CardType, c.LastFour, c.ExpiryDate) }
 
 // matches compares brands only when both sides state one.
 func (c nmiCard) matches(other nmiCard) bool {
@@ -113,8 +119,11 @@ const PaymentMethodDataGapFinding = "life.payment_method_update.provider_data_ga
 // the local card and its recurring agreement always describe one card, and a
 // refused card leaves the previous card and agreement in use.
 type nmiPaymentMethodUpdateProgress struct {
-	SubmissionStarted     bool    `json:"submission_started"`
-	OldCard               nmiCard `json:"old_card"`
+	SubmissionStarted bool    `json:"submission_started"`
+	OldCard           nmiCard `json:"old_card"`
+	// PriorBillingIDs are the vault's entries before staging: an entry not
+	// among them is the staged one.
+	PriorBillingIDs       []string `json:"prior_billing_ids,omitempty"`
 	StagedBillingID       string  `json:"staged_billing_id,omitempty"`
 	VerificationSubmitted bool    `json:"verification_submitted,omitempty"`
 	AgreementRef          string  `json:"agreement_ref,omitempty"`
@@ -133,7 +142,7 @@ func decodeNMIPaymentMethodUpdatePayload(intent gen.BillingRailIntent) (NMIPayme
 	if payload.CardEntry {
 		credential = !credential && strings.TrimSpace(payload.AttemptKey) != ""
 	}
-	if payload.PaymentMethodID == uuid.Nil || strings.TrimSpace(payload.RailCustomerRef) == "" || !credential || !payload.TargetCard.complete() {
+	if payload.PaymentMethodID == uuid.Nil || strings.TrimSpace(payload.RailCustomerRef) == "" || !credential || (payload.CardEntry && !payload.TargetCard.complete()) {
 		return payload, errors.New("nmi payment method update payload is incomplete")
 	}
 	return payload, nil
@@ -259,15 +268,15 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 			card.Zero()
 			return Parked("payment method update progress store not wired")
 		}
-		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"submission_started": true, "old_card": old}); err != nil {
+		known := make([]string, 0, len(customer.Billing))
+		for _, b := range customer.Billing {
+			known = append(known, strings.TrimSpace(b.ID))
+		}
+		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"submission_started": true, "old_card": old, "prior_billing_ids": known}); err != nil {
 			card.Zero()
 			return Retryable("record card replacement submission boundary: " + err.Error())
 		}
-		progress.SubmissionStarted, progress.OldCard = true, old
-		known := make([]string, 0, len(customer.Billing))
-		for _, b := range customer.Billing {
-			known = append(known, b.ID)
-		}
+		progress.SubmissionStarted, progress.OldCard, progress.PriorBillingIDs = true, old, known
 		var id string
 		if payload.CardEntry {
 			id = CardBillingID(intent.ID)
@@ -302,11 +311,16 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 	}
 	if staged == "" {
 		// The staging request's outcome was lost: the entry NMI added is the
-		// one carrying the requested card beside the replaced one.
+		// one the vault did not hold before (carrying the card, when the
+		// server received it).
 		var candidates []string
 		for _, b := range customer.Billing {
-			if card, err := billingCard(b); err == nil && strings.TrimSpace(b.ID) != oldBilling && payload.TargetCard.matches(card) {
-				candidates = append(candidates, strings.TrimSpace(b.ID))
+			id := strings.TrimSpace(b.ID)
+			if id == oldBilling || slices.Contains(progress.PriorBillingIDs, id) {
+				continue
+			}
+			if card, err := billingCard(b); err == nil && (!payload.CardEntry || payload.TargetCard.matches(card)) {
+				candidates = append(candidates, id)
 			}
 		}
 		switch len(candidates) {
@@ -328,7 +342,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 	if err != nil {
 		return Terminal("the staged replacement card disappeared at NMI")
 	}
-	if !payload.TargetCard.matches(stagedCard) {
+	if payload.CardEntry && !payload.TargetCard.matches(stagedCard) {
 		return TerminalWithEvidence("NMI staged a different card than the requested replacement; refusing to use it", map[string]any{"provider_card": stagedCard})
 	}
 
@@ -451,10 +465,11 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		return Terminal("encode payment method metadata: " + err.Error())
 	}
 	now := h.now()
+	brand, last4, month, year := card.model().Columns()
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
 		n, err := d.Gen(ctx).ReplacePaymentMethodCard(ctx, gen.ReplacePaymentMethodCardParams{
-			NewRailMethodRef: staged, LastFour: stringPtr(card.LastFour), CardType: stringPtr(card.CardType), ExpiryDate: stringPtr(card.ExpiryDate),
+			NewRailMethodRef: staged, CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year,
 			Metadata: raw, RecurringRef: ref, UpdatedAt: now, MerchantID: intent.MerchantID, ID: pm.ID, OldRailMethodRef: oldBilling,
 		})
 		if err != nil {
@@ -510,10 +525,13 @@ func entryCard(customer nmi.V5Customer, billingID string) (nmiCard, error) {
 }
 
 // NMIVaultCard is the masked card of one billing entry of an NMI vault ("" =
-// the primary): last four, brand and MMYY expiry.
-func NMIVaultCard(customer nmi.V5Customer, billingID string) (lastFour, cardType, expiry string, err error) {
+// the primary).
+func NMIVaultCard(customer nmi.V5Customer, billingID string) (models.Card, error) {
 	card, err := entryCard(customer, billingID)
-	return card.LastFour, card.CardType, card.ExpiryDate, err
+	if err != nil {
+		return models.Card{}, err
+	}
+	return card.model(), nil
 }
 
 func billingCard(b nmi.V5CustomerBilling) (nmiCard, error) {
@@ -643,11 +661,9 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 		Email:           valueOrEmpty(req.Email),
 		Company:         valueOrEmpty(req.Company),
 		Address2:        valueOrEmpty(req.Address2),
-		TargetCard: nmiCard{
-			LastFour:   valueOrEmpty(req.LastFour),
-			CardType:   valueOrEmpty(req.CardType),
-			ExpiryDate: valueOrEmpty(req.ExpiryDate),
-		},
+	}
+	if req.Card != nil {
+		payload.TargetCard = nmiCard{LastFour: req.Card.LastFour(), CardType: req.Card.Brand(), ExpiryDate: req.Card.Expiry()}
 	}
 	due := time.Now().UTC()
 	if payload.CardEntry {
@@ -658,7 +674,7 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 		MerchantID:     tid.UUID(),
 		Provider:       strings.ToLower(string(pm.Rail)),
 		IntentType:     TypeNMIPaymentMethodUpdate,
-		PspID:          pm.PspID,
+		PspID:          pm.HoldingPSP(),
 		Payload:        payload,
 		IdempotencyKey: payload.idempotencyKey(),
 		NextAttemptAt:  due,

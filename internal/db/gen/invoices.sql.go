@@ -155,23 +155,6 @@ func (q *Queries) CountInvoicePaymentAttemptsByPayer(ctx context.Context, arg Co
 	return count, err
 }
 
-const countInvoicesByPayer = `-- name: CountInvoicesByPayer :one
-SELECT count(*) FROM billing.invoices
-WHERE merchant_id = $1 AND customer_id = $2
-`
-
-type CountInvoicesByPayerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-func (q *Queries) CountInvoicesByPayer(ctx context.Context, arg CountInvoicesByPayerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvoicesByPayer, arg.MerchantID, arg.CustomerID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const failClaimedInvoicePaymentAttempt = `-- name: FailClaimedInvoicePaymentAttempt :execrows
 UPDATE billing.invoice_payments
 SET status = 'failed',
@@ -941,35 +924,37 @@ func (q *Queries) ListInvoicePayers(ctx context.Context, merchantID uuid.UUID) (
 	return items, nil
 }
 
-const listInvoicePaymentAttemptsByPayer = `-- name: ListInvoicePaymentAttemptsByPayer :many
+const listInvoicePaymentsPage = `-- name: ListInvoicePaymentsPage :many
 SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
 FROM billing.invoice_payments p
-JOIN billing.invoices i
-  ON i.merchant_id = p.merchant_id
- AND i.customer_id = p.customer_id
- AND i.id = p.invoice_id
-WHERE p.merchant_id = $1
-  AND p.customer_id = $2
-  AND p.invoice_id = $3
+WHERE p.merchant_id = $1::uuid
+  AND p.customer_id = $2::uuid
+  AND p.invoice_id = $3::uuid
+  AND ($4::timestamptz IS NULL
+       OR (p.created_at, p.id) < ($4::timestamptz, $5::uuid))
 ORDER BY p.created_at DESC, p.id DESC
-LIMIT $4 OFFSET $5
+LIMIT $6::int
 `
 
-type ListInvoicePaymentAttemptsByPayerParams struct {
+type ListInvoicePaymentsPageParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	InvoiceID  uuid.UUID
-	Limit      int64
-	Offset     int64
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
 }
 
-func (q *Queries) ListInvoicePaymentAttemptsByPayer(ctx context.Context, arg ListInvoicePaymentAttemptsByPayerParams) ([]BillingInvoicePayment, error) {
-	rows, err := q.db.Query(ctx, listInvoicePaymentAttemptsByPayer,
+// One page of an invoice's payments, newest first, after a (created_at, id)
+// cursor.
+func (q *Queries) ListInvoicePaymentsPage(ctx context.Context, arg ListInvoicePaymentsPageParams) ([]BillingInvoicePayment, error) {
+	rows, err := q.db.Query(ctx, listInvoicePaymentsPage,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.InvoiceID,
-		arg.Limit,
-		arg.Offset,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -1081,85 +1066,6 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 			&i.Currency,
 			&i.PeriodFrom,
 			&i.PeriodAnchor,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listInvoicesByPayer = `-- name: ListInvoicesByPayer :many
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
-WHERE merchant_id = $1 AND customer_id = $2
-ORDER BY period_from DESC
-LIMIT $3::int OFFSET $4::int
-`
-
-type ListInvoicesByPayerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Column3    int32
-	Column4    int32
-}
-
-func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPayerParams) ([]BillingInvoice, error) {
-	rows, err := q.db.Query(ctx, listInvoicesByPayer,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Column3,
-		arg.Column4,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingInvoice
-	for rows.Next() {
-		var i BillingInvoice
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.InvoiceNumber,
-			&i.PeriodFrom,
-			&i.PeriodTo,
-			&i.UsageTotal,
-			&i.DepositsTotal,
-			&i.OwedAccrued,
-			&i.OwedPaid,
-			&i.ClosingBalance,
-			&i.SubtotalAmount,
-			&i.TotalAmount,
-			&i.AmountPaid,
-			&i.AmountDue,
-			&i.LineItems,
-			&i.MoneyMovements,
-			&i.Status,
-			&i.CollectionMethod,
-			&i.IssuedAt,
-			&i.DueAt,
-			&i.PaidAt,
-			&i.VoidedAt,
-			&i.UncollectibleAt,
-			&i.FinalizedAt,
-			&i.ExternalInvoiceID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.PoNumber,
-			&i.Tax,
-			&i.BillingContacts,
-			&i.Memo,
-			&i.CollectionFailureCount,
-			&i.CollectionFailedAt,
-			&i.NextCollectionAttemptAt,
-			&i.LastCollectionFailureCode,
-			&i.LastCollectionFailureMessage,
-			&i.CollectionIntentID,
 		); err != nil {
 			return nil, err
 		}

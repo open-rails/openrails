@@ -117,7 +117,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	// is armed; there is no boot-plane fallback (a fail-open credential path).
 	adapter := c.adapters[rail]
 	if c.resolver != nil {
-		stored, ok, rerr := c.resolver.ResolveCollectionAdapter(ctx, method)
+		stored, ok, rerr := c.resolver.ResolveCollectionAdapter(ctx, method, req.Instrument.PSPID)
 		if rerr != nil {
 			return nil, fmt.Errorf("resolve merchant %s collection credentials: %w", rail, rerr)
 		}
@@ -177,7 +177,7 @@ func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req Charge
 			if req.HyperSwitch == nil {
 				return charge.ErrInstrumentChanged
 			}
-			binding, err := collectionHyperSwitchBinding(ctx, q, method, req.HyperSwitch.APIBaseURL)
+			binding, err := collectionHyperSwitchBinding(ctx, q, method, req.Instrument.PSPID, req.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}

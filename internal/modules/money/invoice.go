@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -352,64 +351,6 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		return nil, err
 	}
 	return inv, nil
-}
-
-// ListInvoices lists an merchant subject's finalized invoices, newest period
-// first, paginated (issue #303). It filters customer_id directly (the payer)
-// and is scoped to the request merchant, mirroring GetTransactionsByCustomer.
-// Returns the page plus the total count for pagination.
-func (s *MoneyService) ListInvoices(ctx context.Context, payer identity.CustomerID, limit, offset int) ([]models.Invoice, int, error) {
-	if s == nil || s.db == nil {
-		return nil, 0, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, 0, fmt.Errorf("payer required")
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	var items []models.Invoice
-	var total int
-	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		tid, terr := merchant.Require(ctx)
-		if terr != nil {
-			return terr
-		}
-		tenantID := tid.UUID()
-		n, e := q.CountInvoicesByPayer(ctx, gen.CountInvoicesByPayerParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(),
-		})
-		if e != nil {
-			return e
-		}
-		total = int(n)
-		limit32, _ := safecast.Convert[int32](limit)
-		offset32, _ := safecast.Convert[int32](offset)
-		rows, e := q.ListInvoicesByPayer(ctx, gen.ListInvoicesByPayerParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(),
-			Column3: limit32, Column4: offset32,
-		})
-		if e != nil {
-			return e
-		}
-		items = make([]models.Invoice, 0, len(rows))
-		for _, r := range rows {
-			m, merr := invoiceFromGen(r)
-			if merr != nil {
-				return merr
-			}
-			items = append(items, *m)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, total, nil
 }
 
 // GetInvoiceByID returns one finalized invoice (with its snapshotted line

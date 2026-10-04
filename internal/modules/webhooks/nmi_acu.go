@@ -90,12 +90,13 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 		for _, m := range methods {
 			switch kind {
 			case paymentmethods.CardUpdated:
-				lastFour, cardType, expiry, err := intents.NMIVaultCard(customer, m.RailMethodRef)
+				card, err := intents.NMIVaultCard(customer, m.RailMethodRef)
 				if err != nil {
 					return fmt.Errorf("nmi account updater: card %s: %w", m.ID, err)
 				}
+				brand, last4, month, year := card.Columns()
 				if _, err := q.RefreshPaymentMethodCard(ctx, gen.RefreshPaymentMethodCardParams{MerchantID: mid.UUID(), ID: m.ID,
-					LastFour: lastFour, CardType: cardType, ExpiryDate: expiry, UpdatedAt: now}); err != nil {
+					CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year, UpdatedAt: now}); err != nil {
 					return err
 				}
 				if err := subscriptions.WakeForReplacedMethod(ctx, d, mid.UUID(), m.ID, now); err != nil {

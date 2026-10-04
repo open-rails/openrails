@@ -46,7 +46,7 @@ func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (ge
 		if err != nil {
 			return err
 		}
-		if p.Provider != "nmi" || method.Rail != p.Provider || method.CustomerID != customer || method.PspID != p.PspID || method.Custodian != models.CustodianPSP || method.RailCustomerRef != terms.RailCustomerRef || method.RailMethodRef != terms.RailMethodRef {
+		if p.Provider != "nmi" || method.Rail != p.Provider || method.CustomerID != customer || derefUUID(method.PspID) != p.PspID || method.Custodian != models.CustodianPSP || method.RailCustomerRef != terms.RailCustomerRef || method.RailMethodRef != terms.RailMethodRef {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		prior, err := store.GetByIdempotencyKey(ctx, p.IdempotencyKey)

@@ -224,5 +224,6 @@ func invoicePaymentAttemptFromGen(r gen.BillingInvoicePayment) models.InvoicePay
 		FailureMessage:  r.FailureMessage,
 		AttemptedAt:     r.AttemptedAt,
 		SettledAt:       r.SettledAt,
+		CreatedAt:       r.CreatedAt,
 	}
 }

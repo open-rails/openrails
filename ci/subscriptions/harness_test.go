@@ -664,13 +664,13 @@ func (c *customer) saveCard(rail string, card card) string {
 	c.w.t.Helper()
 	switch rail {
 	case "stripe":
-		setup := c.must(http.MethodPost, "/payment-methods/stripe-setup", "setup-"+uuid.NewString(), map[string]any{"psp_id": c.w.psp["stripe"], "consent": true})
+		setup := c.must(http.MethodPost, "/payment-method-setups", "setup-"+uuid.NewString(), map[string]any{"psp_id": c.w.psp["stripe"], "consent": true})
 		c.w.stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), card)
-		confirmed := unwrap(c.must(http.MethodPost, fmt.Sprintf("/payment-methods/stripe-setup/%s/confirm", setup["id"]), "", nil))
+		confirmed := unwrap(c.must(http.MethodPost, fmt.Sprintf("/payment-method-setups/%s/confirm", setup["id"]), "", nil))
 		return confirmed["payment_method_id"].(string)
 	case "nmi":
 		token := c.w.nmi.Tokenize(card)
-		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "payment_token": token, "name_on_card": "E2E Payer"}))
+		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": c.w.psp["nmi"], "payment_token": token, "billing_details": map[string]any{"name": "E2E Payer"}}))
 		return saved["id"].(string)
 	}
 	c.w.t.Fatalf("unknown rail %s", rail)
@@ -749,15 +749,33 @@ func (w *world) subscription(tp topology, id billing.SubscriptionID) *billing.Su
 
 func (w *world) payments(tp topology, customerID string) []billing.Payment {
 	w.t.Helper()
-	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentFilter{CustomerID: customerID, PageOptions: billing.PageOptions{Limit: 100}})
+	id, err := billing.ParseCustomerID(customerID)
 	require.NoError(w.t, err)
-	return page.Data
+	page, err := w.client[tp].ListPayments(w.t.Context(), billing.ListPaymentsParams{CustomerID: id, Page: billing.PageRequest{Limit: 100}})
+	require.NoError(w.t, err)
+	return page.Items
 }
 
+// cid is the customer's id as a Client takes it.
+func (c *customer) cid() billing.CustomerID {
+	c.w.t.Helper()
+	id, err := billing.ParseCustomerID(c.id)
+	require.NoError(c.w.t, err)
+	return id
+}
+
+// declaredCard is a card's display facts as an import declares them.
+func declaredCard(c card) *billing.CardDetails {
+	month, year := 12, 2035
+	return &billing.CardDetails{Brand: &c.Brand, Last4: &c.Last4, ExpMonth: &month, ExpYear: &year}
+}
+
+// completed is the payments whose money moved, a refunded charge included.
 func completed(payments []billing.Payment) []billing.Payment {
 	var out []billing.Payment
 	for _, p := range payments {
-		if p.Status == "succeeded" || p.Status == "completed" {
+		switch p.Status {
+		case billing.PaymentSucceeded, billing.PaymentRefunded, billing.PaymentPartiallyRefunded:
 			out = append(out, p)
 		}
 	}

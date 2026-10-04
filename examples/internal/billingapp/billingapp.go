@@ -189,30 +189,33 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.Resumed = true
 
-	invoice, err := client.GetMerchantInvoice(ctx, in.InvoiceID)
+	invoiceID := billing.InvoiceID(in.InvoiceID)
+	invoice, err := client.GetInvoice(ctx, invoiceID)
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID, billing.InvoiceProfileDTO{
-		NetTermsDays: 14, CollectionMethod: "send_invoice",
-	}); err != nil {
+	profile, err := client.SetCustomerInvoiceProfile(ctx, invoice.CustomerID, billing.SetInvoiceProfileParams{
+		InvoiceProfile: billing.InvoiceProfile{NetTermsDays: 14, CollectionMethod: billing.CollectSendInvoice}, IfAbsent: true,
+	})
+	if err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)
 	}
-	payment := billing.RecordInvoicePaymentRequest{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
-	paid, err := client.RecordInvoicePayment(ctx, in.InvoiceID, payment)
+	r.InvoiceProfileSet = profile.NetTermsDays == 14
+	payment := billing.CreateInvoicePaymentParams{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
+	paid, err := client.CreateInvoicePayment(ctx, invoiceID, payment)
 	if err != nil {
 		return r, fmt.Errorf("record invoice payment: %w", err)
 	}
 	r.InvoiceDueAfterPaid = paid.AmountDue
-	_, err = client.RecordInvoicePayment(ctx, in.InvoiceID, payment)
+	_, err = client.CreateInvoicePayment(ctx, invoiceID, payment)
 	r.InvoicePaidTwice = err == nil
 	if !errors.Is(err, billing.ErrConflict) {
 		return r, fmt.Errorf("replayed remittance: %w", err)
 	}
-	voided, err := client.VoidInvoice(ctx, in.InvoiceID)
+	voided, err := client.VoidInvoice(ctx, invoiceID)
 	if err != nil {
 		return r, fmt.Errorf("void invoice: %w", err)
 	}
-	r.InvoiceStatus = voided.Status
+	r.InvoiceStatus = string(voided.Status)
 	return r, nil
 }
