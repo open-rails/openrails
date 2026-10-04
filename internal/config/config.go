@@ -136,11 +136,12 @@ type Config struct {
 	Encryption         *EncryptionConfig `koanf:"encryption,omitempty"`
 	Vault              *VaultConfig      `koanf:"vault,omitempty"`
 
-	// AdminConsole gates the merchant admin console SPA served at /admin/
-	// (#740). Default OFF. Enabling it requires console assets in the binary
-	// (#754: `task admin-build` builds web/admin) — enabled
-	// without assets refuses boot. Env: ADMIN_CONSOLE_ENABLED,
-	// ADMIN_CONSOLE_AUTH_BASE_URL, ADMIN_CONSOLE_API_BASE_URL.
+	// AdminConsole gates the merchant admin console SPA served at
+	// AdminConsole.Path, /admin by default (#740/#1127). Default OFF. Enabling
+	// it requires console assets in the binary (#754: `task admin-build` builds
+	// web/admin) — enabled without assets refuses boot. Env:
+	// ADMIN_CONSOLE_ENABLED, ADMIN_CONSOLE_PATH, ADMIN_CONSOLE_AUTH_BASE_URL,
+	// ADMIN_CONSOLE_API_BASE_URL.
 	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`
 
 	// LLM configures the server-side model behind the #741 dashboard
@@ -452,11 +453,15 @@ type VaultConfig struct {
 
 // AdminConsoleConfig configures the merchant admin console SPA (#740).
 // Disabled by default; when enabled the server serves the caller-supplied
-// console build (#754) at /admin/ plus a /admin/config.json bootstrap document
-// the SPA reads to find its auth issuer and API base. Enabled without assets
-// is a boot error.
+// console build (#754) at Path plus a Path/config.json bootstrap document the
+// SPA reads to find its auth issuer and API base. Enabled without assets is a
+// boot error.
 type AdminConsoleConfig struct {
 	Enabled bool `koanf:"enabled,omitempty"`
+	// Path is where the console is served (#1127): an absolute URL path
+	// without a trailing slash, e.g. "/billing/admin". Empty is "/admin". An
+	// embedded host mounts Client.AdminConsole() at exactly this path.
+	Path string `koanf:"path,omitempty"`
 	// AuthBaseURL is the base under which the AuthKit authhttp surface lives.
 	// Empty defaults to the standalone control plane's, "/auth/v1" beneath an
 	// origin issuer. Embedded hosts set their AuthKit JSON API, "/api/v1" by
@@ -469,6 +474,33 @@ type AdminConsoleConfig struct {
 
 // IsEnabled reports whether the admin console SPA should be served.
 func (c *AdminConsoleConfig) IsEnabled() bool { return c != nil && c.Enabled }
+
+// DefaultAdminConsolePath is where the console is served when Path is unset.
+const DefaultAdminConsolePath = "/admin"
+
+// MountPath is Path, defaulted to DefaultAdminConsolePath.
+func (c *AdminConsoleConfig) MountPath() string {
+	if c == nil || c.Path == "" {
+		return DefaultAdminConsolePath
+	}
+	return c.Path
+}
+
+var adminConsolePathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
+
+// validateAdminConsolePath accepts one or more slash-led segments of RFC 3986
+// unreserved characters, none of them "." or "..": the value lands in route
+// patterns and the console's <base href>.
+func validateAdminConsolePath(p string) error {
+	bad := !adminConsolePathRe.MatchString(p)
+	for _, segment := range strings.Split(p, "/") {
+		bad = bad || segment == "." || segment == ".."
+	}
+	if bad {
+		return fmt.Errorf("invalid admin_console.path %q: want an absolute path like /billing/admin — no trailing slash, no . or .. segments, only letters, digits and . _ ~ -", p)
+	}
+	return nil
+}
 
 // LLM provider names (#741/#761). The provider selects the API dialect;
 // unknown values refuse to boot.
@@ -1218,6 +1250,11 @@ func Validate(cfg *Config) error {
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
+	}
+	if cfg.AdminConsole != nil && cfg.AdminConsole.Path != "" {
+		if err := validateAdminConsolePath(cfg.AdminConsole.Path); err != nil {
+			return err
+		}
 	}
 
 	// #741/#761: an unknown llm.provider must never silently boot with one

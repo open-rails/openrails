@@ -88,7 +88,7 @@ export async function server(routes: Record<string, Reply> = {}) {
       return value instanceof Response ? value : Response.json(value ?? {})
     })
   )
-  await loadBootstrap()
+  await loadBootstrap("/admin/config.json")
   session = createAuthClient({ baseUrl: BOOTSTRAP.auth_base_url, sessionHint: false })
   bindSession(session)
   await signIn("console-test")

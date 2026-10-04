@@ -4,8 +4,8 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig, type Plugin } from "vite"
 
-// Served by the Go binary at /admin/: web/admin/embed.go go:embeds dist/
-// (`task admin-build`). Only dist/.gitkeep is committed (#754) so the Go
+// Served by the Go binary at admin_console.path: web/admin/embed.go go:embeds
+// dist/ (`task admin-build`). Only dist/.gitkeep is committed (#754) so the Go
 // package compiles without a build; emptyOutDir deletes it, so restore it.
 const keepGoEmbedPlaceholder: Plugin = {
   name: "keep-go-embed-placeholder",
@@ -15,8 +15,11 @@ const keepGoEmbedPlaceholder: Plugin = {
   },
 }
 
-export default defineConfig({
-  base: "/admin/",
+// One build serves any mount path (#1127): built URLs are relative to
+// index.html's <base href>, which the Go handler points at the mount. Dev
+// serves at the default /admin/.
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "./" : "/admin/",
   plugins: [react(), tailwindcss(), keepGoEmbedPlaceholder],
   resolve: {
     alias: {
@@ -35,4 +38,4 @@ export default defineConfig({
       "/admin/config.json": "http://localhost:3053",
     },
   },
-})
+}))

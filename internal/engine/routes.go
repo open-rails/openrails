@@ -3,11 +3,13 @@ package engine
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -86,20 +88,23 @@ func (e *Engine) buildRoutes() ([]routebundle.Route, error) {
 	return routebundle.FromTable(table), nil
 }
 
-// Console is the admin console for a host to mount at /admin/ on its root
-// router; nil unless Config.AdminConsole is enabled. A control plane serves the
-// console in Routes instead.
-func (e *Engine) Console() http.Handler {
-	cfg := e.App.Config
-	if operator.Get(e.App) != nil || !cfg.AdminConsole.IsEnabled() || !adminconsole.Present(e.App.ConsoleAssets) {
-		return nil
+// Console is the admin console for a host to mount at
+// Config.AdminConsole.Path on its root router; nil unless Config.AdminConsole
+// is enabled. A control plane serves the console in Routes instead.
+func (e *Engine) Console() http.Handler { return e.console }
+
+// console builds the embedded host's console at construction, so a build it
+// cannot serve refuses boot.
+func console(cfg *config.Config, assets fs.FS) (http.Handler, error) {
+	if cfg.ControlPlane != nil || !cfg.AdminConsole.IsEnabled() || !adminconsole.Present(assets) {
+		return nil, nil
 	}
-	return adminconsole.Handler(adminconsole.Config{
+	return adminconsole.Handler(cfg.AdminConsole.MountPath(), adminconsole.Config{
 		AuthBaseURL:            cfg.AdminConsole.AuthBaseURL,
 		APIBaseURL:             cfg.AdminConsole.APIBaseURL,
 		NLWidgetsEnabled:       cfg.LLM.IsConfigured(),
 		AskEnabled:             cfg.LLM.AskConfigured(),
 		CatalogCopilotEnabled:  cfg.LLM.CatalogCopilotConfigured(),
 		CatalogDraftingEnabled: cfg.LLM.CatalogDraftingConfigured(),
-	}, e.App.ConsoleAssets)
+	}, assets)
 }

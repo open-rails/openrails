@@ -34,6 +34,8 @@ checks() {
     echo "console: web/admin/dist/index.html missing — the embed gate would prove nothing" >&2
     exit 1
   }
+  # One build serves any admin_console.path (#1127).
+  bash scripts/go-test-gate.sh ./web/admin TestBuiltConsoleServesAtAnyPath
   git diff --quiet -- web/admin/dist || {
     echo "console: the build removed web/admin/dist/.gitkeep; go build without a console build would fail" >&2
     exit 1

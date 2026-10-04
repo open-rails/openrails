@@ -2,7 +2,8 @@
 
 ### What it is
 
-A React SPA (`web/admin`, Vite) served by the engine at `/admin/`, driving the
+A React SPA (`web/admin`, Vite) served by the engine at `admin_console.path`
+(`/admin/` by default), driving the
 `/v1/merchant/*` API. It is the browser UI for the **merchant operator** — the
 human running a merchant on an OpenRails deployment: customers, subscriptions,
 payments, catalog, ops findings, team, API keys. It holds no state and no
@@ -22,19 +23,20 @@ Two independent requirements, both needed (#740/#754):
 
 | assets | `admin_console.enabled` | result |
 |--------|-------------------------|--------|
-| yes | true | console served at `/admin/` |
-| yes | false | not mounted — `/admin/*` 404s |
-| no | false (default) | silently absent — `/admin/*` 404s |
+| yes | true | console served at `admin_console.path` |
+| yes | false | not mounted — the path 404s |
+| no | false (default) | silently absent — the path 404s |
 | no | true | **loud boot error** naming the build step |
 
 ```yaml
 admin_console:
   enabled: true
+  # path: /admin              # default; e.g. /billing/admin when the host owns /admin
   # auth_base_url: /auth/v1   # default: the standalone control plane's AuthKit JSON API
   # api_base_url: /v1      # default standalone; embedded hosts typically /billing/v1
 ```
 
-Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_AUTH_BASE_URL`,
+Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_PATH`, `ADMIN_CONSOLE_AUTH_BASE_URL`,
 `ADMIN_CONSOLE_API_BASE_URL`. Turning it **off** is the default: leave
 `enabled` unset (and/or build without assets — plain `go build ./...` links
 zero frontend bytes and never needs Node).
@@ -50,6 +52,13 @@ task build-console-binary  # admin-build + go build ./cmd/openrails
 
 Release archives and Docker images always carry the console (still
 config-gated at runtime): goreleaser and the Dockerfile build `web/admin` first.
+
+**Path.** `path` is an absolute URL path without a trailing slash, made of
+letters, digits and `. _ ~ -` segments; anything else refuses boot, as does a
+standalone path over an OpenRails route (e.g. `/v1`). One build serves any
+path: its URLs are relative to the `<base href="/admin/">` in `index.html`,
+which the server rewrites to the configured path, and the SPA derives its
+routes and `config.json` URL from `document.baseURI`.
 
 **Embedded hosts.** A module fetched into the Go module cache carries only
 `web/admin/dist/.gitkeep`, so the host builds the console and hands it over.
@@ -74,19 +83,22 @@ source to a temp dir before `pnpm install`):
 bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
 ```
 
-Then pass it as `Deps.ConsoleAssets` and mount the console at `/admin/` on the
-root router (the build's asset URLs are rooted there):
+Then pass it as `Deps.ConsoleAssets` and mount the console at
+`Config.AdminConsole.Path` on the root router, without stripping the prefix. A
+request outside that path answers 500 and is logged, rather than serving a page
+whose assets cannot load:
 
 ```go
 assets, _ := fs.Sub(consoleassets.FS, "dist")
 cfg.AdminConsole = &openrails.AdminConsoleConfig{
     Enabled:     true,
-    AuthBaseURL: "/api/v1",     // the host's AuthKit JSON API
-    APIBaseURL:  "/billing/v1", // the host's billing mount
+    Path:        "/billing/admin", // leaves the host's own /admin alone
+    AuthBaseURL: "/api/v1",        // the host's AuthKit JSON API
+    APIBaseURL:  "/billing/v1",    // the host's billing mount
 }
 client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth, ConsoleAssets: assets})
 if console := client.AdminConsole(); console != nil { // nil unless enabled
-    r.Any("/admin/*path", gin.WrapH(console))
+    r.Any("/billing/admin/*path", gin.WrapH(console))
 }
 ```
 
@@ -102,10 +114,10 @@ embedded: `Config.AdminConsole is enabled but there is no console build: …`). 
 
 What the engine enforces (verified):
 
-- The SPA itself — static assets and `GET /admin/config.json` — is served with
-  **no authentication at the transport layer**. Anyone who can reach `/admin/`
-  gets the app shell and the bootstrap document (base URLs + feature flags; no
-  secrets, no data).
+- The SPA itself — static assets and `GET <path>/config.json` — is served with
+  **no authentication at the transport layer**. Anyone who can reach the
+  console path gets the app shell and the bootstrap document (base URLs +
+  feature flags; no secrets, no data).
 - All **data and actions** go through `/v1/merchant/*` with a Bearer token
   (AuthKit user session or merchant API key) and are enforced server-side by
   the merchant permission catalog (#567) plus per-query merchant scoping. The console
@@ -114,7 +126,7 @@ What the engine enforces (verified):
 - Core OpenRails imposes **no environment restriction** — `enabled: true`
   serves the console in any env.
 
-Recommendation (not engine-enforced): treat exposing `/admin/` like exposing
+Recommendation (not engine-enforced): treat exposing the console like exposing
 any login page. If your deployment doesn't want the console reachable at all in
 production, gate it at boot — e.g. an embedded host may refuse to boot with
 `admin_console.enabled` in a production-like env precisely because the SPA is
@@ -128,8 +140,8 @@ bearers) should keep the console disabled or wire a user authenticator (#739).
 
 ### Viewing it
 
-Browse to `https://<your-openrails-host>/admin/` (bare `/admin` redirects). The
-SPA bootstraps from `GET /admin/config.json`:
+Browse to the console path, `https://<your-openrails-host>/admin/` by default
+(the bare path redirects). The SPA bootstraps from `config.json` beneath it:
 `{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled}`.
 
 - `auth_base_url` — AuthKit's JSON API. Standalone default `/auth/v1` (same

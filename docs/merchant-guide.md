@@ -313,7 +313,7 @@ caller's reproducible idempotency key: retrying it can never double-credit
 
 ### The admin console
 
-A React SPA served at `/admin/`, driving the same `/v1/merchant/*` API — off by
+A React SPA served at `admin_console.path` (`/admin/` by default), driving the same `/v1/merchant/*` API — off by
 default. It mounts only when console assets are built into the binary **and**
 `admin_console.enabled: true` (env `ADMIN_CONSOLE_ENABLED`). Login is a real AuthKit
 login (password standalone; OIDC when the embedded host configures it). Build and

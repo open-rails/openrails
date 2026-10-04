@@ -5,14 +5,19 @@ package adminconsole
 
 import (
 	"encoding/json"
+	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
 )
 
-// Config is the SPA bootstrap document served at /admin/config.json.
+// Config is the SPA bootstrap document served at <path>/config.json.
 type Config struct {
 	// AuthBaseURL is the base under which the AuthKit authhttp routes live
 	// (capabilities, password/login, token, me, OIDC). Standalone default:
@@ -52,12 +57,20 @@ func Present(assets fs.FS) bool {
 	return err == nil && !info.IsDir()
 }
 
-// Handler serves the console from assets (a Vite build rooted at index.html):
-// /admin/config.json from cfg, static files, and index.html as SPA fallback
-// for client-side routes. Mount at "GET /admin/" (redirect bare /admin
-// separately). Callers should gate mounting on Present(assets); if mounted
-// without a build anyway, every request answers 503 naming the build step.
-func Handler(cfg Config, assets fs.FS) http.Handler {
+// baseTag is the mount placeholder in the build's index.html (#1127). The
+// build's URLs are relative to it, so one build serves any path.
+var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
+
+// Handler serves the console from assets (a Vite build rooted at index.html)
+// at path, a validated AdminConsoleConfig.MountPath such as "/billing/admin":
+// path/config.json from cfg, static files, and index.html — its <base href>
+// rewritten to path/ — as the SPA fallback for client routes; bare path
+// redirects to path/. Mount it at path without stripping the prefix (ServeMux
+// "path/", gin "path/*any" and chi Mount all keep it): the build's URLs resolve
+// against path, so a request outside it is a mount mistake, answered 500 and
+// logged. Callers should gate mounting on Present(assets); without a build
+// every request answers 503 naming the build step.
+func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = "/auth/v1"
 	}
@@ -69,9 +82,33 @@ func Handler(cfg Config, assets fs.FS) http.Handler {
 		panic(err) // static struct, cannot fail
 	}
 	present := Present(assets)
+	var index []byte
+	if present {
+		raw, err := fs.ReadFile(assets, "index.html")
+		if err != nil {
+			return nil, fmt.Errorf("admin console: read index.html: %w", err)
+		}
+		if n := len(baseTag.FindAllIndex(raw, -1)); n != 1 {
+			return nil, fmt.Errorf(`admin console: the build's index.html has %d <base href="/admin/"> tags, want 1; rebuild it (scripts/build-admin-console.sh)`, n)
+		}
+		index = baseTag.ReplaceAllLiteral(raw, []byte(`<base href="`+html.EscapeString(path+"/")+`">`))
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rel := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/admin"), "/")
+		if r.URL.Path == path {
+			target := path + "/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
+		rel, ok := strings.CutPrefix(r.URL.Path, path+"/")
+		if !ok {
+			log.Errorf("admin console: request %q is outside its configured path %q; mount Client.AdminConsole() at Config.AdminConsole.Path without stripping the prefix", r.URL.Path, path)
+			writeError(w, http.StatusInternalServerError, "admin console is mounted outside its configured path")
+			return
+		}
 
 		if rel == "config.json" {
 			w.Header().Set("Content-Type", "application/json")
@@ -82,11 +119,11 @@ func Handler(cfg Config, assets fs.FS) http.Handler {
 
 		if !present {
 			writeError(w, http.StatusServiceUnavailable,
-				"admin console assets missing: build the SPA (scripts/build-admin-console.sh) and rebuild with -tags console_assets, or pass the assets FS to the engine")
+				"admin console assets missing: build the SPA (scripts/build-admin-console.sh) before go build, or pass the build as Deps.ConsoleAssets")
 			return
 		}
 
-		if rel != "" && fs.ValidPath(rel) {
+		if rel != "" && rel != "index.html" && fs.ValidPath(rel) {
 			if info, err := fs.Stat(assets, rel); err == nil && !info.IsDir() {
 				if strings.HasPrefix(rel, "assets/") {
 					// Vite emits content-hashed filenames under assets/.
@@ -101,9 +138,10 @@ func Handler(cfg Config, assets fs.FS) http.Handler {
 		}
 
 		// SPA fallback: client-side routes render from index.html.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		http.ServeFileFS(w, r, assets, "index.html")
-	})
+		_, _ = w.Write(index)
+	}), nil
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
