@@ -124,30 +124,42 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"payment_token":"tok"}`), &clean))
 	require.NoError(t, clean.rejectRawCardFields())
 
-	for _, tc := range []struct{ country, postal, zip, want string }{
-		{"US", "", "80202", "80202"},
-		{"DE", "10115", "", "10115"},
-		{"JP", "100-0001", "", "100-0001"},
-		{"BR", "01001-000", "", "01001-000"},
+	for _, tc := range []struct{ country, zip string }{
+		{"US", "80202"},
+		{"DE", "10115"},
+		{"JP", "100-0001"},
+		{"BR", "01001-000"},
 	} {
 		got := toCreatePaymentMethodRequest(&createPaymentMethodRequest{
 			PaymentToken: "opaque-provider-token", Provider: "mobius", NameOnCard: "Ada Lovelace",
-			BillingCountry: tc.country, PostalCode: tc.postal, Zip: tc.zip, Phone: "+49 30 123456", LastFour: "card-4242",
+			Country: tc.country, Zip: tc.zip, Phone: "+49 30 123456", LastFour: "card-4242",
 		}, "ada@example.com")
-		require.Equal(t, []any{"opaque-provider-token", "mobius", tc.country, tc.want, "4242", "ada@example.com", "", ""},
+		require.Equal(t, []any{"opaque-provider-token", "mobius", tc.country, tc.zip, "4242", "ada@example.com", "", ""},
 			[]any{got.PaymentToken, got.Provider, got.Country, got.Zip, got.LastFour, got.Email, got.FirstName, got.LastName})
-		for key, want := range map[string]any{"name_on_card": "Ada Lovelace", "billing_country": tc.country, "postal_code": tc.want, "billing_email": "ada@example.com", "billing_phone": "+49 30 123456"} {
+		for key, want := range map[string]any{"name_on_card": "Ada Lovelace", "billing_country": tc.country, "postal_code": tc.zip, "billing_email": "ada@example.com", "billing_phone": "+49 30 123456"} {
 			require.Equal(t, want, got.Metadata[key], key)
 		}
 		for _, key := range []string{"payment_token", "raw_tokenization_payload", "pan", "cvv"} {
 			require.NotContains(t, got.Metadata, key)
 		}
 	}
-	legacy := toCreatePaymentMethodRequest(&createPaymentMethodRequest{
-		PaymentToken: "tok", FirstName: "Ada", LastName: "Lovelace", Address1: "1 Main", Address2: "Unit 2", City: "Denver", State: "CO", Zip: "80202", Country: "US",
+	address := toCreatePaymentMethodRequest(&createPaymentMethodRequest{
+		PaymentToken: "tok", NameOnCard: "Ada Lovelace", Address1: "1 Main", Address2: "Unit 2", City: "Denver", State: "CO", Zip: "80202", Country: "US",
 	}, "")
-	require.Equal(t, []any{"Ada", "Lovelace", "US", "80202", "1 Main", "Unit 2", "Denver", "CO"},
-		[]any{legacy.FirstName, legacy.LastName, legacy.Country, legacy.Zip, legacy.Metadata["billing_address1"], legacy.Metadata["billing_address2"], legacy.Metadata["billing_city"], legacy.Metadata["billing_state"]})
+	require.Equal(t, []any{"Ada Lovelace", "US", "80202", "1 Main", "Unit 2", "Denver", "CO"},
+		[]any{address.NameOnCard, address.Country, address.Zip, address.Metadata["billing_address1"], address.Metadata["billing_address2"], address.Metadata["billing_city"], address.Metadata["billing_state"]})
+
+	// One name per field: the retired aliases are unknown fields.
+	for _, alias := range []string{"first_name", "last_name", "postal_code", "billing_country"} {
+		err := httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &createPaymentMethodRequest{})
+		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
+		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+alias+`":"x"}`), &updatePaymentMethodRequest{})
+		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
+	}
+	for _, alias := range []string{"first_name", "last_name"} {
+		err := httprequest.DecodeStrict([]byte(`{"price_id":"p","payment":{"`+alias+`":"x"}}`), &checkoutSessionCreateRequest{})
+		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
+	}
 
 	last4, brand := "4242", "Visa"
 	out := paymentMethodToAPI(&models.PaymentMethod{Rail: "mobius", LastFour: &last4, CardType: &brand, Metadata: map[string]any{

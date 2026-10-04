@@ -418,7 +418,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 
 	// Save a card: the customer route a payment-method panel posts to.
 	saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "card": entryCard(entryVisa), "name_on_card": "Card Holder",
-		"address1": "1 Main St", "city": "Springfield", "state": "IL", "postal_code": "62701", "billing_country": "US",
+		"address1": "1 Main St", "city": "Springfield", "state": "IL", "zip": "62701", "country": "US",
 		// What a caller says about the card is ignored: the card names itself.
 		"last_four": "0000", "card_type": "amex", "expiry_date": "01/99"}))
 	method := saved["id"].(string)

@@ -1238,10 +1238,8 @@ pkg openrails/billing, type CheckoutPaymentOptions struct, City string `json:"ci
 pkg openrails/billing, type CheckoutPaymentOptions struct, Country string `json:"country"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, Email string `json:"email"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, ExpiryDate string `json:"expiry_date"`
-pkg openrails/billing, type CheckoutPaymentOptions struct, FirstName string `json:"first_name"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, Flow string `json:"flow"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, LastFour string `json:"last_four"`
-pkg openrails/billing, type CheckoutPaymentOptions struct, LastName string `json:"last_name"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, NameOnCard string `json:"name_on_card"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, PSPID string `json:"psp_id,omitzero"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, PaymentMethodID string `json:"payment_method_id,omitzero"`
@@ -1718,7 +1716,7 @@ pkg openrails/billing, type HostedCheckoutSessionLink struct, URL string `json:"
 pkg openrails/billing, type InvoiceAdminAction string
 pkg openrails/billing, type InvoiceCollectionRetryRequest struct
 pkg openrails/billing, type InvoiceCollectionRetryRequest struct, IdempotencyKey string `json:"-"`
-pkg openrails/billing, type InvoiceCollectionRetryRequest struct, InvoiceID uuid.UUID `json:"invoice_id"`
+pkg openrails/billing, type InvoiceCollectionRetryRequest struct, InvoiceID uuid.UUID `json:"-"`
 pkg openrails/billing, type InvoiceCollectionRetryRequest struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 pkg openrails/billing, type InvoiceCollectionRetryResult struct
 pkg openrails/billing, type InvoiceCollectionRetryResult struct, Attempt InvoicePaymentAttemptDTO `json:"attempt"`

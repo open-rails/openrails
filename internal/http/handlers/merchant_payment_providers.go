@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 
@@ -126,22 +124,7 @@ func MerchantArchivePaymentProviderAccount(r *httprequest.Request) {
 
 // decodeOptionalJSONBody strictly decodes at most one JSON object; an empty
 // body leaves body at its zero value.
-func decodeOptionalJSONBody(r *httprequest.Request, body any) bool {
-	decoder := json.NewDecoder(r.Request.Body)
-	decoder.DisallowUnknownFields()
-	err := decoder.Decode(body)
-	if errors.Is(err, io.EOF) {
-		return true
-	}
-	if err == nil && decoder.Decode(&json.RawMessage{}) != io.EOF {
-		err = errors.New("request body must contain exactly one JSON object")
-	}
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return false
-	}
-	return true
-}
+func decodeOptionalJSONBody(r *httprequest.Request, body any) bool { return r.BindOptionalJSON(body) }
 
 func merchantProviderPathContext(r *httprequest.Request) (*merchants.Service, billing.MerchantID, string, bool) {
 	svc, id, ok := merchantProviderContext(r)

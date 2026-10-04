@@ -157,7 +157,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 }
 
 // Decoder failures are coded, name the field and never carry Go decoder text.
-func TestCatalogDecodeErrorIsCodedAndNamesTheField(t *testing.T) {
+func TestDecodeErrorIsCodedAndNamesTheField(t *testing.T) {
 	decode := func(body string) error {
 		var out struct {
 			Key   string `json:"key"`
@@ -172,13 +172,13 @@ func TestCatalogDecodeErrorIsCodedAndNamesTheField(t *testing.T) {
 		status               int
 		code, message, param string
 	}{
-		{decode(`{"credits_spec":{}}`), 400, api.CodeInvalidParam, "unknown field credits_spec", "credits_spec"},
+		{decode(`{"credits_spec":{}}`), 400, billing.CodeUnknownField, "unknown field credits_spec", "credits_spec"},
 		{decode(`{"price":"7"}`), 400, api.CodeInvalidParam, "price is invalid", "price"},
 		{decode(``), 400, api.CodeInvalidParam, "empty_request_body", ""},
 		{decode(`{"key":`), 400, api.CodeInvalidParam, "invalid_request", ""},
 		{&http.MaxBytesError{Limit: 1}, 413, billing.CodeRequestBodyTooLarge, "request body too large", ""},
 	} {
-		got := catalogDecodeError(tc.err)
+		got := httprequest.BindError(tc.err)
 		param := ""
 		if got.Param != nil {
 			param = *got.Param

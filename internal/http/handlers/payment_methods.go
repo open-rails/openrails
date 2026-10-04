@@ -50,25 +50,21 @@ type paymentMethodURI struct {
 }
 
 type createPaymentMethodRequest struct {
-	PaymentToken   string `json:"payment_token" binding:"required_without=Card"`
-	NameOnCard     string `json:"name_on_card" binding:"omitempty"`
-	FirstName      string `json:"first_name" binding:"omitempty"`
-	LastName       string `json:"last_name" binding:"omitempty"`
-	Address1       string `json:"address1" binding:"omitempty"`
-	City           string `json:"city" binding:"omitempty"`
-	State          string `json:"state" binding:"omitempty"`
-	Zip            string `json:"zip" binding:"omitempty"`
-	PostalCode     string `json:"postal_code" binding:"omitempty"`
-	Country        string `json:"country" binding:"omitempty"`
-	BillingCountry string `json:"billing_country" binding:"omitempty"`
-	Phone          string `json:"phone" binding:"omitempty"`
-	Email          string `json:"email" binding:"omitempty,email"`
-	Company        string `json:"company" binding:"omitempty"`
-	Address2       string `json:"address2" binding:"omitempty"`
-	Provider       string `json:"provider" binding:"omitempty"`
-	LastFour       string `json:"last_four" binding:"omitempty"`
-	CardType       string `json:"card_type" binding:"omitempty"`
-	ExpiryDate     string `json:"expiry_date" binding:"omitempty"`
+	PaymentToken string `json:"payment_token" binding:"required_without=Card"`
+	NameOnCard   string `json:"name_on_card" binding:"omitempty"`
+	Address1     string `json:"address1" binding:"omitempty"`
+	City         string `json:"city" binding:"omitempty"`
+	State        string `json:"state" binding:"omitempty"`
+	Zip          string `json:"zip" binding:"omitempty"`
+	Country      string `json:"country" binding:"omitempty"`
+	Phone        string `json:"phone" binding:"omitempty"`
+	Email        string `json:"email" binding:"omitempty,email"`
+	Company      string `json:"company" binding:"omitempty"`
+	Address2     string `json:"address2" binding:"omitempty"`
+	Provider     string `json:"provider" binding:"omitempty"`
+	LastFour     string `json:"last_four" binding:"omitempty"`
+	CardType     string `json:"card_type" binding:"omitempty"`
+	ExpiryDate   string `json:"expiry_date" binding:"omitempty"`
 
 	// Card is the card itself, for a PSP whose card_entry is server (#1129).
 	Card *cardguard.Card `json:"card,omitempty"`
@@ -85,25 +81,21 @@ type createPaymentMethodRequest struct {
 }
 
 type updatePaymentMethodRequest struct {
-	PaymentToken   string  `json:"payment_token" binding:"required_without=Card"`
-	NameOnCard     *string `json:"name_on_card"`
-	FirstName      *string `json:"first_name"`
-	LastName       *string `json:"last_name"`
-	Address1       *string `json:"address1"`
-	City           *string `json:"city"`
-	State          *string `json:"state"`
-	Zip            *string `json:"zip"`
-	PostalCode     *string `json:"postal_code"`
-	Country        *string `json:"country"`
-	BillingCountry *string `json:"billing_country"`
-	Phone          *string `json:"phone"`
-	Email          *string `json:"email" binding:"omitempty,email"`
-	Company        *string `json:"company"`
-	Address2       *string `json:"address2"`
-	Provider       *string `json:"provider"`
-	LastFour       *string `json:"last_four" binding:"omitempty"`
-	CardType       *string `json:"card_type" binding:"omitempty"`
-	ExpiryDate     *string `json:"expiry_date" binding:"omitempty"`
+	PaymentToken string  `json:"payment_token" binding:"required_without=Card"`
+	NameOnCard   *string `json:"name_on_card"`
+	Address1     *string `json:"address1"`
+	City         *string `json:"city"`
+	State        *string `json:"state"`
+	Zip          *string `json:"zip"`
+	Country      *string `json:"country"`
+	Phone        *string `json:"phone"`
+	Email        *string `json:"email" binding:"omitempty,email"`
+	Company      *string `json:"company"`
+	Address2     *string `json:"address2"`
+	Provider     *string `json:"provider"`
+	LastFour     *string `json:"last_four" binding:"omitempty"`
+	CardType     *string `json:"card_type" binding:"omitempty"`
+	ExpiryDate   *string `json:"expiry_date" binding:"omitempty"`
 
 	// Card replaces the method's card, for a PSP whose card_entry is server.
 	Card *cardguard.Card `json:"card,omitempty"`
@@ -194,8 +186,8 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	}
 
 	if req.Card != nil {
-		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", req.NameOnCard, req.FirstName, req.LastName, req.Address1, req.Address2,
-			req.City, req.State, req.Zip, req.PostalCode, req.Country, req.BillingCountry, req.Phone, req.Email, req.Company, req.Provider) {
+		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", req.NameOnCard, req.Address1, req.Address2,
+			req.City, req.State, req.Zip, req.Country, req.Phone, req.Email, req.Company, req.Provider) {
 			return
 		}
 	} else if strings.TrimSpace(req.PaymentToken) == "" {
@@ -280,14 +272,8 @@ func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string)
 	if len(lastFour) > 4 {
 		lastFour = lastFour[len(lastFour)-4:]
 	}
-	country := strings.TrimSpace(req.BillingCountry)
-	if country == "" {
-		country = strings.TrimSpace(req.Country)
-	}
-	postalCode := strings.TrimSpace(req.PostalCode)
-	if postalCode == "" {
-		postalCode = strings.TrimSpace(req.Zip)
-	}
+	country := strings.TrimSpace(req.Country)
+	postalCode := strings.TrimSpace(req.Zip)
 
 	metadata := map[string]any{}
 	setMetadata := func(key, value string) {
@@ -310,8 +296,6 @@ func toCreatePaymentMethodRequest(req *createPaymentMethodRequest, email string)
 		PaymentToken: req.PaymentToken,
 		Card:         req.Card,
 		NameOnCard:   req.NameOnCard,
-		FirstName:    req.FirstName,
-		LastName:     req.LastName,
 		Address1:     req.Address1,
 		City:         req.City,
 		State:        req.State,
@@ -360,8 +344,8 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	trimmedToken := strings.TrimSpace(body.PaymentToken)
 	attemptKey := ""
 	if body.Card != nil {
-		if !cardFieldAdmitted(r, trimmedToken != "", optionalStrings(body.NameOnCard, body.FirstName, body.LastName, body.Address1, body.Address2,
-			body.City, body.State, body.Zip, body.PostalCode, body.Country, body.BillingCountry, body.Phone, body.Email, body.Company, body.Provider)...) {
+		if !cardFieldAdmitted(r, trimmedToken != "", optionalStrings(body.NameOnCard, body.Address1, body.Address2,
+			body.City, body.State, body.Zip, body.Country, body.Phone, body.Email, body.Company, body.Provider)...) {
 			return
 		}
 		// A retry of this replacement is recognised by its Idempotency-Key,
@@ -406,13 +390,11 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		AttemptKey:   attemptKey,
 		Provider:     body.Provider,
 		NameOnCard:   body.NameOnCard,
-		FirstName:    body.FirstName,
-		LastName:     body.LastName,
 		Address1:     body.Address1,
 		City:         body.City,
 		State:        body.State,
-		Zip:          firstNonNilString(body.PostalCode, body.Zip),
-		Country:      firstNonNilString(body.BillingCountry, body.Country),
+		Zip:          body.Zip,
+		Country:      body.Country,
 		Phone:        body.Phone,
 		Email:        body.Email,
 		Company:      body.Company,
@@ -482,15 +464,6 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON(singlePaymentMethodToAPI(r, updated))
-}
-
-func firstNonNilString(values ...*string) *string {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
 }
 
 func ListPaymentMethods(r *httprequest.Request) {

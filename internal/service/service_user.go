@@ -486,8 +486,6 @@ func checkoutCreateRequest(req CreateCheckoutSessionRequest, mode, subscriptionI
 			Wallet:          req.PaymentOptions.Wallet,
 			Email:           req.PaymentOptions.Email,
 			NameOnCard:      req.PaymentOptions.NameOnCard,
-			FirstName:       req.PaymentOptions.FirstName,
-			LastName:        req.PaymentOptions.LastName,
 			Address1:        req.PaymentOptions.Address1,
 			City:            req.PaymentOptions.City,
 			State:           req.PaymentOptions.State,
