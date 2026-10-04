@@ -7,16 +7,17 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ConvergeMerchantOptions configures ConvergeMerchant.
 type ConvergeMerchantOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// Clock is the runtime's clock; nil reads wall time.
 	Clock clockwork.Clock
 }

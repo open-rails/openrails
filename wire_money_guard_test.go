@@ -22,7 +22,7 @@ var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit
 // package and everything a handler, worker or the shared Client can encode.
 // Generated SQLC output is the storage layer and is skipped.
 var (
-	wireRoots    = []string{".", "billing", "pkg", "internal", "permissions"}
+	wireRoots    = []string{".", "billing", "catalog", "internal"}
 	skippedTrees = map[string]bool{"internal/db/gen": true}
 )
 
@@ -208,7 +208,7 @@ var pinnedMarshalers = map[string]string{
 	"billing/merchant_configuration.go:MerchantConfigurationApplyParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
 	"billing/amount_map.go:AmountMap":                                    "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
 	"internal/modules/metrics/service.go:MoneyCell":                      "TestResultWireEncoding — decimal string",
-	"pkg/catalog/application.go:Field":                                   "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
+	"catalog/application.go:Field":                                       "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
 	"internal/cardguard/card.go:Card":                                    "TestCardRedactsItself — no money: always the redaction",
 }
 

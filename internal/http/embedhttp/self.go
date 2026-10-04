@@ -8,6 +8,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
@@ -17,8 +18,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NewSelfHandler assembles the embedded browser-direct SELF-SERVICE surface
@@ -139,7 +140,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 // checkoutRailConfigured / effectiveSolanaRailConfig use. This runs ONCE at
 // handler-assembly time (not per request), so one query per rail is not a hot
 // path concern.
-func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid merchant.ID) routesurface.ProviderRoutes {
+func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid billing.MerchantID) routesurface.ProviderRoutes {
 	env := config.ExpectedProviderEnvironment(rt.Config != nil && rt.Config.IsTestMode())
 	armed := func(rail string) bool {
 		_, ok, err := rt.Merchants.ActivePSPScope(ctx, mid, rail, env)

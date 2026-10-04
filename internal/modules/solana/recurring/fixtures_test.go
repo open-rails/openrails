@@ -9,15 +9,15 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const testDevnetUSDCMint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
 
-var testMerchantID = merchant.ID(uuid.MustParse("a5a5a5a5-0000-4000-8000-000000000001"))
+var testMerchantID = billing.MerchantID(uuid.MustParse("a5a5a5a5-0000-4000-8000-000000000001"))
 
 func testTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{"usdc": {Mint: testDevnetUSDCMint}}
@@ -36,7 +36,7 @@ func randAddr(t *testing.T) string { return randKey(t).PublicKey().String() }
 
 type staticSecret string
 
-func (s staticSecret) GetSecret(context.Context, merchant.ID, string) (string, error) {
+func (s staticSecret) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
 	return string(s), nil
 }
 

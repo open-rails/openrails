@@ -10,8 +10,8 @@ import (
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // LookupSession finds only a buyer-bound idempotent session and validates the

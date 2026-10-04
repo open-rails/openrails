@@ -9,11 +9,11 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Local maintenance over an owned engine graph: process ownership is the
@@ -28,7 +28,7 @@ func initialized(a *app.App) error {
 
 // Converge runs one merchant-wide convergence pass now: the engine the
 // scheduled sweep uses, so grants and entitlements derive right after an import.
-func Converge(ctx context.Context, a *app.App, merchantID merchant.ID) (ConvergeMerchantResult, error) {
+func Converge(ctx context.Context, a *app.App, merchantID billing.MerchantID) (ConvergeMerchantResult, error) {
 	if err := initialized(a); err != nil {
 		return ConvergeMerchantResult{}, err
 	}
@@ -41,7 +41,7 @@ func Converge(ctx context.Context, a *app.App, merchantID merchant.ID) (Converge
 // writes require Insert, Overwrite or Prune, and a prune writes only with
 // PruneExpectRows matching what the pass found.
 type PullProviderRun struct {
-	MerchantID      merchant.ID
+	MerchantID      billing.MerchantID
 	Providers       []string
 	PSP             string
 	Since           string
@@ -79,16 +79,16 @@ func Pull(ctx context.Context, a *app.App, run PullProviderRun) error {
 
 // ResolveMerchant captures the immutable merchant ID and current name behind a
 // public name. Carry the ID, never the name, into later operations.
-func ResolveMerchant(ctx context.Context, a *app.App, name string) (merchant.ID, string, error) {
+func ResolveMerchant(ctx context.Context, a *app.App, name string) (billing.MerchantID, string, error) {
 	if err := initialized(a); err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	if a.Runtime.Merchants == nil {
-		return merchant.ID{}, "", fmt.Errorf("openrails: merchant directory is not armed")
+		return billing.MerchantID{}, "", fmt.Errorf("openrails: merchant directory is not armed")
 	}
 	selected, err := a.Runtime.Merchants.GetBySlug(ctx, name)
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	return selected.ID, selected.Slug, nil
 }
@@ -96,7 +96,7 @@ func ResolveMerchant(ctx context.Context, a *app.App, name string) (merchant.ID,
 // ApplyCatalogAsOperator applies a catalog to one explicitly selected merchant
 // with operator authority; ordinary Client writes remain governed by
 // AllowCatalogUpdates.
-func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID merchant.ID, params *billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
+func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID billing.MerchantID, params *billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
 	if err := initialized(a); err != nil {
 		return nil, err
 	}
@@ -113,23 +113,23 @@ func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID merchant
 // RegisterMerchantForRestore registers a preserved merchant UUID for a host
 // without a control plane, then binds the engine to it. Call during startup,
 // before serving or starting workers. It registers no PSPs or credentials.
-func RegisterMerchantForRestore(ctx context.Context, a *app.App, id merchant.ID, slug string) (merchant.ID, error) {
+func RegisterMerchantForRestore(ctx context.Context, a *app.App, id billing.MerchantID, slug string) (billing.MerchantID, error) {
 	if err := initialized(a); err != nil {
-		return merchant.ID{}, err
+		return billing.MerchantID{}, err
 	}
 	if a.ControlPlane != nil {
-		return merchant.ID{}, fmt.Errorf("openrails: an attached control plane restores through ProvisionMerchantForRestore with destination group authority")
+		return billing.MerchantID{}, fmt.Errorf("openrails: an attached control plane restores through ProvisionMerchantForRestore with destination group authority")
 	}
 	if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() && bound != id {
-		return merchant.ID{}, merchants.ErrMerchantRestoreConflict
+		return billing.MerchantID{}, merchants.ErrMerchantRestoreConflict
 	}
 	directory, err := merchants.NewDirectoryService(a.Runtime.DB.DataPool())
 	if err != nil {
-		return merchant.ID{}, err
+		return billing.MerchantID{}, err
 	}
 	m, _, err := directory.RegisterForRestore(ctx, id, slug)
 	if err != nil {
-		return merchant.ID{}, err
+		return billing.MerchantID{}, err
 	}
 	a.Runtime.SetConfiguredMerchant(m.ID)
 	return m.ID, nil
@@ -138,7 +138,7 @@ func RegisterMerchantForRestore(ctx context.Context, a *app.App, id merchant.ID,
 // ResolveSolanaPayReview closes a Solana Pay review receipt (a second, late,
 // short or unreadable transfer, or an overpayment's excess) once its money was
 // settled outside OpenRails. Unresolved reviews hold the billing archive back.
-func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID merchant.ID, signature, resolution string) error {
+func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID billing.MerchantID, signature, resolution string) error {
 	if err := initialized(a); err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID merchant
 // now reports after it changed. Until then the Solana rail refuses and the
 // openrails_solana_signer_identity probe fails. Verify the new public key
 // (in the ERROR log and the probe) before calling.
-func ApproveSolanaSigner(ctx context.Context, a *app.App, merchantID merchant.ID, key string) error {
+func ApproveSolanaSigner(ctx context.Context, a *app.App, merchantID billing.MerchantID, key string) error {
 	if err := initialized(a); err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func ApproveSolanaSigner(ctx context.Context, a *app.App, merchantID merchant.ID
 // source to target, two owned engines. It preserves source material. A target
 // snapshot must already hold every current and overlap credential under its
 // stable CredentialSnapshotID, and every later restart must supply it.
-func TransitionProviderCredentials(ctx context.Context, target, source *app.App, id merchant.ID, rail string, params merchants.CredentialTransitionRequest) (*billing.PaymentProviderConfig, error) {
+func TransitionProviderCredentials(ctx context.Context, target, source *app.App, id billing.MerchantID, rail string, params merchants.CredentialTransitionRequest) (*billing.PaymentProviderConfig, error) {
 	for _, a := range []*app.App{target, source} {
 		if err := initialized(a); err != nil {
 			return nil, err

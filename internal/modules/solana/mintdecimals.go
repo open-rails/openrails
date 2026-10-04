@@ -10,8 +10,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MintDecimalsSource resolves a mint's base-unit precision. The ONLY legitimate

@@ -942,7 +942,7 @@ engine-wide policy**, not a per-merchant setting.
   the port stripped (`merchants.NormalizeAPIHost`), so
   `api_host = "api.acme.localhost"` resolves on any listen port — point
   `/etc/hosts` at `127.0.0.1` per name.
-- **Reserved names**: `pkg/merchant.ReservedHostedSlugs` is the advisory list
+- **Reserved names**: `billing.ReservedMerchantSlugs` is the advisory list
   a hosted product should refuse to let a merchant self-provision as a slug
   (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
   it — the host does.

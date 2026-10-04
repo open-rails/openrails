@@ -11,13 +11,13 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 type fakeResolver struct {
@@ -30,7 +30,7 @@ func (f fakeResolver) ResolveDelegated(*http.Request) (*credential.ResolvedDeleg
 }
 
 var (
-	testMerchant = merchant.ID(uuid.MustParse("00000000-0000-4000-8000-00000000abcd"))
+	testMerchant = billing.MerchantID(uuid.MustParse("00000000-0000-4000-8000-00000000abcd"))
 	payerID      = uuid.MustParse("33333333-3333-4333-8333-333333333333")
 )
 
@@ -75,7 +75,7 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 	}
 	invoker := delegated()
 	invoker.Invoker = "bot-7"
-	settings := RequirePermission(permissions.MerchantCustomerSettingsRead)
+	settings := RequirePermission(billing.MerchantCustomerSettingsRead)
 	for _, tc := range []struct {
 		name, authz string
 		mw          mws
@@ -103,7 +103,7 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 		{"missing permission", "Bearer x", mws{self(delegated(), nil), settings}, 403, "permission_required"},
 		{"foreign apex glob", "Bearer x", mws{self(delegated("root:*", "*"), nil), settings}, 403, "permission_required"},
 		{"invoker on payer surface", "Bearer x", mws{self(invoker, nil), PayerScopedRequired()}, 403, "invoker_scoped_principal"},
-		{"merchant treasury without merchant admin", "Bearer x", mws{self(delegated(permissions.CustomerAll), nil), CustomerScopeRequired()}, 403, "customer_scope_mismatch"},
+		{"merchant treasury without merchant admin", "Bearer x", mws{self(delegated(billing.CustomerAll), nil), CustomerScopeRequired()}, 403, "customer_scope_mismatch"},
 		{"treasury without principal", "", mws{CustomerScopeRequired()}, 401, "delegated principal required"},
 	} {
 		w, seen := serveNeutral(t, "/v1/customers/acme", func(r *http.Request) { r.Header.Set("Authorization", tc.authz) }, tc.mw...)
@@ -115,8 +115,8 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 	require.Contains(t, w.Header().Get("WWW-Authenticate"), `DPoP error="invalid_dpop_proof"`)
 
 	for _, mw := range []mws{
-		{self(delegated(permissions.MerchantAll), nil), RequirePermission(" " + permissions.MerchantCustomerSettingsRead + " ")},
-		{self(delegated(permissions.MerchantCustomerSettingsRead), nil), settings},
+		{self(delegated(billing.MerchantAll), nil), RequirePermission(" " + billing.MerchantCustomerSettingsRead + " ")},
+		{self(delegated(billing.MerchantCustomerSettingsRead), nil), settings},
 		{self(delegated(), nil), PayerScopedRequired()},
 	} {
 		w, _ := serveNeutral(t, "/v1/customers/x", nil, mw...)
@@ -127,7 +127,7 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 	p, _ := PrincipalFromRequest(seen)
 	require.Equal(t, CredentialHostDelegatedUser, p.CredentialType)
 	require.True(t, p.InvokerScoped())
-	require.True(t, p.Can(context.Background(), permissions.CustomerAll))
+	require.True(t, p.Can(context.Background(), billing.CustomerAll))
 }
 
 func TestDelegatedBinding(t *testing.T) {
@@ -144,12 +144,12 @@ func TestDelegatedBinding(t *testing.T) {
 	// Neither a client assertion nor a runtime binding may select another merchant.
 	for _, tc := range []struct {
 		header string
-		bound  merchant.ID
+		bound  billing.MerchantID
 		want   int
 	}{
 		{testMerchant.String(), testMerchant, 200},
 		{uuid.NewString(), testMerchant, 409},
-		{"", merchant.ID(uuid.New()), 409},
+		{"", billing.MerchantID(uuid.New()), 409},
 		{"invalid", testMerchant, 400},
 	} {
 		w, _ := serveNeutral(t, "/v1/customers/x", func(r *http.Request) {
@@ -169,11 +169,11 @@ func TestResolveTreasuryPayer(t *testing.T) {
 	uuidSubject.CustomerID, uuidSubject.DelegatedSubject = uuid.Nil, payerID.String()
 	opaqueSubject := delegated()
 	opaqueSubject.CustomerID = uuid.Nil
-	zeroMerchant := delegated(permissions.MerchantAll)
-	zeroMerchant.MerchantID = merchant.ID{}
+	zeroMerchant := delegated(billing.MerchantAll)
+	zeroMerchant.MerchantID = billing.MerchantID{}
 	merchantPayer := &TreasuryPayer{Subject: "user-123", CustomerID: identity.CustomerID(testMerchant.UUID()), MerchantPayer: true}
 	subjectPayer := &TreasuryPayer{Subject: "user-123", CustomerID: identity.CustomerID(payerID)}
-	admin := delegated(permissions.MerchantAll)
+	admin := delegated(billing.MerchantAll)
 
 	for _, tc := range []struct {
 		customerID string
@@ -185,7 +185,7 @@ func TestResolveTreasuryPayer(t *testing.T) {
 		{payerID.String(), uuidSubject, &TreasuryPayer{Subject: payerID.String(), CustomerID: identity.CustomerID(payerID)}},
 		{"user-123", opaqueSubject, nil},
 		{uuid.NewString(), admin, nil},
-		{"acme", delegated(permissions.CustomerAll), nil},
+		{"acme", delegated(billing.CustomerAll), nil},
 		{"acme", admin, merchantPayer},
 		{testMerchant.String(), admin, merchantPayer},
 		{" ", admin, nil},
@@ -217,7 +217,7 @@ func TestNativeTreasuryAuthority(t *testing.T) {
 		{personal, nil, 200},
 		{"acme", nil, 403},
 		{testMerchant.String(), func(_ context.Context, perm string, target billingauth.Target) error {
-			if perm != permissions.CustomerAll || target.CustomerID != testMerchant.String() {
+			if perm != billing.CustomerAll || target.CustomerID != testMerchant.String() {
 				return errors.New("wrong decision request")
 			}
 			return nil
@@ -235,7 +235,7 @@ func TestNativeTreasuryAuthority(t *testing.T) {
 			}
 		}
 		w, _ := serveNeutral(t, "/v1/customers/"+tc.customerID, nil,
-			DelegatedSelfRequired(fakeResolver{resolved: delegated()}), native, CustomerScopeRequired(), RequirePermission(permissions.CustomerAll))
+			DelegatedSelfRequired(fakeResolver{resolved: delegated()}), native, CustomerScopeRequired(), RequirePermission(billing.CustomerAll))
 		require.Equal(t, tc.status, w.Code, "%s: %s", tc.customerID, w.Body.String())
 	}
 }

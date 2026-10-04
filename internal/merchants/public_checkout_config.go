@@ -12,9 +12,9 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -230,7 +230,7 @@ func publicSettingValue(settings map[string]any, key string) string {
 // whose full credential shape resolves — armed reports that, with the same
 // resolver checkout routes through. A PSP declared without credentials (an
 // import attribution) is an identity, never advertised as available.
-func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
+func (s *Service) PublicCheckoutPSPs(ctx context.Context, id billing.MerchantID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
 	scopes, err := s.activePSPScopes(ctx, id, environment)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 
 // checkoutSelectors is every PSP key or rail the merchant's checkout routing
 // can pick; nil means no policy, so every armed PSP takes new checkouts.
-func (s *Service) checkoutSelectors(ctx context.Context, id merchant.ID) (map[string]bool, error) {
+func (s *Service) checkoutSelectors(ctx context.Context, id billing.MerchantID) (map[string]bool, error) {
 	if s.database == nil {
 		return nil, nil
 	}

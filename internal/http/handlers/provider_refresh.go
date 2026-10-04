@@ -5,8 +5,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // RefreshProviders handles POST /v1/merchant/provider-refresh: the bound

@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -216,7 +216,7 @@ func (v *vaultFixture) ListSecrets(context.Context, string) ([]string, error) { 
 // workflow tests qualify the real atomic publication.
 type publication struct {
 	store    merchants.MerchantSecretStore
-	id       merchant.ID
+	id       billing.MerchantID
 	endpoint string
 }
 
@@ -246,7 +246,7 @@ func (p *publication) RetireOverlap(ctx context.Context) error {
 	return p.store.Delete(ctx, p.id, p.name("webhook_signing_secret_previous"))
 }
 
-func managedParams(stripeURL string, store merchants.MerchantSecretStore, id merchant.ID) ManagedStripeWebhookParams {
+func managedParams(stripeURL string, store merchants.MerchantSecretStore, id billing.MerchantID) ManagedStripeWebhookParams {
 	return ManagedStripeWebhookParams{
 		Config:      &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore: store, MerchantID: id, ProviderEnvironment: "live", PspID: "acct_123",
@@ -254,7 +254,7 @@ func managedParams(stripeURL string, store merchants.MerchantSecretStore, id mer
 	}
 }
 
-func putSecret(t *testing.T, store merchants.MerchantSecretStore, id merchant.ID, env, key, value string) {
+func putSecret(t *testing.T, store merchants.MerchantSecretStore, id billing.MerchantID, env, key, value string) {
 	name, err := merchants.PSPSecretName("stripe", env, "acct_123", key)
 	require.NoError(t, err)
 	_, err = store.Put(t.Context(), id, name, value)
@@ -262,7 +262,7 @@ func putSecret(t *testing.T, store merchants.MerchantSecretStore, id merchant.ID
 }
 
 func TestManagedStripeWebhookCustody(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 
 	t.Run("publication stores the minted secret", func(t *testing.T) {
 		fake, store := newFakeStripe(t), newVaultStore()
@@ -281,7 +281,7 @@ func TestManagedStripeWebhookCustody(t *testing.T) {
 	// another environment of the same account.
 	for name, setup := range map[string]func(store merchants.MerchantSecretStore) ManagedStripeWebhookParams{
 		"no custody": func(merchants.MerchantSecretStore) ManagedStripeWebhookParams {
-			p := managedParams("", nil, merchant.ID{})
+			p := managedParams("", nil, billing.MerchantID{})
 			p.SecretKey = "sk_test_123"
 			return p
 		},
@@ -331,7 +331,7 @@ func TestManagedStripeWebhookCustody(t *testing.T) {
 // #856 at the registration layer: a version bump retains the outgoing secret
 // through the overlap and retires nothing until the kill switch allows it.
 func TestManagedStripeWebhookVersionBumpIsGapless(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 	fake, store := newFakeStripe(t), newVaultStore()
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	putSecret(t, store, id, "live", "secret_key", "sk_test_123")

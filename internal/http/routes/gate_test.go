@@ -19,9 +19,8 @@ import (
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -30,8 +29,8 @@ const (
 )
 
 var (
-	merchantA = merchant.ID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
-	merchantB = merchant.ID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+	merchantA = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+	merchantB = billing.MerchantID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
 )
 
 func userAuth(uc billingauth.UserContext, err error) billingauth.Authenticator {
@@ -41,25 +40,25 @@ func userAuth(uc billingauth.UserContext, err error) billingauth.Authenticator {
 // membership grants the permission on the listed merchant slugs; a zero ID is
 // a granted but unresolvable merchant.
 type membership struct {
-	granted  map[string]merchant.ID
+	granted  map[string]billing.MerchantID
 	inferred string
 	err      error
 	refs     []string
 }
 
-func (m *membership) ResolveAuthorizedMerchant(_ context.Context, _ *http.Request, ref, _ string) (merchant.ID, string, error) {
+func (m *membership) ResolveAuthorizedMerchant(_ context.Context, _ *http.Request, ref, _ string) (billing.MerchantID, string, error) {
 	m.refs = append(m.refs, ref)
 	if m.err != nil {
-		return merchant.ID{}, "", m.err
+		return billing.MerchantID{}, "", m.err
 	}
 	if ref == "" {
 		if ref = m.inferred; ref == "" {
-			return merchant.ID{}, "", billing.ErrMerchantUnresolved
+			return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
 		}
 	}
 	id, ok := m.granted[ref]
 	if !ok {
-		return merchant.ID{}, "", billing.ErrPermissionRequired
+		return billing.MerchantID{}, "", billing.ErrPermissionRequired
 	}
 	return id, ref, nil
 }
@@ -108,12 +107,12 @@ func service(perms ...string) *credential.ResolvedServiceCredential {
 // Every credential kind reaches a merchant route only through its own verified
 // merchant and an explicit permission; failures keep distinct, stable codes.
 func TestGateAuthorizesEachCredentialKind(t *testing.T) {
-	read := permissions.MerchantSettingsRead
+	read := billing.MerchantSettingsRead
 	delegatedOK := delegatedResolver{resolved: &credential.ResolvedDelegated{MerchantID: merchantA, Merchant: "a", DelegatedSubject: userA, Permissions: []string{read}}}
 	type want struct {
 		status   int
 		message  string
-		merchant merchant.ID
+		merchant billing.MerchantID
 		subject  string
 		userID   string
 		userSlug string
@@ -126,13 +125,13 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		want   want
 	}{
 		{name: "host principal without merchant", host: &requestauth.HostPrincipal{Permissions: []string{"merchant:*"}}, want: want{status: 401, message: "host_principal_invalid"}},
-		{name: "host principal lacking permission", host: &requestauth.HostPrincipal{MerchantID: merchantA, Permissions: []string{permissions.MerchantCatalogRead}}, want: want{status: 403, message: "permission_required"}},
+		{name: "host principal lacking permission", host: &requestauth.HostPrincipal{MerchantID: merchantA, Permissions: []string{billing.MerchantCatalogRead}}, want: want{status: 403, message: "permission_required"}},
 		{name: "host principal wins over any header", host: &requestauth.HostPrincipal{MerchantID: merchantA, Subject: "svc", Permissions: []string{"merchant:*"}},
 			opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("never consulted")}}, header: map[string]string{"Authorization": "Bearer sk_1"}, want: want{merchant: merchantA, subject: "svc"}},
 
 		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
 		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(permissions.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
+		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: service(billing.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
 		{name: "api key resolved to nothing", opts: GateOptions{ServiceCredentialResolver: credResolver{}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
 		{name: "api key scope denied", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialScopeDenied}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},
 		{name: "api key merchant unresolved", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialMerchantUnresolved}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_merchant_unresolved"}},
@@ -147,14 +146,14 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "wrong-typ service jwt reaches delegated resolver", opts: GateOptions{ServiceCredentialResolver: credResolver{}, DelegatedResolver: delegatedOK}, header: bearer("a.b.c"), want: want{merchant: merchantA, subject: userA, userID: userA, userSlug: "a"}},
 
 		{name: "delegated token", opts: GateOptions{DelegatedResolver: delegatedOK}, header: map[string]string{"Authorization": "DPoP a.b.c"}, want: want{merchant: merchantA, subject: userA, userID: userA, userSlug: "a"}},
-		{name: "delegated token lacking permission", opts: GateOptions{DelegatedResolver: delegatedResolver{resolved: &credential.ResolvedDelegated{MerchantID: merchantA, DelegatedSubject: userA, Permissions: []string{permissions.CustomerSpendDelegationsRead}}}}, header: bearer("a.b.c"), want: want{status: 403, message: "permission_required"}},
+		{name: "delegated token lacking permission", opts: GateOptions{DelegatedResolver: delegatedResolver{resolved: &credential.ResolvedDelegated{MerchantID: merchantA, DelegatedSubject: userA, Permissions: []string{billing.CustomerSpendDelegationsRead}}}}, header: bearer("a.b.c"), want: want{status: 403, message: "permission_required"}},
 		{name: "delegated verification unavailable", opts: GateOptions{DelegatedResolver: delegatedResolver{err: credential.ErrDelegatedUnavailable}}, header: bearer("a.b.c"), want: want{status: 503, message: "delegated_verification_unavailable"}},
 		{name: "delegated token missing sender proof", opts: GateOptions{DelegatedResolver: delegatedResolver{err: auth.ErrSenderProofRequired}}, header: bearer("a.b.c"), want: want{status: 401, message: "sender_proof_required"}},
 		{name: "invalid delegated token", opts: GateOptions{DelegatedResolver: delegatedResolver{err: credential.ErrDelegatedInvalid}}, header: bearer("a.b.c"), want: want{status: 401, message: "delegated_token_invalid"}},
 		{name: "opaque token skips delegated resolver", opts: GateOptions{DelegatedResolver: delegatedOK}, header: bearer("opaque"), want: want{status: 401, message: "bearer principal required"}},
 
 		{name: "host delegated principal", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{read}}, nil)}, want: want{merchant: merchantA, subject: userA, userID: userA}},
-		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{permissions.CustomerSpendDelegationsRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
+		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{billing.CustomerSpendDelegationsRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
 		{name: "host delegated principal with opaque subject", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: "user-1", Permissions: []string{read}}, nil)}, want: want{status: 401, message: "delegated_principal_invalid"}},
 		{name: "host delegated rejection", opts: GateOptions{DelegatedAuthenticator: hostDelegated(nil, billingauth.ErrUnauthenticated)}, want: want{status: 401, message: "authentication required"}},
 
@@ -195,20 +194,20 @@ func TestGateUserSessionMerchantSelection(t *testing.T) {
 		ctx                           func(context.Context) context.Context
 		status                        int
 		message                       string
-		merchant                      merchant.ID
+		merchant                      billing.MerchantID
 		asked, slug                   string
 	}{
-		{name: "explicit selector", selector: " b ", checker: membership{granted: map[string]merchant.ID{"b": merchantB}}, merchant: merchantB, asked: "b", slug: "b"},
-		{name: "single membership inferred", checker: membership{granted: map[string]merchant.ID{"a": merchantA}, inferred: "a"}, merchant: merchantA, asked: "", slug: "a"},
+		{name: "explicit selector", selector: " b ", checker: membership{granted: map[string]billing.MerchantID{"b": merchantB}}, merchant: merchantB, asked: "b", slug: "b"},
+		{name: "single membership inferred", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}, inferred: "a"}, merchant: merchantA, asked: "", slug: "a"},
 		{name: "no selector and no single membership", checker: membership{}, status: 403, message: "merchant_unresolved", asked: ""},
-		{name: "selected merchant without live permission", selector: "b", checker: membership{granted: map[string]merchant.ID{"a": merchantA}}, status: 403, message: "permission_required", asked: "b"},
-		{name: "granted merchant that does not resolve", selector: "b", checker: membership{granted: map[string]merchant.ID{"b": {}}}, status: 403, message: "merchant_unresolved", asked: "b"},
-		{name: "token merchant cannot be overridden", tokenMerchant: "a", selector: "b", checker: membership{granted: map[string]merchant.ID{"a": merchantA, "b": merchantB}}, merchant: merchantA, asked: "a", slug: "a"},
-		{name: "must match the Host merchant", selector: "a", checker: membership{granted: map[string]merchant.ID{"a": merchantA}},
+		{name: "selected merchant without live permission", selector: "b", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}}, status: 403, message: "permission_required", asked: "b"},
+		{name: "granted merchant that does not resolve", selector: "b", checker: membership{granted: map[string]billing.MerchantID{"b": {}}}, status: 403, message: "merchant_unresolved", asked: "b"},
+		{name: "token merchant cannot be overridden", tokenMerchant: "a", selector: "b", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA, "b": merchantB}}, merchant: merchantA, asked: "a", slug: "a"},
+		{name: "must match the Host merchant", selector: "a", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}},
 			ctx: func(ctx context.Context) context.Context { return merchant.WithHostMerchant(ctx, merchantB) }, status: 403, message: "host_merchant_mismatch", asked: "a"},
-		{name: "must match the pinned merchant", selector: "a", checker: membership{granted: map[string]merchant.ID{"a": merchantA}},
+		{name: "must match the pinned merchant", selector: "a", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}},
 			ctx: func(ctx context.Context) context.Context { return merchant.WithID(ctx, merchantB) }, status: 403, message: "merchant_context_mismatch", asked: "a"},
-		{name: "agreeing pins", selector: "a", checker: membership{granted: map[string]merchant.ID{"a": merchantA}},
+		{name: "agreeing pins", selector: "a", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}},
 			ctx: func(ctx context.Context) context.Context {
 				return merchant.WithHostMerchant(merchant.WithID(ctx, merchantA), merchantA)
 			}, merchant: merchantA, asked: "a", slug: "a"},
@@ -224,7 +223,7 @@ func TestGateUserSessionMerchantSelection(t *testing.T) {
 			if tc.ctx != nil {
 				ctx = tc.ctx(ctx)
 			}
-			principal, err := gate.Authorize(ctx, r, permissions.MerchantSettingsRead)
+			principal, err := gate.Authorize(ctx, r, billing.MerchantSettingsRead)
 			assertGate(t, principal, err, tc.status, tc.message)
 			require.Equal(t, []string{tc.asked}, checker.refs)
 			if tc.status == 0 {
@@ -235,8 +234,8 @@ func TestGateUserSessionMerchantSelection(t *testing.T) {
 		})
 	}
 
-	checker := &membership{granted: map[string]merchant.ID{"a": merchantA}, inferred: "a"}
-	principal, err := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: checker}).Authorize(t.Context(), nil, permissions.MerchantSettingsRead)
+	checker := &membership{granted: map[string]billing.MerchantID{"a": merchantA}, inferred: "a"}
+	principal, err := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: checker}).Authorize(t.Context(), nil, billing.MerchantSettingsRead)
 	require.NoError(t, err, "a nil request still infers from membership")
 	require.Equal(t, merchantA, principal.MerchantID)
 }
@@ -274,13 +273,13 @@ func (gateFunc) RequireRecentSignIn(context.Context, *http.Request, billingauth.
 // merchant and principal, and refuses before the handler on any failure.
 func TestMerchantPermissionMiddleware(t *testing.T) {
 	type seen struct {
-		merchant  merchant.ID
+		merchant  billing.MerchantID
 		user      string
 		principal any
 	}
 	run := func(gate billingauth.Gate, header map[string]string, ctx context.Context) (*httptest.ResponseRecorder, *seen) {
 		var got *seen
-		mw := Options{Gate: gate}.RequireMerchantPermission(permissions.MerchantPaymentsRead)
+		mw := Options{Gate: gate}.RequireMerchantPermission(billing.MerchantPaymentsRead)
 		rec := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/v1/merchant/payments", nil).WithContext(ctx)
 		for k, v := range header {
@@ -299,7 +298,7 @@ func TestMerchantPermissionMiddleware(t *testing.T) {
 	}
 	allow := billingauth.Principal{MerchantID: merchantA, Subject: userA, UserContext: billingauth.UserContext{UserID: userA}}
 	allowGate := gateFunc(func(_ context.Context, _ *http.Request, perm string) (billingauth.Principal, error) {
-		require.Equal(t, permissions.MerchantPaymentsRead, perm)
+		require.Equal(t, billing.MerchantPaymentsRead, perm)
 		return allow, nil
 	})
 

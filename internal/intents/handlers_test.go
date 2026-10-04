@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -26,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type fakeNMIResolver struct {
@@ -364,10 +364,10 @@ type fakeSolanaSubmitter struct {
 	err       error
 }
 
-func (f *fakeSolanaSubmitter) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
+func (f *fakeSolanaSubmitter) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
 	return f.merchant, nil
 }
-func (f *fakeSolanaSubmitter) Submit(_ context.Context, _ merchant.ID, ixs []solanago.Instruction) (solanago.Signature, error) {
+func (f *fakeSolanaSubmitter) Submit(_ context.Context, _ billing.MerchantID, ixs []solanago.Instruction) (solanago.Signature, error) {
 	if f.err != nil {
 		return solanago.Signature{}, f.err
 	}

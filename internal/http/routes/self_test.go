@@ -8,12 +8,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 const handlerReached = -1
@@ -65,7 +65,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 		require.True(t, passedGates(code), "%s: %d", route, code)
 	}
 
-	invoker := customerSurface(customerAuth("end-user-7", permissions.CustomerAll))
+	invoker := customerSurface(customerAuth("end-user-7", billing.CustomerAll))
 	require.True(t, passedGates(reach(invoker, http.MethodGet, "/v1/me/spend-limits", nil)))
 	for _, route := range []string{"GET /v1/me/balance", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/checkout", "GET /v1/customers/" + userA + "/balance"} {
 		method, path, _ := strings.Cut(route, " ")
@@ -84,7 +84,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 // its customer:* grant.
 func TestCustomerTreasuryAuthorization(t *testing.T) {
 	path := func(customer string) string { return "/v1/customers/" + customer + "/spend-delegations" }
-	read, update := permissions.CustomerSpendDelegationsRead, permissions.CustomerSpendDelegationsUpdate
+	read, update := billing.CustomerSpendDelegationsRead, billing.CustomerSpendDelegationsUpdate
 	for _, tc := range []struct {
 		name, method, customer string
 		perms                  []string
@@ -94,12 +94,12 @@ func TestCustomerTreasuryAuthorization(t *testing.T) {
 		{"own subject without grant", http.MethodGet, userA, nil, false},
 		{"read grant cannot update", http.MethodPut, userA, []string{read}, false},
 		{"update grant", http.MethodPut, userA, []string{update}, true},
-		{"another customer", http.MethodGet, userB, []string{permissions.MerchantAll, read}, false},
+		{"another customer", http.MethodGet, userB, []string{billing.MerchantAll, read}, false},
 		{"merchant account needs merchant administrator", http.MethodGet, "acme", []string{read}, false},
-		{"merchant administration is not a customer grant", http.MethodGet, "acme", []string{permissions.MerchantAll}, false},
-		{"merchant administrator on merchant slug", http.MethodGet, "acme", []string{permissions.MerchantAll, read}, true},
-		{"merchant administrator on merchant id", http.MethodGet, merchantA.String(), []string{permissions.MerchantAll, read}, true},
-		{"merchant administrator on another merchant", http.MethodGet, merchantB.String(), []string{permissions.MerchantAll, read}, false},
+		{"merchant administration is not a customer grant", http.MethodGet, "acme", []string{billing.MerchantAll}, false},
+		{"merchant administrator on merchant slug", http.MethodGet, "acme", []string{billing.MerchantAll, read}, true},
+		{"merchant administrator on merchant id", http.MethodGet, merchantA.String(), []string{billing.MerchantAll, read}, true},
+		{"merchant administrator on another merchant", http.MethodGet, merchantB.String(), []string{billing.MerchantAll, read}, false},
 	} {
 		code := reach(customerSurface(customerAuth("", tc.perms...)), tc.method, path(tc.customer), nil)
 		if tc.reached {

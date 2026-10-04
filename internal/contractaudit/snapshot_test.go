@@ -31,6 +31,10 @@ func TestContractGateDetectsCoveredMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	vocabulary, err := permissionNames(base)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fresh := overlayFS{base, map[string][]byte{SnapshotPath: snapshot}}
 	if err := c.verify(fresh); err != nil {
 		t.Fatalf("unmutated tree must match its own snapshot: %v", err)
@@ -50,8 +54,8 @@ func TestContractGateDetectsCoveredMutations(t *testing.T) {
 		{"changed HTTP status mapping", under("internal/api/"), goEdit(changeStatusInUnexportedFunc), "boundary source changed: internal/api/"},
 		{"changed error code", under("internal/api/"), goEdit(renameStringConst), "boundary source changed: internal/api/"},
 		{"changed route path", under("internal/http/routes/"), goEdit(renameRoutePath), "boundary source changed: internal/http/routes/"},
-		{"changed route authority", under("internal/http/routes/"), goEdit(swapPermission), "boundary source changed: internal/http/routes/"},
-		{"changed role permission mapping", under("permissions/"), goEdit(editFuncString), "boundary source changed: permissions/"},
+		{"changed route authority", under("internal/http/routes/"), goEdit(swapPermission(vocabulary)), "boundary source changed: internal/http/routes/"},
+		{"changed role permission mapping", under(PermissionsPath), goEdit(editFuncString), "boundary source changed: " + PermissionsPath},
 		{"changed authority decision outside HTTP", outsideBoundaryPrefixes, goEdit(editAuthorityFile), "boundary source changed: "},
 		{"changed schema invariant", under("internal/migrate/postgres/"), textEdit(".sql", " NOT NULL", ""), "boundary source changed: internal/migrate/postgres/"},
 		{"changed canonical wire fixture", under("testdata/wire/"), textEdit(".json", `"`, `"renamed_`), "boundary source changed: testdata/wire/"},
@@ -72,6 +76,27 @@ func TestContractGateDetectsCoveredMutations(t *testing.T) {
 				t.Fatalf("edit outside the reviewed contract drifted: %v", err)
 			}
 		})
+	}
+}
+
+// A production file that names a permission is fingerprinted wherever it lives;
+// the same file without one is not.
+func TestPermissionNamesMakeAFileABoundary(t *testing.T) {
+	vocabulary, err := permissionNames(repositoryFS(t))
+	if err != nil || !vocabulary["MerchantAll"] {
+		t.Fatalf("permission vocabulary = %v, %v", vocabulary, err)
+	}
+	for body, want := range map[string]bool{
+		"package x\n\nimport \"" + Module + "/billing\"\n\nvar _ = billing.MerchantAll\n": true,
+		"package x\n\nimport \"" + Module + "/billing\"\n\nvar _ billing.MerchantID\n":    false,
+	} {
+		facts, err := computeFacts("internal/x/x.go", []byte(body), vocabulary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := facts.source != ""; got != want {
+			t.Errorf("boundary = %v, want %v for:\n%s", got, want, body)
+		}
 	}
 }
 
@@ -305,19 +330,21 @@ func renameRoutePath(file *ast.File, offset func(token.Pos) int, body []byte) ([
 	return out, out != nil
 }
 
-func swapPermission(file *ast.File, offset func(token.Pos) int, body []byte) ([]byte, bool) {
-	var out []byte
-	ast.Inspect(file, func(node ast.Node) bool {
-		if selector, ok := node.(*ast.SelectorExpr); ok && out == nil && isIdent(selector.X, "permissions") && selector.Sel.IsExported() {
-			replacement := "MerchantAll"
-			if selector.Sel.Name == replacement {
-				replacement = "CustomerAll"
+func swapPermission(vocabulary map[string]bool) goEditor {
+	return func(file *ast.File, offset func(token.Pos) int, body []byte) ([]byte, bool) {
+		var out []byte
+		ast.Inspect(file, func(node ast.Node) bool {
+			if selector, ok := node.(*ast.SelectorExpr); ok && out == nil && isIdent(selector.X, "billing") && vocabulary[selector.Sel.Name] {
+				replacement := "MerchantAll"
+				if selector.Sel.Name == replacement {
+					replacement = "CustomerAll"
+				}
+				out = splice(body, offset(selector.Sel.Pos()), offset(selector.Sel.End()), replacement)
 			}
-			out = splice(body, offset(selector.Sel.Pos()), offset(selector.Sel.End()), replacement)
-		}
-		return out == nil
-	})
-	return out, out != nil
+			return out == nil
+		})
+		return out, out != nil
+	}
 }
 
 func editFuncString(file *ast.File, offset func(token.Pos) int, body []byte) ([]byte, bool) {
@@ -342,18 +369,27 @@ func editFuncString(file *ast.File, offset func(token.Pos) int, body []byte) ([]
 }
 
 func editAuthorityFile(file *ast.File, offset func(token.Pos) int, body []byte) ([]byte, bool) {
-	authority := false
+	imports, production := fileImports(file)
+	if !production || !importsAuthority(imports) {
+		return nil, false
+	}
+	return editPlainFunc(file, offset, body)
+}
+
+func fileImports(file *ast.File) (map[string]string, bool) {
+	imports := map[string]string{}
 	for _, spec := range file.Imports {
 		importPath := strings.Trim(spec.Path.Value, `"`)
 		if importPath == "testing" {
 			return nil, false
 		}
-		authority = authority || authorityImports[importPath]
+		local := path.Base(importPath)
+		if spec.Name != nil {
+			local = spec.Name.Name
+		}
+		imports[local] = importPath
 	}
-	if !authority {
-		return nil, false
-	}
-	return editPlainFunc(file, offset, body)
+	return imports, true
 }
 
 func editPlainFunc(file *ast.File, offset func(token.Pos) int, body []byte) ([]byte, bool) {

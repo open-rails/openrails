@@ -16,6 +16,7 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
@@ -23,11 +24,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const KindAccountUpdaterBatch = "openrails.account_updater_batch"
@@ -174,7 +175,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 		merchantID := *mid
 		result.IngestMerchants = append(result.IngestMerchants, merchantID)
 		progress.Mark(ctx, "account updater ingest merchant "+merchantID.String())
-		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "account updater ingest", func(mctx context.Context) error {
+		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "account updater ingest", func(mctx context.Context) error {
 			return w.ingestMerchant(mctx, merchantID, now, &result)
 		}); err != nil {
 			// One merchant's failure must not abort the rest of the fan-out.
@@ -230,7 +231,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 		merchantID := *mid
 		result.SubmitMerchants = append(result.SubmitMerchants, merchantID)
 		progress.Mark(ctx, "account updater submit merchant "+merchantID.String())
-		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "account updater submit", func(mctx context.Context) error {
+		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "account updater submit", func(mctx context.Context) error {
 			return w.submitMerchant(mctx, merchantID, now, &result)
 		}); err != nil {
 			logger.WithError(err).WithField("merchant_id", merchantID).Error("Account updater: submit pass failed; continuing")

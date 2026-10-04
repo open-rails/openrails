@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrSecretStoreReadOnly identifies an explicitly read-only managed store.
@@ -18,13 +18,13 @@ type readOnlySecretStore struct{ MerchantSecretStore }
 func NewReadOnlySecretStore(inner MerchantSecretStore) MerchantSecretStore {
 	return &readOnlySecretStore{inner}
 }
-func (s *readOnlySecretStore) Put(context.Context, merchant.ID, string, string) (Secret, error) {
+func (s *readOnlySecretStore) Put(context.Context, billing.MerchantID, string, string) (Secret, error) {
 	return Secret{}, ErrSecretStoreReadOnly
 }
-func (s *readOnlySecretStore) Delete(context.Context, merchant.ID, string) error {
+func (s *readOnlySecretStore) Delete(context.Context, billing.MerchantID, string) error {
 	return ErrSecretStoreReadOnly
 }
-func (s *readOnlySecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+func (s *readOnlySecretStore) GetVersion(ctx context.Context, id billing.MerchantID, name string, version int) (Secret, error) {
 	return ReadSecretRef(ctx, s.MerchantSecretStore, id, SecretRef{Name: name, MinVersion: version})
 }
 

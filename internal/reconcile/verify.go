@@ -14,13 +14,14 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Verifier resolves unverified subscriptions from provider reads (#1089 §12).
@@ -52,13 +53,13 @@ type Verifier struct {
 
 	once     sync.Once
 	mu       sync.Mutex
-	pending  map[merchant.ID]map[uuid.UUID]struct{}
+	pending  map[billing.MerchantID]map[uuid.UUID]struct{}
 	inflight map[uuid.UUID]struct{}
-	busy     map[merchant.ID]int
-	timer    map[merchant.ID]bool
+	busy     map[billing.MerchantID]int
+	timer    map[billing.MerchantID]bool
 	// bulking holds, per merchant with a bulk read running, the rows it
 	// covers: requests for them are dropped, the rest wait for it to end.
-	bulking map[merchant.ID]map[uuid.UUID]struct{}
+	bulking map[billing.MerchantID]map[uuid.UUID]struct{}
 	sem     chan struct{}
 	changed chan struct{}
 	ctx     context.Context
@@ -92,11 +93,11 @@ func (v *Verifier) init() {
 			v.Retries = defaultVerifyRetries
 		}
 		v.Clock = timeutil.FirstClock(v.Clock)
-		v.pending = map[merchant.ID]map[uuid.UUID]struct{}{}
+		v.pending = map[billing.MerchantID]map[uuid.UUID]struct{}{}
 		v.inflight = map[uuid.UUID]struct{}{}
-		v.busy = map[merchant.ID]int{}
-		v.timer = map[merchant.ID]bool{}
-		v.bulking = map[merchant.ID]map[uuid.UUID]struct{}{}
+		v.busy = map[billing.MerchantID]int{}
+		v.timer = map[billing.MerchantID]bool{}
+		v.bulking = map[billing.MerchantID]map[uuid.UUID]struct{}{}
 		v.sem = make(chan struct{}, v.Workers)
 		v.changed = make(chan struct{})
 		v.ctx, v.stop = context.WithCancel(context.Background())
@@ -116,7 +117,7 @@ func (v *Verifier) Close() {
 }
 
 // Enqueue asks for an immediate read of the subscriptions. It never blocks.
-func (v *Verifier) Enqueue(mid merchant.ID, ids ...uuid.UUID) {
+func (v *Verifier) Enqueue(mid billing.MerchantID, ids ...uuid.UUID) {
 	v.init()
 	if len(ids) == 0 {
 		return
@@ -154,7 +155,7 @@ func (v *Verifier) Enqueue(mid merchant.ID, ids ...uuid.UUID) {
 // flush hands pending requests to workers: one bulk read above the
 // threshold, otherwise batches of verifyBatchSize. A row already being read
 // waits for that read to finish (per-subscription coalescing).
-func (v *Verifier) flush(mid merchant.ID) {
+func (v *Verifier) flush(mid billing.MerchantID) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.timer[mid] = false
@@ -192,7 +193,7 @@ func (v *Verifier) flush(mid merchant.ID) {
 	}
 }
 
-func (v *Verifier) done(mid merchant.ID, ids []uuid.UUID) {
+func (v *Verifier) done(mid billing.MerchantID, ids []uuid.UUID) {
 	v.mu.Lock()
 	for _, id := range ids {
 		delete(v.inflight, id)
@@ -207,7 +208,7 @@ func (v *Verifier) done(mid merchant.ID, ids []uuid.UUID) {
 	}
 }
 
-func (v *Verifier) runBatch(mid merchant.ID, ids []uuid.UUID) {
+func (v *Verifier) runBatch(mid billing.MerchantID, ids []uuid.UUID) {
 	defer v.done(mid, ids)
 	select {
 	case v.sem <- struct{}{}:
@@ -234,7 +235,7 @@ func (v *Verifier) runBatch(mid merchant.ID, ids []uuid.UUID) {
 	}
 }
 
-func (v *Verifier) runBulk(mid merchant.ID) {
+func (v *Verifier) runBulk(mid billing.MerchantID) {
 	defer v.done(mid, nil)
 	defer v.endBulk(mid)
 	select {
@@ -251,7 +252,7 @@ func (v *Verifier) runBulk(mid merchant.ID) {
 }
 
 // Drain waits until every request for the merchant has been read.
-func (v *Verifier) Drain(ctx context.Context, mid merchant.ID) error {
+func (v *Verifier) Drain(ctx context.Context, mid billing.MerchantID) error {
 	v.init()
 	for {
 		v.mu.Lock()
@@ -316,7 +317,7 @@ func (v *Verifier) listenOnce(ctx context.Context, channel string) error {
 		mid, merr := uuid.Parse(m)
 		sid, serr := uuid.Parse(s)
 		if merr == nil && serr == nil {
-			v.Enqueue(merchant.ID(mid), sid)
+			v.Enqueue(billing.MerchantID(mid), sid)
 		}
 	}
 }
@@ -330,7 +331,7 @@ func (v *Verifier) lifecycle() *subscriptions.SubscriptionLifecycleService {
 }
 
 // verifyBatch reads and resolves one batch of one merchant's rows.
-func (v *Verifier) verifyBatch(ctx context.Context, mid merchant.ID, ids []uuid.UUID) error {
+func (v *Verifier) verifyBatch(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) error {
 	return v.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		now := v.Clock.Now().UTC()
 		subs, err := loadUnverified(ctx, v.DB, mid, ids)
@@ -370,7 +371,7 @@ func (v *Verifier) verifyBatch(ctx context.Context, mid merchant.ID, ids []uuid.
 
 // loadUnverified loads the rows of ids that are still unverified and read
 // from a provider (engine rows are resolved by the collection engine).
-func loadUnverified(ctx context.Context, database *db.DB, mid merchant.ID, ids []uuid.UUID) ([]*models.Subscription, error) {
+func loadUnverified(ctx context.Context, database *db.DB, mid billing.MerchantID, ids []uuid.UUID) ([]*models.Subscription, error) {
 	live, err := database.Gen(ctx).ListUnverifiedSubscriptionIDsIn(ctx, gen.ListUnverifiedSubscriptionIDsInParams{MerchantID: mid.UUID(), Ids: ids})
 	if err != nil {
 		return nil, fmt.Errorf("verify: list unverified: %w", err)
@@ -388,7 +389,7 @@ func loadUnverified(ctx context.Context, database *db.DB, mid merchant.ID, ids [
 }
 
 // recordReads stamps the provider reads on the rows' verification records.
-func recordReads(ctx context.Context, database *db.DB, mid merchant.ID, subs []*models.Subscription, now time.Time, readErr error) {
+func recordReads(ctx context.Context, database *db.DB, mid billing.MerchantID, subs []*models.Subscription, now time.Time, readErr error) {
 	ids := make([]uuid.UUID, 0, len(subs))
 	for _, s := range subs {
 		ids = append(ids, s.ID)
@@ -419,7 +420,7 @@ func forPSP(subs []*models.Subscription, psp uuid.UUID) []*models.Subscription {
 // rows: a bulk read above BulkThreshold, otherwise every row is enqueued as
 // the listing reaches it and the pass waits for the reads. Must run on a
 // merchant-scoped connection.
-func (v *Verifier) Pass(ctx context.Context, mid merchant.ID) error {
+func (v *Verifier) Pass(ctx context.Context, mid billing.MerchantID) error {
 	v.init()
 	// One past the threshold is enough to choose the bulk read.
 	ids, err := v.DB.Gen(ctx).ListUnverifiedNMISubscriptionIDs(ctx, gen.ListUnverifiedNMISubscriptionIDsParams{
@@ -440,7 +441,7 @@ func (v *Verifier) Pass(ctx context.Context, mid merchant.ID) error {
 }
 
 // cover drops pending requests for the rows a running bulk read covers.
-func (v *Verifier) cover(mid merchant.ID, subs []*models.Subscription) {
+func (v *Verifier) cover(mid billing.MerchantID, subs []*models.Subscription) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	covered := v.bulking[mid]
@@ -453,7 +454,7 @@ func (v *Verifier) cover(mid merchant.ID, subs []*models.Subscription) {
 	}
 }
 
-func (v *Verifier) endBulk(mid merchant.ID) {
+func (v *Verifier) endBulk(mid billing.MerchantID) {
 	v.mu.Lock()
 	delete(v.bulking, mid)
 	again := len(v.pending[mid]) > 0 && !v.timer[mid]

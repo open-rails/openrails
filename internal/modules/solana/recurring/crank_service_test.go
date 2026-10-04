@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // addressSubmitter records the merchant address the crank signs as. Its
@@ -20,15 +20,15 @@ type addressSubmitter struct {
 	instructions []solanago.Instruction
 }
 
-func (*addressSubmitter) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
+func (*addressSubmitter) MerchantAddress(context.Context, billing.MerchantID) (solanago.PublicKey, error) {
 	return solanago.PublicKey{}, nil
 }
 
-func (*addressSubmitter) Submit(context.Context, merchant.ID, []solanago.Instruction) (solanago.Signature, error) {
+func (*addressSubmitter) Submit(context.Context, billing.MerchantID, []solanago.Instruction) (solanago.Signature, error) {
 	panic("crank must sign as the row's recorded merchant address")
 }
 
-func (s *addressSubmitter) SubmitForMerchantAddress(_ context.Context, _ merchant.ID, address solanago.PublicKey, ixs []solanago.Instruction) (solanago.Signature, error) {
+func (s *addressSubmitter) SubmitForMerchantAddress(_ context.Context, _ billing.MerchantID, address solanago.PublicKey, ixs []solanago.Instruction) (solanago.Signature, error) {
 	s.address, s.instructions = address, ixs
 	return solanago.Signature{}, nil
 }
@@ -89,7 +89,7 @@ type writeAheadSubmitter struct {
 	submitted bool
 }
 
-func (s *writeAheadSubmitter) SubmitForMerchantAddressWithPresubmit(_ context.Context, _ merchant.ID, address solanago.PublicKey, ixs []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+func (s *writeAheadSubmitter) SubmitForMerchantAddressWithPresubmit(_ context.Context, _ billing.MerchantID, address solanago.PublicKey, ixs []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	sig := solanago.Signature{7}
 	if presubmit != nil {
 		if err := presubmit(sig); err != nil {

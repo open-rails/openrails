@@ -11,11 +11,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // pspCatalog is an in-memory Layer-B PSP catalog: key lookup, the #848
@@ -26,11 +27,11 @@ type pspCatalog struct {
 	err      error
 }
 
-func (c pspCatalog) ActivePSPSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
+func (c pspCatalog) ActivePSPSecretName(context.Context, billing.MerchantID, string, string, string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (c pspCatalog) PSPScopeByKey(_ context.Context, _ merchant.ID, key, _ string) (merchants.PSPScope, bool, error) {
+func (c pspCatalog) PSPScopeByKey(_ context.Context, _ billing.MerchantID, key, _ string) (merchants.PSPScope, bool, error) {
 	for _, s := range c.scopes {
 		if strings.EqualFold(s.Key, key) {
 			return s, true, c.err
@@ -39,7 +40,7 @@ func (c pspCatalog) PSPScopeByKey(_ context.Context, _ merchant.ID, key, _ strin
 	return merchants.PSPScope{}, false, c.err
 }
 
-func (c pspCatalog) ActivePSPScopesForRail(_ context.Context, _ merchant.ID, rail, _ string) ([]merchants.PSPScope, error) {
+func (c pspCatalog) ActivePSPScopesForRail(_ context.Context, _ billing.MerchantID, rail, _ string) ([]merchants.PSPScope, error) {
 	var out []merchants.PSPScope
 	for _, s := range c.scopes {
 		if strings.EqualFold(s.Rail, rail) {
@@ -49,7 +50,7 @@ func (c pspCatalog) ActivePSPScopesForRail(_ context.Context, _ merchant.ID, rai
 	return out, c.err
 }
 
-func (c pspCatalog) PSPKeyArchived(_ context.Context, _ merchant.ID, key, _ string) (bool, error) {
+func (c pspCatalog) PSPKeyArchived(_ context.Context, _ billing.MerchantID, key, _ string) (bool, error) {
 	for _, k := range c.archived {
 		if k == key {
 			return true, nil
@@ -60,15 +61,15 @@ func (c pspCatalog) PSPKeyArchived(_ context.Context, _ merchant.ID, key, _ stri
 
 type keyOnlyCatalog struct{}
 
-func (keyOnlyCatalog) ActivePSPSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
+func (keyOnlyCatalog) ActivePSPSecretName(context.Context, billing.MerchantID, string, string, string) (string, bool, error) {
 	return "", false, nil
 }
 
-func (keyOnlyCatalog) PSPScopeByKey(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+func (keyOnlyCatalog) PSPScopeByKey(context.Context, billing.MerchantID, string, string) (merchants.PSPScope, bool, error) {
 	return merchants.PSPScope{}, false, nil
 }
 
-var testMerchant = merchant.ID(uuid.MustParse("a5a5a5a5-0000-4000-8000-000000000001"))
+var testMerchant = billing.MerchantID(uuid.MustParse("a5a5a5a5-0000-4000-8000-000000000001"))
 
 func merchantCtx() context.Context { return merchant.WithID(context.Background(), testMerchant) }
 

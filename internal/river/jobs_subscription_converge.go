@@ -17,10 +17,12 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -29,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #684: webhooks are wake-up signals. This worker is the coalesced dirty-flag
@@ -193,7 +194,7 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		return river.JobSnooze(SubscriptionConvergeDebounce)
 	}
 
-	mctx := db.WithPSPID(merchant.WithID(ctx, merchant.ID(args.MerchantID)), args.PSPID)
+	mctx := db.WithPSPID(merchant.WithID(ctx, billing.MerchantID(args.MerchantID)), args.PSPID)
 	var customerID uuid.UUID
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 		var cerr error
@@ -204,7 +205,7 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		// Inline convergence pass (#511 Phase E): project entitlement windows /
 		// grant effects the transition implies. Best-effort — the sweep backstops.
 		if customerID != uuid.Nil {
-			if _, aerr := converge.AfterMutation(cctx, w.DB, merchant.ID(args.MerchantID), customerID, w.Clock); aerr != nil {
+			if _, aerr := converge.AfterMutation(cctx, w.DB, billing.MerchantID(args.MerchantID), customerID, w.Clock); aerr != nil {
 				log.WithContext(cctx).WithError(aerr).WithFields(log.Fields{
 					"merchant_id": args.MerchantID, "customer_id": customerID,
 				}).Warn("subscription converge: inline converge after transition failed; the sweep will reconcile")

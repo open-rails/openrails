@@ -5,15 +5,15 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const maxActiveMerchantPageSize = 200
 
 // ListActiveMerchantIDs returns one directory page for privileged host
 // orchestration that must enter each merchant's scope independently.
-func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]merchant.ID, error) {
+func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]billing.MerchantID, error) {
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for merchant enumeration")
 	}
@@ -33,9 +33,9 @@ func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset 
 		return nil, fmt.Errorf("controlplane: list active merchant ids: %w", err)
 	}
 
-	ids := make([]merchant.ID, 0, len(rows))
+	ids := make([]billing.MerchantID, 0, len(rows))
 	for _, row := range rows {
-		ids = append(ids, merchant.ID(row.ID))
+		ids = append(ids, billing.MerchantID(row.ID))
 	}
 	return ids, nil
 }

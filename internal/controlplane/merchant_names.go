@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // RenameMerchant renames an active merchant; its former name forwards to it
@@ -16,7 +15,7 @@ import (
 // reserved names, the creation pattern and the rename interval; actorUserID may
 // hold the reserved-name escalation role. An operator rename is subject only to
 // the former-name policy.
-func (c *ControlPlane) RenameMerchant(ctx context.Context, mid merchant.ID, name, actorUserID string, operator bool) (*merchants.Merchant, error) {
+func (c *ControlPlane) RenameMerchant(ctx context.Context, mid billing.MerchantID, name, actorUserID string, operator bool) (*merchants.Merchant, error) {
 	directory, err := c.directory()
 	if err != nil {
 		return nil, err
@@ -32,7 +31,7 @@ func (c *ControlPlane) RenameMerchant(ctx context.Context, mid merchant.ID, name
 
 // SetMerchantDisplayName sets an active merchant's display name; an empty name
 // is a no-op.
-func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id merchant.ID, displayName string) error {
+func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error {
 	directory, err := c.directory()
 	if err != nil {
 		return err

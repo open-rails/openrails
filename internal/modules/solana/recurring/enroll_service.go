@@ -8,13 +8,13 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // membershipCreator is the lifecycle surface enroll drives (satisfied by
@@ -56,7 +56,7 @@ func NewEnrollService(lifecycle membershipCreator, repo subscriptionStore, chain
 
 // EnrollInput describes the checkout whose first payment activates a subscription.
 type EnrollInput struct {
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// CheckoutSessionID is the checkout the first payment settles.
 	CheckoutSessionID uuid.UUID
 	UserID            string

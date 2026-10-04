@@ -14,14 +14,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type stubVerifier struct {
@@ -46,7 +47,7 @@ func okHandler() http.Handler {
 
 type call struct {
 	method, path, ip, xff, user, token string
-	merchant                           merchant.ID
+	merchant                           billing.MerchantID
 	want                               int
 	body                               string
 }
@@ -259,7 +260,7 @@ func TestCaptchaChallenges(t *testing.T) {
 	// routes, and one solve does not lift it. Other merchants, and every
 	// merchant or API route, are never challenged.
 	t.Run("card attack mode", func(t *testing.T) {
-		attacked, other := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+		attacked, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute))
 		h := engine(deps, okHandler())
@@ -284,7 +285,7 @@ func TestCaptchaChallenges(t *testing.T) {
 	// attack flag refuses anyone here: the durable ledger blocks card attempts
 	// per subject (SEC-30), so attack mode never becomes a blanket 429.
 	t.Run("captcha disabled never refuses on a challenge", func(t *testing.T) {
-		attacked := merchant.ID(uuid.New())
+		attacked := billing.MerchantID(uuid.New())
 		deps := newDeps(limits, nil, nil)
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute))

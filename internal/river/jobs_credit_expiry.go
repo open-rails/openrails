@@ -8,11 +8,12 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -80,7 +81,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 		}
 		merchantID := *mid
 		progress.Mark(ctx, "credit expiry merchant "+merchantID.String())
-		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "credit expiry sweep", func(ctx context.Context) error {
+		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "credit expiry sweep", func(ctx context.Context) error {
 			scopeMerchantID, scopeErr := merchant.Require(ctx)
 			if scopeErr != nil {
 				return scopeErr

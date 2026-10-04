@@ -10,14 +10,15 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NMIReader is the merchant's armed NMI client and the PSP it reads.
@@ -275,7 +276,7 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 // recorded as payments and checkpointed, so a crashed pass resumes at the
 // next page; rows are then decided from their recorded charges. Rows the
 // bulk read cannot attribute fall back to batched reads.
-func (v *Verifier) Bulk(ctx context.Context, mid merchant.ID) error {
+func (v *Verifier) Bulk(ctx context.Context, mid billing.MerchantID) error {
 	v.init()
 	v.mu.Lock()
 	if _, running := v.bulking[mid]; running {
@@ -288,7 +289,7 @@ func (v *Verifier) Bulk(ctx context.Context, mid merchant.ID) error {
 	return v.bulkRead(ctx, mid)
 }
 
-func (v *Verifier) bulkRead(ctx context.Context, mid merchant.ID) error {
+func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 	return v.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		now := v.Clock.Now().UTC()
 		armed := v.Builder.Build(ctx, mid)
@@ -428,7 +429,7 @@ func readRoster(ctx context.Context, client *nmi.NMIClient) ([]nmi.V5Subscriptio
 	}
 }
 
-func listUnverifiedNMI(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID) ([]*models.Subscription, error) {
+func listUnverifiedNMI(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID) ([]*models.Subscription, error) {
 	ids, err := database.Gen(ctx).ListUnverifiedSubscriptionIDsForPSP(ctx, gen.ListUnverifiedSubscriptionIDsForPSPParams{MerchantID: mid.UUID(), PspID: psp})
 	if err != nil {
 		return nil, fmt.Errorf("verify: list unverified nmi rows: %w", err)
@@ -438,7 +439,7 @@ func listUnverifiedNMI(ctx context.Context, database *db.DB, mid merchant.ID, ps
 
 // recordedCharges is each row's recorded charges (payments) and declines
 // (payment attempts) since, the evidence a bulk pass decides from.
-func recordedCharges(ctx context.Context, database *db.DB, mid merchant.ID, subs []*models.Subscription, since time.Time) (map[uuid.UUID][]RemoteTransaction, error) {
+func recordedCharges(ctx context.Context, database *db.DB, mid billing.MerchantID, subs []*models.Subscription, since time.Time) (map[uuid.UUID][]RemoteTransaction, error) {
 	ids := make([]uuid.UUID, 0, len(subs))
 	rail := map[uuid.UUID]string{}
 	for _, s := range subs {
@@ -471,7 +472,7 @@ type bulkCheckpoint struct {
 }
 
 // loadCheckpoint resumes an interrupted bulk read, or starts a new one.
-func loadCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID, since, until time.Time) (bulkCheckpoint, error) {
+func loadCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID, since, until time.Time) (bulkCheckpoint, error) {
 	row, err := database.Gen(ctx).StartNMIBulkCheckpoint(ctx, gen.StartNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp, Since: since, Until: until})
 	if err != nil {
 		return bulkCheckpoint{since: since, until: until, next: 1}, fmt.Errorf("verify: bulk checkpoint: %w", err)
@@ -479,11 +480,11 @@ func loadCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp u
 	return bulkCheckpoint{since: row.Since, until: row.Until, next: int(row.NextPage)}, nil
 }
 
-func saveCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID, next int) error {
+func saveCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID, next int) error {
 	return database.Gen(ctx).SetNMIBulkCheckpointPage(ctx, gen.SetNMIBulkCheckpointPageParams{MerchantID: mid.UUID(), PspID: psp, NextPage: int64(next)})
 }
 
-func clearCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID) error {
+func clearCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID) error {
 	return database.Gen(ctx).DeleteNMIBulkCheckpoint(ctx, gen.DeleteNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp})
 }
 

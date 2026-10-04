@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // ErrManifestSecretsReadOnly is returned for runtime writes against the MODE-1
@@ -30,19 +30,19 @@ func NewManifestSecretStore() *ManifestSecretStore {
 	return &ManifestSecretStore{mem: NewMemorySecretStore(), identity: "snapshot"}
 }
 
-func (s *ManifestSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+func (s *ManifestSecretStore) Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error) {
 	return s.mem.Get(ctx, merchantID, name)
 }
 
-func (s *ManifestSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
+func (s *ManifestSecretStore) List(ctx context.Context, merchantID billing.MerchantID) ([]string, error) {
 	return s.mem.List(ctx, merchantID)
 }
 
-func (s *ManifestSecretStore) Put(_ context.Context, _ merchant.ID, name, _ string) (Secret, error) {
+func (s *ManifestSecretStore) Put(_ context.Context, _ billing.MerchantID, name, _ string) (Secret, error) {
 	return Secret{}, fmt.Errorf("put %s: %w", name, ErrManifestSecretsReadOnly)
 }
 
-func (s *ManifestSecretStore) Delete(_ context.Context, _ merchant.ID, name string) error {
+func (s *ManifestSecretStore) Delete(_ context.Context, _ billing.MerchantID, name string) error {
 	return fmt.Errorf("delete %s: %w", name, ErrManifestSecretsReadOnly)
 }
 

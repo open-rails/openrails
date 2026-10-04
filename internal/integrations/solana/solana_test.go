@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // #713: memos are public and immutable; recovery tooling parses these bytes.
@@ -178,7 +178,7 @@ type countingSecrets struct {
 	reads int
 }
 
-func (s *countingSecrets) GetSecret(context.Context, merchant.ID, string) (string, error) {
+func (s *countingSecrets) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reads++
@@ -226,7 +226,7 @@ func (f *fakeTransit) PublicKey(_ context.Context, name string) ([]byte, error) 
 func TestSignersFailClosed(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	ctx := context.Background()
 	signers := map[string]func(broken bool) Signer{
 		"keypair": func(broken bool) Signer {
@@ -255,7 +255,7 @@ func TestSignersFailClosed(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, sig.Verify(pub, msg))
 
-			_, err = s.SignMessage(ctx, merchant.ID{}, msg)
+			_, err = s.SignMessage(ctx, billing.MerchantID{}, msg)
 			require.Error(t, err, "zero merchant")
 			_, err = s.SignMessage(ctx, mid, nil)
 			require.Error(t, err, "empty message")
@@ -277,7 +277,7 @@ func TestSignersFailClosed(t *testing.T) {
 func TestSignerCaching(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	ctx := context.Background()
 
 	secrets := &countingSecrets{value: key.String()}
@@ -292,7 +292,7 @@ func TestSignerCaching(t *testing.T) {
 	require.Equal(t, 2, secrets.reads, "one read per TTL window")
 
 	ft := &fakeTransit{key: key, pubLen: 32, sigLen: 64}
-	ts := NewTransitSigner(ft, func(id merchant.ID) string { return "custom-" + id.String() }, time.Minute)
+	ts := NewTransitSigner(ft, func(id billing.MerchantID) string { return "custom-" + id.String() }, time.Minute)
 	for range 3 {
 		_, err := ts.PublicKey(ctx, mid)
 		require.NoError(t, err)
@@ -321,7 +321,7 @@ func TestBuildPartiallySignedTx(t *testing.T) {
 	require.NoError(t, err)
 	dest := solanago.NewWallet().PublicKey()
 	cosigner := NewKeypairSigner(staticSecret(cranker.String()), 0)
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	ctx := context.Background()
 
 	ixs := []solanago.Instruction{

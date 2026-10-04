@@ -11,10 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // newLedgerAuditCmd wires the #833 ledger-integrity diagnostics as an operator
@@ -140,7 +141,7 @@ func ledgerAuditLabel(res ledgerAuditResult) string {
 }
 
 type ledgerAuditTarget struct {
-	id   merchant.ID
+	id   billing.MerchantID
 	slug string
 }
 
@@ -163,7 +164,7 @@ func ledgerAuditTargets(ctx context.Context, database *db.DB, merchantSlug strin
 	out := make([]ledgerAuditTarget, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, ledgerAuditTarget{
-			id:   merchant.ID(row.ID),
+			id:   billing.MerchantID(row.ID),
 			slug: row.Slug,
 		})
 	}

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 const privateKeySecretName = "private_key"
@@ -20,11 +20,11 @@ type MerchantSecretGetter interface {
 	// GetSecret returns the plaintext secret value for (merchant, name), or an
 	// error. Implementations MUST fail closed (never return "" + nil for a
 	// missing secret) so a missing key can be distinguished from an empty one.
-	GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error)
+	GetSecret(ctx context.Context, merchantID billing.MerchantID, name string) (string, error)
 }
 
 // Signer produces Solana signatures for a merchant key WITHOUT exposing
-// the private key to callers. It is resolved PER MERCHANT (via merchant.ID); there
+// the private key to callers. It is resolved PER MERCHANT (via billing.MerchantID); there
 // is no process-global signer. Two implementations exist:
 //
 //   - keypairSigner: loads the PSP scoped private_key secret and
@@ -38,10 +38,10 @@ type MerchantSecretGetter interface {
 type Signer interface {
 	// PublicKey returns the merchant address — the fee payer and sole
 	// required signer on every plan/pull transaction this package builds.
-	PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error)
+	PublicKey(ctx context.Context, merchantID billing.MerchantID) (solanago.PublicKey, error)
 	// SignMessage signs the raw serialized Solana message bytes
 	// (Transaction.Message.MarshalBinary()) and returns the 64-byte signature.
-	SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error)
+	SignMessage(ctx context.Context, merchantID billing.MerchantID, message []byte) (solanago.Signature, error)
 }
 
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
@@ -64,7 +64,7 @@ type blockhashProvider interface {
 // message's required-signer account list.
 func BuildSignSubmit(
 	ctx context.Context,
-	merchantID merchant.ID,
+	merchantID billing.MerchantID,
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,
@@ -78,7 +78,7 @@ func BuildSignSubmit(
 // a blind re-send. A presubmit error aborts the submit (nothing was sent).
 func BuildSignSubmitPresubmit(
 	ctx context.Context,
-	merchantID merchant.ID,
+	merchantID billing.MerchantID,
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,

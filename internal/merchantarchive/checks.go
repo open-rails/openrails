@@ -8,12 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
@@ -213,7 +213,7 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-func refuseRows(ctx context.Context, tx pgx.Tx, id merchant.ID, table, predicate string) error {
+func refuseRows(ctx context.Context, tx pgx.Tx, id billing.MerchantID, table, predicate string) error {
 	var count int64
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table+" WHERE merchant_id=$1 AND ("+predicate+")", id.UUID()).Scan(&count); err != nil {
 		return err
@@ -224,7 +224,7 @@ func refuseRows(ctx context.Context, tx pgx.Tx, id merchant.ID, table, predicate
 	return nil
 }
 
-func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	checks := []struct{ table, predicate string }{
 		{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
 		{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
@@ -296,7 +296,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	return validateReferences(ctx, tx, id)
 }
 
-func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	purchaseInvalid, err := gen.New(tx).CountInvalidPurchaseCheckoutReferences(ctx, id.UUID())
 	if err != nil {
 		return err

@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/catalog"
 )
 
 func MerchantApplyCatalog(r *httprequest.Request) {

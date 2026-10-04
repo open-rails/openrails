@@ -11,13 +11,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -276,7 +276,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		merchantID := *mid
 		visited = append(visited, merchantID)
 		progress.Mark(ctx, "cleanup merchant "+merchantID.String())
-		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "cleanup expired data", func(mctx context.Context) error {
+		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(merchantID), "cleanup expired data", func(mctx context.Context) error {
 			w.sweepMerchant(mctx, merchantID, now, config, &result, &cleanupErr)
 			return nil
 		}); err != nil {

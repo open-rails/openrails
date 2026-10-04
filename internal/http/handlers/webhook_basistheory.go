@@ -9,12 +9,12 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Basis Theory webhook ingestion (#795, route /webhooks/basistheory → event
@@ -56,7 +56,7 @@ func basisTheoryWebhookTenantID(body []byte) string {
 	return strings.TrimSpace(evt.TenantID)
 }
 
-func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID merchant.ID, accountID string) bool {
+func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID billing.MerchantID, accountID string) bool {
 	body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
 	if !ok {
 		return false
@@ -83,7 +83,7 @@ func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID mercha
 	return processMerchantBasisTheoryWebhookBody(r, merchantID, accountID, body)
 }
 
-func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID merchant.ID, tenantID string, body []byte) bool {
+func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID billing.MerchantID, tenantID string, body []byte) bool {
 	rail := string(models.EventSourceBasisTheory)
 	sig := r.Header(basistheory.SignatureHeader)
 	sigVersion := r.Header(basistheory.SignatureVersionHeader)

@@ -8,12 +8,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type integrationAuthenticator struct{ auth *billingauth.Integration }
@@ -77,7 +77,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	}
 
 	subject := identity.SubjectID
-	if identity.Kind == billingauth.User && (permission == permissions.MerchantCatalogOwnRead || permission == permissions.MerchantCatalogOwnUpdate) {
+	if identity.Kind == billingauth.User && (permission == billing.MerchantCatalogOwnRead || permission == billing.MerchantCatalogOwnUpdate) {
 		if identity.CustomerID == "" && r.Header.Get("OpenRails-Catalog-Owner") == "" {
 			return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "canonical personal identity required"}
 		}

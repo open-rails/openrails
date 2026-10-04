@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SecretCleanupPlan captures a non-secret backend identity and immutable root.
@@ -23,7 +23,7 @@ type SecretCleanupPlan struct {
 }
 
 type secretCleanupTarget interface {
-	cleanupTarget(merchant.ID) (string, string, error)
+	cleanupTarget(billing.MerchantID) (string, string, error)
 }
 
 func baseSecretStore(store MerchantSecretStore) MerchantSecretStore {
@@ -45,7 +45,7 @@ func baseSecretStore(store MerchantSecretStore) MerchantSecretStore {
 	}
 }
 
-func captureSecretCleanup(ctx context.Context, store MerchantSecretStore, id merchant.ID) (*SecretCleanupPlan, error) {
+func captureSecretCleanup(ctx context.Context, store MerchantSecretStore, id billing.MerchantID) (*SecretCleanupPlan, error) {
 	store = mutableSecretView(store)
 	if store == nil {
 		return nil, nil
@@ -70,7 +70,7 @@ func captureSecretCleanup(ctx context.Context, store MerchantSecretStore, id mer
 	return &SecretCleanupPlan{Backend: backend, Root: root, Names: names}, nil
 }
 
-func clearMerchantSecretCache(store MerchantSecretStore, id merchant.ID) {
+func clearMerchantSecretCache(store MerchantSecretStore, id billing.MerchantID) {
 	switch s := store.(type) {
 	case *lifecycleSecretStore:
 		clearMerchantSecretCache(s.MerchantSecretStore, id)
@@ -92,7 +92,7 @@ func clearMerchantSecretCache(store MerchantSecretStore, id merchant.ID) {
 	}
 }
 
-func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.ID, plan SecretCleanupPlan) (int64, error) {
+func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id billing.MerchantID, plan SecretCleanupPlan) (int64, error) {
 	clearMerchantSecretCache(store, id)
 	defer clearMerchantSecretCache(store, id)
 	store = mutableSecretView(store)
@@ -150,7 +150,7 @@ var ErrSecretCleanupPending = errors.New("merchant secret cleanup pending")
 
 // RetrySecretCleanup resumes only an already committed purge of a tombstoned
 // merchant. The destructive run is the durable task and audit authority.
-func (s *Service) RetrySecretCleanup(ctx context.Context, id merchant.ID, runID uuid.UUID) error {
+func (s *Service) RetrySecretCleanup(ctx context.Context, id billing.MerchantID, runID uuid.UUID) error {
 	var cleanupErr error
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)

@@ -12,11 +12,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #895: the progress detector must NOT be a River job.
@@ -577,7 +578,7 @@ func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.BillingWorkerS
 	alertErrors := make([]error, 0)
 	idempotencyKey := workerHealthAlertIdempotencyKey(row, reason)
 	for _, mid := range merchantIDs {
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
+		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		if err := m.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			return webhooks.RecordLedgerRepairAlert(ctx, m.NotificationService, m.DB, now, webhooks.LedgerRepairAlert{
 				Provider:       "openrails",

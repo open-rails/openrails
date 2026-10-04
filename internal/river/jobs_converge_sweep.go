@@ -9,13 +9,14 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const KindConvergeSweep = "openrails.converge_sweep"
@@ -92,7 +93,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	var swept, findings, autoFixed, reconcileRequired, adminRequired, gated int
 	for _, mid := range merchantIDs {
 		progress.Mark(ctx, "converge sweep merchant "+mid.String())
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
+		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		var res converge.ConvergeResult
 		var blocked string
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
@@ -101,7 +102,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 				return nil
 			}
 			var e error
-			res, e = engine.Converge(ctx, converge.Scope{Merchant: merchant.ID(mid)})
+			res, e = engine.Converge(ctx, converge.Scope{Merchant: billing.MerchantID(mid)})
 			return e
 		}); err != nil {
 			// One merchant's failure must not abort the rest of the sweep.

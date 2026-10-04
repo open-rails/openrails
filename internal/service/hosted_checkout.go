@@ -21,13 +21,13 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Hosted checkout (#1124). A session is minted for one signed-in customer and

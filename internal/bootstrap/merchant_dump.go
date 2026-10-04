@@ -10,15 +10,16 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type DumpMerchantConfigOptions struct {
@@ -281,7 +282,7 @@ func MarshalMerchantManifest(m *BillingConfig) ([]byte, error) {
 // grouped by (rail, environment, account_id). It returns nothing unless
 // includeValues is set: a redacted dump omits secret fields entirely rather than
 // emitting a placeholder that a re-apply (--overwrite) could store as the real value.
-func pspSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+func pspSecrets(ctx context.Context, secretStore merchants.MerchantSecretStore, mid billing.MerchantID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil || !includeValues {
 		return nil, nil
 	}
@@ -314,7 +315,7 @@ func pspSecretGroupKey(rail, environment, accountID string) string {
 
 // custodianSecretValues is the custody sibling of pspSecrets,
 // grouped by the custodian's (kind, environment, account_id) identity.
-func custodianSecretValues(ctx context.Context, secretStore merchants.MerchantSecretStore, mid merchant.ID, includeValues bool) (map[string]map[string]string, error) {
+func custodianSecretValues(ctx context.Context, secretStore merchants.MerchantSecretStore, mid billing.MerchantID, includeValues bool) (map[string]map[string]string, error) {
 	if secretStore == nil || !includeValues {
 		return nil, nil
 	}

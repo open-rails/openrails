@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #725/#788: the invoice collection plane arms rail credentials PER
@@ -129,7 +129,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory 
 
 // nmiProxyPosture is the posture identity of scope's gateway credential
 // forwarded by a custodian proxy; its DirectPostURL is the destination.
-func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	settings, err := b.nmiFactory().Settings(ctx, svc.Secrets(), mid, scope)
 	if err != nil {
 		return nil, err
@@ -147,7 +147,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	if !isStripe && !rails.IsNMI(models.Rail(rail)) {
 		return nil, false, nil // rail has no store-armable collection adapter
 	}
-	mid := merchant.ID(method.MerchantID)
+	mid := billing.MerchantID(method.MerchantID)
 	scope, ok, err := b.resolveScope(ctx, svc, mid, rail, &method.PspID)
 	if err != nil {
 		return nil, false, err
@@ -182,7 +182,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 // resolveScope picks the account the charge settles through: the stamped
 // provenance account when present (archived stays addressable for existing
 // obligations), else the pull scope.
-func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, _ *merchants.Service, mid merchant.ID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
+func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, _ *merchants.Service, mid billing.MerchantID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
 	return b.nmiArmer().ResolveScope(ctx, mid, rail, stamped)
 }
 
@@ -231,7 +231,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context,
 	if svc == nil || b.DB == nil {
 		return nil, errors.New("Stripe collection plane is not armed")
 	}
-	mid := merchant.ID(in.MerchantID)
+	mid := billing.MerchantID(in.MerchantID)
 	scope, ok, err := b.resolveScope(ctx, svc, mid, "stripe", in.PspID)
 	if err != nil {
 		return nil, err
@@ -242,7 +242,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context,
 	return b.stripeService(ctx, svc, mid, scope)
 }
 
-func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	service, err := b.stripeService(ctx, svc, mid, scope)
 	if err != nil {
 		return nil, err
@@ -250,7 +250,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 	return NewStripeCollectionAdapter(b.DB, service), nil
 }
 
-func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*subscriptions.StripeService, error) {
+func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (*subscriptions.StripeService, error) {
 	secretKey, err := b.requireSecret(ctx, svc, mid, scope, "secret_key")
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 // gateway half is the PSP's (or#879 folded the old cross-account pointer away);
 // the custodial half is the referenced custodian's (or#880), so several PSPs
 // charging the same vault share ONE credential rather than a copy each.
-func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	if scope.CustodianID == nil {
 		return nil, fmt.Errorf("psp %s/%s: instrument is held by custodian %s but the PSP references none", scope.Rail, scope.AccountID, models.CustodianBasisTheory)
 	}
@@ -299,7 +299,7 @@ func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Con
 	return NewCustodianProxyCollectionAdapter(nmiproxy.New(bt, gw)), nil
 }
 
-func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	client, err := b.nmiClient(ctx, svc, mid, scope)
 	if err != nil {
 		return nil, err
@@ -308,17 +308,17 @@ func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *
 }
 
 // nmiClient builds the store-armed NMI client for scope.
-func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, _ *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, _ *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
 	return b.nmiArmer().NMIClient(ctx, mid, scope)
 }
 
-func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, _ *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
+func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, _ *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, error) {
 	return b.nmiArmer().RequireSecret(ctx, mid, scope, key)
 }
 
 // requireCustodianSecret is the custody sibling: the credential is scoped to
 // the CUSTODIAN's identity, not to the PSP that happens to charge through it.
-func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, custodian merchants.CustodianScope, key string) (string, error) {
+func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, custodian merchants.CustodianScope, key string) (string, error) {
 	// or#812: same versioned read as every other provider credential.
 	ref, err := custodian.SecretRef(key)
 	if err != nil {

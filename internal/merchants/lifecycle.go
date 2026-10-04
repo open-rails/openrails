@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // MerchantStatus mirrors billing.merchants.status.
@@ -27,7 +27,7 @@ const (
 
 // Merchant is the directory view of a row in billing.merchants.
 type Merchant struct {
-	ID                merchant.ID
+	ID                billing.MerchantID
 	Slug              string
 	Status            MerchantStatus
 	PermissionGroupID string // The merchant's own AuthKit permission-group id (#567).
@@ -36,7 +36,7 @@ type Merchant struct {
 // ProvisionRequest parameterizes merchant provisioning.
 type ProvisionRequest struct {
 	// ID optionally preallocates the billing identity; zero generates one.
-	ID merchant.ID
+	ID billing.MerchantID
 	// Slug is the name the new merchant claims.
 	Slug string
 	// PermissionGroupID is the merchant's own AuthKit permission-group id (#567).
@@ -167,7 +167,7 @@ func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 // ErrMerchantNameTaken.
 func (s *Service) Provision(ctx context.Context, req ProvisionRequest, bind func(context.Context, pgx.Tx) error) (*Merchant, error) {
 	slug := normalizeSlug(req.Slug)
-	if err := merchant.ValidateSlug(slug); err != nil {
+	if err := billing.ValidateMerchantSlug(slug); err != nil {
 		return nil, err
 	}
 	groupID := strings.TrimSpace(req.PermissionGroupID)
@@ -212,7 +212,7 @@ func (s *Service) merchantByGroupID(ctx context.Context, groupID string) (*Merch
 }
 
 // Get returns the merchant directory row by id.
-func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
+func (s *Service) Get(ctx context.Context, id billing.MerchantID) (*Merchant, error) {
 	return s.merchantByID(ctx, id)
 }
 
@@ -227,7 +227,7 @@ func (s *Service) GetByGroupID(ctx context.Context, groupID string) (*Merchant, 
 // DirectoryRef is a merchant's public-facing directory identity: its name, the
 // human-readable name an operator gave it, and its AuthKit group.
 type DirectoryRef struct {
-	ID          merchant.ID
+	ID          billing.MerchantID
 	Slug        string
 	DisplayName string
 	GroupID     string
@@ -235,7 +235,7 @@ type DirectoryRef struct {
 
 // SetDisplayName sets the human-readable name for an active merchant. An empty
 // name is a no-op so repair calls cannot clear an existing value by omission.
-func (s *Service) SetDisplayName(ctx context.Context, id merchant.ID, displayName string) error {
+func (s *Service) SetDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error {
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		return nil
@@ -262,14 +262,14 @@ func toMerchant(id uuid.UUID, slug, status string, groupID *string, err error) (
 	if err != nil {
 		return nil, err
 	}
-	m := &Merchant{ID: merchant.ID(id), Slug: slug, Status: MerchantStatus(status)}
+	m := &Merchant{ID: billing.MerchantID(id), Slug: slug, Status: MerchantStatus(status)}
 	if groupID != nil {
 		m.PermissionGroupID = *groupID
 	}
 	return m, nil
 }
 
-func (s *Service) merchantByID(ctx context.Context, id merchant.ID) (*Merchant, error) {
+func (s *Service) merchantByID(ctx context.Context, id billing.MerchantID) (*Merchant, error) {
 	row, err := s.database.Gen(ctx).GetMerchantDirectoryByID(ctx, id.UUID())
 	return toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/catalogscope"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/permissions"
 )
 
 // RegisterOwnedCatalogRoutes exposes only creator product/price operations.
@@ -30,8 +30,8 @@ func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options)
 		scope = append(scope, middleware.MerchantDBConnMW(rt.DB))
 	}
 	scope = append(scope, ownerCatalogScopeMW(rt, opts.Gate))
-	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnRead)}, scope...)
-	write := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnUpdate)}, scope...)
+	read := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCatalogOwnRead)}, scope...)
+	write := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCatalogOwnUpdate)}, scope...)
 	rr.Handle(http.MethodGet, "", h(handlers.OwnCatalog), read...)
 	rr.Handle(http.MethodPut, "", h(handlers.OwnCatalog), write...)
 	rr.Handle(http.MethodGet, "/products", h(handlers.AdminListProducts), read...)
@@ -77,9 +77,9 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 					return
 				}
 				if selected != subject {
-					permission := permissions.MerchantCatalogRead
+					permission := billing.MerchantCatalogRead
 					if r.Request.Method != http.MethodGet && r.Request.Method != http.MethodHead {
-						permission = permissions.MerchantCatalogUpdate
+						permission = billing.MerchantCatalogUpdate
 					}
 					authorized, err := gate.Authorize(r.Request.Context(), r.Request, permission)
 					if err != nil || authorized.MerchantID != principal.MerchantID {
@@ -132,8 +132,8 @@ func RegisterCatalogCollectionRoutes(rr router.Router, rt *app.Runtime, opts Opt
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogRead)}, dbMW...)
-	write := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogUpdate)}, dbMW...)
+	read := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCatalogRead)}, dbMW...)
+	write := append([]router.Middleware{opts.merchantActionPermissionMW(billing.MerchantCatalogUpdate)}, dbMW...)
 	rr.Handle(http.MethodGet, "", h(handlers.ListCatalogs), read...)
 	rr.Handle(http.MethodPost, "", h(handlers.EnsureCatalogForOwner), write...)
 	rr.Handle(http.MethodGet, "/by-owner", h(handlers.GetCatalogForOwner), read...)

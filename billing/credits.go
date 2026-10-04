@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -17,9 +15,6 @@ const (
 	// Wasted-spend reports use payer grace, then charge overage.
 	InvokerTypePayer = "payer"
 )
-
-// MerchantID is an OpenRails merchant identifier.
-type MerchantID = merchant.ID
 
 // SelfIssuer is the issuer keying customers rows for self-service
 // identities whose subject is the user's own UUID — what an embedded host

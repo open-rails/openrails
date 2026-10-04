@@ -7,7 +7,7 @@ import (
 	"time"
 
 	billing "github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/stretchr/testify/require"
 )
 

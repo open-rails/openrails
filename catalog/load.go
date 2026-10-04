@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // SupportedVersion is the only manifest schema version this tool accepts.
@@ -42,7 +41,7 @@ func formatDurationHours(hours int) string {
 }
 
 func normalizeSlug(value string) string {
-	return pricing.NormalizeKey(value)
+	return NormalizeKey(value)
 }
 
 // normalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
@@ -345,23 +344,9 @@ func (m *Manifest) validateMeters() error {
 	seen := map[string]struct{}{}
 	for i := range m.Meters {
 		meter := &m.Meters[i]
-		validated := pricing.Meter{
-			Key:           meter.Key,
-			EventType:     meter.EventType,
-			ValueProperty: meter.ValueProperty,
-			Aggregation:   meter.Aggregation,
-			Unit:          meter.Unit,
-			GroupBy:       meter.GroupBy,
-		}
-		if err := pricing.ValidateMeter(fmt.Sprintf("meter #%d", i+1), &validated); err != nil {
+		if err := ValidateMeter(fmt.Sprintf("meter #%d", i+1), meter); err != nil {
 			return err
 		}
-		meter.Key = validated.Key
-		meter.EventType = validated.EventType
-		meter.ValueProperty = validated.ValueProperty
-		meter.Aggregation = validated.Aggregation
-		meter.Unit = validated.Unit
-		meter.GroupBy = validated.GroupBy
 		if _, ok := seen[meter.Key]; ok {
 			return fmt.Errorf("duplicate meter key %q", meter.Key)
 		}

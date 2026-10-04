@@ -10,10 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -237,7 +238,7 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 // (one tiny tx per directory row — page-bounded, both queries indexed).
 func enrichPlatformMerchant(ctx context.Context, d *db.DB, id uuid.UUID, item *platformMerchantItem) error {
 	item.RailsArmed = []string{}
-	mctx := merchant.WithID(ctx, merchant.ID(id))
+	mctx := merchant.WithID(ctx, billing.MerchantID(id))
 	return d.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		rails, err := q.ListPlatformMerchantRailsArmed(ctx, id)

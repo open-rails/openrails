@@ -15,11 +15,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type catalogReferenceVerifier func(context.Context, string, string, string, string, CreatePriceRequest, map[string]string) (map[string]string, error)

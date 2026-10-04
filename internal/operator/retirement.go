@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ListMerchantRetirementCandidates pages live, group-bound merchants created
@@ -32,7 +31,7 @@ func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req billi
 // RetireUnusedMerchant retires a live, unreserved merchant with no activity that
 // is still bound to groupID, then deletes exactly that AuthKit group with its
 // slug released. Refusals are reported in the result, not as errors.
-func RetireUnusedMerchant(ctx context.Context, a *app.App, merchantID merchant.ID, groupID string) (billing.MerchantRetirement, error) {
+func RetireUnusedMerchant(ctx context.Context, a *app.App, merchantID billing.MerchantID, groupID string) (billing.MerchantRetirement, error) {
 	cp, dir, err := retirementDirectory(a)
 	if err != nil {
 		return billing.MerchantRetirement{}, err

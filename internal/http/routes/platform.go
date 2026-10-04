@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
@@ -47,16 +47,16 @@ type AdminRateLimitUnlocker interface {
 // touching a merchant's customers/payments/subscriptions: creation stays the
 // self-service flow and destructive purge stays the #225 gated path.
 func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOptions) {
-	read := opts.platformPermissionMW(permissions.RootMerchantsRead)
-	del := opts.platformPermissionMW(permissions.RootMerchantsDelete)
-	restore := opts.platformPermissionMW(permissions.RootMerchantsRestore)
-	unlock := opts.platformPermissionMW(permissions.RootAdminRateLimitsUnlock)
+	read := opts.platformPermissionMW(billing.RootMerchantsRead)
+	del := opts.platformPermissionMW(billing.RootMerchantsDelete)
+	restore := opts.platformPermissionMW(billing.RootMerchantsRestore)
+	unlock := opts.platformPermissionMW(billing.RootAdminRateLimitsUnlock)
 
 	// #SEC-22: cross-merchant worker health (last_error is another merchant's
 	// verbatim job error) lives on the platform tier; the merchant tier keeps
 	// the same list with the error TEXT withheld.
 	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetPlatformWorkerHealth),
-		opts.platformPermissionMW(permissions.RootWorkerHealthRead))
+		opts.platformPermissionMW(billing.RootWorkerHealthRead))
 
 	merchants := rr.Group("/merchants")
 	merchants.Handle(http.MethodGet, "", h(httphandlers.PlatformListMerchants), read)

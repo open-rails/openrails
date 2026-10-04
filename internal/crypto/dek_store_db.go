@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // dbDEKStore persists wrapped per-merchant DEKs in billing.merchant_deks.
@@ -28,7 +28,7 @@ func NewDBDEKStore(pool *db.Pool) (DEKStore, error) {
 	return &dbDEKStore{pool: pool}, nil
 }
 
-func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, merchantID merchant.ID) ([]byte, bool, error) {
+func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, merchantID billing.MerchantID) ([]byte, bool, error) {
 	var wrapped []byte
 	err := s.pool.CommittedMerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -48,7 +48,7 @@ func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, merchantID merchant.ID) 
 // merchant (concurrent first-use) — keeps the existing wrapped DEK and returns it.
 // The ON CONFLICT ... DO UPDATE with the no-op assignment guarantees RETURNING
 // yields the row that actually persists, so racing creators converge.
-func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, merchantID merchant.ID, wrapped []byte) ([]byte, error) {
+func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, merchantID billing.MerchantID, wrapped []byte) ([]byte, error) {
 	var stored []byte
 	err := s.pool.CommittedMerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error

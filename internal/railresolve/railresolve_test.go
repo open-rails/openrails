@@ -5,29 +5,29 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 type exactSecrets struct {
 	secret merchants.Secret
 	err    error
-	owner  merchant.ID
+	owner  billing.MerchantID
 	name   string
 	floor  int
 }
 
-func (s *exactSecrets) Get(_ context.Context, owner merchant.ID, name string) (merchants.Secret, error) {
+func (s *exactSecrets) Get(_ context.Context, owner billing.MerchantID, name string) (merchants.Secret, error) {
 	s.owner, s.name = owner, name
 	return s.secret, s.err
 }
 
-func (s *exactSecrets) GetVersion(ctx context.Context, owner merchant.ID, name string, floor int) (merchants.Secret, error) {
+func (s *exactSecrets) GetVersion(ctx context.Context, owner billing.MerchantID, name string, floor int) (merchants.Secret, error) {
 	s.floor = floor
 	return s.Get(ctx, owner, name)
 }
@@ -35,7 +35,7 @@ func (s *exactSecrets) GetVersion(ctx context.Context, owner merchant.ID, name s
 // or#812: the custodian row's rotation floor is exact; owner, kind and posture
 // environment must all match before any credential is read.
 func TestHyperSwitchCredentialResolution(t *testing.T) {
-	owner := merchant.ID(uuid.New())
+	owner := billing.MerchantID(uuid.New())
 	base := gen.BillingCustodian{ID: uuid.New(), MerchantID: owner.UUID(), Kind: "hyperswitch", Environment: "test", AccountID: "merchant_A",
 		Settings: []byte(`{"public_api_key":"public_A","profile_id":"profile_A"}`), CredentialVersions: []byte(`{"api_key":2}`)}
 	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, HyperSwitch: &config.HyperSwitchConfig{APIBaseURL: "https://owned-custody.example"}}

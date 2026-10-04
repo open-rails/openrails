@@ -17,11 +17,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // MerchantAPIKeyManager is the control-plane surface behind the self-serve
@@ -29,9 +30,9 @@ import (
 // host without a control plane) omits these routes at registration.
 type MerchantAPIKeyManager interface {
 	RequestActor
-	MintMerchantAPIKey(ctx context.Context, mid merchant.ID, name string, role iam.Role, actor iam.Actor) (controlplane.MerchantAPIKey, string, error)
-	ListMerchantAPIKeys(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantAPIKey, error)
-	RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error)
+	MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor iam.Actor) (controlplane.MerchantAPIKey, string, error)
+	ListMerchantAPIKeys(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantAPIKey, error)
+	RevokeMerchantAPIKey(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error)
 }
 
 // RequestActor derives who performs a merchant mutation: the AuthKit actor of
@@ -107,11 +108,11 @@ func merchantRoutePrincipal(r *httprequest.Request) (billingauth.Principal, bool
 	return p, ok
 }
 
-func apiKeyMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
+func apiKeyMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
 		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
-		return merchant.ID{}, false
+		return billing.MerchantID{}, false
 	}
 	return mid, true
 }

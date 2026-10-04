@@ -8,14 +8,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // CheckCatalogMeterChange holds the ordinary meter/activity locks through the
 // caller's transaction. Nil replacement means removal. Publishing must not
 // reinterpret recorded events or orphan negotiated pricing/allowance sources.
-func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string, replacement *pricing.Meter) error {
+func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string, replacement *catalog.Meter) error {
 	queries := gen.New(tx)
 	if err := queries.LockUsageMeterKey(ctx, merchantID.String()+":"+key); err != nil {
 		return err
@@ -93,11 +93,11 @@ func CheckCatalogRateCardRemoval(ctx context.Context, tx pgx.Tx, merchantID uuid
 // CheckCatalogRateCardContracts validates the resulting default and retained
 // negotiated prices against the resulting meter, never the old default. The
 // meter/price locks serialize override writers through the caller's transaction.
-func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter pricing.Meter, filter map[string][]string, price pricing.RatePrice) error {
-	if !pricing.BillingSupported(meter.Aggregation) {
+func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter catalog.Meter, filter map[string][]string, price catalog.RatePrice) error {
+	if !catalog.BillingSupported(meter.Aggregation) {
 		return invalidUsageRateCard(fmt.Errorf("meter %q does not support billing", meter.Key))
 	}
-	if err := pricing.ValidateDimensions("default usage rate card", meter.GroupBy, filter, &price); err != nil {
+	if err := catalog.ValidateDimensions("default usage rate card", meter.GroupBy, filter, &price); err != nil {
 		return meterRateCardConflict(err)
 	}
 	_, err := loadUsageMeterForRateCard(ctx, tx, merchantID, meter.Key)
@@ -119,14 +119,14 @@ func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uu
 		if row.CustomerID == nil {
 			continue
 		}
-		var negotiated pricing.RatePrice
+		var negotiated catalog.RatePrice
 		if err := json.Unmarshal(row.Price, &negotiated); err != nil {
 			return err
 		}
 		if negotiated.Currency != price.Currency {
 			return ErrRateCardCurrencyMismatch
 		}
-		if err := pricing.ValidateDimensions("negotiated usage rate card", meter.GroupBy, filter, &negotiated); err != nil {
+		if err := catalog.ValidateDimensions("negotiated usage rate card", meter.GroupBy, filter, &negotiated); err != nil {
 			return meterRateCardConflict(err)
 		}
 		if err := validateRateCardAsAllowanceSource(ctx, queries, merchantID, meter, negotiated); err != nil {

@@ -10,13 +10,13 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Framework-neutral delegated-identity middleware for the self-service
@@ -51,7 +51,7 @@ const (
 // Principal is the common bearer-auth result used by route permission gates.
 type Principal struct {
 	CredentialClass      billingauth.CredentialClass
-	MerchantID           merchant.ID
+	MerchantID           billing.MerchantID
 	MerchantSlug         string
 	MerchantConfigSource string
 	CredentialType       CredentialType
@@ -360,7 +360,7 @@ func ResolveTreasuryPayer(customerID string, resolved *credential.ResolvedDelega
 		if strings.TrimSpace(coordinate) != customerID {
 			continue
 		}
-		if !resolved.HasPermission(permissions.MerchantAll) {
+		if !resolved.HasPermission(billing.MerchantAll) {
 			return nil, false
 		}
 		return &TreasuryPayer{

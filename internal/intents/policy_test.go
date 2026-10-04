@@ -13,11 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type fakeMode struct{ readonly, limited bool }
@@ -246,7 +247,7 @@ func TestRegistryRejectsDuplicateAndNil(t *testing.T) {
 
 func TestEnqueueRequiresMatchingMerchantBeforePersistence(t *testing.T) {
 	store := NewStore(nil) // any persistence attempt would panic
-	a, b := merchant.ID(uuid.New()), uuid.New()
+	a, b := billing.MerchantID(uuid.New()), uuid.New()
 	p := EnqueueParams{MerchantID: b, IntentType: TypeNMIDeleteSubscription}
 	_, err := store.Enqueue(context.Background(), p)
 	assert.ErrorIs(t, err, merchant.ErrNoMerchant)

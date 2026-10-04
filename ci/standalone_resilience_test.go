@@ -18,9 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/vault"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/open-rails/openrails/internal/vaultfake"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // The standalone server boots from its merchant manifest without waiting on

@@ -21,13 +21,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/sqlschema"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -113,7 +114,7 @@ func (e *env) store(i int) *idempotency.Store { return e.storeWith(i, ttl, lease
 func (e *env) ctx() context.Context { return e.ctxFor(e.merchant) }
 
 func (e *env) ctxFor(id uuid.UUID) context.Context {
-	return merchant.WithID(e.t.Context(), merchant.ID(id))
+	return merchant.WithID(e.t.Context(), billing.MerchantID(id))
 }
 
 // lapse ends key's lease on the database clock, as elapsed time or starved
@@ -639,7 +640,7 @@ func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
 	require.NoError(t, err)
 	var n int
 	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error { return nil }))
-	require.NoError(t, d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+	require.NoError(t, d.DataPool().MerchantTx(ctx, billing.MerchantID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM billing.idempotency_keys`).Scan(&n)
 	}), "pool work inside a pinned request reuses the pin")
 	require.NoError(t, d.DataPool().QueryRow(ctx, `SELECT 1`).Scan(&n))
@@ -677,7 +678,7 @@ func TestPinnedTransactionIsNeverJoined(t *testing.T) {
 	defer release()
 
 	// A statement on the request's DB inside a pool transaction.
-	err = d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+	err = d.DataPool().MerchantTx(ctx, billing.MerchantID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, insert, "outer"); err != nil {
 			return err
 		}
@@ -689,7 +690,7 @@ func TestPinnedTransactionIsNeverJoined(t *testing.T) {
 	require.Equal(t, []string{"outer"}, rows(), "the refused statement never ran inside the transaction")
 
 	// A nested DB transaction inside a pool transaction.
-	err = d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+	err = d.DataPool().MerchantTx(ctx, billing.MerchantID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, insert, "rolled-back"); err != nil {
 			return err
 		}
@@ -705,7 +706,7 @@ func TestPinnedTransactionIsNeverJoined(t *testing.T) {
 
 	// A pool statement inside the pool transaction takes its own connection,
 	// never the open transaction.
-	err = d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+	err = d.DataPool().MerchantTx(ctx, billing.MerchantID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
 		_, err := d.DataPool().Exec(ctx, insert, "separate")
 		return errors.Join(err, errors.New("roll back"))
 	})
@@ -713,6 +714,6 @@ func TestPinnedTransactionIsNeverJoined(t *testing.T) {
 	require.Equal(t, []string{"outer", "separate"}, rows())
 
 	// A context for another merchant never runs on this merchant's pin.
-	other := merchant.WithID(ctx, merchant.ID(e.newMerchant()))
+	other := merchant.WithID(ctx, billing.MerchantID(e.newMerchant()))
 	require.NoError(t, d.DataPool().QueryRow(other, `SELECT 1`).Scan(new(int)))
 }

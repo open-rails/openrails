@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 )
 
@@ -44,7 +44,7 @@ func (w MerchantSecretCleanupWorker) Work(ctx context.Context, _ *river.Job[Merc
 			}
 			after = row.RunID
 			progress.Mark(ctx, "merchant secret cleanup "+row.RunID.String())
-			if err := w.Merchants.RetrySecretCleanup(ctx, merchant.ID(*row.MerchantID), *row.RunID); err != nil && firstErr == nil {
+			if err := w.Merchants.RetrySecretCleanup(ctx, billing.MerchantID(*row.MerchantID), *row.RunID); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}

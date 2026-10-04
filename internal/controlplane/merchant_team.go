@@ -23,7 +23,7 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 var (
@@ -80,7 +80,7 @@ type MerchantTeamInviteResult struct {
 }
 
 // ListMerchantTeam returns the merchant's team, owners first.
-func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([]MerchantTeamMember, error) {
+func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid billing.MerchantID) ([]MerchantTeamMember, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 // account has verified the email, it is assigned role immediately (Added).
 // Otherwise a single-use register+join link is minted and returned (URL) —
 // unless the deployment runs registration closed (ErrTeamInvitesDisabled).
-func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email string, role iam.Role, actor iam.Actor) (MerchantTeamInviteResult, error) {
+func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor iam.Actor) (MerchantTeamInviteResult, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: invite email is required")
@@ -143,7 +143,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 
 // ListMerchantTeamInvites returns the merchant's invite links (pending,
 // redeemed and revoked — status is the audit view), never their codes.
-func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant.ID) ([]MerchantTeamInvite, error) {
+func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid billing.MerchantID) ([]MerchantTeamInvite, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (c *ControlPlane) InvitesEnabled() bool {
 
 // RevokeMerchantTeamInvite revokes an invite link of the merchant as actor.
 // It returns false when the merchant has no invite with that id.
-func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error) {
+func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return false, err
@@ -186,7 +186,7 @@ func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchan
 
 // ChangeMerchantTeamRole makes targetUserID hold newRole, as actor. Demoting
 // the last human owner is ErrCannotRemoveLastOwner.
-func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID string, newRole iam.Role, actor iam.Actor) error {
+func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor iam.Actor) error {
 	group, current, owners, err := c.teamMember(ctx, mid, targetUserID)
 	if err != nil || current == newRole.Name() {
 		return err
@@ -200,7 +200,7 @@ func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.
 
 // RemoveMerchantTeamMember removes targetUserID from the merchant team, as
 // actor. Removing the last human owner is ErrCannotRemoveLastOwner.
-func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID string, actor iam.Actor) error {
+func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor iam.Actor) error {
 	group, current, owners, err := c.teamMember(ctx, mid, targetUserID)
 	if err != nil {
 		return err
@@ -214,7 +214,7 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 // teamMember is targetUserID's role in the merchant's group and the number of
 // users owning it: the merchant keeps a human owner (#760), whatever
 // applications also hold the role.
-func (c *ControlPlane) teamMember(ctx context.Context, mid merchant.ID, targetUserID string) (iam.GroupRef, string, int, error) {
+func (c *ControlPlane) teamMember(ctx context.Context, mid billing.MerchantID, targetUserID string) (iam.GroupRef, string, int, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return iam.GroupRef{}, "", 0, err

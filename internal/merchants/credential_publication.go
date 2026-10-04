@@ -12,16 +12,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // publishProviderCredentials stages immutable backend candidates, then publishes
 // their complete references with metadata in one SQL transaction. Unpublished
 // candidates survive interruption and are recoverable by the caller's operation
 // ID. Neither receipts nor SQL publication state contain credential values.
-func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID, rail, environment, account string, enabled bool, req UpsertPaymentProviderConfigRequest, names, keys map[string]string, validated bool, verifiedAt *time.Time, transitionSource ...credentialTransitionPublication) (gen.BillingPsp, error) {
+func (s *Service) publishProviderCredentials(ctx context.Context, id billing.MerchantID, rail, environment, account string, enabled bool, req UpsertPaymentProviderConfigRequest, names, keys map[string]string, validated bool, verifiedAt *time.Time, transitionSource ...credentialTransitionPublication) (gen.BillingPsp, error) {
 	transitionFrom := ""
 	var publication credentialTransitionPublication
 	var snapshotRefs map[string]SecretRef
@@ -320,7 +320,7 @@ func credentialPublicationMetadata(enabled bool, public map[string]string, keys 
 // replayProviderCredentialPublication checks committed custody before any provider
 // probe. Secret equality is checked privately against immutable references;
 // neither payload values nor their hashes are stored in SQL receipts.
-func (s *Service) replayProviderCredentialPublication(ctx context.Context, id merchant.ID, rail, environment, account string, req UpsertPaymentProviderConfigRequest) (gen.BillingPsp, bool, error) {
+func (s *Service) replayProviderCredentialPublication(ctx context.Context, id billing.MerchantID, rail, environment, account string, req UpsertPaymentProviderConfigRequest) (gen.BillingPsp, bool, error) {
 	var row gen.BillingPsp
 	var metadata, receipt []byte
 	var storedRail, storedEnv, storedAccount string
@@ -400,7 +400,7 @@ func (s *Service) replayProviderCredentialPublication(ctx context.Context, id me
 }
 
 // secretRefsDiffer compares two published credential values privately.
-func (s *Service) secretRefsDiffer(ctx context.Context, id merchant.ID, a, b SecretRef) (bool, error) {
+func (s *Service) secretRefsDiffer(ctx context.Context, id billing.MerchantID, a, b SecretRef) (bool, error) {
 	left, err := ReadSecretRef(ctx, s.secrets, id, a)
 	if errors.Is(err, ErrSecretNotFound) {
 		return false, nil

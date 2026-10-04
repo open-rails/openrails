@@ -7,10 +7,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/sqlschema"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Schema relocation (#471, #1123). OpenRails SQL is authored in
@@ -197,7 +198,7 @@ func (p *Pool) Begin(ctx context.Context) (pgx.Tx, error) {
 // MerchantTx runs hand-written pool queries inside a transaction whose
 // app.merchant_id GUC is pinned to the target merchant. Use this for direct Pool
 // stores that touch merchant-owned tables but do not have a *DB.
-func (p *Pool) MerchantTx(ctx context.Context, id merchant.ID, fn func(context.Context, pgx.Tx) error) error {
+func (p *Pool) MerchantTx(ctx context.Context, id billing.MerchantID, fn func(context.Context, pgx.Tx) error) error {
 	if p == nil {
 		return errors.New("db: MerchantTx on nil Pool")
 	}

@@ -8,9 +8,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +21,7 @@ type directory struct {
 	calls int
 }
 
-func (d *directory) Get(context.Context, merchant.ID) (*merchants.Merchant, error) {
+func (d *directory) Get(context.Context, billing.MerchantID) (*merchants.Merchant, error) {
 	d.calls++
 	return d.m, d.err
 }
@@ -38,7 +39,7 @@ func requireGate(t *testing.T, err error, status int) billingauth.GateError {
 }
 
 func TestSelectorFailures(t *testing.T) {
-	id := merchant.ID(uuid.New())
+	id := billing.MerchantID(uuid.New())
 	active := &merchants.Merchant{ID: id, Slug: "shop", Status: merchants.StatusActive}
 	for _, tc := range []struct {
 		name    string
@@ -61,7 +62,7 @@ func TestSelectorFailures(t *testing.T) {
 			for k, v := range tc.headers {
 				r.Header[http.CanonicalHeaderKey(k)] = v
 			}
-			_, err := Resolve(r.Context(), r, tc.dir, merchant.ID{}, "")
+			_, err := Resolve(r.Context(), r, tc.dir, billing.MerchantID{}, "")
 			requireGate(t, err, tc.status)
 		})
 	}
@@ -70,15 +71,15 @@ func TestSelectorFailures(t *testing.T) {
 }
 
 func TestResolvedAliasKeepsCanonicalTargetAndOriginalSelector(t *testing.T) {
-	d := &directory{m: &merchants.Merchant{ID: merchant.ID(uuid.New()), Slug: "current", Status: merchants.StatusActive}}
+	d := &directory{m: &merchants.Merchant{ID: billing.MerchantID(uuid.New()), Slug: "current", Status: merchants.StatusActive}}
 	r := httptest.NewRequest("POST", "/v2/merchant/products", nil)
 	r.Header.Set(merchant.SlugHeader, "Former")
-	target, err := Resolve(r.Context(), r, d, merchant.ID{}, "")
+	target, err := Resolve(r.Context(), r, d, billing.MerchantID{}, "")
 	require.NoError(t, err)
 	require.Equal(t, "current", target.MerchantSlug)
 	r = r.WithContext(WithResolved(r.Context(), target))
 	require.NoError(t, Assert(r, target))
-	captured, err := Resolve(r.Context(), r, d, merchant.ID{}, "")
+	captured, err := Resolve(r.Context(), r, d, billing.MerchantID{}, "")
 	require.NoError(t, err)
 	require.Equal(t, target, captured)
 	require.Equal(t, 1, d.calls, "alias resolves once, never relooked up after authorization")
@@ -94,19 +95,19 @@ func TestResolvedAliasKeepsCanonicalTargetAndOriginalSelector(t *testing.T) {
 // The stored name is the merchant's current name (#1106): ID selection
 // presents it without another lookup.
 func TestIDSelectionPresentsTheStoredName(t *testing.T) {
-	id := merchant.ID(uuid.New())
+	id := billing.MerchantID(uuid.New())
 	group := uuid.NewString()
 	d := &directory{m: &merchants.Merchant{ID: id, Slug: "current", Status: merchants.StatusActive, PermissionGroupID: group}}
 	r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
 	r.Header.Set(merchant.BindingHeader, id.String())
-	target, err := Resolve(r.Context(), r, d, merchant.ID{}, "")
+	target, err := Resolve(r.Context(), r, d, billing.MerchantID{}, "")
 	require.NoError(t, err)
 	require.Equal(t, billingauth.Target{MerchantID: id, MerchantSlug: "current", AuthorityGroupID: group}, target)
 	require.Equal(t, 1, d.calls)
 }
 
 func TestBindingMismatchRefusedBeforeDirectoryLookup(t *testing.T) {
-	bound, selected := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	bound, selected := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	d := &directory{}
 	r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
 	r.Header.Set(merchant.BindingHeader, selected.String())

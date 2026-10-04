@@ -11,12 +11,11 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MerchantRenamer is the control-plane surface behind PUT /v1/merchant/name.
 type MerchantRenamer interface {
-	RenameMerchant(ctx context.Context, mid merchant.ID, name, actorUserID string, operator bool) (*merchants.Merchant, error)
+	RenameMerchant(ctx context.Context, mid billing.MerchantID, name, actorUserID string, operator bool) (*merchants.Merchant, error)
 }
 
 // MerchantRename handles PUT /v1/merchant/name {"name": …}: renames the

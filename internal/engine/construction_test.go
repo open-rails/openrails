@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Every refusal below happens before bootstrap: the configs carry no database,
@@ -215,7 +215,7 @@ func TestHostTransactionsBindEngineMerchant(t *testing.T) {
 	_, err := e.bind(context.Background())
 	require.ErrorContains(t, err, "no merchant is bound")
 
-	bound, other := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	bound, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	appRuntime.SetConfiguredMerchant(bound)
 	ctx, err := e.bind(context.Background())
 	require.NoError(t, err)

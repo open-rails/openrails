@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // AttachOptions configures the embedded AuthKit control plane: the only seam
@@ -85,7 +85,7 @@ type AttachOptions struct {
 	AuthRateLimitOverrides map[string]authkit.RateLimit
 
 	// MerchantCreation declares the hosted policy for merchant names claimed by
-	// users (or#914): reserved names (merchant.ReservedHostedSlugs +
+	// users (or#914): reserved names (billing.ReservedMerchantSlugs +
 	// cfg.ReservedSlugs), the creation pattern and the cfg.Admission cost gate
 	// apply to ProvisionMerchant with an OwnerUserID and to merchant renames.
 	// Leave nil for operator-provisioned (manifest/bootstrap) deployments.

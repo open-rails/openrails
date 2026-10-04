@@ -27,13 +27,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // The declared-facts vocabulary is the shared Client wire (billing.DeclaredBilling);
@@ -57,7 +57,7 @@ type (
 // immutable merchant UUID; imports never interpret a public name.
 type Options struct {
 	DB         *db.DB
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	Book       DeclaredBilling
 	// Clock is the runtime clock the post-import derivation evaluates at.
 	Clock clockwork.Clock
@@ -358,7 +358,7 @@ const FailpointKind = "billing_import"
 // deriveImportedAccess derives, for exactly the book's customers, the grants
 // an operator convergence would: an imported member is entitled without a
 // merchant-wide pass.
-func deriveImportedAccess(ctx context.Context, q *gen.Queries, merchantID merchant.ID, book DeclaredBilling, clock clockwork.Clock) error {
+func deriveImportedAccess(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, book DeclaredBilling, clock clockwork.Clock) error {
 	customers := map[uuid.UUID]struct{}{}
 	for _, c := range book.Customers {
 		customers[c.Customer.UUID()] = struct{}{}

@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 func (s *Service) HasSettledPayment(ctx context.Context, customerID, priceID uuid.UUID) (bool, error) {

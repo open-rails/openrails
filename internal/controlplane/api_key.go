@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/db/gen"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 const (
@@ -32,16 +32,16 @@ type ResolvedServiceCredential = credential.ResolvedServiceCredential
 
 // MerchantScope resolves a current or former merchant name to its bound
 // merchant and current name.
-func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, error) {
+func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (billing.MerchantID, string, error) {
 	if c == nil || c.pool == nil || c.Core() == nil || strings.TrimSpace(ref) == "" {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return billing.MerchantID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	groupID, err := c.merchantGroupByName(ctx, ref)
 	if errors.Is(err, billing.ErrMerchantUnresolved) {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return billing.MerchantID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	return c.merchantForGroupID(ctx, groupID)
 }
@@ -110,17 +110,17 @@ var ErrServiceCredentialScopeDenied = credential.ErrServiceCredentialScopeDenied
 // merchantForGroupID resolves the OpenRails merchant bound to an AuthKit group
 // (#567: a merchant IS its own group). Suspended and deleted merchants are
 // rejected.
-func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (merchant.ID, string, error) {
+func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (billing.MerchantID, string, error) {
 	groupID = strings.TrimSpace(groupID)
 	if c.pool == nil {
-		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
+		return billing.MerchantID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
 	}
 	if groupID == "" {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return billing.MerchantID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	mid, slug, err := c.merchantDirectoryRow(gen.New(c.pool).ListLiveMerchantsByGroupID(ctx, groupID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return billing.MerchantID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	return mid, slug, err
 }
@@ -130,7 +130,7 @@ func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (
 // and the merchant must be active (#567).
 // merchantForGroupID resolves the group's merchant; AuthorizeMerchant is the
 // explicit fail-closed gate for any path that NAMES a merchant id directly.
-func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mid merchant.ID) error {
+func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mid billing.MerchantID) error {
 	groupID = strings.TrimSpace(groupID)
 	if c == nil || c.pool == nil {
 		return errors.New("controlplane: pgx pool unavailable for merchant authorization")
@@ -155,18 +155,18 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mi
 // returns pgx.ErrNoRows untouched so callers can decide whether a fallback
 // applies. If the lookup matches multiple active merchants, the caller must
 // name a merchant explicitly and authorize it with AuthorizeMerchant.
-func (c *ControlPlane) merchantDirectoryRow(matches []gen.BillingMerchant, err error) (merchant.ID, string, error) {
+func (c *ControlPlane) merchantDirectoryRow(matches []gen.BillingMerchant, err error) (billing.MerchantID, string, error) {
 	if err != nil {
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	if len(matches) == 0 {
-		return merchant.ID{}, "", pgx.ErrNoRows
+		return billing.MerchantID{}, "", pgx.ErrNoRows
 	}
 	if len(matches) > 1 {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return billing.MerchantID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	if matches[0].Status != "active" {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return billing.MerchantID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	return merchant.ID(matches[0].ID), matches[0].Slug, nil
+	return billing.MerchantID(matches[0].ID), matches[0].Slug, nil
 }

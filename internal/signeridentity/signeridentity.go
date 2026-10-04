@@ -16,12 +16,12 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Transit checks every Transit public-key read made while provisioning one
@@ -104,13 +104,13 @@ type StoredSigner struct {
 // Stored returns the merchant and its active Solana PSPs signed by the
 // Transit key, oldest first. A merchant not provisioned yet has none; any
 // other failure is returned, never read as "none".
-func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, slug, environment, key string) (merchant.ID, []StoredSigner, error) {
-	m, err := directory.GetBySlug(ctx, merchant.NormalizeSlug(slug))
+func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, slug, environment, key string) (billing.MerchantID, []StoredSigner, error) {
+	m, err := directory.GetBySlug(ctx, billing.NormalizeMerchantSlug(slug))
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
-		return merchant.ID{}, nil, nil
+		return billing.MerchantID{}, nil, nil
 	}
 	if err != nil {
-		return merchant.ID{}, nil, err
+		return billing.MerchantID{}, nil, err
 	}
 	rail := "solana"
 	var out []StoredSigner
@@ -136,7 +136,7 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 		return nil
 	})
 	if err != nil {
-		return merchant.ID{}, nil, err
+		return billing.MerchantID{}, nil, err
 	}
 	return m.ID, out, nil
 }
@@ -145,7 +145,7 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 // awaiting exactly that key drain (archived, pending cleared). The caller then
 // re-applies the merchant's declaration, which provisions the approved one.
 // It refuses when nothing is pending for that key.
-func Approve(ctx context.Context, database *db.DB, directory *merchants.Service, transit solanaint.TransitClient, mid merchant.ID, environment, key string) (string, error) {
+func Approve(ctx context.Context, database *db.DB, directory *merchants.Service, transit solanaint.TransitClient, mid billing.MerchantID, environment, key string) (string, error) {
 	if transit == nil {
 		return "", fmt.Errorf("no Vault Transit signer is configured")
 	}

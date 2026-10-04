@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ProvisionMerchant idempotently provisions a merchant at runtime through the
@@ -22,8 +21,8 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req billing.ProvisionMer
 	if cp == nil || cp.Core() == nil {
 		return nil, fmt.Errorf("control plane provision: no control plane attached (call Attach first)")
 	}
-	slug := merchant.NormalizeSlug(req.Slug)
-	if err := merchant.ValidateSlug(slug); err != nil {
+	slug := billing.NormalizeMerchantSlug(req.Slug)
+	if err := billing.ValidateMerchantSlug(slug); err != nil {
 		return nil, fmt.Errorf("%w: %w", billing.ErrInvalidMerchantSlug, err)
 	}
 	if err := cp.EnforceMerchantCreationPolicy(ctx, slug, req.OwnerUserID); err != nil {

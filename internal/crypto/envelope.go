@@ -31,7 +31,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 const (
@@ -51,11 +51,11 @@ var ErrEncryptionDisabled = errors.New("crypto: encryption disabled (no master k
 type DEKStore interface {
 	// GetWrappedDEK returns the wrapped DEK for a merchant, or (nil, false) when the
 	// merchant has none yet.
-	GetWrappedDEK(ctx context.Context, merchantID merchant.ID) (wrapped []byte, ok bool, err error)
+	GetWrappedDEK(ctx context.Context, merchantID billing.MerchantID) (wrapped []byte, ok bool, err error)
 	// PutWrappedDEK stores the wrapped DEK for a merchant. It must be safe under
 	// concurrent first-use: if a row already exists it should keep the existing
 	// one and return that (so two racing creates converge on one DEK).
-	PutWrappedDEK(ctx context.Context, merchantID merchant.ID, wrapped []byte) (stored []byte, err error)
+	PutWrappedDEK(ctx context.Context, merchantID billing.MerchantID, wrapped []byte) (stored []byte, err error)
 }
 
 // Encryptor provides per-merchant field encryption backed by envelope encryption.
@@ -65,7 +65,7 @@ type Encryptor struct {
 	store     DEKStore
 
 	mu      sync.Mutex
-	dekGCMs map[merchant.ID]cipher.AEAD // cache of unwrapped per-merchant DEK ciphers
+	dekGCMs map[billing.MerchantID]cipher.AEAD // cache of unwrapped per-merchant DEK ciphers
 }
 
 // NewEncryptor builds an Encryptor from a base64-encoded 32-byte master key and a
@@ -74,7 +74,7 @@ type Encryptor struct {
 // back-compat / self-hosted-without-encryption.
 func NewEncryptor(masterKeyB64 string, store DEKStore) (*Encryptor, error) {
 	if masterKeyB64 == "" {
-		return &Encryptor{store: store, dekGCMs: map[merchant.ID]cipher.AEAD{}}, nil
+		return &Encryptor{store: store, dekGCMs: map[billing.MerchantID]cipher.AEAD{}}, nil
 	}
 	key, err := base64.StdEncoding.DecodeString(masterKeyB64)
 	if err != nil {
@@ -90,7 +90,7 @@ func NewEncryptor(masterKeyB64 string, store DEKStore) (*Encryptor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crypto: master key cipher: %w", err)
 	}
-	return &Encryptor{masterGCM: gcm, store: store, dekGCMs: map[merchant.ID]cipher.AEAD{}}, nil
+	return &Encryptor{masterGCM: gcm, store: store, dekGCMs: map[billing.MerchantID]cipher.AEAD{}}, nil
 }
 
 // Enabled reports whether at-rest encryption is active (a master key is set).
@@ -107,7 +107,7 @@ type AAD []byte
 // SecretAAD is the binding for a merchant secret row: (merchant_id, name).
 // Length-prefixed so no two distinct pairs can encode to the same bytes —
 // ("ab","c") must not collide with ("a","bc").
-func SecretAAD(merchantID merchant.ID, name string) AAD {
+func SecretAAD(merchantID billing.MerchantID, name string) AAD {
 	id := merchantID.UUID()
 	out := make([]byte, 0, 8+len(id)+len(name)+16)
 	out = append(out, "openrails/secret/v1\x00"...)
@@ -131,7 +131,7 @@ func SecretAAD(merchantID merchant.ID, name string) AAD {
 // (nonce || ciphertext || tag). aad binds the ciphertext to its row and MUST be
 // reproduced byte-for-byte at Decrypt; it is authenticated, not stored. The
 // merchant DEK is created+wrapped+stored lazily on first use and reused after.
-func (e *Encryptor) Encrypt(ctx context.Context, merchantID merchant.ID, aad AAD, plaintext []byte) (string, error) {
+func (e *Encryptor) Encrypt(ctx context.Context, merchantID billing.MerchantID, aad AAD, plaintext []byte) (string, error) {
 	if !e.Enabled() {
 		return "", ErrEncryptionDisabled
 	}
@@ -153,7 +153,7 @@ func (e *Encryptor) Encrypt(ctx context.Context, merchantID merchant.ID, aad AAD
 // produced for one merchant CANNOT be decrypted with another merchant's DEK, and
 // one produced for a different (merchant, name) row CANNOT be decrypted here —
 // both fail the GCM tag.
-func (e *Encryptor) Decrypt(ctx context.Context, merchantID merchant.ID, aad AAD, ciphertextB64 string) ([]byte, error) {
+func (e *Encryptor) Decrypt(ctx context.Context, merchantID billing.MerchantID, aad AAD, ciphertextB64 string) ([]byte, error) {
 	if !e.Enabled() {
 		return nil, ErrEncryptionDisabled
 	}
@@ -177,7 +177,7 @@ func (e *Encryptor) Decrypt(ctx context.Context, merchantID merchant.ID, aad AAD
 
 // merchantGCM returns the AEAD for a merchant's DEK, lazily creating + wrapping +
 // storing the DEK on first use and caching the unwrapped cipher.
-func (e *Encryptor) merchantGCM(ctx context.Context, merchantID merchant.ID) (cipher.AEAD, error) {
+func (e *Encryptor) merchantGCM(ctx context.Context, merchantID billing.MerchantID) (cipher.AEAD, error) {
 	e.mu.Lock()
 	if gcm, ok := e.dekGCMs[merchantID]; ok {
 		e.mu.Unlock()
@@ -207,7 +207,7 @@ func (e *Encryptor) merchantGCM(ctx context.Context, merchantID merchant.ID) (ci
 // loadOrCreateDEK fetches and unwraps the merchant's DEK, or generates a fresh DEK,
 // wraps it with the master key, and stores it (idempotently). The plaintext DEK
 // is never persisted.
-func (e *Encryptor) loadOrCreateDEK(ctx context.Context, merchantID merchant.ID) ([]byte, error) {
+func (e *Encryptor) loadOrCreateDEK(ctx context.Context, merchantID billing.MerchantID) ([]byte, error) {
 	if wrapped, ok, err := e.store.GetWrappedDEK(ctx, merchantID); err != nil {
 		return nil, fmt.Errorf("crypto: load wrapped DEK: %w", err)
 	} else if ok {
@@ -238,7 +238,7 @@ func (e *Encryptor) loadOrCreateDEK(ctx context.Context, merchantID merchant.ID)
 
 // dekAAD binds a wrapped DEK to the merchant whose row holds it, so a wrapped
 // DEK relocated to another merchant's row does not unwrap.
-func dekAAD(merchantID merchant.ID) AAD {
+func dekAAD(merchantID billing.MerchantID) AAD {
 	id := merchantID.UUID()
 	out := make([]byte, 0, 24+len(id))
 	out = append(out, "openrails/dek/v1\x00"...)
@@ -246,7 +246,7 @@ func dekAAD(merchantID merchant.ID) AAD {
 	return out
 }
 
-func (e *Encryptor) unwrapDEK(merchantID merchant.ID, wrapped []byte) ([]byte, error) {
+func (e *Encryptor) unwrapDEK(merchantID billing.MerchantID, wrapped []byte) ([]byte, error) {
 	dek, err := open(e.masterGCM, dekAAD(merchantID), wrapped)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: unwrap DEK (wrong master key?): %w", err)

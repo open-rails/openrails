@@ -7,10 +7,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 var (
@@ -49,13 +50,13 @@ func RefuseOwnerOperation(ctx context.Context) error {
 	return nil
 }
 
-func queryCatalogScope(ctx context.Context) (merchant.ID, *uuid.UUID, error) {
+func queryCatalogScope(ctx context.Context) (billing.MerchantID, *uuid.UUID, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return merchant.ID{}, nil, err
+		return billing.MerchantID{}, nil, err
 	}
 	if err := ValidateOwnerScope(ctx); err != nil {
-		return merchant.ID{}, nil, err
+		return billing.MerchantID{}, nil, err
 	}
 	return mid, catalogscope.QueryID(ctx), nil
 }

@@ -11,12 +11,13 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -142,9 +143,9 @@ func (p *SolanaPayPoller) PollOnce(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		mctx := merchant.WithID(ctx, merchant.ID(mid))
+		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		if err := p.db.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			p.pollMerchant(ctx, merchant.ID(mid), group)
+			p.pollMerchant(ctx, billing.MerchantID(mid), group)
 			return nil
 		}); err != nil {
 			log.WithError(err).WithField("merchant_id", mid.String()).Warn("Solana Pay merchant pass failed")
@@ -153,7 +154,7 @@ func (p *SolanaPayPoller) PollOnce(ctx context.Context) error {
 	return nil
 }
 
-func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid merchant.ID, refs []gen.BillingSolanaPayReference) {
+func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid billing.MerchantID, refs []gen.BillingSolanaPayReference) {
 	ledger := NewPayLedger(p.db)
 	rpc, err := p.rpcBuilder.Resolve(ctx, mid)
 	if rpc == nil {

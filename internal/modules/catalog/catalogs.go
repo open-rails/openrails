@@ -6,10 +6,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // CatalogRepo persists business ownership within the selected merchant. It
@@ -18,13 +19,13 @@ type CatalogRepo struct{ db *db.DB }
 
 func NewCatalogRepo(database *db.DB) *CatalogRepo { return &CatalogRepo{db: database} }
 
-func catalogMerchant(ctx context.Context) (merchant.ID, error) {
+func catalogMerchant(ctx context.Context) (billing.MerchantID, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return merchant.ID{}, err
+		return billing.MerchantID{}, err
 	}
 	if scope, ok := catalogscope.FromContext(ctx); ok && scope.MerchantID != mid {
-		return merchant.ID{}, fmt.Errorf("catalog scope does not match the authorized merchant")
+		return billing.MerchantID{}, fmt.Errorf("catalog scope does not match the authorized merchant")
 	}
 	return mid, nil
 }

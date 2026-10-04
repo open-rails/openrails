@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/requestauth"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // River decodes a job by kind into the worker's args type, so the public args
@@ -46,7 +45,7 @@ func TestRemoteClientRefusesHostingOperations(t *testing.T) {
 	require.Nil(t, c.Probes())
 	_, err = c.ProvisionMerchant(t.Context(), billing.ProvisionMerchantRequest{Slug: "x"})
 	require.ErrorIs(t, err, ErrRemoteClient)
-	_, err = c.DeclarePSP(t.Context(), merchant.ID(uuid.New()), billing.PSPDeclaration{})
+	_, err = c.DeclarePSP(t.Context(), billing.MerchantID(uuid.New()), billing.PSPDeclaration{})
 	require.ErrorIs(t, err, ErrRemoteClient)
 	require.Nil(t, c.AuthKit())
 	require.NoError(t, c.Close(t.Context()))
@@ -56,7 +55,7 @@ func TestRemoteClientRefusesHostingOperations(t *testing.T) {
 // transport principal never becomes that subject, and nothing the clone
 // exposes can widen scope or reach admin operations.
 func TestCatalogOwnerClientCannotExpandScope(t *testing.T) {
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	product := billing.ProductID(uuid.New())
 	const subject = "作者 / external:123"
 	calls := 0
@@ -72,7 +71,7 @@ func TestCatalogOwnerClientCannotExpandScope(t *testing.T) {
 		require.Empty(t, principal.Subject)
 		require.NoError(t, json.NewEncoder(w).Encode(billing.CatalogProduct{ID: product}))
 	})
-	transport, capability := inprocess.NewTransport(handler, func() merchant.ID { return mid })
+	transport, capability := inprocess.NewTransport(handler, func() billing.MerchantID { return mid })
 	admin, err := NewRemote(engine.InprocessBaseURL, WithMerchantID(mid), WithHTTPClient(&http.Client{Transport: transport}),
 		WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
 	require.NoError(t, err)

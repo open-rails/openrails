@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StripeWebhookCredentialState is private operator state, never a public DTO.
@@ -22,13 +22,13 @@ type StripeWebhookCredentialState struct {
 // its loaded revision. Each reconcile pass owns one instance.
 type StripeWebhookPublication struct {
 	service  *Service
-	merchant merchant.ID
+	merchant billing.MerchantID
 	account  string
 	row      gen.BillingPsp
 	loaded   bool
 }
 
-func (s *Service) StripeWebhookPublication(id merchant.ID, account string) *StripeWebhookPublication {
+func (s *Service) StripeWebhookPublication(id billing.MerchantID, account string) *StripeWebhookPublication {
 	return &StripeWebhookPublication{service: s, merchant: id, account: account}
 }
 func (p *StripeWebhookPublication) Load(ctx context.Context) (StripeWebhookCredentialState, error) {

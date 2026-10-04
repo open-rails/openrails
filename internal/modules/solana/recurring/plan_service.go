@@ -9,10 +9,10 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const maxPeriodHours = 8760 // 1 year — the program's upper bound for period_hours
@@ -23,20 +23,20 @@ const maxPeriodHours = 8760 // 1 year — the program's upper bound for period_h
 // so the services are unit-testable without a live signer/RPC.
 type Submitter interface {
 	// MerchantAddress returns the merchant's on-chain merchant/cranker address.
-	MerchantAddress(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error)
+	MerchantAddress(ctx context.Context, tenantID billing.MerchantID) (solanago.PublicKey, error)
 	// Submit signs (with the merchant's key) and submits the instructions, returning
 	// the confirmed transaction signature.
-	Submit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error)
+	Submit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction) (solanago.Signature, error)
 }
 
 type publicKeySigner interface {
-	SignMessageForPublicKey(ctx context.Context, tenantID merchant.ID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error)
+	SignMessageForPublicKey(ctx context.Context, tenantID billing.MerchantID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error)
 }
 
 // RPCResolver arms the merchant's Solana RPC client at use time (#728:
 // store-declared rail-account settings win, boot client as fallback). nil
 // client with nil error = no plane armed.
-type RPCResolver func(ctx context.Context, merchantID merchant.ID) (*solanaint.RPCClient, error)
+type RPCResolver func(ctx context.Context, merchantID billing.MerchantID) (*solanaint.RPCClient, error)
 
 // signerSubmitter is the production Submitter: a per-merchant solana.Signer + RPC,
 // wired through solana.BuildSignSubmit (the verified build/sign/submit path).
@@ -61,7 +61,7 @@ func NewSignerSubmitterWithResolver(signer solanaint.Signer, resolve RPCResolver
 
 // rpcFor arms this merchant's RPC: resolver first (store-wins), fixed client
 // as fallback; neither armed = loud error (the pull fails as operational).
-func (s *signerSubmitter) rpcFor(ctx context.Context, tenantID merchant.ID) (*solanaint.RPCClient, error) {
+func (s *signerSubmitter) rpcFor(ctx context.Context, tenantID billing.MerchantID) (*solanaint.RPCClient, error) {
 	if s.resolve != nil {
 		rpc, err := s.resolve(ctx, tenantID)
 		if err != nil {
@@ -77,11 +77,11 @@ func (s *signerSubmitter) rpcFor(ctx context.Context, tenantID merchant.ID) (*so
 	return nil, fmt.Errorf("solana: no RPC client armed for merchant %s (#728)", tenantID.String())
 }
 
-func (s *signerSubmitter) MerchantAddress(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error) {
+func (s *signerSubmitter) MerchantAddress(ctx context.Context, tenantID billing.MerchantID) (solanago.PublicKey, error) {
 	return s.signer.PublicKey(ctx, tenantID)
 }
 
-func (s *signerSubmitter) Submit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error) {
+func (s *signerSubmitter) Submit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction) (solanago.Signature, error) {
 	rpc, err := s.rpcFor(ctx, tenantID)
 	if err != nil {
 		return solanago.Signature{}, err
@@ -91,7 +91,7 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID merchant.ID, inst
 
 // SubmitWithPresubmit persists the signed tx signature via presubmit BEFORE
 // submission (#674).
-func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID merchant.ID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	rpc, err := s.rpcFor(ctx, tenantID)
 	if err != nil {
 		return solanago.Signature{}, err
@@ -99,12 +99,12 @@ func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID merc
 	return solanaint.BuildSignSubmitPresubmit(ctx, tenantID, s.signer, rpc, instructions, presubmit)
 }
 
-func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error) {
+func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error) {
 	return s.SubmitForMerchantAddressWithPresubmit(ctx, tenantID, merchantAddress, instructions, nil)
 }
 
 // SubmitForMerchantAddressWithPresubmit: see SubmitWithPresubmit.
-func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID merchant.ID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	if signer, ok := s.signer.(publicKeySigner); ok {
 		rpc, err := s.rpcFor(ctx, tenantID)
 		if err != nil {
@@ -154,7 +154,7 @@ func NewPlanServiceWithReader(submitter Submitter, reader planReader, network st
 // MerchantAddress returns the merchant's on-chain merchant (cranker) address — the
 // owner half of a plan PDA. The catalog provider adapter uses it to derive a
 // price's plan PDA for an idempotent find-or-attach read-back before publishing.
-func (s *PlanService) MerchantAddress(ctx context.Context, tenantID merchant.ID) (solanago.PublicKey, error) {
+func (s *PlanService) MerchantAddress(ctx context.Context, tenantID billing.MerchantID) (solanago.PublicKey, error) {
 	return s.submitter.MerchantAddress(ctx, tenantID)
 }
 
@@ -199,7 +199,7 @@ func (s *PlanService) mintDecimals(ctx context.Context, mintStr string) (int, er
 
 // PublishPlanInput describes a recurring plan to publish on-chain.
 type PublishPlanInput struct {
-	MerchantID      merchant.ID
+	MerchantID      billing.MerchantID
 	PlanID          uint64 // caller-chosen unique id (the plan PDA derives from it)
 	TokenSymbol     string // must be recurring-eligible (USDC/USD1)
 	AmountBaseUnits uint64 // fixed charge per period, in token base units
@@ -483,7 +483,7 @@ var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this mer
 // (it has already verified the plan exists and is not yet sunset); its mutable
 // fields are echoed so the update changes status and nothing else. Signed by
 // the merchant's merchant key, which must equal the plan's owner.
-func (s *PlanService) SunsetPlan(ctx context.Context, tenantID merchant.ID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (signature string, err error) {
+func (s *PlanService) SunsetPlan(ctx context.Context, tenantID billing.MerchantID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (signature string, err error) {
 	if current == nil {
 		return "", fmt.Errorf("recurring: sunset requires the current plan account")
 	}
@@ -514,7 +514,7 @@ func (s *PlanService) SunsetPlan(ctx context.Context, tenantID merchant.ID, plan
 
 // ensureReceivingATAs provisions the merchant's receiving ATA and, for a cold
 // wallet plan, the receiving wallet's too.
-func (s *PlanService) ensureReceivingATAs(ctx context.Context, tenantID merchant.ID, mint, merchant solanago.PublicKey, recv *solanago.PublicKey) error {
+func (s *PlanService) ensureReceivingATAs(ctx context.Context, tenantID billing.MerchantID, mint, merchant solanago.PublicKey, recv *solanago.PublicKey) error {
 	if err := s.ensureReceivingATA(ctx, tenantID, merchant, mint); err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func (s *PlanService) ensureReceivingATAs(ctx context.Context, tenantID merchant
 // mint (classic SPL Token), paid + signed by the merchant's cranker; an ATA already
 // on chain submits nothing. A failure is a hard error: the plan cannot be billed
 // without a receiving ATA.
-func (s *PlanService) ensureReceivingATA(ctx context.Context, tenantID merchant.ID, owner, mint solanago.PublicKey) error {
+func (s *PlanService) ensureReceivingATA(ctx context.Context, tenantID billing.MerchantID, owner, mint solanago.PublicKey) error {
 	ata, _, err := subscriptions.DeriveATA(owner, mint, solanago.TokenProgramID)
 	if err != nil {
 		return fmt.Errorf("recurring: derive receiving ata for %s: %w", owner, err)

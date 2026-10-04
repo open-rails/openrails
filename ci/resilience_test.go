@@ -28,10 +28,10 @@ import (
 	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/internal/vaultfake"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const transitKey = "e2e-solana"
@@ -289,7 +289,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 		}
 		return active, archived
 	}
-	railConfig := func(rt *openrails.Client, mid merchant.ID) error {
+	railConfig := func(rt *openrails.Client, mid billing.MerchantID) error {
 		_, err := engine.Graph(rt).Runtime.RailConfigs.RailConfig(merchant.WithID(t.Context(), mid), "solana", "")
 		return err
 	}

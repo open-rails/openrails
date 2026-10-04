@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values []config.ProviderCredentialSnapshot) error {
@@ -19,7 +19,7 @@ func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values
 		return fmt.Errorf("openrails: Deps.ProviderCredentials requires snapshot credential custody")
 	}
 	type entry struct {
-		merchant merchant.ID
+		merchant billing.MerchantID
 		name     string
 		value    string
 	}

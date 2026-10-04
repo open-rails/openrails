@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -114,7 +114,7 @@ func TestProbeNMIAndCCBillCredentials(t *testing.T) {
 	}))
 	t.Cleanup(nmi.Close)
 	svc := &Service{secrets: NewMemorySecretStore(), nmiCredentialProbeQueryURL: nmi.URL}
-	ok, err := svc.probePaymentProviderCredentials(t.Context(), merchant.ID(uuid.New()), "nmi", "test", "gateway", map[string]string{"security_key": "security-key"})
+	ok, err := svc.probePaymentProviderCredentials(t.Context(), billing.MerchantID(uuid.New()), "nmi", "test", "gateway", map[string]string{"security_key": "security-key"})
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -125,7 +125,7 @@ func TestProbeNMIAndCCBillCredentials(t *testing.T) {
 		assert.Equal(t, "stored-pass", r.Form.Get("password"))
 	}))
 	t.Cleanup(ccbill.Close)
-	id := merchant.ID(uuid.New())
+	id := billing.MerchantID(uuid.New())
 	store := NewMemorySecretStore()
 	_, err = store.Put(t.Context(), id, "psps/ccbill/live/900000-0000/datalink_password", "stored-pass")
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func TestStripeCredentialProbeBindsAccountAndEnvironment(t *testing.T) {
 				}
 				return &http.Response{StatusCode: status, Header: http.Header{"Location": {"https://unexpected.example/secret"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 			}))}
-			ok, err := svc.probePaymentProviderCredentials(context.Background(), merchant.ID(uuid.New()), "stripe", tc.environment, "acct_selected", map[string]string{"secret_key": tc.key})
+			ok, err := svc.probePaymentProviderCredentials(context.Background(), billing.MerchantID(uuid.New()), "stripe", tc.environment, "acct_selected", map[string]string{"secret_key": tc.key})
 			require.Equal(t, tc.ok, ok)
 			if tc.ok {
 				require.NoError(t, err)

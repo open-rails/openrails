@@ -1,7 +1,7 @@
 package payments
 
 import (
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 
 	"context"
 	"errors"

@@ -25,6 +25,8 @@ import (
 const (
 	Module       = "github.com/open-rails/openrails"
 	SnapshotPath = "compatibility/contract.json"
+	// PermissionsPath declares the permission names in package billing.
+	PermissionsPath = "billing/permissions.go"
 )
 
 // Snapshot is the reviewed contract. Every section is derived from source, so
@@ -44,8 +46,9 @@ type Snapshot struct {
 	Sources map[string]string `json:"boundary_sources_sha256"`
 }
 
-// Boundary implementation prefixes. Any other production file that imports the
-// authority vocabulary is covered too, so new authorization code cannot opt out.
+// Boundary implementation prefixes. Any other production file that imports an
+// authority package or names a permission is covered too, so new
+// authorization code cannot opt out.
 var (
 	boundaryPrefixes = []string{
 		"internal/auth/",
@@ -53,13 +56,12 @@ var (
 		"internal/http/",
 		"internal/requestauth/",
 		"internal/migrate/postgres/",
-		"permissions/",
 		"internal/api/",
 		"internal/billingauth/",
 		"testdata/wire/",
 	}
-	boundaryFiles    = map[string]bool{"billing/errors.go": true}
-	authorityImports = map[string]bool{Module + "/permissions": true, Module + "/internal/billingauth": true, Module + "/internal/auth/policy": true}
+	boundaryFiles    = map[string]bool{"billing/errors.go": true, PermissionsPath: true}
+	authorityImports = map[string]bool{Module + "/internal/billingauth": true, Module + "/internal/auth/policy": true}
 	nonPublicRoots   = map[string]bool{"cmd": true, "internal": true, "scripts": true, "tests": true, "tools": true}
 	wireCodecMethods = map[string]bool{"MarshalJSON": true, "UnmarshalJSON": true, "MarshalText": true, "UnmarshalText": true}
 	ErrContractDrift = errors.New("reviewed release contract drifted")
@@ -75,10 +77,12 @@ type fileFacts struct {
 	roots   []typeReference
 }
 
-// capturer caches facts by path and content so one process can capture several
-// trees without reparsing unchanged files.
+// capturer caches facts by path, content and permission vocabulary so one
+// process can capture several trees without reparsing unchanged files.
 type capturer struct {
-	cache map[string]fileFacts
+	cache      map[string]fileFacts
+	vocabulary map[string]bool
+	vocabKey   string
 }
 
 func newCapturer() *capturer { return &capturer{cache: map[string]fileFacts{}} }
@@ -88,9 +92,14 @@ func newCapturer() *capturer { return &capturer{cache: map[string]fileFacts{}} }
 func Capture(fsys fs.FS) ([]byte, error) { return newCapturer().capture(fsys) }
 
 func (c *capturer) capture(fsys fs.FS) ([]byte, error) {
+	vocabulary, err := permissionNames(fsys)
+	if err != nil {
+		return nil, err
+	}
+	c.vocabulary, c.vocabKey = vocabulary, vocabularyKey(vocabulary)
 	out := Snapshot{API: map[string][]string{}, Wire: map[string][]string{}, Imports: map[string]map[string]string{}, Sources: map[string]string{}}
 	files := map[string]fileFacts{}
-	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
+	err = fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -184,18 +193,18 @@ func covered(name string) bool {
 }
 
 func (c *capturer) facts(name string, body []byte) (fileFacts, error) {
-	key := name + "\x00" + digest(body)
+	key := name + "\x00" + digest(body) + "\x00" + c.vocabKey
 	if facts, ok := c.cache[key]; ok {
 		return facts, nil
 	}
-	facts, err := computeFacts(name, body)
+	facts, err := computeFacts(name, body, c.vocabulary)
 	if err == nil {
 		c.cache[key] = facts
 	}
 	return facts, err
 }
 
-func computeFacts(name string, body []byte) (fileFacts, error) {
+func computeFacts(name string, body []byte, vocabulary map[string]bool) (fileFacts, error) {
 	facts := fileFacts{pkg: path.Dir(name)}
 	if path.Ext(name) != ".go" {
 		facts.source = digest(body)
@@ -220,7 +229,7 @@ func computeFacts(name string, body []byte) (fileFacts, error) {
 		imports[local] = importPath
 		production = production && importPath != "testing"
 	}
-	if boundary(name, imports, production) {
+	if boundary(name, imports, production, production && namesPermission(file, imports, vocabulary)) {
 		normalized, err := render(fset, file)
 		if err != nil {
 			return facts, err
@@ -256,8 +265,8 @@ func computeFacts(name string, body []byte) (fileFacts, error) {
 	return facts, nil
 }
 
-func boundary(name string, imports map[string]string, production bool) bool {
-	if boundaryFiles[name] {
+func boundary(name string, imports map[string]string, production, namesPermission bool) bool {
+	if boundaryFiles[name] || namesPermission {
 		return true
 	}
 	for _, prefix := range boundaryPrefixes {
@@ -265,15 +274,84 @@ func boundary(name string, imports map[string]string, production bool) bool {
 			return true
 		}
 	}
-	if !production {
-		return false
-	}
+	return production && importsAuthority(imports)
+}
+
+func importsAuthority(imports map[string]string) bool {
 	for _, importPath := range imports {
 		if authorityImports[importPath] {
 			return true
 		}
 	}
 	return false
+}
+
+// permissionNames lists the exported names PermissionsPath declares.
+func permissionNames(fsys fs.FS) (map[string]bool, error) {
+	names := map[string]bool{}
+	body, err := fs.ReadFile(fsys, PermissionsPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return names, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), PermissionsPath, body, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, err
+	}
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Recv == nil && d.Name.IsExported() {
+				names[d.Name.Name] = true
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if value, ok := spec.(*ast.ValueSpec); ok {
+					for _, n := range value.Names {
+						if n.IsExported() {
+							names[n.Name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return names, nil
+}
+
+func vocabularyKey(vocabulary map[string]bool) string {
+	names := make([]string, 0, len(vocabulary))
+	for name := range vocabulary {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
+}
+
+// namesPermission reports whether file selects a permission name from
+// package billing.
+func namesPermission(file *ast.File, imports map[string]string, vocabulary map[string]bool) bool {
+	local := ""
+	for name, importPath := range imports {
+		if importPath == Module+"/billing" {
+			local = name
+		}
+	}
+	if local == "" {
+		return false
+	}
+	found := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		if selector, ok := node.(*ast.SelectorExpr); ok && !found {
+			if id, ok := selector.X.(*ast.Ident); ok && id.Name == local && vocabulary[selector.Sel.Name] {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 func publicPackage(name, pkg string) bool {

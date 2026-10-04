@@ -1,4 +1,4 @@
-package pricing
+package catalog
 
 import (
 	"testing"

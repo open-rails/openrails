@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 func invalidHostEventRequest(message string) error {
@@ -52,7 +52,7 @@ func (s *Service) ListHostEvents(ctx context.Context, options billing.HostEventL
 	}
 	events := make([]billing.HostEvent, 0, len(rows))
 	for _, row := range rows {
-		event := billing.HostEvent{ID: row.ID, MerchantID: merchant.ID(row.MerchantID), Type: billing.HostEventType(row.EventType),
+		event := billing.HostEvent{ID: row.ID, MerchantID: billing.MerchantID(row.MerchantID), Type: billing.HostEventType(row.EventType),
 			OccurredAt: row.OccurredAt, AcknowledgedAt: row.DeliveredAt}
 		switch event.Type {
 		case billing.HostEventPaymentSettled:

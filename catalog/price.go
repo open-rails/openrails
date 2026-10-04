@@ -1,10 +1,9 @@
-package pricing
+package catalog
 
 // RatePrice and friends are the declarative (YAML/JSON) form of a charge model,
-// shared by the catalog manifest/loader (pkg/catalog) and the runtime
-// rater/quoter (internal/modules/money). They normalize into ChargeModel, the
-// pure evaluator in this package. This package is a leaf (no other openrails
-// deps) so both sides import it without an import cycle.
+// shared by the manifest loader and the runtime rater/quoter
+// (internal/modules/money). They normalize into ChargeModel, the pure
+// evaluator in this package.
 
 // Allowance models included units before overage. The simple form is a flat
 // `included` amount per period. The accrual form draws each active resource's

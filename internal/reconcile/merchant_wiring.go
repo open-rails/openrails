@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #699/#788: the pull plane (provider refresh, unknown-cohort resolution,
@@ -91,7 +91,7 @@ type MerchantFetcherBuilder struct {
 // Build resolves the merchant's pull credentials and returns the armed plane.
 // It never fails as a whole: a rail that cannot arm is absent (with its WARN
 // already logged) so the remaining rails keep pulling.
-func (b MerchantFetcherBuilder) Build(ctx context.Context, mid merchant.ID) MerchantPullClients {
+func (b MerchantFetcherBuilder) Build(ctx context.Context, mid billing.MerchantID) MerchantPullClients {
 	out := MerchantPullClients{
 		Fetchers: map[Provider]RailFetcher{},
 		Probers:  map[Provider]SubscriptionProber{},
@@ -121,7 +121,7 @@ func (b MerchantFetcherBuilder) environment() string {
 // resolveScopeCoverage is resolveScope plus the #841 coverage record: how many
 // PSPs the merchant declares active on the rail versus the one this pass arms
 // from.
-func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid merchant.ID, provider Provider, out *MerchantPullClients) (merchants.PSPScope, bool) {
+func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid billing.MerchantID, provider Provider, out *MerchantPullClients) (merchants.PSPScope, bool) {
 	scope, ok := b.resolveScopeInner(ctx, mid, provider)
 	if !ok || out == nil {
 		return scope, ok
@@ -150,7 +150,7 @@ func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid me
 	return scope, true
 }
 
-func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid merchant.ID, provider Provider) (merchants.PSPScope, bool) {
+func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid billing.MerchantID, provider Provider) (merchants.PSPScope, bool) {
 	if b.Merchants == nil {
 		return merchants.PSPScope{}, false
 	}
@@ -176,7 +176,7 @@ func (b MerchantFetcherBuilder) resolveScopeInner(ctx context.Context, mid merch
 	return scope, ok
 }
 
-func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid merchant.ID, provider Provider, err error) {
+func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid billing.MerchantID, provider Provider, err error) {
 	log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 		"merchant_id": mid.String(), "rail": string(provider),
 	}).Warn("provider pull: rail not armed — PSP resolution failed")
@@ -184,7 +184,7 @@ func (b MerchantFetcherBuilder) warnScopeError(ctx context.Context, mid merchant
 
 // secret loads one scoped secret. found=false with nil err means the secret is
 // genuinely absent (terminal for this pass); backend errors surface as err.
-func (b MerchantFetcherBuilder) secret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
+func (b MerchantFetcherBuilder) secret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool, error) {
 	if b.Merchants == nil || b.Merchants.Secrets() == nil {
 		return "", false, nil
 	}
@@ -209,7 +209,7 @@ func (b MerchantFetcherBuilder) secret(ctx context.Context, mid merchant.ID, sco
 
 // requireSecret is secret plus the #699 fail-loud contract: absence or a
 // backend failure logs ONE WARN naming merchant, rail and the secret name.
-func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool) {
+func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool) {
 	value, found, err := b.secret(ctx, mid, scope, key)
 	if err != nil {
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
@@ -228,7 +228,7 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.
 	return value, true
 }
 
-func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
+func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderNMI, out); ok {
 		if _, ok := b.requireSecret(ctx, mid, scope, "security_key"); !ok {
 			return // fail closed (logged): a declared account never falls back across planes
@@ -250,7 +250,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, o
 	}
 }
 
-func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
+func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderCCBill, out); ok {
 		// #697: CCBill account_id is dash-joined (clientAccnum-clientSubacc,
 		// e.g. 945280-0000). Both parts are numeric, so the first dash splits.
@@ -287,7 +287,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID
 	}
 }
 
-func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
+func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderStripe, out); ok {
 		secretKey, ok := b.requireSecret(ctx, mid, scope, "secret_key")
 		if !ok {
@@ -310,7 +310,7 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID
 // A declared solana account row arms the fetcher; its settings block carries
 // the merchant's RPC knobs (rpc_provider / rpc_api_key, #711), defaulting to
 // the public RPC fallback with the network derived from test_mode.
-func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
+func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if b.DB == nil {
 		return
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // ErrMerchantRouteUnresolved indicates an inbound webhook could not be mapped to an
@@ -16,7 +16,7 @@ var ErrMerchantRouteUnresolved = errors.New("merchants: webhook host/slug maps t
 // WebhookRoute is the resolved merchant for an inbound webhook, plus its routing
 // metadata.
 type WebhookRoute struct {
-	MerchantID   merchant.ID
+	MerchantID   billing.MerchantID
 	MerchantSlug string
 }
 

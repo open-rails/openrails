@@ -17,10 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Host-lifecycle event types emitted on a delinquency transition. One per
@@ -249,7 +249,7 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 // emits the signal for it. Upsert + signal share one transaction: a transition
 // that is stored but never announced is a silent shutoff instruction lost, and
 // an announcement without the stored state would repeat forever.
-func (s *Service) apply(ctx context.Context, tid merchant.ID, policy Policy, customerID uuid.UUID, currency string, exposure Exposure, now time.Time) (Transition, bool, error) {
+func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Policy, customerID uuid.UUID, currency string, exposure Exposure, now time.Time) (Transition, bool, error) {
 	state := Classify(policy, exposure, now)
 
 	var since *time.Time

@@ -11,11 +11,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // newConvergeCmd wires the or#859 inspection surface for converge-enforce, the
@@ -55,19 +56,19 @@ func newConvergeCmd() *cobra.Command {
 	return cmd
 }
 
-func convergeOpenDB(cmd *cobra.Command, merchantSlug string) (*db.DB, merchant.ID, error) {
+func convergeOpenDB(cmd *cobra.Command, merchantSlug string) (*db.DB, billing.MerchantID, error) {
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	if cfg == nil || cfg.DB == nil {
-		return nil, merchant.ID{}, fmt.Errorf("config not loaded")
+		return nil, billing.MerchantID{}, fmt.Errorf("config not loaded")
 	}
 	database, err := db.NewDB(cmd.Context(), cfg)
 	if err != nil {
-		return nil, merchant.ID{}, fmt.Errorf("open postgres: %w", err)
+		return nil, billing.MerchantID{}, fmt.Errorf("open postgres: %w", err)
 	}
 	mid, err := resolveCLIMerchant(cmd.Context(), database, strings.TrimSpace(merchantSlug))
 	if err != nil {
 		_ = database.Close()
-		return nil, merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", merchantSlug, err)
+		return nil, billing.MerchantID{}, fmt.Errorf("resolve merchant %q: %w", merchantSlug, err)
 	}
 	return database, mid, nil
 }

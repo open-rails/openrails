@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -17,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -76,7 +76,7 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 	if job.Args.MerchantID == uuid.Nil {
 		return fmt.Errorf("cancel subscription %s: merchant_id required on the job args", job.Args.SubscriptionID)
 	}
-	return w.DB.RunInMerchantScope(ctx, merchant.ID(job.Args.MerchantID), "cancel subscription", func(ctx context.Context) error {
+	return w.DB.RunInMerchantScope(ctx, billing.MerchantID(job.Args.MerchantID), "cancel subscription", func(ctx context.Context) error {
 		return w.cancel(ctx, job.Args)
 	})
 }
@@ -211,7 +211,7 @@ func (w ResumeSubscriptionWorker) Work(ctx context.Context, job *river.Job[Resum
 	if job.Args.MerchantID == uuid.Nil {
 		return fmt.Errorf("resume subscription %s: merchant_id required on the job args", job.Args.SubscriptionID)
 	}
-	return w.DB.RunInMerchantScope(ctx, merchant.ID(job.Args.MerchantID), "resume subscription", func(ctx context.Context) error {
+	return w.DB.RunInMerchantScope(ctx, billing.MerchantID(job.Args.MerchantID), "resume subscription", func(ctx context.Context) error {
 		return w.resume(ctx, job.Args)
 	})
 }

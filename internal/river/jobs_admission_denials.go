@@ -11,10 +11,11 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const KindAdmissionDenialFlush = "openrails.admission_denial_flush"
@@ -121,7 +122,7 @@ func (w AdmissionDenialFlushWorker) flushKey(ctx context.Context, key string, no
 	}
 
 	if len(rows) > 0 {
-		mctx := merchant.WithID(ctx, merchant.ID(merchantID))
+		mctx := merchant.WithID(ctx, billing.MerchantID(merchantID))
 		if err := w.DB.MerchantTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 			q := gen.New(tx)
 			for _, r := range rows {

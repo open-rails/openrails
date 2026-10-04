@@ -8,12 +8,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerqualification"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type PaymentProviderConfig = merchants.PaymentProviderConfig
@@ -22,7 +23,7 @@ type ArchivePaymentProviderAccountRequest = merchants.ArchivePaymentProviderAcco
 
 // ListPaymentProviderConfigs returns the merchant's PSP accounts on rail (""
 // = every rail) filtered by status ("active", "archived", "" = all), redacted.
-func ListPaymentProviderConfigs(ctx context.Context, a *app.App, id merchant.ID, rail, status string) ([]PaymentProviderConfig, error) {
+func ListPaymentProviderConfigs(ctx context.Context, a *app.App, id billing.MerchantID, rail, status string) ([]PaymentProviderConfig, error) {
 	providerService, err := paymentProviderService(a)
 	if err != nil {
 		return nil, fmt.Errorf("control plane list payment providers: %w", err)
@@ -36,7 +37,7 @@ func ListPaymentProviderConfigs(ctx context.Context, a *app.App, id merchant.ID,
 
 // ArchivePaymentProviderAccount archives exactly one PSP account by its
 // immutable id without contacting the provider (#655/#656).
-func ArchivePaymentProviderAccount(ctx context.Context, a *app.App, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
+func ArchivePaymentProviderAccount(ctx context.Context, a *app.App, id billing.MerchantID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
 	if strings.TrimSpace(rail) == "" {
 		return PaymentProviderConfig{}, errors.New("control plane archive payment provider account: rail required")
 	}
@@ -53,7 +54,7 @@ func ArchivePaymentProviderAccount(ctx context.Context, a *app.App, id merchant.
 
 // GetPaymentProviderConfig returns one system-owned merchant PSP
 // with credential values redacted.
-func GetPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
+func GetPaymentProviderConfig(ctx context.Context, a *app.App, id billing.MerchantID, rail, environment string) (PaymentProviderConfig, error) {
 	if strings.TrimSpace(rail) == "" {
 		return PaymentProviderConfig{}, errors.New("control plane get payment provider: rail required")
 	}
@@ -70,7 +71,7 @@ func GetPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID, r
 
 // UpsertPaymentProviderConfig configures one PSP for a
 // system-owned merchant through the existing merchant-secret backend.
-func UpsertPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+func UpsertPaymentProviderConfig(ctx context.Context, a *app.App, id billing.MerchantID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
 	providerService, err := paymentProviderService(a)
 	if err != nil {
 		return PaymentProviderConfig{}, fmt.Errorf("control plane configure payment provider: %w", err)
@@ -97,7 +98,7 @@ func paymentProviderService(a *app.App) (*merchants.Service, error) {
 
 // SetProviderCutoverQualification installs or revokes only the private operator
 // qualification record for an existing merchant-owned account. No provider call.
-func SetProviderCutoverQualification(ctx context.Context, a *app.App, id merchant.ID, pspID uuid.UUID, record *providerqualification.Record) error {
+func SetProviderCutoverQualification(ctx context.Context, a *app.App, id billing.MerchantID, pspID uuid.UUID, record *providerqualification.Record) error {
 	if Get(a) == nil || a.Runtime == nil || a.Runtime.DB == nil {
 		return errors.New("control plane runtime is unavailable")
 	}

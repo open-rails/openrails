@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ListActiveMerchantIDs returns one page of active merchant IDs for an
 // embedding host that must perform explicitly merchant-scoped background work.
 // This is a privileged host seam; callers are responsible for authorizing and
 // auditing its use.
-func ListActiveMerchantIDs(ctx context.Context, a *app.App, limit, offset int) ([]merchant.ID, error) {
+func ListActiveMerchantIDs(ctx context.Context, a *app.App, limit, offset int) ([]billing.MerchantID, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")

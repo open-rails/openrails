@@ -15,12 +15,14 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -29,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -176,7 +177,7 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 		return w.HasRailAccounts(ctx, mid)
 	}
 	var exists bool
-	mctx := merchant.WithID(ctx, merchant.ID(mid))
+	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
 		// The explicit merchant_id predicate is the scope.
 		var err error
@@ -379,7 +380,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 // changed → unknown-cohort reconcile.
 func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *log.Entry) error {
 	gate := destructive.New(w.DB)
-	mctx := merchant.WithID(ctx, merchant.ID(mid))
+	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
 		// #836 kill switch + #835 first-enforce gate, read once per merchant
 		// per pass.
@@ -402,7 +403,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 			logger.WithField("merchant_id", mid).Warn("Provider Refresh: " + verdict.Reason)
 		}
 
-		armed := builder.Build(tctx, merchant.ID(mid))
+		armed := builder.Build(tctx, billing.MerchantID(mid))
 		res := w.runEventRefresh(tctx, mid, mode, armed.Coverage, armed.Fetchers)
 		stats.add(res)
 
@@ -492,9 +493,9 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 	var verifyErr error
 	if w.Verifier != nil {
 		opts.SkipRails = []string{string(reconcile.ProviderNMI)}
-		verifyErr = w.Verifier.Pass(ctx, merchant.ID(mid))
+		verifyErr = w.Verifier.Pass(ctx, billing.MerchantID(mid))
 	}
-	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, merchant.ID(mid), w.now(), opts)
+	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, billing.MerchantID(mid), w.now(), opts)
 	err = errors.Join(verifyErr, err)
 	if res.Held > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
@@ -519,7 +520,7 @@ func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUI
 		// would panic on first use.
 		engine.Notifier = w.Alerts
 	}
-	_, err := engine.Converge(ctx, converge.Scope{Merchant: merchant.ID(mid)})
+	_, err := engine.Converge(ctx, converge.Scope{Merchant: billing.MerchantID(mid)})
 	return err
 }
 

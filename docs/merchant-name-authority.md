@@ -16,7 +16,7 @@ The pre-launch cutover needs no old-name compatibility reader or second alias re
 
 ## Pre-launch helper API changes
 
-Imports and maintenance operations take `MerchantID merchant.ID`, never a name: the operator's converge and pull-provider tools, the declared-facts import on the merchant-bound Client, and the standalone CLI's prune/undo commands. They run on the runtime's unprivileged billing pool.
+Imports and maintenance operations take `MerchantID billing.MerchantID`, never a name: the operator's converge and pull-provider tools, the declared-facts import on the merchant-bound Client, and the standalone CLI's prune/undo commands. They run on the runtime's unprivileged billing pool.
 
 At a host CLI boundary, call `rt.ResolveMerchant(ctx, name)` once to obtain the billing UUID and canonical name; the runtime's configured directory (its attached control plane's AuthKit authority, or the unbound host namespace) answers.
 

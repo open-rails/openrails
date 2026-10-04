@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Merchant retirement is the core mechanism behind hosted name recycling. Core
@@ -52,7 +51,7 @@ func (s *Service) ListRetirementCandidates(ctx context.Context, req billing.Merc
 		return page, fmt.Errorf("merchants: list retirement candidates: %w", err)
 	}
 	for _, row := range rows {
-		mid := merchant.ID(row.ID)
+		mid := billing.MerchantID(row.ID)
 		var used bool
 		if err := s.pool.MerchantTx(ctx, mid, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
@@ -77,7 +76,7 @@ func (s *Service) ListRetirementCandidates(ctx context.Context, req billing.Merc
 // (every blocker references it), so the activity check and the irreversible
 // tombstone commit together. Any failure after that commit returns Retired
 // with ErrGroupReleasePending.
-func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID string, reservedSlugs []string, release GroupReleaser) (billing.MerchantRetirement, error) {
+func (s *Service) RetireUnused(ctx context.Context, mid billing.MerchantID, groupID string, reservedSlugs []string, release GroupReleaser) (billing.MerchantRetirement, error) {
 	var res billing.MerchantRetirement
 	if s == nil || s.pool == nil {
 		return res, errors.New("merchants: retirement requires a DB pool")
@@ -153,7 +152,7 @@ func (s *Service) CompletePendingGroupReleases(ctx context.Context, limit int, r
 	var errs []error
 	completed := 0
 	for _, item := range items {
-		if err := s.releaseRetiredGroup(ctx, merchant.ID(item.ID), item.GroupID, release); err != nil {
+		if err := s.releaseRetiredGroup(ctx, billing.MerchantID(item.ID), item.GroupID, release); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -162,7 +161,7 @@ func (s *Service) CompletePendingGroupReleases(ctx context.Context, limit int, r
 	return completed, errors.Join(errs...)
 }
 
-func (s *Service) releaseRetiredGroup(ctx context.Context, mid merchant.ID, groupID string, release GroupReleaser) error {
+func (s *Service) releaseRetiredGroup(ctx context.Context, mid billing.MerchantID, groupID string, release GroupReleaser) error {
 	if err := release(ctx, groupID); err != nil {
 		return fmt.Errorf("%w: merchant %s group %s: %w", billing.ErrMerchantGroupReleasePending, mid, groupID, err)
 	}
@@ -175,9 +174,9 @@ func (s *Service) releaseRetiredGroup(ctx context.Context, mid merchant.ID, grou
 }
 
 func normalizeReserved(slugs []string) []string {
-	out := make([]string, 0, len(merchant.ReservedHostedSlugs)+len(slugs))
-	for _, slug := range append(append([]string{}, merchant.ReservedHostedSlugs...), slugs...) {
-		if slug = merchant.NormalizeSlug(slug); slug != "" && !containsSlug(out, slug) {
+	out := make([]string, 0, len(billing.ReservedMerchantSlugs)+len(slugs))
+	for _, slug := range append(append([]string{}, billing.ReservedMerchantSlugs...), slugs...) {
+		if slug = billing.NormalizeMerchantSlug(slug); slug != "" && !containsSlug(out, slug) {
 			out = append(out, slug)
 		}
 	}

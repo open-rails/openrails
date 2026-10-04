@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrMerchantRestoreConflict refuses a restore destination whose UUID, name or
@@ -19,7 +19,7 @@ var ErrMerchantRestoreConflict = errors.New("merchants: restore destination iden
 // ProvisionForRestore attaches a preserved billing UUID to a destination group
 // already authorized by the caller. Ordinary Provision keeps allocating UUIDs.
 // This creates only directory identity; the archive importer checks book emptiness.
-func (s *Service) ProvisionForRestore(ctx context.Context, id merchant.ID, req ProvisionRequest) (*Merchant, bool, error) {
+func (s *Service) ProvisionForRestore(ctx context.Context, id billing.MerchantID, req ProvisionRequest) (*Merchant, bool, error) {
 	groupID := strings.TrimSpace(req.PermissionGroupID)
 	if groupID == "" {
 		return nil, false, ErrPermissionGroupRequired
@@ -29,16 +29,16 @@ func (s *Service) ProvisionForRestore(ctx context.Context, id merchant.ID, req P
 
 // RegisterForRestore creates an explicitly unbound, host-owned destination.
 // It never adopts a group-bound row, even if its UUID and display name match.
-func (s *Service) RegisterForRestore(ctx context.Context, id merchant.ID, slug string) (*Merchant, bool, error) {
+func (s *Service) RegisterForRestore(ctx context.Context, id billing.MerchantID, slug string) (*Merchant, bool, error) {
 	return s.restoreIdentity(ctx, id, slug, "")
 }
 
-func (s *Service) restoreIdentity(ctx context.Context, id merchant.ID, slug, groupID string) (*Merchant, bool, error) {
+func (s *Service) restoreIdentity(ctx context.Context, id billing.MerchantID, slug, groupID string) (*Merchant, bool, error) {
 	if id.IsZero() {
 		return nil, false, fmt.Errorf("merchants: restore merchant_id is required")
 	}
 	slug = normalizeSlug(slug)
-	if err := merchant.ValidateSlug(slug); err != nil {
+	if err := billing.ValidateMerchantSlug(slug); err != nil {
 		return nil, false, err
 	}
 	if s == nil || s.pool == nil {

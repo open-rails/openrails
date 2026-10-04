@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
@@ -31,8 +32,6 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // Priced checkout refuses operation selectors and malformed saved methods
@@ -63,7 +62,7 @@ func TestCustomerActionRequiresInteractiveSession(t *testing.T) {
 			wire.Header.Set("Credential-Class", "user_session")
 			rec := httptest.NewRecorder()
 			r := httprequest.NewHTTP(rec, wire, nil)
-			payer, mid := uuid.NewString(), merchant.ID(uuid.New())
+			payer, mid := uuid.NewString(), billing.MerchantID(uuid.New())
 			r.SetUserContext(billingauth.UserContext{UserID: payer})
 			r.Set(middleware.PrincipalContextKey, &middleware.Principal{CredentialType: middleware.CredentialHostDelegatedUser, CredentialClass: class, Invoker: invoker, MerchantID: mid, Subject: payer})
 
@@ -200,15 +199,15 @@ func TestUsageMeterAndRateCardInput(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, billingservice.UsageMeterSpec{
-		Key: "storage-gb", EventType: "storage.used", ValueProperty: "bytes", Aggregation: pricing.AggregationSum,
+		Key: "storage-gb", EventType: "storage.used", ValueProperty: "bytes", Aggregation: catalog.AggregationSum,
 		Unit: "GB", GroupBy: map[string]string{"region": "metadata.region"},
 	}, spec)
-	_, err = usageMeterSpec("requests", adminUsageMeterRequest{Aggregation: pricing.AggregationMax})
+	_, err = usageMeterSpec("requests", adminUsageMeterRequest{Aggregation: catalog.AggregationMax})
 	require.EqualError(t, err, "usage meter aggregation must be sum or count")
 
 	product := uuid.New()
-	price := func(currency string) pricing.RatePrice {
-		return pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: currency, PerUnit: &pricing.PerUnitPrice{UnitAmount: 100}}
+	price := func(currency string) catalog.RatePrice {
+		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: currency, PerUnit: &catalog.PerUnitPrice{UnitAmount: 100}}
 	}
 	meter := billingservice.UsageMeterDTO{Key: "storage-gb", GroupBy: map[string]string{"region": "metadata.region"}}
 	input, err := defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{

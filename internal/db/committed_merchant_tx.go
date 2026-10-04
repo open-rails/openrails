@@ -6,7 +6,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // ErrCallerTransaction refuses durable custody that cannot join a caller's
@@ -24,7 +25,7 @@ func transactionContext(ctx context.Context) context.Context {
 // pin exists. It never joins or commits an existing caller-owned transaction.
 // Supported DB/Pool transaction callbacks carry the private marker below;
 // manually managed raw pgx transactions must use BindMerchantTx to bind context.
-func (p *Pool) CommittedMerchantTx(ctx context.Context, id merchant.ID, fn func(context.Context, pgx.Tx) error) error {
+func (p *Pool) CommittedMerchantTx(ctx context.Context, id billing.MerchantID, fn func(context.Context, pgx.Tx) error) error {
 	if p == nil || p.raw == nil || id.IsZero() {
 		return fmt.Errorf("db: committed merchant transaction requires pool and merchant")
 	}

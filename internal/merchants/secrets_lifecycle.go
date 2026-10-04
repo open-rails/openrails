@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // lifecycleSecretStore serializes runtime Vault writes with merchant tombstoning.
@@ -26,7 +27,7 @@ func NewLifecycleSecretStore(database *db.DB, inner MerchantSecretStore) Merchan
 	return &lifecycleSecretStore{MerchantSecretStore: inner, database: database}
 }
 
-func (s *lifecycleSecretStore) Put(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+func (s *lifecycleSecretStore) Put(ctx context.Context, id billing.MerchantID, name, value string) (Secret, error) {
 	if err := validateSecretRef(id, name); err != nil {
 		return Secret{}, err
 	}
@@ -49,13 +50,13 @@ func (s *lifecycleSecretStore) Put(ctx context.Context, id merchant.ID, name, va
 }
 
 // Preserve the cache's rotation floor through the lifecycle decorator.
-func (s *lifecycleSecretStore) GetAtLeastVersion(ctx context.Context, id merchant.ID, name string, minVersion int) (Secret, error) {
+func (s *lifecycleSecretStore) GetAtLeastVersion(ctx context.Context, id billing.MerchantID, name string, minVersion int) (Secret, error) {
 	if versioned, ok := s.MerchantSecretStore.(VersionedSecretReader); ok {
 		return versioned.GetAtLeastVersion(ctx, id, name, minVersion)
 	}
 	return s.MerchantSecretStore.Get(ctx, id, name)
 }
 
-func (s *lifecycleSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+func (s *lifecycleSecretStore) GetVersion(ctx context.Context, id billing.MerchantID, name string, version int) (Secret, error) {
 	return ReadSecretRef(ctx, s.MerchantSecretStore, id, SecretRef{Name: name, MinVersion: version})
 }

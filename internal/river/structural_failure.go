@@ -9,7 +9,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // or#901: River retries every returned error the same way — up to max_attempts,

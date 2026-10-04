@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // DeclarePSP idempotently records a PSP identity for an embedded host. It does
@@ -25,7 +25,7 @@ import (
 // the row receives the same deterministic natural-key ID as every other PSP
 // writer. This is the public precursor to ImportBilling when the declared book
 // attributes its rows with a PSPRef.
-func DeclarePSP(ctx context.Context, application *app.App, merchantID merchant.ID, declaration billing.PSPDeclaration) (uuid.UUID, error) {
+func DeclarePSP(ctx context.Context, application *app.App, merchantID billing.MerchantID, declaration billing.PSPDeclaration) (uuid.UUID, error) {
 	if application == nil || application.Runtime == nil || application.Runtime.DB == nil {
 		return uuid.Nil, fmt.Errorf("embedded billing: runtime not initialized")
 	}

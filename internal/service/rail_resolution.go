@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 
 	log "github.com/sirupsen/logrus"
 )

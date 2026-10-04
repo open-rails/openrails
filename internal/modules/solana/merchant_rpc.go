@@ -7,10 +7,11 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #728: per-merchant Solana RPC arming for the PROCESS-WIDE services (payment
@@ -48,7 +49,7 @@ func (b *MerchantRPCBuilder) testMode() bool {
 // client. nil client with nil error = neither plane armed (caller skips/warns).
 // The scope pick is the pull scope (active for new work, else newest archived
 // for drain — #655), matching the #725 collection resolver.
-func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid merchant.ID) (*solanarpc.RPCClient, error) {
+func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID) (*solanarpc.RPCClient, error) {
 	if b == nil {
 		return nil, nil
 	}

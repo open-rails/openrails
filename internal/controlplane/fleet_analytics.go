@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Fleet analytics (openrails-saas #28): cross-merchant operator aggregates over
@@ -69,7 +69,7 @@ type FleetAnalytics struct {
 // from every aggregate (the platform merchant itself, so its self-billing book
 // never counts as fleet processing volume); zero means exclude nothing.
 // windowDays outside 1..365 falls back to 30.
-func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, windowDays int) (*FleetAnalytics, error) {
+func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude billing.MerchantID, windowDays int) (*FleetAnalytics, error) {
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for fleet analytics")
 	}

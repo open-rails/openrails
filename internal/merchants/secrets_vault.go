@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // ErrVaultNotConfigured reports that a Vault-backed store has no client. It
@@ -54,11 +54,11 @@ func NewVaultSecretStore(mount string, client VaultKV) MerchantSecretStore {
 }
 
 // pathFor builds the merchant-scoped Vault path for a (merchant, name) pair.
-func (v *vaultSecretStore) pathFor(merchantID merchant.ID, name string) string {
+func (v *vaultSecretStore) pathFor(merchantID billing.MerchantID, name string) string {
 	return path.Join(v.mount, v.prefix, "merchants", merchantID.String(), cleanSecretName(name))
 }
 
-func (v *vaultSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
+func (v *vaultSecretStore) Get(ctx context.Context, tenantID billing.MerchantID, name string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -89,7 +89,7 @@ func kvVersionOrOne(v int) int {
 	return v
 }
 
-func (v *vaultSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, value string) (Secret, error) {
+func (v *vaultSecretStore) Put(ctx context.Context, tenantID billing.MerchantID, name, value string) (Secret, error) {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -104,7 +104,7 @@ func (v *vaultSecretStore) Put(ctx context.Context, tenantID merchant.ID, name, 
 	return Secret{Name: name, Value: value, Version: kvVersionOrOne(version)}, nil
 }
 
-func (v *vaultSecretStore) Delete(ctx context.Context, tenantID merchant.ID, name string) error {
+func (v *vaultSecretStore) Delete(ctx context.Context, tenantID billing.MerchantID, name string) error {
 	if err := validateSecretRef(tenantID, name); err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (v *vaultSecretStore) Delete(ctx context.Context, tenantID merchant.ID, nam
 	return nil
 }
 
-func (v *vaultSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]string, error) {
+func (v *vaultSecretStore) List(ctx context.Context, tenantID billing.MerchantID) ([]string, error) {
 	if tenantID.IsZero() {
 		return nil, validateSecretRef(tenantID, "x")
 	}
@@ -133,7 +133,7 @@ func (v *vaultSecretStore) List(ctx context.Context, tenantID merchant.ID) ([]st
 	return names, nil
 }
 
-func (v *vaultSecretStore) cleanupTarget(id merchant.ID) (string, string, error) {
+func (v *vaultSecretStore) cleanupTarget(id billing.MerchantID) (string, string, error) {
 	if id.IsZero() {
 		return "", "", validateSecretRef(id, "x")
 	}
@@ -145,7 +145,7 @@ func (v *vaultSecretStore) cleanupTarget(id merchant.ID) (string, string, error)
 }
 
 // GetVersion never selects a newer, unpublished candidate.
-func (v *vaultSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+func (v *vaultSecretStore) GetVersion(ctx context.Context, id billing.MerchantID, name string, version int) (Secret, error) {
 	if err := validateSecretRef(id, name); err != nil {
 		return Secret{}, err
 	}

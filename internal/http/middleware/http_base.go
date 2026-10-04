@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // This file holds the net/http base middleware (issue #282; sole stack since
@@ -280,10 +280,10 @@ func (s *statusWriter) status() int {
 // If resolve is nil or returns zero, NOTHING is pinned: downstream
 // merchant.Require fails, so a missing merchant is a hard error rather than a
 // silent default.
-func ResolveMerchantHTTP(resolve func() merchant.ID) HTTPMiddleware {
+func ResolveMerchantHTTP(resolve func() billing.MerchantID) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var configured merchant.ID
+			var configured billing.MerchantID
 			if resolve != nil {
 				configured = resolve()
 			}
@@ -297,12 +297,12 @@ func ResolveMerchantHTTP(resolve func() merchant.ID) HTTPMiddleware {
 	}
 }
 
-// StaticMerchant adapts a fixed merchant.ID into the resolver ResolveMerchantHTTP
+// StaticMerchant adapts a fixed billing.MerchantID into the resolver ResolveMerchantHTTP
 // expects. Production code should prefer a live accessor (Runtime.ConfiguredMerchant);
 // this exists for callers with a genuinely fixed id — chiefly tests that pin one
 // merchant for the lifetime of a test server.
-func StaticMerchant(id merchant.ID) func() merchant.ID {
-	return func() merchant.ID { return id }
+func StaticMerchant(id billing.MerchantID) func() billing.MerchantID {
+	return func() billing.MerchantID { return id }
 }
 
 // ResolveMerchantFromHostHTTP resolves the merchant owning the request's Host

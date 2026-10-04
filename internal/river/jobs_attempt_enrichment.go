@@ -11,13 +11,13 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const (
@@ -72,7 +72,7 @@ func (w *AttemptEnrichmentWorker) Work(ctx context.Context, _ *river.Job[Attempt
 		if mid == nil {
 			continue
 		}
-		err := w.DB.RunInMerchantScope(ctx, merchant.ID(*mid), "attempt enrichment", func(ctx context.Context) error {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(*mid), "attempt enrichment", func(ctx context.Context) error {
 			return w.enrich(ctx, *mid, since, before, now)
 		})
 		if err != nil {

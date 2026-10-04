@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // or#880: custody is Layer B state exactly like a PSP is. A custodian is
@@ -61,7 +61,7 @@ func (c CustodianScope) SecretRef(key string) (SecretRef, error) {
 // to: which merchant owns the tenant id the event carries.
 type CustodianIdentity struct {
 	ID          uuid.UUID
-	MerchantID  merchant.ID
+	MerchantID  billing.MerchantID
 	Key         string
 	Kind        string
 	Environment string
@@ -105,7 +105,7 @@ func decodeCustodianSettings(raw []byte) map[string]any {
 }
 
 // CustodianScopeByKey resolves a merchant's custodian by its declared key.
-func (s *Service) CustodianScopeByKey(ctx context.Context, id merchant.ID, key string) (CustodianScope, bool, error) {
+func (s *Service) CustodianScopeByKey(ctx context.Context, id billing.MerchantID, key string) (CustodianScope, bool, error) {
 	key = strings.TrimSpace(key)
 	if s == nil || s.pool == nil || id.IsZero() || key == "" {
 		return CustodianScope{}, false, nil
@@ -130,7 +130,7 @@ func (s *Service) CustodianScopeByKey(ctx context.Context, id merchant.ID, key s
 
 // CustodianScopeByID resolves a custodian by its row id — the shape a PSP's
 // custodian_id reference takes.
-func (s *Service) CustodianScopeByID(ctx context.Context, id merchant.ID, custodianID uuid.UUID) (CustodianScope, bool, error) {
+func (s *Service) CustodianScopeByID(ctx context.Context, id billing.MerchantID, custodianID uuid.UUID) (CustodianScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || custodianID == uuid.Nil {
 		return CustodianScope{}, false, nil
 	}
@@ -152,7 +152,7 @@ func (s *Service) CustodianScopeByID(ctx context.Context, id merchant.ID, custod
 // CustodianScopeByIdentity resolves a merchant's custodian by its vendor
 // identity (kind + environment + tenant id) — the shape a custodian webhook
 // carries once the merchant is already known.
-func (s *Service) CustodianScopeByIdentity(ctx context.Context, id merchant.ID, kind, environment, accountID string) (CustodianScope, bool, error) {
+func (s *Service) CustodianScopeByIdentity(ctx context.Context, id billing.MerchantID, kind, environment, accountID string) (CustodianScope, bool, error) {
 	kind = custodians.Normalize(kind)
 	environment = normalizeProviderSecretEnvironment(environment)
 	accountID = strings.TrimSpace(accountID)
@@ -183,7 +183,7 @@ func (s *Service) CustodianScopeByIdentity(ctx context.Context, id merchant.ID, 
 }
 
 // ListCustodians lists a merchant's declared custodians.
-func (s *Service) ListCustodians(ctx context.Context, id merchant.ID) ([]CustodianScope, error) {
+func (s *Service) ListCustodians(ctx context.Context, id billing.MerchantID) ([]CustodianScope, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return nil, nil
 	}
@@ -206,7 +206,7 @@ func (s *Service) ListCustodians(ctx context.Context, id merchant.ID) ([]Custodi
 // UpsertCustodian converges ONE declared custodian. Both ingestion planes go
 // through it, and both validate through config.ValidateCustodianEntry first —
 // so a value the manifest accepts is never one an API write silently drops.
-func (s *Service) UpsertCustodian(ctx context.Context, id merchant.ID, entry config.CustodianEntry, environment string) (CustodianScope, error) {
+func (s *Service) UpsertCustodian(ctx context.Context, id billing.MerchantID, entry config.CustodianEntry, environment string) (CustodianScope, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return CustodianScope{}, errors.New("merchants: custodian upsert requires a merchant")
 	}
@@ -339,7 +339,7 @@ func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, environm
 	}
 	return CustodianIdentity{
 		ID:          *row.ID,
-		MerchantID:  merchant.ID(*row.MerchantID),
+		MerchantID:  billing.MerchantID(*row.MerchantID),
 		Key:         derefString(row.Key),
 		Kind:        derefString(row.Kind),
 		Environment: derefString(row.Environment),

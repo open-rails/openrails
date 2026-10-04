@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const TypeHyperSwitchMethodDelete = "hyperswitch_method_delete"
@@ -133,7 +133,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil || binding != p.Binding {
 		return Parked("accepted custodian binding changed")
 	}
-	client, err := railresolve.HyperSwitchClient(ctx, h.Rails.Config, h.Rails.MerchantSecrets, merchant.ID(current.MerchantID), row)
+	client, err := railresolve.HyperSwitchClient(ctx, h.Rails.Config, h.Rails.MerchantSecrets, billing.MerchantID(current.MerchantID), row)
 	if err != nil {
 		return Parked("accepted custodian credentials are unavailable")
 	}

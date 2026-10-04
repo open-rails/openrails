@@ -4,16 +4,17 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EnforceMerchantBinding checks assertions after authentication and before the
 // principal is pinned. Neither a Client header nor an existing runtime/Host
 // binding may silently select a merchant different from the verified one.
-func EnforceMerchantBinding(r *request.Request, actual merchant.ID) bool {
+func EnforceMerchantBinding(r *request.Request, actual billing.MerchantID) bool {
 	if raw := strings.TrimSpace(r.Header(merchant.SlugHeader)); raw != "" {
 		target, ok := merchanttarget.FromContext(r.Request.Context())
 		if !ok || target.MerchantID != actual || merchanttarget.Assert(r.Request, target) != nil {
@@ -22,7 +23,7 @@ func EnforceMerchantBinding(r *request.Request, actual merchant.ID) bool {
 		}
 	}
 	if raw := strings.TrimSpace(r.Header(merchant.BindingHeader)); raw != "" {
-		expected, err := merchant.ParseID(raw)
+		expected, err := billing.ParseMerchantID(raw)
 		if err != nil || expected.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid merchant binding")
 			return false

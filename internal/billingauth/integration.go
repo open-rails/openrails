@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // PrincipalKind is verified credential provenance, not a role or permission.
@@ -47,7 +47,7 @@ const (
 // AuthorityGroupID is an optional opaque association owned by a configured
 // authorization provider; OpenRails does not read that provider's tables.
 type Target struct {
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// MerchantSlug is empty when an ID-selected, group-bound directory has no
 	// canonical name authority. Authorize by immutable IDs, never a stale name.
 	MerchantSlug     string

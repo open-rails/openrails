@@ -7,7 +7,7 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // TransitClient is the minimal Vault Transit surface the remote signer needs. It
@@ -22,10 +22,10 @@ type TransitClient interface {
 }
 
 // TransitKeyName maps a merchant to its Vault Transit key name.
-type TransitKeyName func(merchant.ID) string
+type TransitKeyName func(billing.MerchantID) string
 
 // DefaultTransitKeyName names a merchant signing key "openrails-solana-<merchantID>".
-func DefaultTransitKeyName(id merchant.ID) string {
+func DefaultTransitKeyName(id billing.MerchantID) string {
 	return "openrails-solana-" + id.String()
 }
 
@@ -67,7 +67,7 @@ func NewTransitSigner(transit TransitClient, keyName TransitKeyName, ttl time.Du
 	}
 }
 
-func (t *transitSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (solanago.PublicKey, error) {
+func (t *transitSigner) PublicKey(ctx context.Context, merchantID billing.MerchantID) (solanago.PublicKey, error) {
 	if t.transit == nil {
 		return solanago.PublicKey{}, fmt.Errorf("solana: transit signer has no client")
 	}
@@ -100,7 +100,7 @@ func (t *transitSigner) PublicKey(ctx context.Context, merchantID merchant.ID) (
 	return key, nil
 }
 
-func (t *transitSigner) SignMessage(ctx context.Context, merchantID merchant.ID, message []byte) (solanago.Signature, error) {
+func (t *transitSigner) SignMessage(ctx context.Context, merchantID billing.MerchantID, message []byte) (solanago.Signature, error) {
 	if t.transit == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: transit signer has no client")
 	}

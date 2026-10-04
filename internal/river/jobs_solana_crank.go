@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -45,7 +45,7 @@ func (SolanaCrankArgs) Kind() string { return KindSolanaCrank }
 
 // solanaCranker is the on-chain pull surface (satisfied by *recurring.CrankService).
 type solanaCranker interface {
-	Crank(ctx context.Context, merchantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
+	Crank(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
 }
 
 // presubmitCranker is the optional signature write-ahead capability (#674):
@@ -54,7 +54,7 @@ type solanaCranker interface {
 // self-recognition memo stamped on the pull tx.
 // *recurring.CrankService implements it; fakes without it skip the write-ahead.
 type presubmitCranker interface {
-	CrankWithPresubmit(ctx context.Context, merchantID merchant.ID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
+	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
 }
 
 // membershipManager is the lifecycle surface the cranker drives (satisfied by
@@ -195,7 +195,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		// next_pull_at anchor), inline execution, pre-submit signature
 		// write-ahead. Crash at any point ⇒ verify-then-resolve off the
 		// recorded signature, never a paid-but-unrenewed subscriber.
-		err := w.DB.RunInMerchantScope(ctx, merchant.ID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
 			_, err := w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
 				MerchantID:     row.MerchantID,
 				Provider:       string(models.RailSolana),
@@ -258,7 +258,7 @@ type crankOutcome struct {
 // failed — the caller distinguishes via the recorded signature); a nil error
 // means the state machine resolved the period (see crankKind).
 func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, memoLocalID uuid.UUID, presubmit func(signature string) error) (crankOutcome, error) {
-	merchantID := merchant.ID(row.MerchantID)
+	merchantID := billing.MerchantID(row.MerchantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint
 	// from the linked price's Solana rail config.

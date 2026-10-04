@@ -3,64 +3,14 @@ package catalog
 import (
 	"fmt"
 	"strings"
-
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
-// This file defines the #638 rate-card catalog model (rate cards, dimensional
-// matrix pricing, allowances) and the #639/#640 variable credit-purchase shape,
-// plus their validation. The pure charge-model engine and the declarative price
-// types live in the leaf package pkg/pricing, so internal/modules/money can share
-// them without an import cycle through internal/service. The aliases below keep the
-// catalog API stable.
-//
-// Naming follows OpenMeter's catalog vocabulary (value_property, group_by,
-// mode: volume|graduated, maximum_amount, payment_term) with Stripe's
-// transform_quantity divisor (divide_by/round, which
-// integer-micros needs and OpenMeter/Lago lack) and Orb's matrix for per-SKU
+// Rate cards (#638): a meter or flat fee bound to a charge-model price, plus
+// the #639/#640 variable credit-purchase shape. Naming follows OpenMeter's
+// catalog vocabulary (value_property, group_by, mode: volume|graduated,
+// maximum_amount, payment_term) with Stripe's transform_quantity divisor
+// (divide_by/round, which integer micros need) and Orb's matrix for per-SKU
 // pricing. See #638's Research Appendix.
-
-type (
-	RatePrice    = pricing.RatePrice
-	FlatPrice    = pricing.FlatPrice
-	PerUnitPrice = pricing.PerUnitPrice
-	TieredPrice  = pricing.TieredPrice
-	PackagePrice = pricing.PackagePrice
-	RateTier     = pricing.RateTier
-	Matrix       = pricing.Matrix
-	MatrixCell   = pricing.MatrixCell
-	Allowance    = pricing.Allowance
-	ChargeModel  = pricing.ChargeModel
-	ChargeTier   = pricing.ChargeTier
-)
-
-const (
-	ModelFlat    = pricing.ModelFlat
-	ModelPerUnit = pricing.ModelPerUnit
-	ModelTiered  = pricing.ModelTiered
-	ModelPackage = pricing.ModelPackage
-
-	TierModeVolume    = pricing.TierModeVolume
-	TierModeGraduated = pricing.TierModeGraduated
-
-	RoundHalfUp = pricing.RoundHalfUp
-	RoundUp     = pricing.RoundUp
-	RoundDown   = pricing.RoundDown
-)
-
-// Meter aggregations. Union of OpenMeter and Lago minus AVG and weighted_sum:
-// counters use sum/count; point-in-time gauges use max/min/latest/unique_count;
-// time-weighted "gauge" usage (GiB-months) is modeled as sum of host-emitted
-// unit-seconds + a price-level divide_by (the OpenMeter heartbeat approach),
-// so no native weighted_sum is needed.
-const (
-	AggSum         = pricing.AggregationSum
-	AggCount       = pricing.AggregationCount
-	AggMax         = pricing.AggregationMax
-	AggMin         = pricing.AggregationMin
-	AggUniqueCount = pricing.AggregationUniqueCount
-	AggLatest      = pricing.AggregationLatest
-)
 
 // payment terms (OpenMeter PaymentTermType / Lago pay_in_advance).
 const (
@@ -107,7 +57,7 @@ func (rc RateCard) RateUsage(dimValue string, quantity int64) (int64, error) {
 // validateRatePrice normalizes and validates a charge-model price. `where` is a
 // human label for error messages (e.g. `product "droplet" rate_card #1`).
 func validateRatePrice(where string, rp *RatePrice) error {
-	return pricing.ValidateRatePrice(where, rp)
+	return ValidateRatePrice(where, rp)
 }
 
 // validateRateCard validates one rate card: a flat fee (no meter) or a metered
@@ -145,7 +95,7 @@ func validateRateCard(where string, rc *RateCard) error {
 }
 
 func validateAllowance(where string, a *Allowance) error {
-	return pricing.ValidateAllowance(where, a)
+	return ValidateAllowance(where, a)
 }
 
 // validateRateCardModel validates the rate-card
@@ -203,7 +153,7 @@ func (m *Manifest) validateRateCardModel() error {
 }
 
 func validateMatrixDimension(where string, mx *Matrix, mt Meter) error {
-	return pricing.ValidateDimensions(where, mt.GroupBy, nil, &RatePrice{
+	return ValidateDimensions(where, mt.GroupBy, nil, &RatePrice{
 		Model: ModelPerUnit,
 		PerUnit: &PerUnitPrice{
 			Matrix: mx,
@@ -212,8 +162,8 @@ func validateMatrixDimension(where string, mx *Matrix, mt Meter) error {
 }
 
 func validateFilterKeys(where string, filter *map[string][]string, mt Meter) error {
-	if err := pricing.ValidateFilter(where, filter); err != nil {
+	if err := ValidateFilter(where, filter); err != nil {
 		return err
 	}
-	return pricing.ValidateDimensions(where, mt.GroupBy, *filter, nil)
+	return ValidateDimensions(where, mt.GroupBy, *filter, nil)
 }

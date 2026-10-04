@@ -7,8 +7,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SolanaPrivateKeyWritePattern is the path.Match pattern for a self-custody
@@ -57,11 +57,11 @@ func NewWriteRestrictedSecretStore(inner MerchantSecretStore, reasons map[string
 	return &writeRestrictedSecretStore{inner: inner, reasons: clean}
 }
 
-func (s *writeRestrictedSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+func (s *writeRestrictedSecretStore) Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error) {
 	return s.inner.Get(ctx, merchantID, name)
 }
 
-func (s *writeRestrictedSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
+func (s *writeRestrictedSecretStore) Put(ctx context.Context, merchantID billing.MerchantID, name, value string) (Secret, error) {
 	name = strings.TrimSpace(name)
 	for pattern, reason := range s.reasons {
 		matched, err := path.Match(pattern, name)
@@ -79,11 +79,11 @@ func (s *writeRestrictedSecretStore) Put(ctx context.Context, merchantID merchan
 	return s.inner.Put(ctx, merchantID, name, value)
 }
 
-func (s *writeRestrictedSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name string) error {
+func (s *writeRestrictedSecretStore) Delete(ctx context.Context, merchantID billing.MerchantID, name string) error {
 	return s.inner.Delete(ctx, merchantID, name)
 }
 
-func (s *writeRestrictedSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
+func (s *writeRestrictedSecretStore) List(ctx context.Context, merchantID billing.MerchantID) ([]string, error) {
 	return s.inner.List(ctx, merchantID)
 }
 

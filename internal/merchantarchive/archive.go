@@ -12,11 +12,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type Result struct {
@@ -66,7 +67,7 @@ func classify(err error) error {
 
 // Export writes a consistent snapshot. The caller must discard a partial
 // artifact on error; only the verified footer establishes a complete artifact.
-func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer) error {
+func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.Writer) error {
 	if database == nil || id.IsZero() {
 		return &Error{Code: "merchant_mismatch"}
 	}
@@ -148,7 +149,7 @@ func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer)
 // Restore validates and inserts in one transaction. Footer failure, disconnect,
 // mismatched identity, unsupported state or integrity errors roll back all rows.
 // A matching committed receipt is a no-op even if the target has since advanced.
-func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader) (Result, error) {
+func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.Reader) (Result, error) {
 	var result Result
 	if database == nil || id.IsZero() {
 		return result, &Error{Code: "merchant_mismatch"}
@@ -232,7 +233,7 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 	return result, nil
 }
 
-func scope(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	q := gen.New(tx)
 	if _, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: db.MerchantGUC, Value: id.String(), IsLocal: true}); err != nil {
 		return err

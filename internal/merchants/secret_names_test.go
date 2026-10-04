@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +49,7 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 // SEC-24 item 6: the cleaned name is joined into a Vault path, so traversal
 // segments are refused even though callers allowlist names today.
 func TestSecretNameRejectsTraversal(t *testing.T) {
-	mid := merchant.ID(uuid.New())
+	mid := billing.MerchantID(uuid.New())
 	for _, name := range []string{"..", "../../root", "psps/../../other-merchant/nmi/security_key", "stripe/../../..", "./stripe/secret_key", "stripe/./secret_key", "/../", " / "} {
 		require.Empty(t, cleanSecretName(name), name)
 		require.Error(t, validateSecretRef(mid, name), name)
@@ -58,7 +58,7 @@ func TestSecretNameRejectsTraversal(t *testing.T) {
 		require.NotEmpty(t, cleanSecretName(name), name)
 		require.NoError(t, validateSecretRef(mid, name), name)
 	}
-	require.Error(t, validateSecretRef(merchant.ID{}, stripeKeyName))
+	require.Error(t, validateSecretRef(billing.MerchantID{}, stripeKeyName))
 }
 
 func TestSecretWritability(t *testing.T) {
@@ -83,7 +83,7 @@ func TestSecretWritability(t *testing.T) {
 }
 
 func TestCredentialWritesRequirePublication(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 	store := NewMemorySecretStore()
 	svc, err := NewSecretManagementService(store)
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestCredentialWritesRequirePublication(t *testing.T) {
 }
 
 func TestValidateCredentialNeverPersists(t *testing.T) {
-	ctx, id := t.Context(), merchant.ID(uuid.New())
+	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 	probeErr := errors.New("Stripe refused access")

@@ -7,10 +7,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func snapshotRuntime(t *testing.T, posture config.CredentialPosture) (*app.Runtime, *merchants.ManifestSecretStore) {
@@ -29,7 +29,7 @@ func TestCredentialSnapshotStripePostureIsAtomic(t *testing.T) {
 		for _, key := range []string{"sk_test_fixture", "rk_test_fixture", "sk_live_fixture", "rk_live_fixture", "invalid_secret_fixture", "sk_other_fixture", "sk_test_", "rk_live_"} {
 			t.Run(string(posture)+"/"+key, func(t *testing.T) {
 				rt, store := snapshotRuntime(t, posture)
-				id := merchant.ID(uuid.New())
+				id := billing.MerchantID(uuid.New())
 				first := "sk" + prefix + "first"
 				err := loadProviderCredentialSnapshot(context.Background(), rt, []config.ProviderCredentialSnapshot{
 					{MerchantID: id, Rail: "stripe", AccountID: "acct_first", Credentials: map[string]string{"secret_key": first}},
@@ -56,12 +56,12 @@ func TestCredentialSnapshotStripePostureIsAtomic(t *testing.T) {
 }
 
 func TestCredentialSnapshotRefusals(t *testing.T) {
-	id := merchant.ID(uuid.New())
-	entry := func(mid merchant.ID, credentials map[string]string) config.ProviderCredentialSnapshot {
+	id := billing.MerchantID(uuid.New())
+	entry := func(mid billing.MerchantID, credentials map[string]string) config.ProviderCredentialSnapshot {
 		return config.ProviderCredentialSnapshot{MerchantID: mid, Rail: "nmi", AccountID: "100001", Credentials: credentials}
 	}
 	for name, values := range map[string][]config.ProviderCredentialSnapshot{
-		"zero merchant":  {entry(merchant.ID{}, map[string]string{"security_key": "k"})},
+		"zero merchant":  {entry(billing.MerchantID{}, map[string]string{"security_key": "k"})},
 		"no credentials": {entry(id, nil)},
 		"blank value":    {entry(id, map[string]string{"security_key": "  "})},
 		"duplicate":      {entry(id, map[string]string{"security_key": "a"}), entry(id, map[string]string{"security_key": "b"})},

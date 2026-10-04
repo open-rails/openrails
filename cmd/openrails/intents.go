@@ -18,8 +18,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // newIntentsCmd wires the read-only provider-intent-ledger (#358) CLI:

@@ -12,9 +12,10 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Recorder writes webhook-health rows. Merchant comes from ctx; every write
@@ -35,7 +36,7 @@ func (r *Recorder) now() time.Time {
 // Accepted stamps the verified-accepted watermark. Call ONLY after signature
 // verification succeeded (CCBill: after its IP-allowlist + payload gate).
 func (r *Recorder) Accepted(ctx context.Context, rail string) {
-	r.record(ctx, rail, "accepted", func(ctx context.Context, q *gen.Queries, mid merchant.ID) error {
+	r.record(ctx, rail, "accepted", func(ctx context.Context, q *gen.Queries, mid billing.MerchantID) error {
 		return q.RecordWebhookAccepted(ctx, gen.RecordWebhookAcceptedParams{
 			MerchantID: mid.UUID(), Rail: rail, At: r.now(),
 		})
@@ -45,14 +46,14 @@ func (r *Recorder) Accepted(ctx context.Context, rail string) {
 // Rejected counts a failed-verification delivery. Never touches the accepted
 // watermark.
 func (r *Recorder) Rejected(ctx context.Context, rail string) {
-	r.record(ctx, rail, "rejected", func(ctx context.Context, q *gen.Queries, mid merchant.ID) error {
+	r.record(ctx, rail, "rejected", func(ctx context.Context, q *gen.Queries, mid billing.MerchantID) error {
 		return q.RecordWebhookRejected(ctx, gen.RecordWebhookRejectedParams{
 			MerchantID: mid.UUID(), Rail: rail, At: r.now(),
 		})
 	})
 }
 
-func (r *Recorder) record(ctx context.Context, rail, kind string, fn func(ctx context.Context, q *gen.Queries, mid merchant.ID) error) {
+func (r *Recorder) record(ctx context.Context, rail, kind string, fn func(ctx context.Context, q *gen.Queries, mid billing.MerchantID) error) {
 	if r == nil || r.DB == nil || rail == "" {
 		return
 	}

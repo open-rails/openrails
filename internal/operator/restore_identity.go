@@ -12,14 +12,13 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ProvisionMerchantForRestoreRequest selects billing identity from an archive
 // and authority from the destination. The host supplies the authenticated local
 // owner; group identity and permissions must never come from the archive.
 type ProvisionMerchantForRestoreRequest struct {
-	MerchantID merchant.ID
+	MerchantID billing.MerchantID
 	// Slug is the name the restored merchant claims at the destination.
 	Slug            string
 	ExistingGroupID string

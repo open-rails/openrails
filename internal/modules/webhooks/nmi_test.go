@@ -9,9 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // GAP-1: NMI ids may arrive as bare JSON numbers; they must never pass through float64.
@@ -165,7 +166,7 @@ func (e *recordingConvergeEnqueuer) EnqueueSubscriptionConverge(_ context.Contex
 func TestNMIWebhookMarksSubscriptionDirty(t *testing.T) {
 	t.Parallel()
 	merchantID, pspID := uuid.New(), uuid.New()
-	ctx := db.WithPSPID(merchant.WithID(context.Background(), merchant.ID(merchantID)), pspID)
+	ctx := db.WithPSPID(merchant.WithID(context.Background(), billing.MerchantID(merchantID)), pspID)
 	svc := func(eventType, body string, enq SubscriptionConvergeEnqueuer) *NMIWebhookService {
 		return &NMIWebhookService{Rail: "nmi", ConvergeEnqueuer: enq, Data: NMIWebhookEvent{EventID: uuid.NewString(), EventType: eventType, EventBody: json.RawMessage(body)}}
 	}
@@ -199,7 +200,7 @@ func TestNMIWebhookMarksSubscriptionDirty(t *testing.T) {
 	}{
 		"no enqueuer": {ctx, nil},
 		"no merchant": {db.WithPSPID(context.Background(), pspID), &recordingConvergeEnqueuer{}},
-		"no psp":      {merchant.WithID(context.Background(), merchant.ID(merchantID)), &recordingConvergeEnqueuer{}},
+		"no psp":      {merchant.WithID(context.Background(), billing.MerchantID(merchantID)), &recordingConvergeEnqueuer{}},
 	} {
 		err := svc(EventTypeNMIUpdateSubscription, `{"subscription_id":"sub"}`, tc.enq).HandleNMIWebhook(tc.ctx)
 		require.Error(t, err, name)

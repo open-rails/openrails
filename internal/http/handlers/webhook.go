@@ -12,11 +12,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -24,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/internal/webhookauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -109,7 +110,7 @@ func Webhook(r *httprequest.Request) {
 // Nested calls are a no-op (db.WithMerchantConn returns the existing pin), so
 // the Stripe-by-account path that re-enters processResolvedMerchantWebhook is
 // safe.
-func pinWebhookMerchantConn(r *httprequest.Request, merchantID merchant.ID) (func(), bool) {
+func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
 	if r != nil && r.State != nil {
 		if bound := r.State.ConfiguredMerchant(); !bound.IsZero() && bound != merchantID {
 			rejectWebhook(r)
@@ -131,7 +132,7 @@ func pinWebhookMerchantConn(r *httprequest.Request, merchantID merchant.ID) (fun
 	return release, true
 }
 
-func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) {
+func processResolvedMerchantWebhook(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string) {
 	if strings.TrimSpace(accountID) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "Webhook account_id is required")
 		return
@@ -456,7 +457,7 @@ func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID stri
 	return account, release, true
 }
 
-func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string) bool {
+func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string) bool {
 	body, ok := readLimitedWebhookBody(r, maxNMIWebhookBytes)
 	if !ok {
 		return false
@@ -464,7 +465,7 @@ func processMerchantNMIWebhook(r *httprequest.Request, provider string, merchant
 	return processMerchantNMIWebhookBody(r, provider, merchantID, accountID, body)
 }
 
-func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merchantID merchant.ID, accountID string, body []byte) bool {
+func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merchantID billing.MerchantID, accountID string, body []byte) bool {
 	if strings.TrimSpace(accountID) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "Webhook account_id is required")
 		return false

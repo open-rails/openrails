@@ -12,14 +12,15 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/retry"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StartProviderPosture verifies, in the background, every PSP credential set
@@ -33,7 +34,7 @@ import (
 //
 // Under live posture every NMI account must prove it is not in test mode
 // (SEC-33): an account left in test mode approves without moving money.
-func (r *Runtime) StartProviderPosture(declared ...merchant.ID) {
+func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
 	if r == nil || r.Config == nil || r.Config.IsProviderReadOnly() || r.DB == nil || r.Merchants == nil {
 		if r != nil {
 			r.posturePending.Store(0)
@@ -54,13 +55,13 @@ func (r *Runtime) StartProviderPosture(declared ...merchant.ID) {
 
 // verifyProviderPosture verifies every loaded PSP whose verdict is not yet
 // known and returns how many remain unknown.
-func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []merchant.ID) int {
+func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.MerchantID) int {
 	live := !r.Config.IsTestMode()
 	environment := config.ExpectedProviderEnvironment(!live)
 	registry := providerposture.Process()
 	pending := 0
-	seen := map[merchant.ID]bool{}
-	for _, mid := range append([]merchant.ID{r.ConfiguredMerchant()}, declared...) {
+	seen := map[billing.MerchantID]bool{}
+	for _, mid := range append([]billing.MerchantID{r.ConfiguredMerchant()}, declared...) {
 		if mid.IsZero() || seen[mid] {
 			continue
 		}
@@ -110,7 +111,7 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []merchant
 const postureCheckTimeout = 30 * time.Second
 
 // verifyPSPPosture reports whether the PSP's verdict is now known.
-func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID uuid.UUID) bool {
+func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) bool {
 	svc := r.Merchants
 	scope, ok, err := svc.PSPScopeByID(ctx, mid, pspID)
 	fields := log.Fields{"merchant_id": mid.String(), "psp_id": pspID.String()}
@@ -197,7 +198,7 @@ func (r *Runtime) postureState() error {
 	return fmt.Errorf("PSPs not armed: %s", strings.Join(reasons, "; "))
 }
 
-func pspSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
+func pspSecret(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, error) {
 	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", err

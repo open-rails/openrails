@@ -10,17 +10,18 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/progress"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const KindStripeWebhookReconcile = "openrails.stripe_webhook_reconcile"
@@ -108,7 +109,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 				continue
 			}
 			after = mid
-			merchantID := merchant.ID(*mid)
+			merchantID := billing.MerchantID(*mid)
 			progress.Mark(ctx, "stripe webhook reconcile merchant "+merchantID.String())
 			// The directory carries the slug (billing.merchants is global);
 			// the PSP rows are the merchant's own and are read in its scope.
@@ -204,7 +205,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 // managed endpoint. Best-effort: the endpoint is already correct in Stripe, and
 // failing to file the paperwork must never fail the pass.
 func (w StripeWebhookReconcileWorker) recordEndpointFinding(
-	ctx context.Context, mid merchant.ID, accountID string,
+	ctx context.Context, mid billing.MerchantID, accountID string,
 	res catalog.ManagedStripeWebhookResult, verdict destructive.Verdict,
 ) {
 	subject := "stripe:" + accountID
@@ -245,7 +246,7 @@ func (w StripeWebhookReconcileWorker) recordEndpointFinding(
 
 // resolveStripeWebhookFinding closes a standing finding once the rollover has
 // fully drained.
-func resolveStripeWebhookFinding(ctx context.Context, database *db.DB, mid merchant.ID, subject string) error {
+func resolveStripeWebhookFinding(ctx context.Context, database *db.DB, mid billing.MerchantID, subject string) error {
 	return database.Gen(ctx).AutoResolveFindingBySubject(ctx, gen.AutoResolveFindingBySubjectParams{
 		MerchantID: mid.UUID(), FindingType: FindingStripeWebhookEndpoint, SubjectKey: subject,
 	})

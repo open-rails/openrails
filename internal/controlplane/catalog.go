@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/permissions"
 )
 
 // Roles is OpenRails' permission model (#567): two flat personas beside root.
@@ -42,31 +41,31 @@ var (
 	CustomerOwner = customerPersona.Owner
 
 	MerchantCreator = merchantRole("creator",
-		permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate)
+		billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate)
 	MerchantSupport = merchantRole("support",
-		permissions.MerchantCustomerSettingsRead, permissions.MerchantCustomerSettingsUpdate,
-		permissions.MerchantPaymentsRead, permissions.MerchantPaymentsRefund,
-		permissions.MerchantInvoicesRead, permissions.MerchantInvoicesCollect,
-		permissions.MerchantSubscriptionsRead, permissions.MerchantSubscriptionsUpdate,
-		permissions.MerchantUsageRead, permissions.MerchantHostEventsRead, permissions.MerchantRepairAlertsRead,
-		permissions.MerchantMetricsRead, permissions.MerchantDashboardUpdate)
+		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,
+		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
+		billing.MerchantInvoicesRead, billing.MerchantInvoicesCollect,
+		billing.MerchantSubscriptionsRead, billing.MerchantSubscriptionsUpdate,
+		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantRepairAlertsRead,
+		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate)
 	// MerchantViewer is read-only: finance, audit, analysts and LLM agents.
 	MerchantViewer = merchantRole("viewer",
-		permissions.MerchantSettingsRead, permissions.MerchantPaymentProvidersRead,
-		permissions.MerchantCatalogRead, permissions.MerchantCustomerSettingsRead,
-		permissions.MerchantPaymentsRead, permissions.MerchantInvoicesRead, permissions.MerchantSubscriptionsRead,
-		permissions.MerchantUsageRead, permissions.MerchantHostEventsRead, permissions.MerchantRepairAlertsRead,
-		permissions.MerchantMetricsRead)
+		billing.MerchantSettingsRead, billing.MerchantPaymentProvidersRead,
+		billing.MerchantCatalogRead, billing.MerchantCustomerSettingsRead,
+		billing.MerchantPaymentsRead, billing.MerchantInvoicesRead, billing.MerchantSubscriptionsRead,
+		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantRepairAlertsRead,
+		billing.MerchantMetricsRead)
 
 	// CustomerMember is a delegated spender: read-only on the balance surface.
 	CustomerMember = customerPersona.Role("member",
-		declared(permissions.CustomerBalanceRead), declared(permissions.CustomerSpendDelegationsRead))
+		declared(billing.CustomerBalanceRead), declared(billing.CustomerSpendDelegationsRead))
 
 	// Bounded platform-operator roles (#721) for the cross-merchant directory.
 	// The root owner holds root:* and covers both.
-	RootMerchantDirectoryViewer = Roles.Root.Role("merchant-directory-viewer", declared(permissions.RootMerchantsRead))
+	RootMerchantDirectoryViewer = Roles.Root.Role("merchant-directory-viewer", declared(billing.RootMerchantsRead))
 	RootMerchantDirectoryAdmin  = Roles.Root.Role("merchant-directory-admin",
-		declared(permissions.RootMerchantsRead), declared(permissions.RootMerchantsDelete), declared(permissions.RootMerchantsRestore))
+		declared(billing.RootMerchantsRead), declared(billing.RootMerchantsDelete), declared(billing.RootMerchantsRestore))
 )
 
 // catalogPerms registers every OpenRails permission. members:* and
@@ -81,26 +80,26 @@ var catalogPerms = func() map[string]iam.Perm {
 		}
 	}
 	declare(merchantPersona,
-		permissions.MerchantHostEventsRead, permissions.MerchantHostEventsAcknowledge,
-		permissions.MerchantSettingsRead, permissions.MerchantSettingsUpdate,
-		permissions.MerchantPaymentProvidersRead, permissions.MerchantPaymentProvidersUpdate,
-		permissions.MerchantCatalogRead, permissions.MerchantCatalogUpdate,
-		permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate,
-		permissions.MerchantCustomerSettingsRead, permissions.MerchantCustomerSettingsUpdate,
-		permissions.MerchantInvoicesRead, permissions.MerchantInvoicesUpdate, permissions.MerchantInvoicesCollect,
-		permissions.MerchantCheckoutCreate,
-		permissions.MerchantPaymentsRead, permissions.MerchantPaymentsRefund,
-		permissions.MerchantSubscriptionsRead, permissions.MerchantSubscriptionsUpdate,
-		permissions.MerchantAdmissionsCreate, permissions.MerchantUsageRead, permissions.MerchantRepairAlertsRead,
-		permissions.MerchantMetricsRead, permissions.MerchantDashboardUpdate, permissions.MerchantFindingsResolve,
-		permissions.MerchantBillingImport, permissions.MerchantBillingExport,
-		permissions.MerchantCreditsGrant, permissions.MerchantCreditsRevoke, permissions.MerchantAccessGrantPermanent)
+		billing.MerchantHostEventsRead, billing.MerchantHostEventsAcknowledge,
+		billing.MerchantSettingsRead, billing.MerchantSettingsUpdate,
+		billing.MerchantPaymentProvidersRead, billing.MerchantPaymentProvidersUpdate,
+		billing.MerchantCatalogRead, billing.MerchantCatalogUpdate,
+		billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate,
+		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,
+		billing.MerchantInvoicesRead, billing.MerchantInvoicesUpdate, billing.MerchantInvoicesCollect,
+		billing.MerchantCheckoutCreate,
+		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
+		billing.MerchantSubscriptionsRead, billing.MerchantSubscriptionsUpdate,
+		billing.MerchantAdmissionsCreate, billing.MerchantUsageRead, billing.MerchantRepairAlertsRead,
+		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate, billing.MerchantFindingsResolve,
+		billing.MerchantBillingImport, billing.MerchantBillingExport,
+		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantAccessGrantPermanent)
 	declare(customerPersona,
-		permissions.CustomerBalanceRead, permissions.CustomerBillingUpdate, permissions.CustomerPaymentMethodsUpdate,
-		permissions.CustomerCheckoutCreate, permissions.CustomerSpendDelegationsRead, permissions.CustomerSpendDelegationsUpdate)
+		billing.CustomerBalanceRead, billing.CustomerBillingUpdate, billing.CustomerPaymentMethodsUpdate,
+		billing.CustomerCheckoutCreate, billing.CustomerSpendDelegationsRead, billing.CustomerSpendDelegationsUpdate)
 	declare(Roles.Root.PersonaDef,
-		permissions.RootMerchantsRead, permissions.RootMerchantsDelete, permissions.RootMerchantsRestore,
-		permissions.RootWorkerHealthRead, permissions.RootAdminRateLimitsUnlock)
+		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
+		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock)
 	return out
 }()
 

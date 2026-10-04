@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // memSecretStore is an in-memory MerchantSecretStore for tests and pure-dev runs
@@ -22,7 +22,7 @@ func NewMemorySecretStore() MerchantSecretStore {
 	return &memSecretStore{data: make(map[string]map[string]Secret)}
 }
 
-func (m *memSecretStore) Get(_ context.Context, merchantID merchant.ID, name string) (Secret, error) {
+func (m *memSecretStore) Get(_ context.Context, merchantID billing.MerchantID, name string) (Secret, error) {
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -39,7 +39,7 @@ func (m *memSecretStore) Get(_ context.Context, merchantID merchant.ID, name str
 	return s, nil
 }
 
-func (m *memSecretStore) Put(_ context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
+func (m *memSecretStore) Put(_ context.Context, merchantID billing.MerchantID, name, value string) (Secret, error) {
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return Secret{}, err
 	}
@@ -64,7 +64,7 @@ func (m *memSecretStore) Put(_ context.Context, merchantID merchant.ID, name, va
 	return s, nil
 }
 
-func (m *memSecretStore) Delete(_ context.Context, merchantID merchant.ID, name string) error {
+func (m *memSecretStore) Delete(_ context.Context, merchantID billing.MerchantID, name string) error {
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (m *memSecretStore) Delete(_ context.Context, merchantID merchant.ID, name 
 	return nil
 }
 
-func (m *memSecretStore) List(_ context.Context, merchantID merchant.ID) ([]string, error) {
+func (m *memSecretStore) List(_ context.Context, merchantID billing.MerchantID) ([]string, error) {
 	if merchantID.IsZero() {
 		return nil, validateSecretRef(merchantID, "x")
 	}
@@ -94,6 +94,6 @@ func (m *memSecretStore) List(_ context.Context, merchantID merchant.ID) ([]stri
 	return names, nil
 }
 
-func (m *memSecretStore) cleanupTarget(id merchant.ID) (string, string, error) {
+func (m *memSecretStore) cleanupTarget(id billing.MerchantID) (string, string, error) {
 	return "memory", id.String(), nil
 }

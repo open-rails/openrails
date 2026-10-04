@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // DefaultSecretCacheTTL is the in-process secret cache TTL used when a managed
@@ -66,7 +66,7 @@ func NewCachedSecretStore(inner MerchantSecretStore, ttl time.Duration) Merchant
 	}
 }
 
-func (c *cachedSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
+func (c *cachedSecretStore) Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error) {
 	return c.GetAtLeastVersion(ctx, merchantID, name, 0)
 }
 
@@ -76,7 +76,7 @@ func (c *cachedSecretStore) Get(ctx context.Context, merchantID merchant.ID, nam
 // row that the credential has been rotated to version N is never answered from
 // a pre-N cache entry, however much TTL is left. minVersion 0 is the
 // unversioned path and behaves exactly as before.
-func (c *cachedSecretStore) GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error) {
+func (c *cachedSecretStore) GetAtLeastVersion(ctx context.Context, merchantID billing.MerchantID, name string, minVersion int) (Secret, error) {
 	if minVersion < 0 {
 		return Secret{}, fmt.Errorf("%w: invalid credential version floor", ErrSecretBackendUnavailable)
 	}
@@ -109,7 +109,7 @@ func (c *cachedSecretStore) GetAtLeastVersion(ctx context.Context, merchantID me
 	return sec, nil
 }
 
-func (c *cachedSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error) {
+func (c *cachedSecretStore) Put(ctx context.Context, merchantID billing.MerchantID, name, value string) (Secret, error) {
 	sec, err := c.inner.Put(ctx, merchantID, name, value)
 	if err != nil {
 		// Invalidate on failure too: we no longer know the authoritative value.
@@ -124,7 +124,7 @@ func (c *cachedSecretStore) Put(ctx context.Context, merchantID merchant.ID, nam
 	return sec, nil
 }
 
-func (c *cachedSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name string) error {
+func (c *cachedSecretStore) Delete(ctx context.Context, merchantID billing.MerchantID, name string) error {
 	err := c.inner.Delete(ctx, merchantID, name)
 	// Whether or not delete succeeded, drop the cached copy: on success it's gone,
 	// on failure we must not keep serving a value we tried to remove.
@@ -133,11 +133,11 @@ func (c *cachedSecretStore) Delete(ctx context.Context, merchantID merchant.ID, 
 }
 
 // List is not cached (enumeration is rare and used by export/audit paths).
-func (c *cachedSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
+func (c *cachedSecretStore) List(ctx context.Context, merchantID billing.MerchantID) ([]string, error) {
 	return c.inner.List(ctx, merchantID)
 }
 
-func (c *cachedSecretStore) invalidate(merchantID merchant.ID, name string) {
+func (c *cachedSecretStore) invalidate(merchantID billing.MerchantID, name string) {
 	key := cacheKey{merchant: merchantID.String(), name: name}
 	c.mu.Lock()
 	delete(c.entries, key)
@@ -146,6 +146,6 @@ func (c *cachedSecretStore) invalidate(merchantID merchant.ID, name string) {
 
 // GetVersion requires the exact published reference. The backend is consulted
 // on every managed versioned read so revoked access cannot be hidden by cache.
-func (c *cachedSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+func (c *cachedSecretStore) GetVersion(ctx context.Context, id billing.MerchantID, name string, version int) (Secret, error) {
 	return ReadSecretRef(ctx, c.inner, id, SecretRef{Name: name, MinVersion: version})
 }

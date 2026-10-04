@@ -12,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if baseURL == "" || key == "" {
 		return errors.New("OPENRAILS_URL and OPENRAILS_API_KEY are required")
 	}
-	merchantID, err := merchant.ParseID(getenv("OPENRAILS_MERCHANT_ID"))
+	merchantID, err := billing.ParseMerchantID(getenv("OPENRAILS_MERCHANT_ID"))
 	if err != nil {
 		return err
 	}

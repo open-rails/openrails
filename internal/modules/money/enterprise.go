@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/open-rails/openrails/pkg/pricing"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Enterprise arrears seams (#798): host-driven sweep, past-due marking,
@@ -115,7 +115,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meter := pricing.Meter{
+	meter := catalog.Meter{
 		Key:           spec.Key,
 		EventType:     spec.EventType,
 		ValueProperty: spec.ValueProperty,
@@ -123,10 +123,10 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 		Unit:          spec.Unit,
 		GroupBy:       spec.GroupBy,
 	}
-	if err := pricing.ValidateMeter("usage meter", &meter); err != nil {
+	if err := catalog.ValidateMeter("usage meter", &meter); err != nil {
 		return err
 	}
-	if !pricing.BillingSupported(meter.Aggregation) {
+	if !catalog.BillingSupported(meter.Aggregation) {
 		return fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation)
 	}
 	groupByJSON, err := json.Marshal(meter.GroupBy)
@@ -143,7 +143,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 			return fmt.Errorf("lock usage meter: %w", err)
 		}
 
-		var existing pricing.Meter
+		var existing catalog.Meter
 		row, err := queries.GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
 			MerchantID: tid.UUID(),
 			MeterKey:   meter.Key,
@@ -166,7 +166,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 			return fmt.Errorf("load usage meter: %w", err)
 		}
 
-		existing = pricing.Meter{
+		existing = catalog.Meter{
 			Key:           row.Key,
 			EventType:     row.EventType,
 			ValueProperty: row.ValueProperty,
@@ -213,8 +213,8 @@ type UsageRateCardInput struct {
 	ProductID *uuid.UUID
 	MeterKey  string
 	Filter    map[string][]string
-	Price     pricing.RatePrice
-	Allowance *pricing.Allowance
+	Price     catalog.RatePrice
+	Allowance *catalog.Allowance
 }
 
 // SetUsageRateCard upserts an in_arrears usage rate card. Operator surface —
@@ -223,7 +223,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meterKey := pricing.NormalizeKey(in.MeterKey)
+	meterKey := catalog.NormalizeKey(in.MeterKey)
 	if meterKey == "" {
 		return invalidUsageRateCard(fmt.Errorf("meter_key required"))
 	}
@@ -237,7 +237,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if payerScoped && len(in.Filter) > 0 {
 		return invalidUsageRateCard(fmt.Errorf("filter is inherited by a payer rate card"))
 	}
-	if err := pricing.ValidateUsagePrice("usage rate card", &in.Price); err != nil {
+	if err := catalog.ValidateUsagePrice("usage rate card", &in.Price); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	if in.Price.Currency == "" {
@@ -246,10 +246,10 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if err := RequireBillingCurrency(in.Price.Currency); err != nil {
 		return invalidUsageRateCard(err)
 	}
-	if err := pricing.ValidateAllowance("usage rate card", in.Allowance); err != nil {
+	if err := catalog.ValidateAllowance("usage rate card", in.Allowance); err != nil {
 		return invalidUsageRateCard(err)
 	}
-	if err := pricing.ValidateFilter("usage rate card", &in.Filter); err != nil {
+	if err := catalog.ValidateFilter("usage rate card", &in.Filter); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	priceJSON, err := json.Marshal(in.Price)
@@ -272,10 +272,10 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		if err != nil {
 			return err
 		}
-		if !pricing.BillingSupported(meter.Aggregation) {
+		if !catalog.BillingSupported(meter.Aggregation) {
 			return invalidUsageRateCard(fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation))
 		}
-		if err := pricing.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
+		if err := catalog.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
 			return invalidUsageRateCard(err)
 		}
 		if err := ensureAllowanceSource(
@@ -361,7 +361,7 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meterKey = pricing.NormalizeKey(meterKey)
+	meterKey = catalog.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return fmt.Errorf("meter_key required")
 	}
@@ -418,8 +418,8 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 // merchant-default card for MeterKey when rating this payer.
 type PayerRateCard struct {
 	MeterKey  string             `json:"meter_key"`
-	Price     pricing.RatePrice  `json:"price"`
-	Allowance *pricing.Allowance `json:"allowance,omitempty"`
+	Price     catalog.RatePrice  `json:"price"`
+	Allowance *catalog.Allowance `json:"allowance,omitempty"`
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 }
@@ -458,7 +458,7 @@ func (s *MoneyService) ListPayerRateCards(ctx context.Context, payer identity.Cu
 			return nil, fmt.Errorf("decode rate card price for meter %q: %w", card.MeterKey, err)
 		}
 		if len(row.Allowance) > 0 {
-			var a pricing.Allowance
+			var a catalog.Allowance
 			if err := json.Unmarshal(row.Allowance, &a); err != nil {
 				return nil, fmt.Errorf("decode rate card allowance for meter %q: %w", card.MeterKey, err)
 			}
@@ -478,7 +478,7 @@ func (s *MoneyService) DeletePayerRateCard(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	meterKey = pricing.NormalizeKey(meterKey)
+	meterKey = catalog.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return fmt.Errorf("meter_key required")
 	}

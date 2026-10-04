@@ -1,6 +1,6 @@
 // Package merchants implements merchant provisioning, lifecycle, per-merchant
 // rail credentials, and webhook routing for OpenRails' merchant platform
-// (issue #225). It builds on the #223 merchant primitive (pkg/merchant +
+// (issue #225). It builds on the #223 merchant primitive (internal/merchant +
 // billing.merchants)
 // and the #224 in-process AuthKit control plane (internal/controlplane): the
 // lifecycle service records merchant permission-group ids through control-plane
@@ -18,11 +18,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // A merchant secret has exactly ONE spelling: the PSP-scoped name
@@ -243,7 +243,7 @@ type Secret struct {
 // Checkout, vaulting, and workers use this so fixed-credential runtimes do not
 // need write access merely to resolve credentials.
 type MerchantSecretReader interface {
-	Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error)
+	Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error)
 }
 
 // VersionedSecretReader is the cross-node ROTATION CUTOVER contract (or#812).
@@ -259,12 +259,12 @@ type MerchantSecretReader interface {
 // Only the caching wrapper needs to implement this; ReadSecretRef degrades to
 // a plain Get for uncached stores, then verifies the returned version too.
 type VersionedSecretReader interface {
-	GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error)
+	GetAtLeastVersion(ctx context.Context, merchantID billing.MerchantID, name string, minVersion int) (Secret, error)
 }
 
 // ExactSecretReader resolves only a published immutable version.
 type ExactSecretReader interface {
-	GetVersion(context.Context, merchant.ID, string, int) (Secret, error)
+	GetVersion(context.Context, billing.MerchantID, string, int) (Secret, error)
 }
 
 // SecretRef names a credential AND the version floor a reader must satisfy for
@@ -280,7 +280,7 @@ type SecretRef struct {
 // ReadSecretRef enforces the recorded version floor for every backend. A
 // version-aware cache may refresh first, but a lagging backend is unavailable,
 // never permission to present a retired credential.
-func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant.ID, ref SecretRef) (Secret, error) {
+func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id billing.MerchantID, ref SecretRef) (Secret, error) {
 	if ref.Retired {
 		return Secret{}, ErrSecretNotFound
 	}
@@ -312,13 +312,13 @@ func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant
 // PSPSecretResolver resolves the canonical secret name for the
 // active PSP a merchant should use.
 type PSPSecretResolver interface {
-	ActivePSPSecretName(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (string, bool, error)
+	ActivePSPSecretName(ctx context.Context, merchantID billing.MerchantID, rail, environment, key string) (string, bool, error)
 }
 
 // PSPSecretRefResolver is PSPSecretResolver plus the rotation version floor —
 // the form every credential read should use (or#812).
 type PSPSecretRefResolver interface {
-	ActivePSPSecretRef(ctx context.Context, merchantID merchant.ID, rail, environment, key string) (SecretRef, bool, error)
+	ActivePSPSecretRef(ctx context.Context, merchantID billing.MerchantID, rail, environment, key string) (SecretRef, bool, error)
 }
 
 // PSPScope is the configured PSP selected for a
@@ -404,20 +404,20 @@ func NormalizeCredentialVersionKey(key string) string {
 // PSPScopeResolver resolves the selected PSP without
 // requiring a particular secret key.
 type PSPScopeResolver interface {
-	ActivePSPScope(ctx context.Context, merchantID merchant.ID, rail, environment string) (PSPScope, bool, error)
+	ActivePSPScope(ctx context.Context, merchantID billing.MerchantID, rail, environment string) (PSPScope, bool, error)
 }
 
 // PSPKeyResolver resolves a declared account by its manifest
 // account key — the payment-provider name checkout requests
 // and catalog provider_links use.
 type PSPKeyResolver interface {
-	PSPScopeByKey(ctx context.Context, merchantID merchant.ID, key, environment string) (PSPScope, bool, error)
+	PSPScopeByKey(ctx context.Context, merchantID billing.MerchantID, key, environment string) (PSPScope, bool, error)
 }
 
 // PSPRailScopesResolver lists every non-archived account on a rail kind —
 // checkout's unambiguous rail-kind fallback (#848).
 type PSPRailScopesResolver interface {
-	ActivePSPScopesForRail(ctx context.Context, merchantID merchant.ID, rail, environment string) ([]PSPScope, error)
+	ActivePSPScopesForRail(ctx context.Context, merchantID billing.MerchantID, rail, environment string) ([]PSPScope, error)
 }
 
 // ArchivedPSPKeyResolver reports whether a key names an ARCHIVED account
@@ -425,7 +425,7 @@ type PSPRailScopesResolver interface {
 // "no such PSP was ever declared" (unknown_selector) — two very different
 // answers to "why didn't my checkout go there".
 type ArchivedPSPKeyResolver interface {
-	PSPKeyArchived(ctx context.Context, merchantID merchant.ID, key, environment string) (bool, error)
+	PSPKeyArchived(ctx context.Context, merchantID billing.MerchantID, key, environment string) (bool, error)
 }
 
 // MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every
@@ -445,18 +445,18 @@ type MerchantSecretStore interface {
 	// Put creates or rotates the secret for (merchant, name). It is idempotent on
 	// value: putting the same value twice is a no-op rotation. Returns the stored
 	// secret (with its new version).
-	Put(ctx context.Context, merchantID merchant.ID, name, value string) (Secret, error)
+	Put(ctx context.Context, merchantID billing.MerchantID, name, value string) (Secret, error)
 	// Delete removes the secret for (merchant, name). Deleting a missing secret is
 	// a no-op (idempotent), so it is safe in merchant-delete purge.
-	Delete(ctx context.Context, merchantID merchant.ID, name string) error
+	Delete(ctx context.Context, merchantID billing.MerchantID, name string) error
 	// List enumerates the secret NAMES (never values) held for a merchant. Used by
 	// the export path for Vault-side secret enumeration (GDPR / portability).
-	List(ctx context.Context, merchantID merchant.ID) ([]string, error)
+	List(ctx context.Context, merchantID billing.MerchantID) ([]string, error)
 }
 
 // validateSecretRef guards the (merchant, name) addressing shared by every store
 // so a blank/zero merchant or empty name can never read or clobber a secret.
-func validateSecretRef(merchantID merchant.ID, name string) error {
+func validateSecretRef(merchantID billing.MerchantID, name string) error {
 	if merchantID.IsZero() {
 		return fmt.Errorf("merchants: secret access requires a merchant id")
 	}
@@ -487,7 +487,7 @@ func cleanSecretName(name string) string {
 // PSPIdentityScopeResolver resolves immutable account identity for existing
 // obligations. Archived PSPs remain available; new admission uses active scopes.
 type PSPIdentityScopeResolver interface {
-	PSPScopeByID(ctx context.Context, merchantID merchant.ID, pspID uuid.UUID) (PSPScope, bool, error)
+	PSPScopeByID(ctx context.Context, merchantID billing.MerchantID, pspID uuid.UUID) (PSPScope, bool, error)
 }
 
 // CredentialRefs returns the exact immutable candidate selected by publication.

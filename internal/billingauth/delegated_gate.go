@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/billing"
 )
 
 // DelegatedGate is the standard host-side Gate over a DelegatedAuthenticator:
@@ -35,7 +35,7 @@ func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permissio
 	if !HasPermission(principal.Permissions, permission) {
 		return Principal{}, GateError{Status: http.StatusForbidden, Message: "permission_required"}
 	}
-	mid, err := merchant.ParseID(principal.MerchantID)
+	mid, err := billing.ParseMerchantID(principal.MerchantID)
 	if err != nil {
 		return Principal{}, GateError{Status: http.StatusUnauthorized, Message: "delegated_principal_invalid"}
 	}

@@ -6,9 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ErrHostMerchantUnknown indicates a request Host does not map to any active
@@ -25,20 +25,20 @@ var ErrHostMerchantUnknown = errors.New("controlplane: host maps to no active me
 // boot-time host map exists, so a merchant registered (or re-hosted) on any
 // node resolves on the very next request against every process sharing this
 // database.
-func (c *ControlPlane) merchantForHost(ctx context.Context, host string) (merchant.ID, string, error) {
+func (c *ControlPlane) merchantForHost(ctx context.Context, host string) (billing.MerchantID, string, error) {
 	host = merchants.NormalizeAPIHost(host)
 	if host == "" {
-		return merchant.ID{}, "", ErrHostMerchantUnknown
+		return billing.MerchantID{}, "", ErrHostMerchantUnknown
 	}
 	if c == nil || c.pool == nil {
-		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for host resolution")
+		return billing.MerchantID{}, "", errors.New("controlplane: pgx pool unavailable for host resolution")
 	}
 	mid, slug, err := c.merchantDirectoryRow(gen.New(c.pool).ListLiveMerchantsByAPIHost(ctx, host))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
-			return merchant.ID{}, "", ErrHostMerchantUnknown
+			return billing.MerchantID{}, "", ErrHostMerchantUnknown
 		}
-		return merchant.ID{}, "", err
+		return billing.MerchantID{}, "", err
 	}
 	return mid, slug, nil
 }
@@ -46,11 +46,11 @@ func (c *ControlPlane) merchantForHost(ctx context.Context, host string) (mercha
 // ResolveMerchantByHost is the exported #734 Host->merchant resolver: the
 // single mechanism both merchant-scoped Host resolution and the Host-routed
 // webhook mount (pkg/embedded) share. Its signature matches
-// pkg/merchant.HostResolver, so a method value (cp.ResolveMerchantByHost) is
+// internal/merchant.HostResolver, so a method value (cp.ResolveMerchantByHost) is
 // directly assignable wherever that type is expected. Browser CORS no longer
 // resolves through this (#765: CORS is now a static per-route-tier policy,
 // not per-merchant — see internal/http/middleware.PermissiveCORSHTTP).
-func (c *ControlPlane) ResolveMerchantByHost(ctx context.Context, host string) (merchant.ID, error) {
+func (c *ControlPlane) ResolveMerchantByHost(ctx context.Context, host string) (billing.MerchantID, error) {
 	mid, _, err := c.merchantForHost(ctx, host)
 	return mid, err
 }

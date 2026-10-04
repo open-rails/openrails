@@ -14,10 +14,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 type CatalogMeterSpec struct {
@@ -221,7 +221,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		if old, ok := currentMeters[m.Key]; ok && reflect.DeepEqual(old, m) {
 			continue
 		}
-		replacement := pricing.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
+		replacement := catalog.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
 		if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, &replacement); err != nil {
 			return err
 		}
@@ -261,11 +261,11 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		if old, ok := currentCards[key]; ok && sameCatalogCards([]CatalogRateCardSpec{old}, []CatalogRateCardSpec{c}) && reflect.DeepEqual(currentMeters[key], meter) {
 			continue
 		}
-		var price pricing.RatePrice
+		var price catalog.RatePrice
 		if err := json.Unmarshal(c.Price, &price); err != nil {
 			return err
 		}
-		effective := pricing.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
+		effective := catalog.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
 		if err := money.CheckCatalogRateCardContracts(ctx, tx, merchantID, effective, c.Filter, price); err != nil {
 			return err
 		}
@@ -327,11 +327,11 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 			slices.Sort(values)
 			c.Filter[key] = slices.Compact(values)
 		}
-		var price pricing.RatePrice
+		var price catalog.RatePrice
 		if err := json.Unmarshal(c.Price, &price); err != nil {
 			return fmt.Errorf("decode catalog rate card: %w", err)
 		}
-		if err := pricing.ValidateRatePrice("catalog rate card", &price); err != nil {
+		if err := catalog.ValidateRatePrice("catalog rate card", &price); err != nil {
 			return err
 		}
 		if price.PerUnit != nil {
@@ -339,22 +339,22 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 				price.PerUnit.DivideBy = 1
 			}
 			if price.PerUnit.Round == "" {
-				price.PerUnit.Round = pricing.RoundHalfUp
+				price.PerUnit.Round = catalog.RoundHalfUp
 			}
 		}
 		c.Price, _ = json.Marshal(price)
 		if len(c.Allowance) == 0 || bytes.Equal(c.Allowance, []byte("null")) {
 			c.Allowance = nil
 		} else {
-			var allowance pricing.Allowance
+			var allowance catalog.Allowance
 			if err := json.Unmarshal(c.Allowance, &allowance); err != nil {
 				return err
 			}
-			if err := pricing.ValidateAllowance("catalog allowance", &allowance); err != nil {
+			if err := catalog.ValidateAllowance("catalog allowance", &allowance); err != nil {
 				return err
 			}
 			if allowance.Cap != "" {
-				duration, err := pricing.ParseDurationSpec(allowance.Cap)
+				duration, err := catalog.ParseDurationSpec(allowance.Cap)
 				if err != nil {
 					return err
 				}
