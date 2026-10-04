@@ -13,7 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -324,12 +323,11 @@ func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
 		}
 		var refusal billingauth.GateError
 		if errors.As(err, &refusal) && refusal.Status != http.StatusForbidden {
-			r.ErrorJSON(refusal.Status, refusal.Message)
+			r.AbortGate(refusal)
 			return false
 		}
 	}
-	r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeForStatus(http.StatusForbidden), "permanent_grant_forbidden",
-		"a grant with no end needs "+billing.MerchantAccessGrantPermanent))
+	r.ErrorCode("permanent_grant_forbidden", "a grant with no end needs "+billing.MerchantAccessGrantPermanent)
 	return false
 }
 

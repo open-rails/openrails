@@ -78,7 +78,7 @@ func writeEngineTakeoverError(r *httprequest.Request, err error) {
 	case errors.Is(err, intents.ErrRateCeilingTripped):
 		r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded, "Destructive operation rate limit reached; try again later"))
 	case db.IsNotFound(err):
-		cutoverRefusal(r, http.StatusNotFound, "resource_missing", "subscription not found", "subscription_id")
+		cutoverRefusal(r, http.StatusNotFound, api.CodeResourceNotFound, "subscription not found", "subscription_id")
 	default:
 		r.InternalError("engine takeover failed", err)
 	}

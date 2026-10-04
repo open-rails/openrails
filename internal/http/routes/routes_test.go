@@ -29,7 +29,7 @@ type deny struct{ asked []string }
 
 func (g *deny) Authorize(_ context.Context, _ *http.Request, perm string) (billingauth.Principal, error) {
 	g.asked = append(g.asked, perm)
-	return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+	return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 }
 
 func (*deny) RequireRecentSignIn(context.Context, *http.Request, billingauth.Principal) error {

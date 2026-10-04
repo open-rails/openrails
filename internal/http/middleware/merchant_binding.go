@@ -1,11 +1,9 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
@@ -18,23 +16,23 @@ func EnforceMerchantBinding(r *request.Request, actual billing.MerchantID) bool 
 	if raw := strings.TrimSpace(r.Header(merchant.SlugHeader)); raw != "" {
 		target, ok := merchanttarget.FromContext(r.Request.Context())
 		if !ok || target.MerchantID != actual || merchanttarget.Assert(r.Request, target) != nil {
-			r.APIError(api.ConflictError("resolved merchant binding mismatch"))
+			r.ErrorCode(billing.CodeMerchantBindingMismatch, "resolved merchant binding mismatch")
 			return false
 		}
 	}
 	if raw := strings.TrimSpace(r.Header(merchant.BindingHeader)); raw != "" {
 		expected, err := billing.ParseMerchantID(raw)
 		if err != nil || expected.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid merchant binding")
+			r.ErrorCode(billing.CodeMerchantSelectorInvalid, "invalid merchant binding")
 			return false
 		}
 		if expected != actual {
-			r.APIError(api.ConflictError("merchant binding mismatch"))
+			r.ErrorCode(billing.CodeMerchantBindingMismatch, "merchant binding mismatch")
 			return false
 		}
 	}
 	if bound, ok := merchant.FromContext(r.Request.Context()); ok && !bound.IsZero() && bound != actual {
-		r.APIError(api.ConflictError("configured merchant binding mismatch"))
+		r.ErrorCode(billing.CodeMerchantBindingMismatch, "configured merchant binding mismatch")
 		return false
 	}
 	return true

@@ -204,7 +204,7 @@ func (c *Client) Verify(ctx context.Context, requestOptions ...RequestOption) er
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
 // matches ErrInvalid identically to the embedded transport.
 func invalidErr(msg string) error {
-	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeInvalidParam, Message: msg}}
 }
 
 // requireID trims a caller-supplied identifier and refuses a blank one with
@@ -789,7 +789,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error, requestOptions ...RequestOption) error {
 	if c.catalogOwner != "" && path != "/v1/catalog" && !strings.HasPrefix(path, "/v1/catalog/") {
-		return &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients only support catalog operations"}}
+		return &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeResourceAccessDenied, Message: "catalog-scoped clients only support catalog operations"}}
 	}
 	target, err := c.requestTarget(requestOptions)
 	if err != nil {
@@ -812,7 +812,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 			return invalidErr("merchant slug selection cannot be combined with an ambient merchant ID assertion")
 		}
 		if pinned != expectedMerchant {
-			return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "resource_conflict",
+			return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeMerchantBindingMismatch,
 				Message: fmt.Sprintf("openrails: call pinned to merchant %s but operation selects merchant %s", pinned, expectedMerchant)}}
 		}
 	}

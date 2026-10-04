@@ -52,7 +52,7 @@ func TestContractGateDetectsCoveredMutations(t *testing.T) {
 		{"changed internal wire field type", under("internal/modules/"), goEdit(retypeJSONField), "wire_types internal/modules/"},
 		{"changed custom JSON codec", under("internal/modules/"), goEdit(editJSONCodec), "wire_types internal/modules/"},
 		{"changed HTTP status mapping", under("internal/api/"), goEdit(changeStatusInUnexportedFunc), "boundary source changed: internal/api/"},
-		{"changed error code", under("internal/api/"), goEdit(renameStringConst), "boundary source changed: internal/api/"},
+		{"changed error code", under("billing/error_codes.go"), goEdit(renameStringConst), "go_api billing added: const"},
 		{"changed route path", under("internal/http/routes/"), goEdit(renameRoutePath), "boundary source changed: internal/http/routes/"},
 		{"changed route authority", under("internal/http/routes/"), goEdit(swapPermission(vocabulary)), "boundary source changed: internal/http/routes/"},
 		{"changed role permission mapping", under(PermissionsPath), goEdit(editFuncString), "boundary source changed: " + PermissionsPath},

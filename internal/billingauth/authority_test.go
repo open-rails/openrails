@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	auth "github.com/open-rails/helpers/auth"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/stretchr/testify/require"
 )
@@ -49,10 +50,10 @@ func TestDelegatedGateAndExplicitMapping(t *testing.T) {
 		gate DelegatedGate
 		want GateError
 	}{
-		{NewDelegatedGate(nil), GateError{Status: 500, Message: "authorization unavailable"}},
-		{gate(nil, ErrUnauthenticated), GateError{Status: 401, Message: "authentication required"}},
-		{gate(func(p *DelegatedPrincipal) { p.Permissions = []string{"catalog:read"} }, nil), GateError{Status: 403, Message: "permission_required"}},
-		{gate(func(p *DelegatedPrincipal) { p.MerchantID = "not-a-merchant-id" }, nil), GateError{Status: 401, Message: "delegated_principal_invalid"}},
+		{NewDelegatedGate(nil), GateError{Status: 500, Code: billing.CodeInternalError, Message: "authorization unavailable"}},
+		{gate(nil, ErrUnauthenticated), Refusal(billing.CodeAuthenticationRequired, "authentication required")},
+		{gate(func(p *DelegatedPrincipal) { p.Permissions = []string{"catalog:read"} }, nil), Refusal(billing.CodePermissionRequired)},
+		{gate(func(p *DelegatedPrincipal) { p.MerchantID = "not-a-merchant-id" }, nil), Refusal(billing.CodeDelegatedPrincipalInvalid)},
 	} {
 		_, err := tc.gate.Authorize(context.Background(), req, "billing:read")
 		require.Equal(t, tc.want, err)
@@ -199,11 +200,11 @@ func TestIntegrationClassifiesVerifierFailures(t *testing.T) {
 		err       error
 		want      error
 	}{
-		{nil, fmt.Errorf("provider: %w", auth.ErrForbidden), GateError{Status: 403, Message: "permission_required"}},
-		{nil, auth.ErrUnavailable, GateError{Status: 503, Message: "authentication unavailable"}},
-		{nil, auth.ErrSenderProofRequired, GateError{Status: 401, Message: "sender_proof_required"}},
-		{nil, auth.ErrExpired, GateError{Status: 401, Message: "credential_expired"}},
-		{nil, auth.ErrRevoked, GateError{Status: 401, Message: "credential_revoked"}},
+		{nil, fmt.Errorf("provider: %w", auth.ErrForbidden), Refusal(billing.CodePermissionRequired)},
+		{nil, auth.ErrUnavailable, Refusal(billing.CodeAuthenticationUnavailable)},
+		{nil, auth.ErrSenderProofRequired, Refusal(billing.CodeSenderProofRequired)},
+		{nil, auth.ErrExpired, Refusal(billing.CodeCredentialExpired)},
+		{nil, auth.ErrRevoked, Refusal(billing.CodeCredentialRevoked)},
 		{nil, errors.New("db password=hunter2"), ErrUnauthenticated},
 		{nil, nil, ErrUnauthenticated},
 		{typedNil, nil, ErrUnauthenticated},
@@ -274,7 +275,7 @@ func TestRequireRecentSignIn(t *testing.T) {
 	require.NoError(t, err)
 	ctx := r.Context()
 	native := Principal{Kind: User}
-	unavailable := GateError{Status: 403, Message: "step_up_unavailable"}
+	unavailable := Refusal(billing.CodeStepUpUnavailable)
 	require.Equal(t, unavailable, RequireRecentSignIn(ctx, native, func(ctx context.Context) error { return integration.RecentSignIn.CheckRecentSignIn(ctx, r) }))
 	require.Equal(t, unavailable, RequireRecentSignIn(ctx, Principal{}, nil), "an unset kind is a native user")
 	for _, kind := range []PrincipalKind{Machine, Delegated} {
@@ -285,10 +286,10 @@ func TestRequireRecentSignIn(t *testing.T) {
 		err  error
 		want GateError
 	}{
-		{errors.Join(auth.ErrStepUpRequired, challenge), GateError{Status: 403, Message: "step_up_required", Code: "step_up_required", Metadata: challenge}},
-		{errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked), GateError{Status: 401, Message: "credential_revoked"}},
-		{auth.ErrForbidden, GateError{Status: 403, Message: "permission_required"}},
-		{auth.ErrUnavailable, GateError{Status: 503, Message: "authorization unavailable"}},
+		{errors.Join(auth.ErrStepUpRequired, challenge), func() GateError { r := Refusal(billing.CodeStepUpRequired); r.Metadata = challenge; return r }()},
+		{errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked), Refusal(billing.CodeCredentialRevoked)},
+		{auth.ErrForbidden, Refusal(billing.CodePermissionRequired)},
+		{auth.ErrUnavailable, Refusal(billing.CodeAuthorizationUnavailable)},
 	} {
 		require.Equal(t, tc.want, RequireRecentSignIn(ctx, native, func(context.Context) error { return tc.err }))
 	}

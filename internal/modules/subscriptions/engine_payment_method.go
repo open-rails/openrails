@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -61,7 +62,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		}
 		if method.CustomerID != customer {
 			// Another customer's method is indistinguishable from a missing one.
-			return apperr.New(http.StatusNotFound, "not_found", "payment method not found")
+			return apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "payment method not found")
 		}
 		if method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
 			return charge.ErrInstrumentChanged

@@ -22,7 +22,7 @@ import (
 func apiHostMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
-		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+		r.ErrorCode(billing.CodeMerchantUnresolved, "")
 		return billing.MerchantID{}, false
 	}
 	if r.State == nil || r.State.Merchants == nil {

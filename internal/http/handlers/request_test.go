@@ -321,7 +321,7 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 	require.Nil(t, out[2].Result)
 	require.Equal(t, int64(7), out[3].Result.RetryAfterSeconds)
 	require.Equal(t, "admission check failed", out[4].Error.Message)
-	require.Equal(t, "service_credential_customer_scope_denied", out[5].Error.Message)
+	require.Equal(t, "service_credential_customer_scope_denied", out[5].Error.Code)
 	require.Equal(t, "expires_at", *out[7].Error.Param)
 
 	wire, err := json.Marshal(out)

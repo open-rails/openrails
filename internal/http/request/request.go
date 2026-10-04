@@ -20,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -168,6 +169,31 @@ func (r *Request) InternalError(msg string, cause error) {
 	response := api.SimpleErrorResponse(http.StatusInternalServerError, msg)
 	response.Error.RequestID = requestID
 	r.t.WriteJSON(http.StatusInternalServerError, response)
+}
+
+// AbortGate answers a Gate or authenticator refusal with its code.
+func (r *Request) AbortGate(err error) {
+	var refusal billingauth.GateError
+	if !errors.As(err, &refusal) {
+		r.AbortAPIError(api.Coded(billing.CodeInternalError, "authorization unavailable"))
+		return
+	}
+	if refusal.Code == billing.CodeSenderProofRequired {
+		r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
+	}
+	r.AbortAPIError(billingauth.RefusalError(refusal))
+}
+
+// AbortCode stops the chain with a registered error code; an empty message
+// answers the code's meaning.
+func (r *Request) AbortCode(code, message string) {
+	r.AbortAPIError(api.Coded(code, message))
+}
+
+// ErrorCode answers a registered error code; an empty message answers the
+// code's meaning.
+func (r *Request) ErrorCode(code, message string) {
+	r.APIError(api.Coded(code, message))
 }
 
 // AbortAPIError is APIError that also stops the middleware chain.

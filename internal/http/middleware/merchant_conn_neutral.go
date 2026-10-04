@@ -1,10 +1,9 @@
 package middleware
 
 import (
-	"net/http"
-
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -25,7 +24,7 @@ func MerchantDBConnMW(database *db.DB) router.Middleware {
 			ctx, release, err := database.WithMerchantConn(r.Request.Context())
 			if err != nil {
 				log.WithError(err).Error("merchant db connection setup failed")
-				r.AbortJSON(http.StatusInternalServerError, "internal_error")
+				r.AbortCode(billing.CodeInternalError, "")
 				return
 			}
 			defer release()

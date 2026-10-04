@@ -91,7 +91,7 @@ func (req productArchiveRequest) fingerprint() []byte {
 
 func (req *productArchiveRequest) validate() *api.APIError {
 	invalid := func(msg string) *api.APIError {
-		return productArchiveError(http.StatusBadRequest, "invalid_request", msg)
+		return productArchiveError(http.StatusBadRequest, api.CodeInvalidParam, msg)
 	}
 	if (strings.TrimSpace(req.ProductID) == "") == (strings.TrimSpace(req.ProductKey) == "") {
 		return invalid("exactly one of product_id or product_key is required")
@@ -253,7 +253,7 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req produ
 		if raw := strings.TrimSpace(req.ProductID); raw != "" {
 			typed, perr := billing.ParseProductID(raw)
 			if perr != nil || typed.IsZero() {
-				refusal = productArchiveError(http.StatusBadRequest, "invalid_request", "invalid product_id")
+				refusal = productArchiveError(http.StatusBadRequest, api.CodeInvalidParam, "invalid product_id")
 				return nil
 			}
 			product, err = q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: mid.UUID(), ID: typed.UUID()})
@@ -261,7 +261,7 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req produ
 			product, err = q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: mid.UUID(), Key: strings.TrimSpace(req.ProductKey)})
 		}
 		if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
-			refusal = productArchiveError(http.StatusNotFound, "resource_missing", "product not found")
+			refusal = productArchiveError(http.StatusNotFound, api.CodeResourceNotFound, "product not found")
 			return nil
 		}
 		if err != nil {

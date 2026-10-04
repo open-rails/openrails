@@ -253,9 +253,12 @@ func assertGate(t *testing.T, principal billingauth.Principal, err error, status
 	var gateErr billingauth.GateError
 	require.ErrorAs(t, err, &gateErr)
 	require.Equal(t, status, gateErr.Status, gateErr.Message)
-	if message != "" {
+	if _, coded := billing.LookupErrorCode(message); coded {
+		require.Equal(t, message, gateErr.Code)
+	} else if message != "" {
 		require.Equal(t, message, gateErr.Message)
 	}
+	require.NotEmpty(t, gateErr.Code, "every gate refusal carries its code")
 	require.Zero(t, principal)
 }
 
@@ -317,7 +320,7 @@ func TestMerchantPermissionMiddleware(t *testing.T) {
 	}{
 		{"no gate", nil, nil, t.Context(), 500},
 		{"gate refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-			return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "permission_required"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}), nil, t.Context(), 403},
 		{"gate failure is not a refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
 			return billingauth.Principal{}, errors.New("db down")
@@ -333,7 +336,7 @@ func TestMerchantPermissionMiddleware(t *testing.T) {
 	}
 
 	rec, _ = run(gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-		return billingauth.Principal{}, billingauth.GateError{Status: 401, Message: "sender_proof_required"}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeSenderProofRequired)
 	}), nil, t.Context())
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 	require.Contains(t, rec.Header().Get("WWW-Authenticate"), "DPoP")

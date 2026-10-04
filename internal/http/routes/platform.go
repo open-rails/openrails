@@ -95,29 +95,29 @@ func (opts PlatformOptions) platformPermissionMW(perm string) router.Middleware 
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			if opts.Authenticator == nil || opts.Root == nil {
-				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
+				r.AbortCode(billing.CodeInternalError, "authorization unavailable")
 				return
 			}
 			uc, err := opts.Authenticator.Authenticate(r.Request.Context(), r.Request)
 			if err != nil {
-				r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
+				r.AbortGate(billingauth.Unauthenticated(err))
 				return
 			}
 			if verr := uc.ValidateSubject(); verr != nil {
-				r.AbortJSON(http.StatusUnauthorized, verr.Error())
+				r.AbortCode(billing.CodeAuthenticationRequired, verr.Error())
 				return
 			}
 			allowed, err := opts.Root.HasRootPermission(r.Request.Context(), r.Request, perm)
 			if errors.Is(err, auth.ErrRevoked) || errors.Is(err, billingauth.ErrUnauthenticated) {
-				r.AbortJSON(http.StatusUnauthorized, credentialFailure(err))
+				r.AbortGate(credentialFailure(err))
 				return
 			}
 			if err != nil {
-				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")
+				r.AbortCode(billing.CodeInternalError, "failed to check permission")
 				return
 			}
 			if !allowed {
-				r.AbortJSON(http.StatusForbidden, "permission_required")
+				r.AbortCode(billing.CodePermissionRequired, "")
 				return
 			}
 			r.SetUserContext(uc)

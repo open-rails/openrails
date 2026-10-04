@@ -168,7 +168,7 @@ func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
 			if tc.supplied != "" {
 				r.Header.Set("X-Request-ID", tc.supplied)
 			}
-			NewHTTP(rec, r, nil).APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, "card_declined", "declined"))
+			NewHTTP(rec, r, nil).APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, "card_declined", "declined"))
 			id := errorBody(t, rec).Error.RequestID
 			require.NotEmpty(t, id)
 			require.LessOrEqual(t, len(id), 128)
@@ -193,11 +193,11 @@ func TestRefusalLogLevel(t *testing.T) {
 		{func(r *Request) { r.ErrorJSON(http.StatusNotFound, "product_not_found") }, logrus.InfoLevel, 404},
 		{func(r *Request) { r.AbortJSON(http.StatusConflict, "conflict") }, logrus.InfoLevel, 409},
 		{func(r *Request) {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, "card_declined", "declined"))
-		}, logrus.InfoLevel, 400},
+			r.APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, "card_declined", "declined"))
+		}, logrus.InfoLevel, 402},
 		{func(r *Request) { r.ErrorJSON(http.StatusInternalServerError, "boom") }, logrus.ErrorLevel, 500},
 		{func(r *Request) {
-			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "unavailable", "down"))
+			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "service_unavailable", "down"))
 		}, logrus.ErrorLevel, 503},
 	} {
 		hook.Reset()

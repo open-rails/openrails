@@ -60,7 +60,7 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 			value, ok := r.Get(handlers.MerchantRoutePrincipalContextKey)
 			principal, valid := value.(billingauth.Principal)
 			if !ok || !valid {
-				r.ErrorJSON(http.StatusForbidden, "catalog owner identity required")
+				r.ErrorCode(billing.CodeCatalogOwnerRequired, "catalog owner identity required")
 				return
 			}
 			subject := principal.Subject
@@ -73,7 +73,7 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 				decoded, err := base64.RawURLEncoding.DecodeString(encoded)
 				selected := string(decoded)
 				if err != nil || catalogscope.ValidateSubject(selected) != nil {
-					r.ErrorJSON(http.StatusBadRequest, "invalid catalog owner selector")
+					r.ErrorCode(billing.CodeInvalidParam, "invalid catalog owner selector")
 					return
 				}
 				if selected != subject {
@@ -83,18 +83,18 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 					}
 					authorized, err := gate.Authorize(r.Request.Context(), r.Request, permission)
 					if err != nil || authorized.MerchantID != principal.MerchantID {
-						r.ErrorJSON(http.StatusForbidden, "catalog owner selection requires administrator permission")
+						r.ErrorCode(billing.CodePermissionRequired, "catalog owner selection requires administrator permission")
 						return
 					}
 				}
 				subject = selected
 			}
 			if err := catalogscope.ValidateSubject(subject); err != nil || principal.MerchantID.IsZero() {
-				r.ErrorJSON(http.StatusForbidden, "catalog owner identity required")
+				r.ErrorCode(billing.CodeCatalogOwnerRequired, "catalog owner identity required")
 				return
 			}
 			if rt == nil || rt.DB == nil {
-				r.ErrorJSON(http.StatusServiceUnavailable, "catalog unavailable")
+				r.ErrorCode(billing.CodeServiceUnavailable, "catalog unavailable")
 				return
 			}
 			repo := catalog.NewCatalogRepo(rt.DB)
@@ -106,16 +106,16 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 				row, err = repo.Ensure(r.Request.Context(), &subject)
 			}
 			if errors.Is(err, pgx.ErrNoRows) {
-				r.ErrorJSON(http.StatusNotFound, "catalog not found")
+				r.ErrorCode("catalog_not_found", "")
 				return
 			}
 			if err != nil || row.MerchantID != principal.MerchantID.UUID() || row.OwnerSubject == nil || *row.OwnerSubject != subject {
-				r.ErrorJSON(http.StatusInternalServerError, "catalog unavailable")
+				r.ErrorCode(billing.CodeInternalError, "catalog unavailable")
 				return
 			}
 			ctx, err := catalogscope.WithOwner(r.Request.Context(), catalogscope.Scope{MerchantID: principal.MerchantID, CatalogID: row.ID, OwnerSubject: subject})
 			if err != nil {
-				r.ErrorJSON(http.StatusForbidden, "catalog scope mismatch")
+				r.ErrorCode("catalog_scope_mismatch", "")
 				return
 			}
 			r.Request = r.Request.WithContext(ctx)

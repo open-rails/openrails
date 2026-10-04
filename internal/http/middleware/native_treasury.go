@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/http/request"
@@ -64,7 +64,7 @@ func requireNativeTreasuryPermission(r *request.Request, authority NativeTreasur
 		return true
 	}
 	if authority.Authorize == nil {
-		r.AbortJSON(http.StatusForbidden, "customer_scope_mismatch")
+		r.AbortCode(billing.CodeCustomerScopeMismatch, "")
 		return false
 	}
 	err := authority.Authorize(r.Request.Context(), permission, authority.Target)
@@ -74,12 +74,10 @@ func requireNativeTreasuryPermission(r *request.Request, authority NativeTreasur
 	if err != nil {
 		var gate billingauth.GateError
 		switch {
-		case errors.As(err, &gate) && gate.Code != "":
-			r.AbortAPIError(api.NewAPIError(gate.Status, api.ErrorTypeForStatus(gate.Status), gate.Code, gate.Message).WithMetadata(gate.Metadata))
 		case errors.As(err, &gate) && gate.Status >= 400 && gate.Status <= 599:
-			r.AbortJSON(gate.Status, gate.Message)
+			r.AbortGate(gate)
 		default:
-			r.AbortJSON(http.StatusServiceUnavailable, "authorization unavailable")
+			r.AbortCode(billing.CodeAuthorizationUnavailable, "")
 		}
 		return false
 	}

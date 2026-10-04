@@ -113,7 +113,8 @@ func serviceAdmitBatchVerdicts(
 			continue
 		}
 		if !allows(*payer) {
-			out[i] = admitFailure(http.StatusForbidden, "service_credential_customer_scope_denied", "")
+			details := api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, "").ToResponse().Error
+			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: &details}
 			continue
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))

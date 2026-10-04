@@ -153,7 +153,7 @@ func TestMerchantSelectorRoutes(t *testing.T) {
 
 	rec := call(http.MethodGet, "/billing/v2/merchant/payments", nil)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "merchant_selector_required")
+	require.Contains(t, rec.Body.String(), "merchant_selector_invalid")
 	require.Nil(t, last)
 	require.Zero(t, calls)
 
@@ -173,8 +173,8 @@ func TestMerchantSelectorRoutes(t *testing.T) {
 		status int
 		code   string
 	}{
-		{billingauth.GateError{Status: http.StatusForbidden, Message: "not yours"}, http.StatusForbidden, "merchant_selection_invalid"},
-		{billingauth.GateError{Status: http.StatusNotFound, Message: "unknown"}, http.StatusNotFound, "merchant_selection_invalid"},
+		{billingauth.GateError{Status: http.StatusForbidden, Message: "not yours"}, http.StatusForbidden, "resource_access_denied"},
+		{billingauth.Refusal(billing.CodeMerchantNotFound), http.StatusNotFound, "merchant_not_found"},
 		{errors.New("db down"), http.StatusServiceUnavailable, "merchant_directory_unavailable"},
 	} {
 		resolveErr = tc.err

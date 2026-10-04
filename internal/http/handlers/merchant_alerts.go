@@ -27,7 +27,7 @@ func alertService(r *httprequest.Request) (*alerting.Service, bool) {
 func alertPathID(r *httprequest.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
 	if err != nil {
-		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", "no record with that id in this merchant"))
+		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "no record with that id in this merchant"))
 		return uuid.Nil, false
 	}
 	return id, true
@@ -46,7 +46,7 @@ func handleAlertWriteError(r *httprequest.Request, err error, notFoundMsg string
 	case errors.As(err, &verr):
 		alertValidationError(r, verr)
 	case db.IsNotFound(err):
-		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", notFoundMsg))
+		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, notFoundMsg))
 	default:
 		writeRefusal(r, err, "alerting request failed")
 	}
@@ -128,7 +128,7 @@ func DeleteMerchantWebhook(r *httprequest.Request) {
 		return
 	}
 	if !deleted {
-		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", "no webhook with that id in this merchant"))
+		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "no webhook with that id in this merchant"))
 		return
 	}
 	r.JSON(http.StatusOK, map[string]any{"deleted": true, "id": id})
@@ -167,7 +167,7 @@ func MarkMerchantNotificationRead(r *httprequest.Request) {
 		return
 	}
 	if !marked {
-		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", "no notification with that id in this merchant"))
+		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "no notification with that id in this merchant"))
 		return
 	}
 	r.JSON(http.StatusOK, map[string]any{"read": true, "id": id})

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
@@ -40,21 +41,22 @@ func AddMerchantSelectorRoutes(table *Table, prefix string, resolve func(context
 		entry.Path = prefix + "/v2/" + strings.TrimPrefix(local, "/v1/")
 		entry.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodOptions && strings.TrimSpace(r.Header.Get(merchant.SlugHeader)) == "" && strings.TrimSpace(r.Header.Get(merchant.BindingHeader)) == "" {
-				billingauth.WriteJSONError(w, http.StatusBadRequest, "merchant_selector_required", "explicit merchant selector required")
+				billingauth.WriteJSONError(w, http.StatusBadRequest, billing.CodeMerchantSelectorInvalid, "explicit merchant selector required")
 				return
 			}
 			if r.Method != http.MethodOptions {
 				if resolve == nil {
-					billingauth.WriteJSONError(w, 503, "authorization_unavailable", "merchant resolver unavailable")
+					billingauth.WriteJSONError(w, 503, billing.CodeAuthorizationUnavailable, "merchant resolver unavailable")
 					return
 				}
 				target, err := resolve(r.Context(), r)
 				if err != nil {
 					var gate billingauth.GateError
 					if errors.As(err, &gate) {
-						billingauth.WriteJSONError(w, gate.Status, "merchant_selection_invalid", gate.Message)
+						refusal := billingauth.RefusalError(gate)
+						billingauth.WriteJSONError(w, refusal.HTTPStatus, refusal.Code, refusal.Message)
 					} else {
-						billingauth.WriteJSONError(w, 503, "merchant_directory_unavailable", "merchant directory unavailable")
+						billingauth.WriteJSONError(w, 503, billing.CodeMerchantDirectoryUnavailable, "merchant directory unavailable")
 					}
 					return
 				}

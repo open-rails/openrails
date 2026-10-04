@@ -39,7 +39,7 @@ type MerchantTeamManager interface {
 func teamMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
-		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+		r.ErrorCode(billing.CodeMerchantUnresolved, "")
 		return billing.MerchantID{}, false
 	}
 	return mid, true
@@ -148,7 +148,7 @@ func MerchantRevokeTeamInvite(svc MerchantTeamManager) func(*httprequest.Request
 			return
 		}
 		if !revoked {
-			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found",
+			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound,
 				"no pending invite with that id in this merchant"))
 			return
 		}
@@ -222,7 +222,7 @@ func MerchantRemoveTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 
 func teamServiceError(r *httprequest.Request, err error, fallback string) {
 	if errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
-		r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
+		r.ErrorCode(billing.CodeMerchantUnresolved, "")
 		return
 	}
 	r.ErrorJSON(http.StatusInternalServerError, fallback)
@@ -235,7 +235,7 @@ func teamMutationError(r *httprequest.Request, err error, fallback string) {
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "last_owner",
 			"a merchant must keep at least one owner — assign another owner before demoting or removing this one"))
 	case errors.Is(err, controlplane.ErrNotATeamMember):
-		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found",
+		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound,
 			"that user is not a member of this merchant"))
 	case errors.Is(err, controlplane.ErrUnknownMerchantRole):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",

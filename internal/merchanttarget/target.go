@@ -43,10 +43,10 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound bi
 			return billingauth.Target{}, err
 		}
 		if !bound.IsZero() && bound != target.MerchantID {
-			return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant binding mismatch"}
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantBindingMismatch, "configured merchant binding mismatch")
 		}
 		if defaultSlug != "" && billing.NormalizeMerchantSlug(defaultSlug) != target.MerchantSlug {
-			return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant slug mismatch"}
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantBindingMismatch, "configured merchant slug mismatch")
 		}
 		return target, nil
 	}
@@ -55,20 +55,20 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound bi
 	if r != nil {
 		rawID := strings.TrimSpace(r.Header.Get(merchant.BindingHeader))
 		if values, present := r.Header[http.CanonicalHeaderKey(merchant.BindingHeader)]; present && (len(values) != 1 || rawID == "") {
-			return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "invalid merchant ID selector"}
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant ID selector")
 		}
 		slug = strings.TrimSpace(r.Header.Get(merchant.SlugHeader))
 		if values, present := r.Header[http.CanonicalHeaderKey(merchant.SlugHeader)]; present && (len(values) != 1 || slug == "") {
-			return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "invalid merchant slug selector"}
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant slug selector")
 		}
 		if rawID != "" && slug != "" {
-			return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "choose one merchant selector"}
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "choose one merchant selector")
 		}
 		if rawID != "" {
 			var err error
 			id, err = billing.ParseMerchantID(rawID)
 			if err != nil || id.IsZero() {
-				return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "invalid merchant ID"}
+				return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant ID")
 			}
 		}
 	}
@@ -79,32 +79,32 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound bi
 		}
 	}
 	if slug == "" && id.IsZero() {
-		return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "merchant selector is required"}
+		return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "merchant selector is required")
 	}
 	if !bound.IsZero() && !id.IsZero() && id != bound {
-		return billingauth.Target{}, billingauth.GateError{Status: 409, Message: fmt.Sprintf("configured merchant binding mismatch: requested %s, configured %s", id, bound)}
+		return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantBindingMismatch, fmt.Sprintf("configured merchant binding mismatch: requested %s, configured %s", id, bound))
 	}
 	if directory == nil {
-		return billingauth.Target{}, billingauth.GateError{Status: 503, Message: "merchant directory unavailable"}
+		return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantDirectoryUnavailable, "merchant directory unavailable")
 	}
 	var selected *merchants.Merchant
 	var err error
 	if slug != "" {
 		if err := billing.ValidateMerchantSlug(slug); err != nil {
-			return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "invalid merchant slug"}
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant slug")
 		}
 		selected, err = directory.GetBySlug(ctx, slug)
 	} else {
 		selected, err = directory.Get(ctx, id)
 	}
 	if err != nil && !errors.Is(err, merchants.ErrMerchantNotFound) {
-		return billingauth.Target{}, billingauth.GateError{Status: 503, Message: "merchant directory unavailable"}
+		return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantDirectoryUnavailable, "merchant directory unavailable")
 	}
 	if err != nil || selected == nil || selected.Status != merchants.StatusActive {
-		return billingauth.Target{}, billingauth.GateError{Status: 404, Message: "merchant not found"}
+		return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantNotFound, "merchant not found")
 	}
 	if !bound.IsZero() && selected.ID != bound {
-		return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant binding mismatch"}
+		return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantBindingMismatch, "configured merchant binding mismatch")
 	}
 	target := billingauth.Target{MerchantID: selected.ID, MerchantSlug: selected.Slug, AuthorityGroupID: selected.PermissionGroupID}
 	if r != nil {
@@ -123,15 +123,15 @@ func Assert(r *http.Request, target billingauth.Target) error {
 	rawID := strings.TrimSpace(r.Header.Get(merchant.BindingHeader))
 	rawSlug := strings.TrimSpace(r.Header.Get(merchant.SlugHeader))
 	if rawID != "" && rawSlug != "" {
-		return billingauth.GateError{Status: 400, Message: "choose one merchant selector"}
+		return billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "choose one merchant selector")
 	}
 	if rawID != "" {
 		id, err := billing.ParseMerchantID(rawID)
 		if err != nil {
-			return billingauth.GateError{Status: 400, Message: "invalid merchant ID"}
+			return billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant ID")
 		}
 		if id != target.MerchantID {
-			return billingauth.GateError{Status: 409, Message: "merchant binding mismatch"}
+			return billingauth.Refusal(billing.CodeMerchantBindingMismatch, "merchant binding mismatch")
 		}
 	}
 	expectedSlug := target.MerchantSlug
@@ -139,7 +139,7 @@ func Assert(r *http.Request, target billingauth.Target) error {
 		expectedSlug = captured.slug
 	}
 	if rawSlug != "" && billing.NormalizeMerchantSlug(rawSlug) != expectedSlug {
-		return billingauth.GateError{Status: 409, Message: "merchant binding mismatch"}
+		return billingauth.Refusal(billing.CodeMerchantBindingMismatch, "merchant binding mismatch")
 	}
 	return nil
 }

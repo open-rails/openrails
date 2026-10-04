@@ -99,7 +99,7 @@ func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingid
 			return false
 		}
 		if !resolved.AllowsCustomer(tenantSubject.UUID()) {
-			r.ErrorJSON(http.StatusForbidden, "service_credential_customer_scope_denied")
+			r.ErrorCode(billing.CodeServiceCredentialCustomerScopeDenied, "")
 			return false
 		}
 		return true
@@ -517,7 +517,7 @@ func ServiceGetDeposit(r *httprequest.Request) {
 		return
 	}
 	if trx == nil {
-		r.ErrorJSON(http.StatusNotFound, "deposit_not_found")
+		r.ErrorCode("deposit_not_found", "")
 		return
 	}
 	r.SuccessJSON(trx)
@@ -639,7 +639,7 @@ func ServiceExtendHold(r *httprequest.Request) {
 	case err == nil:
 		r.SuccessJSON(map[string]any{"ok": true})
 	case errors.Is(err, billingservice.ErrHoldNotFound):
-		r.ErrorJSON(http.StatusNotFound, "hold_not_found")
+		r.ErrorCode("hold_not_found", "")
 	case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
 		r.ErrorJSON(http.StatusBadRequest, "expires_at already passed")
 	case errors.Is(err, spendgate.ErrDeadlineShortened):

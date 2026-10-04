@@ -233,7 +233,7 @@ func deleteCustomerSpendDelegation(r *httprequest.Request, svc *billingservice.S
 		return
 	}
 	if !deleted {
-		r.ErrorJSON(http.StatusNotFound, "spend_delegation_not_found")
+		r.ErrorCode("spend_delegation_not_found", "")
 		return
 	}
 	r.SuccessJSON(map[string]any{"deleted": true})

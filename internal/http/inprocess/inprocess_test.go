@@ -168,7 +168,7 @@ func TestTransportExplicitSelector(t *testing.T) {
 		status int
 		code   string
 	}{
-		{billingauth.GateError{Status: http.StatusForbidden, Message: "not yours"}, billing.MerchantID{}, http.StatusForbidden, "merchant_selection_invalid"},
+		{billingauth.Refusal(billing.CodeMerchantNotFound), billing.MerchantID{}, http.StatusNotFound, "merchant_not_found"},
 		{errors.New("directory down"), billing.MerchantID{}, http.StatusConflict, ""},
 		{nil, billing.MerchantID(uuid.New()), http.StatusConflict, ""},
 	} {

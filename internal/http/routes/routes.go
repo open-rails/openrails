@@ -11,7 +11,6 @@ import (
 
 	auth "github.com/open-rails/helpers/auth"
 
-	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -90,16 +89,16 @@ func (opts Options) requiredMW() router.Middleware {
 		return func(r *httprequest.Request) {
 			a := opts.Authenticator
 			if a == nil {
-				r.AbortJSON(http.StatusInternalServerError, "authentication disabled")
+				r.AbortCode(billing.CodeInternalError, "authentication disabled")
 				return
 			}
 			uc, err := a.Authenticate(r.Request.Context(), r.Request)
 			if err != nil {
-				r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
+				r.AbortGate(billingauth.Unauthenticated(err))
 				return
 			}
 			if verr := uc.ValidateSubject(); verr != nil {
-				r.AbortJSON(http.StatusUnauthorized, verr.Error())
+				r.AbortCode(billing.CodeAuthenticationRequired, verr.Error())
 				return
 			}
 			r.SetUserContext(uc)
@@ -395,7 +394,7 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			if opts.Gate == nil {
-				r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
+				r.AbortCode(billing.CodeInternalError, "authorization unavailable")
 				return
 			}
 			principal, err := opts.Gate.Authorize(r.Request.Context(), r.Request, perm)
@@ -432,20 +431,7 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 }
 
 // abortGate answers a Gate refusal.
-func abortGate(r *httprequest.Request, err error) {
-	var ge billingauth.GateError
-	switch {
-	case !errors.As(err, &ge):
-		r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
-	case ge.Code != "":
-		r.AbortAPIError(api.NewAPIError(ge.Status, api.ErrorTypeForStatus(ge.Status), ge.Code, ge.Message).WithMetadata(ge.Metadata))
-	default:
-		if ge.Message == "sender_proof_required" {
-			r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
-		}
-		r.AbortJSON(ge.Status, ge.Message)
-	}
-}
+func abortGate(r *httprequest.Request, err error) { r.AbortGate(err) }
 
 func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm string) (billingauth.Principal, error) {
 	// #685: in-process host principal, attached to the request CONTEXT by the
@@ -454,7 +440,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	// permissions like every other credential.
 	if hp, ok := requestauth.HostPrincipalFromContext(ctx); ok {
 		if hp.MerchantID.IsZero() {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "host_principal_invalid"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostPrincipalInvalid)
 		}
 		resolved := &credential.ResolvedServiceCredential{
 			OwnerGroupRef: "in-process-host",
@@ -463,7 +449,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 			Permissions:   hp.Permissions,
 		}
 		if !resolved.HasPermission(perm) {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}
 		return billingauth.Principal{MerchantID: hp.MerchantID, Kind: billingauth.Machine, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
 	}
@@ -471,22 +457,22 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if err != nil {
 			switch {
 			case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved):
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_merchant_unresolved"}
+				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialMerchantUnresolved)
 			case errors.Is(err, credential.ErrServiceCredentialScopeDenied):
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_resource_scope_denied"}
+				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialResourceScopeDenied)
 			case errors.Is(err, credential.ErrDelegatedIssuerUnknown), errors.Is(err, credential.ErrServiceCredentialHostMismatch):
 				// The API key or issuer resolves to a different Host merchant.
 				// Issuer resolution also uses its sentinel for unregistered/disabled issuers.
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
+				return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
 			default:
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}
+				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialInvalid)
 			}
 		}
 		if resolved == nil {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialInvalid)
 		}
 		if !resolved.HasPermission(perm) {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}
 		return billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Machine, Permissions: resolved.Permissions}, nil
 	}
@@ -495,17 +481,17 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 			resolved, err := g.DelegatedResolver.ResolveDelegated(req)
 			if err != nil {
 				if errors.Is(err, credential.ErrDelegatedUnavailable) {
-					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusServiceUnavailable, Message: "delegated_verification_unavailable"}
+					return billingauth.Principal{}, billingauth.Refusal(billing.CodeDelegatedVerificationUnavailable)
 				}
 				if errors.Is(err, auth.ErrSenderProofRequired) {
-					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "sender_proof_required"}
+					return billingauth.Principal{}, billingauth.Refusal(billing.CodeSenderProofRequired)
 				}
 				if g.Authenticator == nil || !errors.Is(err, credential.ErrDelegatedInvalid) {
-					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_token_invalid"}
+					return billingauth.Principal{}, billingauth.Refusal(billing.CodeDelegatedTokenInvalid)
 				}
 			} else {
 				if !resolved.HasPermission(perm) {
-					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+					return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 				}
 				return billingauth.Principal{
 					MerchantID: resolved.MerchantID,
@@ -526,14 +512,14 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if g.DelegatedAuthenticator != nil && req != nil {
 		principal, err := g.DelegatedAuthenticator.AuthenticateDelegated(ctx, req)
 		if err != nil {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: billingauth.UnauthenticatedMessage(err)}
+			return billingauth.Principal{}, billingauth.Unauthenticated(err)
 		}
 		resolved, verr := credential.ResolvedDelegatedFromHostPrincipal(principal)
 		if verr != nil {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_principal_invalid"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeDelegatedPrincipalInvalid)
 		}
 		if !resolved.HasPermission(perm) {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}
 		return billingauth.Principal{
 			MerchantID: resolved.MerchantID,
@@ -550,17 +536,17 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}, nil
 	}
 	if g.Authenticator == nil {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "bearer principal required"}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAuthenticationRequired, "bearer principal required")
 	}
 	uc, err := g.Authenticator.Authenticate(ctx, req)
 	if err != nil {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: billingauth.UnauthenticatedMessage(err)}
+		return billingauth.Principal{}, billingauth.Unauthenticated(err)
 	}
 	if verr := uc.ValidateSubject(); verr != nil {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: verr.Error()}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAuthenticationRequired, verr.Error())
 	}
 	if g.AdminPermissionChecker == nil {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "authorization unavailable"}
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "authorization unavailable"}
 	}
 	if strings.TrimSpace(uc.Merchant) == "" {
 		if req != nil {
@@ -572,17 +558,17 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrRevoked), errors.Is(err, billingauth.ErrUnauthenticated):
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: credentialFailure(err)}
+			return billingauth.Principal{}, credentialFailure(err)
 		case errors.Is(err, billing.ErrPermissionRequired):
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		case errors.Is(err, billing.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantUnresolved)
 		default:
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "failed to check permission"}
 		}
 	}
 	if membershipMID.IsZero() {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantUnresolved)
 	}
 	uc.Merchant = canonical
 	mid, ok := merchant.FromContext(ctx)
@@ -601,11 +587,11 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	// single-merchant self-hosters are unaffected.
 	if hostMID, ok := merchant.HostMerchant(ctx); ok {
 		if hostMID != membershipMID {
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
 		}
 	}
 	if mid != membershipMID {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantContextMismatch)
 	}
 	return billingauth.Principal{MerchantID: mid, Kind: billingauth.User, Subject: uc.UserID, UserContext: uc}, nil
 }
@@ -671,12 +657,9 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 	return nil, nil, false
 }
 
-// credentialFailure is the 401 message for a credential a live check refused.
-func credentialFailure(err error) string {
-	if errors.Is(err, auth.ErrRevoked) {
-		return "credential_revoked"
-	}
-	return billingauth.UnauthenticatedMessage(err)
+// credentialFailure is the 401 for a credential a live check refused.
+func credentialFailure(err error) billingauth.GateError {
+	return billingauth.Unauthenticated(err)
 }
 
 func bearerToken(header string) string {

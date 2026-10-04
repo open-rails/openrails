@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
@@ -169,11 +170,11 @@ func (p *providerIntegration) Authorize(ctx context.Context, r *http.Request, id
 		return err
 	}
 	if identity.Kind != verified.Kind || identity.Issuer != verified.Issuer || identity.SubjectID != verified.SubjectID || identity.CustomerID != verified.CustomerID || identity.CredentialClass != verified.CredentialClass || identity.Invoker != verified.Invoker || !slices.Equal(identity.Permissions, verified.Permissions) {
-		return GateError{Status: http.StatusUnauthorized, Message: "credential identity mismatch"}
+		return Refusal(billing.CodeCredentialIdentityMismatch)
 	}
 	checker, ok := principal.(auth.PermissionChecker)
 	if !ok || nilInterface(checker) {
-		return GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		return Refusal(billing.CodePermissionRequired)
 	}
 	for index, resolve := range []AuthorityResolver{p.options.Authority, p.options.PlatformAuthority} {
 		if resolve == nil {
@@ -185,7 +186,7 @@ func (p *providerIntegration) Authorize(ctx context.Context, r *http.Request, id
 		}
 		mapping, err := resolve(ctx, query)
 		if err != nil {
-			return GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
+			return Refusal(billing.CodeAuthorizationUnavailable)
 		}
 		if mapping.Permission == "" || mapping.Scope.ID == "" || mapping.Scope.Authority == "" {
 			continue
@@ -201,7 +202,7 @@ func (p *providerIntegration) Authorize(ctx context.Context, r *http.Request, id
 			return nil
 		}
 	}
-	return GateError{Status: http.StatusForbidden, Message: "permission_required"}
+	return Refusal(billing.CodePermissionRequired)
 }
 
 // CheckRecentSignIn asks the verified principal, through its helpers/auth
@@ -224,21 +225,21 @@ func permissionCheckFailure(err error) error {
 	if errors.Is(err, auth.ErrRevoked) || errors.Is(err, auth.ErrExpired) {
 		return authenticationFailure(err)
 	}
-	return GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
+	return Refusal(billing.CodeAuthorizationUnavailable)
 }
 
 func authenticationFailure(err error) error {
 	switch {
 	case errors.Is(err, auth.ErrForbidden):
-		return GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		return Refusal(billing.CodePermissionRequired)
 	case errors.Is(err, auth.ErrUnavailable):
-		return GateError{Status: http.StatusServiceUnavailable, Message: "authentication unavailable"}
+		return Refusal(billing.CodeAuthenticationUnavailable)
 	case errors.Is(err, auth.ErrSenderProofRequired):
-		return GateError{Status: http.StatusUnauthorized, Message: "sender_proof_required"}
+		return Refusal(billing.CodeSenderProofRequired)
 	case errors.Is(err, auth.ErrExpired):
-		return GateError{Status: http.StatusUnauthorized, Message: "credential_expired"}
+		return Refusal(billing.CodeCredentialExpired)
 	case errors.Is(err, auth.ErrRevoked):
-		return GateError{Status: http.StatusUnauthorized, Message: "credential_revoked"}
+		return Refusal(billing.CodeCredentialRevoked)
 	default:
 		return ErrUnauthenticated
 	}
