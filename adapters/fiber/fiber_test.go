@@ -221,14 +221,14 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	}
 }
 
-// A client that serves no payment page lets nobody frame one.
+// A client that serves no payment page lets only itself frame one.
 func TestCheckoutFramePolicy(t *testing.T) {
 	engine := strictApp()
 	engine.Get("/checkout", CheckoutFramePolicy(nil), func(c fiber.Ctx) error { return c.SendString("page") })
 	response, err := engine.Test(httptest.NewRequest(http.MethodGet, "/checkout", nil))
 	require.NoError(t, err)
 	defer response.Body.Close()
-	require.Equal(t, "frame-ancestors 'none'", response.Header.Get("Content-Security-Policy"))
+	require.Equal(t, "frame-ancestors 'self'", response.Header.Get("Content-Security-Policy"))
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, "page", string(body))

@@ -39,7 +39,7 @@ var errHostedOfferUnavailable = apperr.New(http.StatusUnprocessableEntity, "chec
 
 // HostedCheckoutMint is a mint request. Advertise attaches the browser driver
 // and public values to the price's options (the HTTP layer's checkout-config
-// projection); an option left without a driver is not offered.
+// projection); an option the page cannot drive is not offered.
 type HostedCheckoutMint struct {
 	billing.CreateHostedCheckoutSessionRequest
 	Advertise func([]billing.CheckoutRailOption)
@@ -426,7 +426,7 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in HostedChe
 		in.Advertise(options)
 	}
 	for _, option := range options {
-		if option.Driver == "" || option.PSPID == "" {
+		if !hostedcheckout.Drivable(option.Driver) || option.PSPID == "" {
 			continue
 		}
 		raw := make([]byte, 18)

@@ -51,9 +51,10 @@ func TestCheckoutConfig(t *testing.T) {
 		require.Equal(t, ok, CheckoutConfig{EmbedOrigins: []string{raw}}.Validate() == nil, raw)
 	}
 
-	cfg := &Config{HTTP: &HTTPConfig{Checkout: &CheckoutConfig{EmbedOrigins: []string{"https://Host-One.example/", "https://host-two.example"}}}}
-	require.Equal(t, "frame-ancestors https://host-one.example https://host-two.example", cfg.CheckoutFrameAncestors())
+	cfg := &Config{HTTP: &HTTPConfig{Checkout: &CheckoutConfig{PageURL: "https://pay.example/checkout", EmbedOrigins: []string{"https://Host-One.example/", "https://host-two.example"}}}}
+	require.Equal(t, "frame-ancestors 'self' https://host-one.example https://host-two.example", cfg.CheckoutFrameAncestors())
 	require.True(t, cfg.CheckoutEmbedAllowed("https://host-two.example"))
+	require.True(t, cfg.CheckoutEmbedAllowed("https://pay.example"), "the payment host may frame its own page")
 	require.False(t, cfg.CheckoutEmbedAllowed("https://host-three.example"))
 	require.False(t, cfg.CheckoutEmbedAllowed(""))
 	// The sites framing the page are where its redirect rails return to.
@@ -61,7 +62,7 @@ func TestCheckoutConfig(t *testing.T) {
 	require.False(t, cfg.ReturnURLAllowed("https://host-three.example/subscribe"))
 
 	for _, single := range []*Config{{}, {HTTP: &HTTPConfig{}}, {HTTP: &HTTPConfig{Checkout: &CheckoutConfig{}}}} {
-		require.Equal(t, "frame-ancestors 'none'", single.CheckoutFrameAncestors())
+		require.Equal(t, "frame-ancestors 'self'", single.CheckoutFrameAncestors())
 		require.False(t, single.CheckoutEmbedAllowed("https://host-one.example"))
 	}
 }

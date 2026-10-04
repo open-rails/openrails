@@ -364,8 +364,8 @@ func TestHostedCheckoutEmbedOrigins(t *testing.T) {
 		openrailshttp.CheckoutFramePolicy(w.rt)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/checkout", nil))
 		return rec.Header().Get("Content-Security-Policy")
 	}
-	require.Equal(t, "frame-ancestors "+hostedAppOrigin, page(pay), "only the listed sites may frame the payment page")
-	require.Equal(t, "frame-ancestors 'none'", page(app), "an app that serves no payment page lets nobody frame one")
+	require.Equal(t, "frame-ancestors 'self' "+hostedAppOrigin, page(pay), "only the payment host and the listed sites may frame the page")
+	require.Equal(t, "frame-ancestors 'self'", page(app), "an app that serves no payment page lists nobody")
 
 	listed := hostedSession{w: pay, id: buyer.mint(map[string]any{"price_id": price.ID})["id"].(string)}
 	require.Equal(t, hostedAppOrigin, listed.read()["embed_origin"], "the app's origin comes from its configuration")

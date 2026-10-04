@@ -7,6 +7,16 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// Drivable reports whether the payment page can run driver: it has no
+// billing client of the buyer's, so Stripe Elements card setup is not offered.
+func Drivable(driver string) bool {
+	switch driver {
+	case "collect_js", "redirect", "solana_pay":
+		return true
+	}
+	return false
+}
+
 // Payment turns the browser's pay body into the engine's payment options for
 // the minted option it names. The option decides the PSP and the settlement
 // token; the browser supplies only the instrument and its billing identity.

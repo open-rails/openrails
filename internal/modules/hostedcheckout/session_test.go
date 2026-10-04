@@ -85,3 +85,9 @@ func TestPayment(t *testing.T) {
 	_, err = Payment(card, billing.HostedCheckoutPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "QA"}, "", owns)
 	require.NoError(t, err, "a postal code is not demanded where none exists")
 }
+
+func TestDrivable(t *testing.T) {
+	for driver, ok := range map[string]bool{"collect_js": true, "redirect": true, "solana_pay": true, "stripe_elements": false, "": false} {
+		require.Equal(t, ok, Drivable(driver), driver)
+	}
+}

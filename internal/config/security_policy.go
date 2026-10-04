@@ -91,12 +91,16 @@ func (cfg *Config) HostedCheckout() CheckoutConfig {
 }
 
 // CheckoutEmbedAllowed reports whether origin may frame the payment page this
-// host serves.
+// host serves: one of EmbedOrigins, or the page's own origin.
 func (cfg *Config) CheckoutEmbedAllowed(origin string) bool {
 	if origin == "" {
 		return false
 	}
-	for _, raw := range cfg.HostedCheckout().EmbedOrigins {
+	checkout := cfg.HostedCheckout()
+	if page, ok := URLOrigin(checkout.PageURL); ok && page == origin {
+		return true
+	}
+	for _, raw := range checkout.EmbedOrigins {
 		if allowed, ok := URLOrigin(raw); ok && allowed == origin {
 			return true
 		}
@@ -105,18 +109,15 @@ func (cfg *Config) CheckoutEmbedAllowed(origin string) bool {
 }
 
 // CheckoutFrameAncestors is the Content-Security-Policy of the payment page
-// this host serves: only EmbedOrigins may frame it.
+// this host serves: only the host itself and EmbedOrigins may frame it.
 func (cfg *Config) CheckoutFrameAncestors() string {
-	var origins []string
+	policy := "frame-ancestors 'self'"
 	for _, raw := range cfg.HostedCheckout().EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
-			origins = append(origins, origin)
+			policy += " " + origin
 		}
 	}
-	if len(origins) == 0 {
-		return "frame-ancestors 'none'"
-	}
-	return "frame-ancestors " + strings.Join(origins, " ")
+	return policy
 }
 
 // Validate checks PageURL and EmbedOrigins.

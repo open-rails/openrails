@@ -179,11 +179,12 @@ func (c *Client) Routes() ([]Route, error) {
 }
 
 // CheckoutFrameAncestors is the Content-Security-Policy an embedded host sends
-// with the payment page it serves: only Config.HTTP.Checkout.EmbedOrigins may
-// frame it. The adapters' CheckoutFramePolicy sets it.
+// with the payment page it serves: only the host itself and
+// Config.HTTP.Checkout.EmbedOrigins may frame it. The adapters'
+// CheckoutFramePolicy sets it.
 func (c *Client) CheckoutFrameAncestors() string {
 	if c == nil || c.engine == nil {
-		return "frame-ancestors 'none'"
+		return "frame-ancestors 'self'"
 	}
 	return c.engine.App.Config.CheckoutFrameAncestors()
 }

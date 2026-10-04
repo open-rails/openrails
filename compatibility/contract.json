@@ -5111,7 +5111,7 @@
     "internal/requestauth/cache.go": "5841a63887ec69aee7ca8c0f8de84fb76fee2357cc6dd4c69e1030255bc40bdf",
     "internal/requestauth/hostprincipal.go": "da329e07de292fd17e2a6d7345ead3d766eb9702707a61f7fe62f9a6d357a8a6",
     "internal/service/customer_payment.go": "7c33ca51d66ebb3f512e9adec5cba8fcb317d8bf613e4cf521bcc859ad4bc5cb",
-    "internal/service/hosted_checkout.go": "5db592ecd2bc5ec7773acbee9d651bee433f7afb8bd85e1c7812c07308a1247e",
+    "internal/service/hosted_checkout.go": "f0c86806d2a6d2e4145e853881d3f670dcbec8b304a3be97861605a33bda85c3",
     "internal/service/service_user.go": "b1f9ec596907187d41d6ee08428ef9477a0cedd3829effe2baaeb018443a4cc9",
     "internal/standalonehandlers/merchant_api_keys.go": "6a854c7b4c7ffbb2ed3e741f3274bc8b4d4e1574f36e60e1c76bf62287483d8e",
     "permissions/permissions.go": "59dc34705f32ded259a0914a8c6a9cd0189b93f11cc0f68b8a16d6aa077d5dfb",

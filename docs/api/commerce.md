@@ -75,9 +75,9 @@ database share it, so one of them can serve the payment page for all.
 - The session records the minting app's origin from that app's configuration
   (the `success_url` origin, else `ReturnOrigins[0]`, else the origin of
   `PublicBillingBaseURL`) and the document carries it as `embed_origin` only
-  when the serving host lists it in `EmbedOrigins`.
+  when the serving host lists it in `EmbedOrigins` or it is `PageURL`'s own.
 - The host serving the page wraps it with the adapter's `CheckoutFramePolicy`
-  (`Content-Security-Policy: frame-ancestors <EmbedOrigins>`).
+  (`Content-Security-Policy: frame-ancestors 'self' <EmbedOrigins>`).
 - Limits: per address as any checkout route, and per session id 120 reads and
   10 pays a minute.
 
