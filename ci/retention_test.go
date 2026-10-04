@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
@@ -629,4 +631,95 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	// not keep the merchant on the due list.
 	again := w.sweep(0)
 	require.Zero(t, again.ProviderIntents+again.ProviderMutationLogs+again.CostObservations)
+}
+
+// With Config.SchemaOwner the engine runs as logins that only inherit the
+// owner. A partition one of them creates belongs to the owner, so every other
+// such login can use and drop it, and a later Migrate has nothing to reassign.
+func TestRuntimePartitionsBelongToTheSchemaOwner(t *testing.T) {
+	ctx := t.Context()
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
+	admin, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(admin.Close)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	schema, owner := "parts_"+suffix, "parts_owner_"+suffix
+	logins := []string{"parts_a_" + suffix, "parts_b_" + suffix}
+	_, err = admin.Exec(ctx, `CREATE ROLE `+pgx.Identifier{owner}.Sanitize()+` NOLOGIN`)
+	require.NoError(t, err)
+	for _, login := range logins {
+		_, err = admin.Exec(ctx, `CREATE ROLE `+pgx.Identifier{login}.Sanitize()+` LOGIN PASSWORD 'login' IN ROLE `+pgx.Identifier{owner}.Sanitize())
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, _ = admin.Exec(ctx, `DROP SCHEMA IF EXISTS `+pgx.Identifier{schema}.Sanitize()+` CASCADE`)
+		for _, role := range append(logins, owner) {
+			_, _ = admin.Exec(ctx, `DROP ROLE IF EXISTS `+pgx.Identifier{role}.Sanitize())
+		}
+	})
+	cfg := openrails.Config{Schema: schema, SchemaOwner: owner, River: openrails.RiverHostOwned}
+	require.NoError(t, openrails.Migrate(ctx, admin, cfg))
+
+	// owners maps each partition of both tables to the role that owns it.
+	owners := func() map[string]string {
+		rows, err := admin.Query(ctx, `
+			SELECT c.relname::text, pg_get_userbyid(c.relowner)::text
+			  FROM pg_inherits i
+			  JOIN pg_class c ON c.oid = i.inhrelid
+			  JOIN pg_class p ON p.oid = i.inhparent
+			  JOIN pg_namespace n ON n.oid = p.relnamespace
+			 WHERE n.nspname = $1 AND p.relkind = 'p'`, schema)
+		require.NoError(t, err)
+		defer rows.Close()
+		out := map[string]string{}
+		for rows.Next() {
+			var name, role string
+			require.NoError(t, rows.Scan(&name, &role))
+			out[name] = role
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	migrated := owners()
+	require.NotEmpty(t, migrated)
+	for name, role := range migrated {
+		require.Equal(t, owner, role, "%s, made by the migration, was handed over", name)
+	}
+
+	as := func(login string) *db.DB {
+		config, err := pgxpool.ParseConfig(dsn)
+		require.NoError(t, err)
+		config.ConnConfig.User, config.ConnConfig.Password = login, "login"
+		pool, err := pgxpool.NewWithConfig(ctx, config)
+		require.NoError(t, err)
+		t.Cleanup(pool.Close)
+		database, err := db.NewWithPGXPool(pool, schema)
+		require.NoError(t, err)
+		return database
+	}
+
+	// One login makes the partitions of a later month.
+	later := time.Now().AddDate(0, 6, 0)
+	created, err := retention.EnsurePartitions(ctx, as(logins[0]).GenDirectory(), later)
+	require.NoError(t, err)
+	require.Positive(t, created)
+	all := owners()
+	require.Greater(t, len(all), len(migrated))
+	for name, role := range all {
+		require.Equal(t, owner, role, "%s, made by a login at run time, belongs to the owner", name)
+	}
+	// So Migrate finds nothing left to hand over.
+	require.NoError(t, openrails.Migrate(ctx, admin, cfg))
+	require.Equal(t, all, owners())
+
+	// The other login writes into one and drops them all.
+	other := as(logins[1])
+	_, err = other.Pool().Exec(ctx, `SELECT count(*) FROM `+pgx.Identifier{schema, partitionName("usage_events", retention.MonthStart(later))}.Sanitize())
+	require.NoError(t, err)
+	dropped, err := retention.DropExpiredPartitions(ctx, other.GenDirectory(), later.AddDate(10, 0, 0))
+	require.NoError(t, err)
+	require.Equal(t, len(all), dropped)
+	require.Empty(t, owners())
 }

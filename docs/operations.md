@@ -729,6 +729,10 @@ How it runs:
   per merchant per pass. A backlog drains over the following passes. Partitions
   are also ensured at migration and by the first write a process makes in a new
   month, so writes never wait for the job.
+- A partition belongs to its table's owner, whoever creates it. Under
+  `schema_owner` the logins OpenRails runs as hand each partition they create
+  to the shared owner, so any of them can drop it; that takes the right to
+  `SET ROLE` to the owner, which role membership gives by default.
 - Creating a partition attaches a table built beside the parent, so reads and
   writes carry on. Dropping one locks the table briefly; it gives up after two
   seconds rather than queue writers behind a long reader (a logical backup, a

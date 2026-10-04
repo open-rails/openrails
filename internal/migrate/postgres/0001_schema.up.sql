@@ -66,16 +66,22 @@ COMMENT ON FUNCTION billing.guard_retention_delete() IS 'Refuses every DELETE ex
 -- A partition is built beside the table and attached, which takes SHARE UPDATE
 -- EXCLUSIVE on the table: reads and writes carry on. lock_timeout bounds the
 -- wait for the locks its foreign keys need on the referenced tables.
+--
+-- A partition belongs to its table's owner, whoever creates it: a login that
+-- only inherits a shared owner hands it over, so any other such login can
+-- drop it. That takes the right to SET ROLE to the owner, which membership
+-- gives by default; without it the partition is not created.
 CREATE FUNCTION billing.ensure_month_partitions(p_table name, p_from timestamptz, p_through timestamptz) RETURNS integer
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' SET timezone TO 'UTC' SET lock_timeout TO '2s' AS $$
 DECLARE
     parent regclass := to_regclass(quote_ident(p_table));
     parent_schema name;
+    parent_owner name;
     month_start timestamptz := date_trunc('month', p_from);
     partition name;
     created integer := 0;
 BEGIN
-    SELECT n.nspname INTO parent_schema
+    SELECT n.nspname, pg_get_userbyid(c.relowner) INTO parent_schema, parent_owner
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE c.oid = parent AND c.relkind = 'p';
     IF NOT FOUND THEN
@@ -87,6 +93,9 @@ BEGIN
             BEGIN
                 EXECUTE format('CREATE TABLE %I.%I (LIKE %I.%I INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES INCLUDING GENERATED INCLUDING STORAGE)',
                     parent_schema, partition, parent_schema, p_table);
+                IF parent_owner <> current_user THEN
+                    EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', parent_schema, partition, parent_owner);
+                END IF;
                 EXECUTE format('ALTER TABLE %I.%I ATTACH PARTITION %I.%I FOR VALUES FROM (%L) TO (%L)',
                     parent_schema, p_table, parent_schema, partition, month_start, month_start + interval '1 month');
                 created := created + 1;
@@ -99,7 +108,7 @@ BEGIN
     RETURN created;
 END;
 $$;
-COMMENT ON FUNCTION billing.ensure_month_partitions(name, timestamptz, timestamptz) IS 'Creates the missing monthly partitions of a partitioned table covering [p_from, p_through]. Returns how many it created.';
+COMMENT ON FUNCTION billing.ensure_month_partitions(name, timestamptz, timestamptz) IS 'Creates the missing monthly partitions of a partitioned table covering [p_from, p_through], owned by the table''s owner. Returns how many it created.';
 
 CREATE FUNCTION billing.month_partitions(p_table name) RETURNS TABLE (partition name, range_from timestamptz, range_to timestamptz)
 LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
