@@ -32,7 +32,7 @@ func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (ge
 		return row, err
 	}
 	customer, err := uuid.Parse(terms.UserID)
-	if err != nil || customer == uuid.Nil || p.IdempotencyKey != NMIPaymentMethodUpdateIdempotencyKey(terms.PaymentMethodID, terms.PaymentToken) {
+	if err != nil || customer == uuid.Nil || p.IdempotencyKey != terms.idempotencyKey() {
 		return row, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

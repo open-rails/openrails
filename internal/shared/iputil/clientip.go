@@ -65,6 +65,22 @@ func (t *TrustedProxies) ClientIP(r *http.Request) string {
 	return t.resolve(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))
 }
 
+// ForwardedHTTPS reports whether a trusted proxy says the client connection
+// was HTTPS: the socket peer is trusted and every X-Forwarded-Proto value it
+// relayed is https. An untrusted peer's header counts for nothing.
+func (t *TrustedProxies) ForwardedHTTPS(r *http.Request) bool {
+	if !t.trusts(net.ParseIP(hostOnly(r.RemoteAddr))) {
+		return false
+	}
+	protos := strings.Split(strings.Join(r.Header.Values("X-Forwarded-Proto"), ","), ",")
+	for _, proto := range protos {
+		if !strings.EqualFold(strings.TrimSpace(proto), "https") {
+			return false
+		}
+	}
+	return true
+}
+
 // resolve walks forwardedFor, the joined X-Forwarded-For hops, back from
 // remoteAddr, the transport-level peer ("host:port" or a bare host).
 func (t *TrustedProxies) resolve(remoteAddr, forwardedFor string) string {

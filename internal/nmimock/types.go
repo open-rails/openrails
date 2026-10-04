@@ -22,6 +22,8 @@ type Card struct {
 	// NetworkToken: the network token stands in for the card number, and the
 	// Query API reports network_token_used on its charges.
 	NetworkToken bool
+	// Exp is the MMYY a card stored by number was given; empty reads as 1235.
+	Exp string
 }
 
 // Vault is a Customer Vault record: its priority-1 billing entry, then Extra.

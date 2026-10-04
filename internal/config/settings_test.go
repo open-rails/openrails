@@ -90,6 +90,45 @@ func TestNMIEndpointDeployment(t *testing.T) {
 	}
 }
 
+// card_entry (#1129) defaults to browser; server is an explicit declaration,
+// refused where the gateway has no server-side vault call or a custodian
+// takes the card.
+func TestCardEntry(t *testing.T) {
+	for _, tc := range []struct {
+		rail      string
+		settings  map[string]any
+		custodial bool
+		want      string
+	}{
+		{"nmi", nil, false, CardEntryBrowser},
+		{"nmi", map[string]any{"tokenization_key": "tk"}, false, CardEntryBrowser},
+		{"nmi", map[string]any{"card_entry": "browser"}, true, CardEntryBrowser},
+		{"nmi", map[string]any{"card_entry": "server"}, false, CardEntryServer},
+		{"stripe", map[string]any{"card_entry": "browser"}, false, CardEntryBrowser},
+	} {
+		got, err := CardEntry(tc.rail, tc.settings, tc.custodial)
+		require.NoError(t, err, "%s %v", tc.rail, tc.settings)
+		require.Equal(t, tc.want, got, "%s %v", tc.rail, tc.settings)
+	}
+	for name, tc := range map[string]struct {
+		rail      string
+		value     any
+		custodial bool
+	}{
+		"stripe has no server vault call": {"stripe", "server", false},
+		"ccbill has no server vault call": {"ccbill", "server", false},
+		"solana has no card":              {"solana", "server", false},
+		"unknown rail":                    {"unknown", "server", false},
+		"a custodian takes the card":      {"nmi", "server", true},
+		"not a mode":                      {"nmi", "SERVER", false},
+		"empty":                           {"nmi", "", false},
+		"not a string":                    {"nmi", true, false},
+	} {
+		_, err := CardEntry(tc.rail, map[string]any{"card_entry": tc.value}, tc.custodial)
+		require.Error(t, err, name)
+	}
+}
+
 func TestSolanaAccountSettings(t *testing.T) {
 	const usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	s, err := ParseSolanaAccountSettings(map[string]any{

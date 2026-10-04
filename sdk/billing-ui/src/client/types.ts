@@ -4,6 +4,7 @@
 // src/test/fixtures/wire.
 import { z } from "zod"
 
+import type { CardEntry } from "../lib/card-entry"
 import { isAmount } from "../lib/money"
 
 const amount = z.string().refine(isAmount, "amount must be an int64 string")
@@ -451,10 +452,9 @@ export const paymentAuthenticationSchema = z.object({
 export type PaymentAuthentication = z.infer<typeof paymentAuthenticationSchema>
 
 /** What a card setup hands the server: tokenized data only, never a PAN. */
-export interface NewCard {
-  /** OpenRails PSP key that issued the token (e.g. "nmi"); required. */
+interface NewCardFields {
+  /** OpenRails PSP key the card is saved with (e.g. "nmi"); required. */
   provider: string
-  payment_token: string
   name_on_card?: string
   country?: string
   zip?: string
@@ -464,3 +464,14 @@ export interface NewCard {
   card_type?: string
   expiry_date?: string
 }
+
+/**
+ * A card to save: a token from the PSP's own fields (`payment_token`), or,
+ * for a PSP whose card_entry is server (`cardSetupDriver` "card"), the card
+ * itself, posted to OpenRails and never kept by this package.
+ */
+export type NewCard = NewCardFields &
+  (
+    | { payment_token: string; card?: never }
+    | { card: CardEntry; payment_token?: never }
+  )

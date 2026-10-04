@@ -9,7 +9,9 @@
 // card, and one button that is the payer's explicit confirmation of the
 // displayed terms. With a BillingProvider, a new card is saved to the
 // customer's account first and the payment charges it by id; a decline keeps
-// the buyer on the panel to pick another card and retry.
+// the buyer on the panel to pick another card and retry. A rail whose driver
+// is card takes the card in plain inputs and posts it to OpenRails: no
+// gateway script is loaded.
 import * as React from "react"
 
 import {
@@ -21,7 +23,7 @@ import { authenticatePayment } from "#orck/authenticate"
 import { isBillingError, isServerError } from "#orck/client/errors"
 import type { PaymentMethod } from "#orck/client/types"
 import { CardBillingFields } from "#orck/components/billing-fields"
-import { CardFields } from "#orck/components/card-fields"
+import { CardFields, NativeCardFields } from "#orck/components/card-fields"
 import { CCBillFields } from "#orck/components/ccbill-fields"
 import {
   ccbillBillingSchema,
@@ -55,6 +57,7 @@ import {
   nmiBillingSchema,
   type NMIBilling,
 } from "#orck/lib/billing"
+import { cardEntryDisplay, useCardEntry } from "#orck/lib/card-entry"
 import { amountToDecimal, formatAmount } from "#orck/lib/money"
 import { everyLabel } from "#orck/lib/period"
 import { isCardRail, railPsp } from "#orck/psp"
@@ -358,6 +361,20 @@ export function Checkout({
     }),
     [uid]
   )
+  // Native card entry for a PSP that takes cards on OpenRails (driver card).
+  const nativeCard = useCardEntry()
+  const nativeCardRef = React.useRef(nativeCard)
+  React.useEffect(() => {
+    nativeCardRef.current = nativeCard
+  })
+  const nativeIds = React.useMemo(
+    () => ({
+      number: `orck-${uid}-card-number`,
+      expiry: `orck-${uid}-card-expiry`,
+      cvv: `orck-${uid}-card-cvc`,
+    }),
+    [uid]
+  )
   const collect = useCollectJS({
     enabled:
       Boolean(nmiOption) &&
@@ -421,6 +438,33 @@ export function Checkout({
           parsed.error.issues[0]?.message ?? "Check the billing details"
         )
         return null
+      }
+      if (rail.driver === "card") {
+        // The card leaves the form here and goes to OpenRails only.
+        const card = nativeCardRef.current.take()
+        if (!card) return null
+        if (!client) return { option_id: rail.id, card, ...parsed.data }
+        const display = cardEntryDisplay(card)
+        const method = await client.addPaymentMethod({
+          provider: rail.psp_key ?? rail.rail,
+          card,
+          ...parsed.data,
+        })
+        billingContext?.notify({
+          type: "payment_method.added",
+          paymentMethodId: method.id,
+        })
+        const saved = savedFrom(method, rail)
+        setAddedCards((current) => [
+          {
+            ...saved,
+            brand: saved.brand ?? display.card_type,
+            last_four: saved.last_four ?? display.last_four,
+          },
+          ...current,
+        ])
+        setSavedChoice(method.id)
+        return { option_id: rail.id, payment_method_id: method.id }
       }
       const tokenized = await collect.tokenize()
       const display = collectCardDisplay(tokenized.card)
@@ -751,7 +795,11 @@ export function Checkout({
   const collectErrors: CollectFieldErrors = { ...collect.fieldErrors }
   let postalError: string | undefined
   let inlineFailure = false
-  if (failure?.field && newCardOpen && active?.driver === "collect_js") {
+  if (
+    failure?.field &&
+    newCardOpen &&
+    (active?.driver === "collect_js" || active?.driver === "card")
+  ) {
     inlineFailure = true
     if (failure.field === "number") collectErrors.number = failure.message
     else if (failure.field === "expiry") collectErrors.expiry = failure.message
@@ -767,6 +815,7 @@ export function Checkout({
       : undefined
   const cardBody = (option: PaymentRailOption, isActive: boolean) => {
     const stripe = option.driver === "stripe_elements"
+    const native = option.driver === "card"
     const entryOpen = isActive && !usingSavedMethod
     return (
       <MethodBody hidden={!isActive}>
@@ -815,12 +864,21 @@ export function Checkout({
               disabled={processing || !isActive || usingSavedMethod}
               postalError={isActive ? postalError : undefined}
             />
-            <CardFields
-              ids={cardIds}
-              preview={collect.preview}
-              error={isActive ? collect.loadError : undefined}
-              fieldErrors={isActive ? collectErrors : undefined}
-            />
+            {native ? (
+              <NativeCardFields
+                ids={nativeIds}
+                card={nativeCard}
+                fieldErrors={isActive ? collectErrors : undefined}
+                disabled={processing || !isActive || usingSavedMethod}
+              />
+            ) : (
+              <CardFields
+                ids={cardIds}
+                preview={collect.preview}
+                error={isActive ? collect.loadError : undefined}
+                fieldErrors={isActive ? collectErrors : undefined}
+              />
+            )}
           </div>
         )}
         {isActive && cardError ? (
@@ -937,7 +995,9 @@ export function Checkout({
             !usingSavedMethod &&
             (active.driver === "collect_js"
               ? !collect.ready || !collect.valid || Boolean(collect.loadError)
-              : !stripeComplete)
+              : active.driver === "card"
+                ? !nativeCard.valid
+                : !stripeComplete)
           }
         />
       ) : null}

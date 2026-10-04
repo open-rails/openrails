@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -40,6 +41,20 @@ func NMIPaymentMethodUpdateIdempotencyKey(paymentMethodID uuid.UUID, paymentToke
 	return fmt.Sprintf("%s:%s:%s", TypeNMIPaymentMethodUpdate, paymentMethodID, hex.EncodeToString(digest[:16]))
 }
 
+// NMIPaymentMethodCardUpdateIdempotencyKey keys a replacement whose card the
+// server received (#1129) by the caller's attempt key: a card is never hashed.
+func NMIPaymentMethodCardUpdateIdempotencyKey(paymentMethodID uuid.UUID, attemptKey string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(attemptKey)))
+	return fmt.Sprintf("%s:%s:card:%s", TypeNMIPaymentMethodUpdate, paymentMethodID, hex.EncodeToString(digest[:16]))
+}
+
+func (p NMIPaymentMethodUpdatePayload) idempotencyKey() string {
+	if p.CardEntry {
+		return NMIPaymentMethodCardUpdateIdempotencyKey(p.PaymentMethodID, p.AttemptKey)
+	}
+	return NMIPaymentMethodUpdateIdempotencyKey(p.PaymentMethodID, p.PaymentToken)
+}
+
 type NMIPaymentMethodUpdatePayload struct {
 	UserID          string    `json:"user_id"`
 	PaymentMethodID uuid.UUID `json:"payment_method_id"`
@@ -59,6 +74,11 @@ type NMIPaymentMethodUpdatePayload struct {
 	Company         string    `json:"company,omitempty"`
 	Address2        string    `json:"address2,omitempty"`
 	TargetCard      nmiCard   `json:"target_card"`
+
+	// CardEntry: the server received the replacement card itself (#1129). The
+	// request that carried it stages it; the intent keeps only TargetCard.
+	CardEntry  bool   `json:"card_entry,omitempty"`
+	AttemptKey string `json:"attempt_key,omitempty"`
 }
 
 type nmiCard struct {
@@ -109,8 +129,11 @@ func decodeNMIPaymentMethodUpdatePayload(intent gen.BillingRailIntent) (NMIPayme
 	if err := json.Unmarshal(intent.Payload, &payload); err != nil {
 		return payload, fmt.Errorf("decode nmi payment method update payload: %w", err)
 	}
-	if payload.PaymentMethodID == uuid.Nil || strings.TrimSpace(payload.RailCustomerRef) == "" ||
-		strings.TrimSpace(payload.PaymentToken) == "" || !payload.TargetCard.complete() {
+	credential := strings.TrimSpace(payload.PaymentToken) != ""
+	if payload.CardEntry {
+		credential = !credential && strings.TrimSpace(payload.AttemptKey) != ""
+	}
+	if payload.PaymentMethodID == uuid.Nil || strings.TrimSpace(payload.RailCustomerRef) == "" || !credential || !payload.TargetCard.complete() {
 		return payload, errors.New("nmi payment method update payload is incomplete")
 	}
 	return payload, nil
@@ -224,13 +247,20 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 		if verifying {
 			return Terminal("card replacement is missing its durable submission boundary")
 		}
-		if !intent.CreatedAt.IsZero() && !h.now().Before(intent.CreatedAt.Add(collectJSTokenLifetime)) {
+		// A card rides the request that carried it; a later run has none.
+		card := cardguard.CardFrom(ctx)
+		switch {
+		case payload.CardEntry && card == nil:
+			return retokenizeTerminal("the request that carried the replacement card ended before it was sent; the card is entered again")
+		case !payload.CardEntry && !intent.CreatedAt.IsZero() && !h.now().Before(intent.CreatedAt.Add(collectJSTokenLifetime)):
 			return retokenizeTerminal("Collect.js token expired before the replacement could be submitted")
 		}
 		if h.Store == nil {
+			card.Zero()
 			return Parked("payment method update progress store not wired")
 		}
 		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"submission_started": true, "old_card": old}); err != nil {
+			card.Zero()
 			return Retryable("record card replacement submission boundary: " + err.Error())
 		}
 		progress.SubmissionStarted, progress.OldCard = true, old
@@ -238,7 +268,13 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 		for _, b := range customer.Billing {
 			known = append(known, b.ID)
 		}
-		id, err := client.AddCustomerBillingEntry(ctx, vault, payload.providerUpdate().CreateCustomerVaultData, known)
+		var id string
+		if payload.CardEntry {
+			id = CardBillingID(intent.ID)
+			err = client.AddCustomerBillingFromCard(ctx, vault, id, payload.providerUpdate().CreateCustomerVaultData, card)
+		} else {
+			id, err = client.AddCustomerBillingEntry(ctx, vault, payload.providerUpdate().CreateCustomerVaultData, known)
+		}
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
 			return Parked("nmi provider writes blocked (mode=readonly)")
@@ -255,6 +291,15 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 			return Ambiguous("read the vault after staging the replacement card failed")
 		}
 	}
+	if named := CardBillingID(intent.ID); payload.CardEntry && (staged == "" || staged == named) {
+		// The entry is the one this operation named; a gateway that named it
+		// itself is found below by the card it holds.
+		if _, kept := billingEntry(customer, named); kept {
+			staged = named
+		} else {
+			staged = ""
+		}
+	}
 	if staged == "" {
 		// The staging request's outcome was lost: the entry NMI added is the
 		// one carrying the requested card beside the replaced one.
@@ -266,7 +311,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 		}
 		switch len(candidates) {
 		case 0:
-			return retokenizeTerminal("NMI still has only the original card; the single-use replacement token cannot be submitted again")
+			return retokenizeTerminal("NMI still has only the original card; the replacement cannot be submitted again")
 		case 1:
 			staged = candidates[0]
 		default:
@@ -573,6 +618,7 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 	if pm == nil || req == nil || req.PaymentToken == nil {
 		return paymentmethods.PaymentMethodUpdateOutcome{}, errors.New("payment method and replacement are required")
 	}
+	defer req.Card.Zero()
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return paymentmethods.PaymentMethodUpdateOutcome{}, err
@@ -583,6 +629,8 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 		RailCustomerRef: pm.RailCustomerRef,
 		RailMethodRef:   pm.RailMethodRef,
 		PaymentToken:    strings.TrimSpace(*req.PaymentToken),
+		CardEntry:       req.Card != nil,
+		AttemptKey:      strings.TrimSpace(req.AttemptKey),
 		NameOnCard:      valueOrEmpty(req.NameOnCard),
 		FirstName:       valueOrEmpty(req.FirstName),
 		LastName:        valueOrEmpty(req.LastName),
@@ -601,17 +649,23 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 			ExpiryDate: valueOrEmpty(req.ExpiryDate),
 		},
 	}
-	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
+	due := time.Now().UTC()
+	if payload.CardEntry {
+		// A worker has no card: it looks only after this request has had its turn.
+		due = due.Add(cardVaultAttendance)
+	}
+	row, err := t.Runner.EnqueueAndExecute(cardguard.WithCard(ctx, req.Card), EnqueueParams{
 		MerchantID:     tid.UUID(),
 		Provider:       strings.ToLower(string(pm.Rail)),
 		IntentType:     TypeNMIPaymentMethodUpdate,
 		PspID:          pm.PspID,
 		Payload:        payload,
-		IdempotencyKey: NMIPaymentMethodUpdateIdempotencyKey(pm.ID, payload.PaymentToken),
-		NextAttemptAt:  time.Now().UTC(),
+		IdempotencyKey: payload.idempotencyKey(),
+		NextAttemptAt:  due,
 		Origin:         OriginUser,
 		OriginReason:   "user stored-card replacement",
 	})
+	req.Card.Zero()
 	if err != nil {
 		return paymentmethods.PaymentMethodUpdateOutcome{}, err
 	}

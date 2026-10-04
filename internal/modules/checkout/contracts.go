@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 )
@@ -40,6 +41,8 @@ type CheckoutRequest struct {
 	PriceKey        string `json:"price_key,omitempty"`
 	PaymentMethodID string `json:"payment_method_id,omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
+	// Card is a new card for a PSP whose card_entry is server (#1129).
+	Card *cardguard.Card `json:"-"`
 	// BTTokenIntentID (#795): the Basis Theory token-intent id from BT Elements
 	// — the ONLY card handle custodian-held-card checkout accepts (PAN firewall).
 	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`

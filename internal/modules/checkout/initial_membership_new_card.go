@@ -52,6 +52,7 @@ func (s *CheckoutSessionService) vaultEnrollmentCard(ctx context.Context, paymen
 	}
 	req := &CheckoutRequest{
 		PaymentToken: payment.PaymentToken,
+		Card:         payment.Card,
 		Rail:         target.PSP,
 		Metadata:     session.Metadata,
 		Email:        payment.Email,

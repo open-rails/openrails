@@ -209,6 +209,7 @@ var pinnedMarshalers = map[string]string{
 	"billing/amount_map.go:AmountMap":                                    "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
 	"internal/modules/metrics/service.go:MoneyCell":                      "TestResultWireEncoding — decimal string",
 	"pkg/catalog/application.go:Field":                                   "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
+	"internal/cardguard/card.go:Card":                                    "TestCardRedactsItself — no money: always the redaction",
 }
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {

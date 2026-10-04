@@ -254,7 +254,11 @@ func (m *Mock) v5(method string, seg []string, q url.Values, body []byte) (int, 
 
 func (m *Mock) customer(v *Vault) obj {
 	details := func(c Card) obj {
-		d := obj{"card_number": maskedNumber(c), "card_exp": "1235", "card_type": c.Brand}
+		exp := c.Exp
+		if exp == "" {
+			exp = "1235"
+		}
+		d := obj{"card_number": maskedNumber(c), "card_exp": exp, "card_type": c.Brand}
 		if v.NoBrand {
 			delete(d, "card_type")
 		}

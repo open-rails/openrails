@@ -412,6 +412,22 @@ func (r *Request) ClientIP() string {
 	return resolver.ClientIP(r.Request)
 }
 
+// SecureTransport reports whether the client reached this request over HTTPS:
+// TLS on this connection, or a trusted proxy's X-Forwarded-Proto.
+func (r *Request) SecureTransport() bool {
+	if r.Request == nil {
+		return false
+	}
+	if r.Request.TLS != nil {
+		return true
+	}
+	var resolver *iputil.TrustedProxies
+	if r.State != nil {
+		resolver = r.State.TrustedProxies
+	}
+	return resolver.ForwardedHTTPS(r.Request)
+}
+
 func (r *Request) GetRemoteIP() string {
 	if r.Request == nil {
 		return ""
@@ -513,6 +529,9 @@ func (h *httpTransport) BindJSON(data any) error {
 	if err != nil {
 		return err
 	}
+	// The body may carry a card (#1129); decoded values are copies, so the
+	// bytes read from the wire are wiped once decoding is done.
+	defer clear(raw)
 	if err := json.Unmarshal(raw, data); err != nil {
 		return err
 	}

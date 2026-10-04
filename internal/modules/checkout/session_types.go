@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/cardguard"
 )
 
 var (
@@ -40,6 +41,10 @@ type CheckoutSessionPaymentRequest struct {
 	LastFour        string
 	CardType        string
 	ExpiryDate      string
+
+	// Card is a new card for a PSP whose card_entry is server (#1129). It is
+	// never encoded: it is no part of a request fingerprint or a stored row.
+	Card *cardguard.Card `json:"-"`
 }
 
 type CheckoutSessionCreateRequest struct {

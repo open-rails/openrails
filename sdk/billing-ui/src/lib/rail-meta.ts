@@ -9,7 +9,11 @@ export interface RailMeta {
 
 // A card taken in the page reads "Card" whichever PSP charges it.
 export function railMeta(option: PaymentRailOption): RailMeta {
-  if (option.driver === "collect_js" || option.driver === "stripe_elements")
+  if (
+    option.driver === "collect_js" ||
+    option.driver === "card" ||
+    option.driver === "stripe_elements"
+  )
     return { label: "Card" }
   return RAIL_META[option.rail]
 }
@@ -69,7 +73,8 @@ export function supportedOptions(
 ): PaymentRailOption[] {
   return options.filter((option) => {
     if (RAIL_META[option.rail] === undefined) return false
-    if (option.driver === "collect_js") return option.rail === "nmi"
+    if (option.driver === "collect_js" || option.driver === "card")
+      return option.rail === "nmi"
     if (option.driver === "stripe_elements") return option.rail === "stripe"
     if (option.driver === "redirect")
       return option.rail === "stripe" || option.rail === "ccbill"

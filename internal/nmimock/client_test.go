@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -168,4 +169,62 @@ func TestLostAndHeldRequests(t *testing.T) {
 	require.Eventually(t, func() bool { return len(m.Ledger(vault)) == 2 }, 5*time.Second, 10*time.Millisecond, "a committed request charged though its caller gave up")
 	held.Release()
 	m.ClearIntercepts()
+}
+
+// The Customer Vault takes a card by number (server card entry): the caller
+// names the vault and billing entry, and the stored card reads back masked.
+func TestVaultCardByNumber(t *testing.T) {
+	ctx := context.Background()
+	m := nmimock.New(nmimock.Options{})
+	t.Cleanup(m.Close)
+	c := client(t, m)
+	typed := func(number string) *cardguard.Card {
+		card, err := cardguard.NewCard(number, 10, 2027, "999")
+		require.NoError(t, err)
+		return card
+	}
+
+	created, err := c.CreateCustomerVaultFromCard(ctx, "700000000000000001", "900000000000000001", nmi.CreateCustomerVaultData{FirstName: "A", LastName: "B"}, typed("4111111111111111"))
+	require.NoError(t, err)
+	require.Equal(t, "700000000000000001", created.CustomerVaultID)
+	require.NoError(t, c.AddCustomerBillingFromCard(ctx, "700000000000000001", "900000000000000002", nmi.CreateCustomerVaultData{}, typed("5431111111111111")))
+	customer, found, err := c.GetCustomer(ctx, "700000000000000001")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, customer.Billing, 2)
+	require.Equal(t, []string{"900000000000000001", "4xxxxxxxxxxx1111", "1027", "visa"},
+		[]string{customer.Billing[0].ID, customer.Billing[0].PaymentDetails.CardNumber, customer.Billing[0].PaymentDetails.CardExp, customer.Billing[0].PaymentDetails.CardType})
+	require.Equal(t, []string{"900000000000000002", "mastercard"}, []string{customer.Billing[1].ID, customer.Billing[1].PaymentDetails.CardType})
+	_, err = c.RunSale(ctx, nmi.SaleParams{CustomerVaultID: "700000000000000001", BillingID: "900000000000000002", Amount: 999, Currency: "USD", OrderID: "order-card", StoredCredential: cit()})
+	require.NoError(t, err)
+	require.Equal(t, "mastercard", m.LastSale().Card.Brand)
+
+	// The gateway refuses a taken vault or billing id and a card the issuer
+	// will not let it store; each refusal is definite, never ambiguous.
+	m.Issue("6011000991300009", nmimock.Card{Decline: "vault"})
+	for name, call := range map[string]func() error{
+		"taken vault id": func() error {
+			_, err := c.CreateCustomerVaultFromCard(ctx, "700000000000000001", "b", nmi.CreateCustomerVaultData{}, typed("4111111111111111"))
+			return err
+		},
+		"taken billing id": func() error {
+			return c.AddCustomerBillingFromCard(ctx, "700000000000000001", "900000000000000002", nmi.CreateCustomerVaultData{}, typed("4111111111111111"))
+		},
+		"unknown vault": func() error {
+			return c.AddCustomerBillingFromCard(ctx, "missing", "b", nmi.CreateCustomerVaultData{}, typed("4111111111111111"))
+		},
+		"refused card": func() error {
+			_, err := c.CreateCustomerVaultFromCard(ctx, "700000000000000002", "b", nmi.CreateCustomerVaultData{}, typed("6011000991300009"))
+			return err
+		},
+	} {
+		err := call()
+		var refused *nmi.CustomerVaultError
+		require.ErrorAs(t, err, &refused, name)
+		require.Equal(t, 300, refused.ResponseCode, name)
+		require.False(t, nmi.IsTransportAmbiguous(err), name)
+	}
+	require.Equal(t, 1, m.RefusedSaves())
+	require.Len(t, m.Vaults(), 1)
+	require.Empty(t, m.Unexpected())
 }

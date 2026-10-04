@@ -1,8 +1,12 @@
 // Card entry for the NMI rail. Live mode mounts Collect.js hosted iframes
 // into these containers (card data never touches our code); preview mode
 // (fixture tokenization keys) renders inert placeholders with the same
-// geometry so every state is designable without a gateway.
+// geometry so every state is designable without a gateway. A PSP that takes
+// cards on OpenRails itself gets NativeCardFields instead.
+import type * as React from "react"
+
 import { Label } from "#orck/components/ui/label"
+import type { CardEntryState } from "#orck/lib/card-entry"
 import type { CollectFieldErrors } from "#orck/lib/collect"
 import { cn } from "cn"
 
@@ -110,6 +114,104 @@ export function CardFields({
           {error}
         </p>
       ) : null}
+    </div>
+  )
+}
+
+const NATIVE_FIELD =
+  "h-[38px] w-full min-w-0 rounded-[9px] border border-[color:var(--border)] bg-card px-[11px] text-sm text-foreground tabular-nums outline-none placeholder:text-[color:var(--orck-faint)] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+
+/**
+ * Card entry for a PSP that takes cards on OpenRails itself (driver "card"):
+ * plain inputs in the same layout as the Collect.js containers. The card is
+ * posted to OpenRails; no gateway script is loaded.
+ */
+export function NativeCardFields({
+  ids,
+  card,
+  fieldErrors = {},
+  disabled,
+  hidden,
+}: {
+  ids: CardFieldIds
+  card: CardEntryState
+  /** Inline errors beyond the form's own (a decline naming a field). */
+  fieldErrors?: CollectFieldErrors
+  disabled?: boolean
+  hidden?: boolean
+}) {
+  const errors = { ...card.fieldErrors, ...fieldErrors }
+  const field = (
+    id: string,
+    name: "number" | "expiry" | "cvc",
+    error: string | undefined,
+    props: React.ComponentProps<"input">
+  ) => (
+    <>
+      <input
+        id={id}
+        name={`card-${name}`}
+        className={cn(NATIVE_FIELD, error && "border-destructive")}
+        value={card.input[name]}
+        onChange={(event) => card.change(name, event.target.value)}
+        onBlur={() => card.leave(name)}
+        inputMode="numeric"
+        spellCheck={false}
+        disabled={disabled}
+        required
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        {...props}
+      />
+      <FieldError id={`${id}-error`} message={error} />
+    </>
+  )
+  return (
+    <div
+      className={cn("grid gap-3", hidden && "hidden")}
+      aria-hidden={hidden || undefined}
+    >
+      <div className="grid gap-1.5">
+        <Label
+          htmlFor={ids.number}
+          className="text-[13px] font-medium text-foreground"
+        >
+          Card number
+        </Label>
+        {field(ids.number, "number", errors.number, {
+          autoComplete: "cc-number",
+          placeholder: "1234 1234 1234 1234",
+          maxLength: 23,
+        })}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-1.5">
+          <Label
+            htmlFor={ids.expiry}
+            className="text-[13px] font-medium text-foreground"
+          >
+            Expiry
+          </Label>
+          {field(ids.expiry, "expiry", errors.expiry, {
+            autoComplete: "cc-exp",
+            placeholder: "MM / YY",
+            maxLength: 7,
+          })}
+        </div>
+        <div className="grid gap-1.5">
+          <Label
+            htmlFor={ids.cvv}
+            className="text-[13px] font-medium text-foreground"
+          >
+            CVC
+          </Label>
+          {field(ids.cvv, "cvc", errors.cvv, {
+            autoComplete: "cc-csc",
+            placeholder: "CVC",
+            maxLength: 4,
+          })}
+        </div>
+      </div>
     </div>
   )
 }

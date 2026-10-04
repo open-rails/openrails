@@ -72,6 +72,8 @@ var providerWriteSurface = map[string]string{
 	"DeleteCustomerVault":             "write", // IRREVERSIBLE: destroys the stored card
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
 	"AddCustomerBillingEntry":         "write", // stages a card in an existing vault
+	"CreateCustomerVaultFromCard":     "write", // stores a card the server received (#1129)
+	"AddCustomerBillingFromCard":      "write", // stages a card the server received in an existing vault (#1129)
 	"ReadVerificationByOrderID":       "read",
 
 	// --- reads ----------------------------------------------------------
@@ -156,6 +158,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/nmi_payment_source_update.go:Execute":              "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
 	"internal/intents/nmi_payment_method_delete.go:Execute":              "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
 	"internal/intents/nmi_payment_method_update.go:advance":              "nmi_payment_method_update intent handler — the only stored-card replacement writer",
+	"internal/intents/nmi_card_vault.go:advance":                         "nmi_card_vault intent handler (#1129): vaults a card the server received, and removes a vault that surfaces after its request ended",
 	"internal/intents/manual_rebill_preparation.go:prepareProvider":      "manual_rebill intent pre-charge step; immutable provider preconditions and set/readback retry are proven by TestManualRebillPreparesAcceptedPriceOnceBeforeCharging",
 
 	// --- reactive user/admin cancels ------------------------------------

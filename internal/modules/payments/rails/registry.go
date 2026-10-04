@@ -125,6 +125,10 @@ type Descriptor struct {
 	// NewSubscription is how checkout enrolls a NEW subscription on this rail.
 	// Existing and imported agreements keep working regardless (#1045).
 	NewSubscription NewSubscription
+
+	// ServerCardEntry: the gateway has a server-side vault call, so a PSP of
+	// this rail may declare card_entry: server (#1129).
+	ServerCardEntry bool
 }
 
 // NewSubscription classifies new-subscription enrollment on a rail (#1078).
@@ -197,6 +201,7 @@ var descriptors = []Descriptor{
 		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "webhook_overlap_expires_at"},
 		true,                  // OneOffSale (direct gateway sale, #1055)
 		NewSubscriptionEngine, // saved vault card charged by OpenRails
+		true,                  // ServerCardEntry (Direct Post customer_vault=add_customer)
 	},
 	{
 		models.RailCCBill,
@@ -215,6 +220,7 @@ var descriptors = []Descriptor{
 		nil,
 		false,               // OneOffSale
 		NewSubscriptionNone, // retained cohort only; new sales are refused (#1045, #1070)
+		false,               // ServerCardEntry (CCBill's own page takes the card)
 	},
 	{
 		models.RailStripe,
@@ -236,6 +242,7 @@ var descriptors = []Descriptor{
 		[]string{"publishable_key", "webhook_overlap_expires_at"},
 		true,                  // OneOffSale
 		NewSubscriptionEngine, // saved PaymentMethod charged by OpenRails
+		false,                 // ServerCardEntry (Stripe's own fields take the card)
 	},
 	{
 		models.RailSolana,
@@ -254,6 +261,7 @@ var descriptors = []Descriptor{
 		nil,                        // structured settings (tokens, RPC) are declared programmatically
 		true,                       // OneOffSale (Solana Pay transfer)
 		NewSubscriptionOnChainPlan, // subscriber signs the price's on-chain plan
+		false,                      // ServerCardEntry (no card)
 	},
 }
 
@@ -322,6 +330,13 @@ func CanSellNew(rail models.Rail, recurring, trial bool) bool {
 // terms, so a price needs no provider link to sell on it.
 func SellsOnLocalTerms(rail models.Rail) bool {
 	return NewSubscriptionFor(rail) == NewSubscriptionEngine
+}
+
+// SupportsServerCardEntry reports whether a PSP of this rail may take cards on
+// the server (#1129). Unknown rails: false.
+func SupportsServerCardEntry(rail models.Rail) bool {
+	d, ok := Lookup(rail)
+	return ok && d.ServerCardEntry
 }
 
 // NewSubscriptionFor returns how the rail enrolls new subscriptions.

@@ -99,6 +99,8 @@ describe("PSP flows", () => {
 
   it("picks the in-page card setup from the PSP configuration", () => {
     expect(cardSetupDriver(nmi)).toBe("collect_js")
+    expect(cardSetupDriver({ ...nmi, flow: "card", config: null })).toBe("card")
+    expect(cardSetupDriver({ ...stripe, flow: "card" })).toBe("stripe_elements")
     expect(cardSetupDriver(stripe)).toBe("stripe_elements")
     expect(cardSetupDriver(ccbill)).toBeNull()
     expect(cardSetupDriver({ ...nmi, custodian: "basis_theory" })).toBeNull()
@@ -186,6 +188,77 @@ describe("PSP flows", () => {
         body: { psp_id: "psp_stripe", consent: true },
       },
     ])
+  })
+
+  // #1129: a PSP whose card_entry is server takes the card in plain inputs;
+  // it goes to OpenRails, and no gateway script is loaded.
+  it("saves a card with OpenRails itself for a server card-entry PSP", async () => {
+    const calls: { path: string; body: unknown }[] = []
+    const fetch = vi.fn(async (input: string, init: RequestInit) => {
+      calls.push({ path: input, body: JSON.parse(String(init.body)) })
+      return Response.json({
+        id: "pm_7",
+        psp_id: "psp_nmi",
+        card: { brand: "visa", last4: "1111", exp_month: 10, exp_year: 2027 },
+      })
+    })
+    const onSaved = vi.fn()
+    render(
+      <BillingUiProvider>
+        <BillingProvider client={createBillingClient({ fetch })}>
+          <SavePaymentMethod
+            psp={{ ...nmi, flow: "card", config: null }}
+            onSaved={onSaved}
+            defaultCountry="US"
+          />
+        </BillingProvider>
+      </BillingUiProvider>
+    )
+    const save = screen.getByRole("button", { name: "Save card" })
+    expect(save).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.change(screen.getByLabelText("Card number"), {
+      target: { value: "4111111111111111" },
+    })
+    fireEvent.change(screen.getByLabelText("Expiry"), {
+      target: { value: "1027" },
+    })
+    fireEvent.change(screen.getByLabelText("CVC"), { target: { value: "999" } })
+    expect(screen.getByLabelText("Card number")).toHaveValue(
+      "4111 1111 1111 1111"
+    )
+    expect(screen.getByLabelText("Card number")).toHaveAttribute(
+      "autocomplete",
+      "cc-number"
+    )
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("pm_7"))
+    expect(calls).toEqual([
+      {
+        path: "/billing/v1/me/payment-methods",
+        body: {
+          provider: "nmi",
+          name_on_card: "Pat Reader",
+          country: "US",
+          zip: "94107",
+          card: {
+            number: "4111111111111111",
+            exp_month: 10,
+            exp_year: 2027,
+            cvc: "999",
+          },
+        },
+      },
+    ])
+    expect(document.getElementById("openrails-collectjs")).toBeNull()
+    expect(screen.getByLabelText("Card number")).toHaveValue("")
+    expect(screen.getByLabelText("CVC")).toHaveValue("")
   })
 
   it("says so when a PSP cannot save cards in the page", () => {

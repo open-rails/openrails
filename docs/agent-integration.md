@@ -14,8 +14,10 @@ the doc map. Follow it top to bottom.
   entitlements, never by inspecting subscription rows. See
   [entitlements_timeline.md](entitlements_timeline.md).
 - **Card data never touches OpenRails or the host.** Checkout is redirect or
-  tokenized-vault only (SAQ-A). Do not build any flow that posts PAN/CVV to the host
-  or to OpenRails.
+  tokenized-vault (SAQ-A). Do not build any flow that posts PAN/CVV to the host.
+  The one exception is a PSP the merchant declared `card_entry: server`
+  ([docs/rails/nmi.md](rails/nmi.md)), which puts the deployment in SAQ D; never
+  enable it on your own.
 - **Sandbox first.** All development runs `test_mode = sandbox` — every rail routes to
   its test environment and live credentials refuse to boot. Do not touch live
   credentials until the full flow is proven.

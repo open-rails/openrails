@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -51,6 +52,10 @@ type RailPaymentMethodService struct {
 	// nmi_payment_method_update provider intent (#928); wired at runtime assembly.
 	UpdateIntents PaymentMethodUpdateExecutor
 	clock         clockwork.Clock
+
+	// CardVaults routes a card the server received through the durable
+	// nmi_card_vault provider intent (#1129); wired at runtime assembly.
+	CardVaults CardVaultExecutor
 }
 
 type subscriptionReader interface {
@@ -120,6 +125,10 @@ type CreatePaymentMethodRequest struct {
 	// checkout (#1110): the price being bought, or attempts.CardSave.
 	AttemptTarget string
 	AttemptOwner  attempts.Owner
+
+	// Card is the card itself, for a PSP whose card_entry is server (#1129);
+	// never beside PaymentToken. It is wiped before CreatePaymentMethod returns.
+	Card *cardguard.Card
 }
 
 type UpdatePaymentMethodRequest struct {
@@ -140,6 +149,12 @@ type UpdatePaymentMethodRequest struct {
 	LastFour     *string
 	CardType     *string
 	ExpiryDate   *string
+
+	// Card replaces PaymentToken for a PSP whose card_entry is server (#1129).
+	// AttemptKey is the caller's retry identity for that replacement: a card
+	// is never hashed into one.
+	Card       *cardguard.Card
+	AttemptKey string
 }
 
 // PaymentMethodError carries additional context for payment method creation failures, including localization codes.
@@ -191,6 +206,7 @@ func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReade
 // vault is created IN that PSP's account, and the row's rail comes from the
 // resolved scope.
 func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, userID string, req *CreatePaymentMethodRequest) (*models.PaymentMethod, error) {
+	defer req.Card.Zero()
 	startedAt := time.Now()
 	var providerDuration time.Duration
 	var databaseDuration time.Duration
@@ -236,6 +252,15 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		}
 	}
 
+	if req.Card != nil {
+		if strings.TrimSpace(req.PaymentToken) != "" {
+			return nil, ErrCardWithToken
+		}
+		if scope == nil || pspID == nil || cardEntry(*scope) != config.CardEntryServer {
+			return nil, ErrCardEntryNotEnabled
+		}
+	}
+
 	firstName, lastName := nmiNameParts(req.FirstName, req.LastName, req.NameOnCard)
 	canonicalName := cardholdername.Canonical(req.NameOnCard, req.FirstName, req.LastName)
 	metadata := req.Metadata
@@ -268,11 +293,21 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Address2:     req.Address2,
 	}
 
+	methodID := uuidutil.NewV7()
 	providerStartedAt := time.Now()
-	nmiResponse, err := client.CreateCustomerVault(ctx, vaultData)
+	var nmiResponse *nmi.CreateCustomerVaultResponse
+	if req.Card != nil {
+		nmiResponse, err = s.vaultCard(ctx, client, userID, methodID, rail, *pspID, vaultData, req)
+	} else {
+		nmiResponse, err = client.CreateCustomerVault(ctx, vaultData)
+	}
 	providerDuration = time.Since(providerStartedAt)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
+		var refusal *PaymentMethodError
+		if errors.As(err, &refusal) {
+			return nil, err
+		}
 		if errors.Is(err, nmi.ErrV5Refused) {
 			s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Step: "vault"})
 		}
@@ -291,7 +326,6 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	// credential-on-file agreement now, so an engine membership can move onto
 	// it and renew as merchant-initiated. A refused or unproven verification
 	// leaves nothing saved; a retry verifies a new vault entry.
-	methodID := uuidutil.NewV7()
 	agreementRef, err := client.EstablishRecurringAgreement(ctx, nmiResponse.CustomerVaultID, nmiResponse.BillingID, "pmv-"+methodID.String())
 	if err != nil {
 		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
@@ -357,6 +391,112 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	outcome = "success"
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")
 	return pm, nil
+}
+
+var (
+	// ErrCardEntryNotEnabled refuses a card sent to a PSP whose card_entry is
+	// browser: the firewall's answer to a card number, whatever field held it.
+	ErrCardEntryNotEnabled = errors.New("card must be tokenized by the payment provider before calling OpenRails")
+	// ErrCardWithToken refuses a request naming both a card and a token.
+	ErrCardWithToken = errors.New("provide either card or payment_token, not both")
+	// ErrCardNotSaved: the gateway holds no vault for the card and it cannot be
+	// sent again; the customer enters it again.
+	ErrCardNotSaved = errors.New("the card was not saved; enter it again")
+)
+
+// CardVaultRequest is one card to vault in a PSP's gateway account.
+type CardVaultRequest struct {
+	UserID          string
+	PaymentMethodID uuid.UUID
+	PspID           uuid.UUID
+	Rail            string
+	Billing         nmi.CreateCustomerVaultData
+	Card            *cardguard.Card
+}
+
+// CardVaultOutcome mirrors the durable intent's state after its inline run.
+// VaultID set = vaulted. Unknown = the gateway did not answer and does not
+// show the vault yet. Otherwise nothing was vaulted: Refused with the
+// gateway's response code, or the card must be entered again.
+type CardVaultOutcome struct {
+	VaultID, BillingID string
+	Unknown            bool
+	Refused            bool
+	ResponseCode       int
+	Reason             string
+}
+
+// CardVaultExecutor posts the nmi_card_vault intent and executes it in the
+// request that carries the card. Implemented by intents.CardVaultThrough.
+type CardVaultExecutor interface {
+	ExecuteCardVault(ctx context.Context, req CardVaultRequest) (CardVaultOutcome, error)
+}
+
+func cardEntry(scope merchants.PSPScope) string {
+	entry, err := config.CardEntry(scope.Rail, scope.Settings, scope.CustodianID != nil)
+	if err != nil {
+		return config.CardEntryBrowser
+	}
+	return entry
+}
+
+// CardEntryForPSP is where a PSP takes new cards: config.CardEntryServer only
+// when its declaration says so.
+func (s *RailPaymentMethodService) CardEntryForPSP(ctx context.Context, pspID uuid.UUID) (string, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	if s == nil || s.DB == nil || pspID == uuid.Nil {
+		return config.CardEntryBrowser, nil
+	}
+	row, err := s.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: pspID})
+	if err != nil {
+		return "", err
+	}
+	return cardEntry(merchants.PSPScopeFromRow(row)), nil
+}
+
+// ResolveClientForPSP arms the NMI client of one declared PSP.
+func (s *RailPaymentMethodService) ResolveClientForPSP(ctx context.Context, rail string, pspID uuid.UUID) (*nmi.NMIClient, error) {
+	client, _, err := s.resolveNMIClient(ctx, rail, &pspID)
+	return client, err
+}
+
+// vaultCard vaults a card the server received through its durable intent and
+// reads the vault for the billing entry the gateway recorded.
+func (s *RailPaymentMethodService) vaultCard(ctx context.Context, client *nmi.NMIClient, userID string, methodID uuid.UUID, rail string, pspID uuid.UUID, billing nmi.CreateCustomerVaultData, req *CreatePaymentMethodRequest) (*nmi.CreateCustomerVaultResponse, error) {
+	card := req.Card
+	if s.CardVaults == nil {
+		return nil, errors.New("card vault intent executor not wired")
+	}
+	out, err := s.CardVaults.ExecuteCardVault(ctx, CardVaultRequest{UserID: userID, PaymentMethodID: methodID, PspID: pspID, Rail: rail, Billing: billing, Card: card})
+	if err != nil {
+		return nil, fmt.Errorf("post card vault intent: %w", err)
+	}
+	switch {
+	case out.VaultID != "":
+		resp := &nmi.CreateCustomerVaultResponse{CustomerVaultID: out.VaultID, Card: nmi.V5BillingCardData{CardType: card.Brand()}}
+		if customer, found, err := client.GetCustomer(ctx, out.VaultID); err == nil && found {
+			if entry := customer.PrimaryBilling(); entry != nil {
+				resp.BillingID, resp.Card = strings.TrimSpace(entry.ID), entry.PaymentDetails
+			}
+		}
+		// The card names itself when the gateway's record does not.
+		req.LastFour, req.ExpiryDate, req.CardType = card.LastFour(), card.Expiry(), card.Brand()
+		return resp, nil
+	case out.Refused:
+		code := decline.NMILocalizationID(out.ResponseCode)
+		if code == "" {
+			code = fmt.Sprintf("nmi_response_%d", out.ResponseCode)
+		}
+		answer := decline.Evidence{Rail: "nmi", Code: code, CardBrand: card.Brand(), CardLast4: card.LastFour()}
+		s.recordVerification(ctx, userID, &pspID, req, attempts.Attempt{Answer: answer, Step: "vault"})
+		return nil, &PaymentMethodError{Err: errors.New("the gateway refused the card"), LocalizationID: code, Message: "failed to create payment method: the gateway refused the card", Rail: "nmi", Reason: decline.ClassifyEvidence(answer).Reason}
+	case out.Unknown:
+		return nil, &nmi.TransportAmbiguousError{Err: errors.New("card vault outcome unknown")}
+	}
+	return nil, ErrCardNotSaved
 }
 
 func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provider string, pspID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
@@ -631,6 +771,16 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	if !rails.SupportsPaymentMethodCRUD(models.Rail(rail)) {
 		return nil, RailPaymentMethodsUnsupported(rail)
 	}
+	defer req.Card.Zero()
+	if req.Card != nil {
+		entry, err := s.CardEntryForPSP(ctx, pm.PspID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrPaymentMethodProviderUnavailable, err)
+		}
+		if entry != config.CardEntryServer {
+			return nil, ErrCardEntryNotEnabled
+		}
+	}
 	if err := preparePaymentMethodUpdate(req); err != nil {
 		return nil, err
 	}
@@ -659,10 +809,16 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 }
 
 func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
-	if req.PaymentToken == nil || strings.TrimSpace(*req.PaymentToken) == "" {
+	token := ""
+	if req.PaymentToken != nil {
+		token = strings.TrimSpace(*req.PaymentToken)
+	}
+	switch {
+	case req.Card != nil && token != "":
+		return &PaymentMethodUpdateValidationError{Message: ErrCardWithToken.Error()}
+	case req.Card == nil && token == "":
 		return &PaymentMethodUpdateValidationError{Message: "payment_token is required"}
 	}
-	token := strings.TrimSpace(*req.PaymentToken)
 	req.PaymentToken = &token
 
 	lastFour := ""
@@ -676,6 +832,10 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 	expiry := ""
 	if req.ExpiryDate != nil {
 		expiry = normalizeReplacementExpiry(*req.ExpiryDate)
+	}
+	if req.Card != nil {
+		// The card names itself; nothing the caller says about it is used.
+		lastFour, cardType, expiry = req.Card.LastFour(), req.Card.Brand(), req.Card.Expiry()
 	}
 	// The brand is display metadata; the vault record derives it from the
 	// masked number when the tokenizer omits it.

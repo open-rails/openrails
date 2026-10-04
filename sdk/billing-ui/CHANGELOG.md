@@ -1,5 +1,17 @@
 # Changelog
 
+## Server card entry (openrails#1129)
+
+- Driver `card` (a PSP declared `card_entry: server`, flow `card`): `<Checkout>`
+  and `SavePaymentMethod` render plain card inputs with the Collect.js form's
+  layout and field errors, load no gateway script, and send
+  `card: {number, exp_month, exp_year, cvc}`. Inside a `BillingProvider` the
+  card is saved first (`addPaymentMethod({ provider, card })`) and charged by
+  id; a page without one sends `card` in `PayRequest`. The inputs are cleared
+  once the card is sent.
+- `cardSetupDriver` may return `"card"`; `NewCard` takes `payment_token` or
+  `card`, never both.
+
 ## Catalog and plan-change client (openrails#1128)
 
 - `@openrails/billing-ui/client` gains the public catalog (`listProducts`,

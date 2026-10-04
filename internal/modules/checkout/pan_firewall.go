@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // PAN firewall (#795 B5, SAQ A): custodian-held-card checkout accepts ONLY the BT
@@ -15,6 +16,34 @@ import (
 // refusals by the detector's grouping rule (internal/cardguard), never by a
 // per-field exemption: an exemption is a hole an attacker can aim at, and it
 // only ever covered the fields someone had already been burned by.
+//
+// The one card OpenRails takes is the typed `card` field (cardguard.Card,
+// #1129), and only for the PSP a request routes to when that PSP declares
+// card_entry: server (cardEntryFor). It is not a string field, so nothing here
+// is relaxed for it.
+
+// cardEntryFor is where the PSP a request routed to takes new cards.
+func cardEntryFor(target railTarget) string {
+	if target.Scope == nil {
+		return config.CardEntryBrowser
+	}
+	entry, err := config.CardEntry(target.Scope.Rail, target.Scope.Settings, target.Scope.CustodianID != nil)
+	if err != nil {
+		return config.CardEntryBrowser
+	}
+	return entry
+}
+
+// describeCard stamps a request's card onto the display fields it names
+// (nothing the caller says about the card is used) and returns its wipe.
+func describeCard(req *CheckoutSessionCreateRequest) func() {
+	if req == nil || req.Payment.Card == nil {
+		return func() {}
+	}
+	card := req.Payment.Card
+	req.Payment.LastFour, req.Payment.CardType, req.Payment.ExpiryDate = card.LastFour(), card.Brand(), card.Expiry()
+	return card.Zero
+}
 
 // RejectPANShapedFields errors when any string field of the checkout request
 // contains a card number.

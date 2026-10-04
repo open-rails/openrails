@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -34,6 +35,10 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 		NewPriceID     json.RawMessage `json:"new_price_id"`
 	}
 	if !r.BindJSON(&input) {
+		return
+	}
+	defer input.PaymentOptions.Card.Zero()
+	if input.PaymentOptions.Card != nil && !cardFieldAdmitted(r, strings.TrimSpace(input.PaymentOptions.PaymentToken) != "") {
 		return
 	}
 	if raw := input.PaymentOptions.PaymentMethodID; raw != "" {
@@ -76,6 +81,7 @@ func ServiceLookupCheckoutSession(r *httprequest.Request) {
 	if !r.BindJSON(&input) {
 		return
 	}
+	defer input.PaymentOptions.Card.Zero()
 	payer, ok := commerceCustomer(r, customerIDParam(input.Customer.ID))
 	if !ok {
 		return
@@ -253,6 +259,12 @@ func ServiceCreateSolanaTierChangeSession(r *httprequest.Request) {
 
 func serviceCreateCheckoutAction(r *httprequest.Request, customer billing.CheckoutCustomerIdentity, key string, payment billing.CheckoutPaymentOptions, create func(*billingservice.Service) (*billing.CheckoutSession, error)) {
 	r.SetHeader("Cache-Control", "no-store")
+	// None of these actions takes a card (#1129).
+	if payment.Card != nil {
+		payment.Card.Zero()
+		r.ErrorJSON(http.StatusBadRequest, paymentmethods.ErrCardEntryNotEnabled.Error())
+		return
+	}
 	if _, ok := commerceCustomer(r, customerIDParam(customer.ID)); !ok {
 		return
 	}

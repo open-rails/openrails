@@ -4,7 +4,8 @@
 //   - Customer Vault v5 (/api/v5/customers, billing entries),
 //   - v5 payments (read, refund, void, auth probe), plans and subscriptions,
 //   - Direct Post /api/transact.php (sale, validate, refund, void,
-//     recurring add_subscription/update_subscription/rebill_subscription),
+//     recurring add_subscription/update_subscription/rebill_subscription,
+//     customer_vault add_customer/add_billing with a card number),
 //   - Query API /api/query.php (transaction, recurring, test_mode_status).
 //
 // Serve it over loopback (New, then point provider_sandbox.nmi_gateway_url at
@@ -12,7 +13,7 @@
 // use the Mock as an http.RoundTripper or http.Handler). Time comes only from
 // Options.Clock.
 //
-// Tests seed state (Tokenize, AddVault, AddPlan, AddSchedule, AddSale),
+// Tests seed state (Tokenize, Issue, AddVault, AddPlan, AddSchedule, AddSale),
 // inspect what the gateway saw (Sales, Ledger, Attempts, Calls, Validations)
 // and inject failures (SetDecline, DeclineValidations, LoseSales,
 // DropSaleResponses, RefuseDuplicates, QueryUnavailable, FailRequests, Hold,
@@ -32,6 +33,9 @@
 //   - Declines: responsetext is always "DECLINE" (real text varies by
 //     processor). A card declined "vault" is refused when stored. Card
 //     verification (type=validate) approves funds declines 202 and 203.
+//     A card stored by number must pass Luhn and carry an MMYY expiry; its
+//     brand comes from its first digits, its behaviour from Issue, and its
+//     cvv is not checked.
 //   - Duplicate checks: the gateway-wide window (Options.DuplicateWindow)
 //     matches card brand, last four and amount; dup_seconds matches the same
 //     within one vault. Real NMI also weighs other fields.

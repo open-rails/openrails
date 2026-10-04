@@ -12,7 +12,8 @@ billing (subscriptions, saved cards, payment history).
 
 The checkout owns the browser payment flow while the host supplies a
 short-lived `CheckoutSource`. Card data is tokenized in NMI-hosted Collect.js
-iframes and never enters the host application.
+iframes and never enters the host application, unless the PSP takes cards on
+OpenRails itself (`card_entry: server`, driver `card`).
 
 See [Payment form contract](docs/payment-form-contract.md) for the exact-money
 session document, billing fields, browser-autofill behavior, and the checkout
@@ -101,7 +102,7 @@ const change = await billing.changeTier(sub.id, {
 
 Hosts pass OpenRails's browser PSP configs (`GET /checkout-config`, `psps`)
 through unchanged; the PSP's `flow` and public `config` pick the browser flow
-(Collect.js, Stripe Elements, redirect, wallet). Hosts never branch on a
+(Collect.js, native card inputs, Stripe Elements, redirect, wallet). Hosts never branch on a
 provider:
 
 - `checkoutRails(offers)` and `savedMethodsFor(methods, rails)` build a
@@ -111,7 +112,7 @@ provider:
   lists exactly the armed PSPs whose rail can make this sale (Solana when it is
   configured, never CCBill for a new subscription), each with its `driver` and
   `public_config`. An offer without a driver is not rendered.
-  Card rails (`collect_js`, `stripe_elements`) render one panel: saved cards,
+  Card rails (`collect_js`, `card`, `stripe_elements`) render one panel: saved cards,
   an inline new card and one Pay/Subscribe button, which is the payer's
   confirmation of the displayed terms. No provider chooser with one rail.
 - Inside a `BillingProvider`, a new card is always saved to the account first

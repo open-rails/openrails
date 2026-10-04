@@ -480,6 +480,7 @@ func checkoutCreateRequest(req CreateCheckoutSessionRequest, mode, subscriptionI
 			Rail:            req.PaymentOptions.Rail,
 			PaymentMethodID: req.PaymentOptions.PaymentMethodID,
 			PaymentToken:    req.PaymentOptions.PaymentToken,
+			Card:            req.PaymentOptions.Card,
 			TokenSymbol:     req.PaymentOptions.TokenSymbol,
 			Flow:            req.PaymentOptions.Flow,
 			Wallet:          req.PaymentOptions.Wallet,

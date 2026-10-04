@@ -6,13 +6,20 @@ import {
   type CheckoutAppearance,
 } from "./appearance"
 import { isBillingError } from "./client/errors"
+import { CardBillingFields } from "./components/billing-fields"
+import { NativeCardFields } from "./components/card-fields"
 import { PayButton, TrustLine } from "./components/pay-button"
 import {
   StripeCardEntry,
   type StripeCardHandle,
 } from "./components/stripe-card"
 import { useMessages } from "./i18n/context"
-import { initialCountry } from "./lib/billing"
+import {
+  emptyNMIBilling,
+  initialCountry,
+  nmiBillingSchema,
+} from "./lib/billing"
+import { useCardEntry } from "./lib/card-entry"
 import { cardSetupDriver, type PspConfig } from "./psp"
 import { useBillingContext } from "./react/context"
 import {
@@ -40,8 +47,9 @@ export interface SavePaymentMethodProps {
 
 /**
  * Saves a card to the customer's account with any PSP OpenRails serves, in
- * the page. The PSP's configuration picks the flow; card data only ever
- * enters provider frames. Requires `BillingProvider`.
+ * the page. The PSP's configuration picks the flow: card data enters the
+ * provider's own frames, or, for a PSP whose card_entry is server, is posted
+ * to OpenRails. Requires `BillingProvider`.
  */
 export function SavePaymentMethod(props: SavePaymentMethodProps) {
   const { t } = useMessages()
@@ -63,6 +71,8 @@ export function SavePaymentMethod(props: SavePaymentMethodProps) {
       </p>
       {driver === "collect_js" ? (
         <TokenizedSetup {...props} />
+      ) : driver === "card" ? (
+        <NativeCardSetup {...props} />
       ) : (
         <ElementsSetup {...props} />
       )}
@@ -117,6 +127,88 @@ function TokenizedSetup({
         appearance={appearance}
       />
     </>
+  )
+}
+
+function NativeCardSetup({
+  psp,
+  onSaved,
+  submitLabel,
+  defaultCountry,
+}: SavePaymentMethodProps) {
+  const m = useMessages()
+  const { client, notify } = useBillingContext()
+  const uid = React.useId().replace(/[^a-zA-Z0-9-]/g, "")
+  const ids = React.useMemo(
+    () => ({
+      number: `orck-save-${uid}-number`,
+      expiry: `orck-save-${uid}-expiry`,
+      cvv: `orck-save-${uid}-cvv`,
+    }),
+    [uid]
+  )
+  const card = useCardEntry()
+  const [billing, setBilling] = React.useState(() => ({
+    ...emptyNMIBilling,
+    country: initialCountry(defaultCountry),
+  }))
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string>()
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (busy) return
+    const parsed = nmiBillingSchema.safeParse(billing)
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? "Check the billing details")
+      return
+    }
+    const entered = card.take()
+    if (!entered) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const method = await client.addPaymentMethod({
+        ...parsed.data,
+        provider: psp.key,
+        card: entered,
+      })
+      notify({ type: "payment_method.added", paymentMethodId: method.id })
+      onSaved(method.id)
+    } catch (cause) {
+      setError(describe(m, cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form
+      aria-label="Secure card setup"
+      autoComplete="on"
+      className="grid gap-4"
+      noValidate
+      onSubmit={(event) => void submit(event)}
+    >
+      <CardBillingFields
+        idPrefix={`orck-save-${uid}`}
+        value={billing}
+        onChange={setBilling}
+        disabled={busy}
+      />
+      <NativeCardFields ids={ids} card={card} disabled={busy} />
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <PayButton
+        label={submitLabel ?? m.t("paymentMethods.save")}
+        processing={busy}
+        disabled={!card.valid}
+      />
+      <TrustLine />
+    </form>
   )
 }
 

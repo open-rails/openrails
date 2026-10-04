@@ -9,7 +9,21 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
+// refuseCard: a Card re-encodes as a redaction, so a Client cannot carry one.
+// It reaches OpenRails only in the request that first carried it (the mounted
+// customer and checkout routes); the refused card is wiped.
+func refuseCard(payment billing.CheckoutPaymentOptions) error {
+	if payment.Card == nil {
+		return nil
+	}
+	payment.Card.Zero()
+	return invalidErr("a card cannot be sent through a Client: post it to OpenRails' own routes")
+}
+
 func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
+	if err := refuseCard(request.PaymentOptions); err != nil {
+		return nil, err
+	}
 	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
 		return nil, invalidErr("exactly one of price_id or price_key is required")
 	}
@@ -28,6 +42,9 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 // LookupCheckoutSession is a read-only idempotency probe for thin host
 // wrappers. It never creates, routes, or contacts a provider.
 func (c *Client) LookupCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
+	if err := refuseCard(request.PaymentOptions); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(request.IdempotencyKey) == "" {
 		return nil, invalidErr("Idempotency-Key required")
 	}
@@ -42,6 +59,9 @@ func (c *Client) LookupCheckoutSession(ctx context.Context, request billing.Crea
 }
 
 func (c *Client) CreatePaymentMethodSession(ctx context.Context, request billing.CreatePaymentMethodSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
+	if err := refuseCard(request.PaymentOptions); err != nil {
+		return nil, err
+	}
 	var out billing.CheckoutSession
 	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/payment-method-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
@@ -50,6 +70,9 @@ func (c *Client) CreatePaymentMethodSession(ctx context.Context, request billing
 }
 
 func (c *Client) CreateSolanaCancelSession(ctx context.Context, request billing.CreateSolanaCancelSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
+	if err := refuseCard(request.PaymentOptions); err != nil {
+		return nil, err
+	}
 	var out billing.CheckoutSession
 	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/solana-cancel-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
@@ -58,6 +81,9 @@ func (c *Client) CreateSolanaCancelSession(ctx context.Context, request billing.
 }
 
 func (c *Client) CreateSolanaTierChangeSession(ctx context.Context, request billing.CreateSolanaTierChangeSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
+	if err := refuseCard(request.PaymentOptions); err != nil {
+		return nil, err
+	}
 	var out billing.CheckoutSession
 	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/solana-tier-change-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
