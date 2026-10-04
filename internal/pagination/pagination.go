@@ -39,8 +39,14 @@ func Limit(page billing.PageRequest) (int, error) {
 }
 
 // Fetch is the row count a keyset query asks for: one more than the page, so
-// Cut can tell whether another page follows without a count query.
-func Fetch(limit int) int32 { return int32(limit) + 1 }
+// Cut can tell whether another page follows without a count query. A limit
+// outside 1..billing.MaxPageLimit (Limit refuses it) asks for a full page.
+func Fetch(limit int) int32 {
+	if limit < 1 || limit > billing.MaxPageLimit {
+		limit = billing.MaxPageLimit
+	}
+	return int32(limit) + 1 // #nosec G115 -- bounded to 1..MaxPageLimit above
+}
 
 // Encode makes an opaque cursor from a keyset position: the ordering key of
 // the last row of a page. Clients pass it back verbatim.
