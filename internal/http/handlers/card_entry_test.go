@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -52,7 +53,7 @@ func TestCardFieldRequestRules(t *testing.T) {
 		if tc.code != "" {
 			require.Equal(t, http.StatusBadRequest, rec.Code, name)
 			require.Contains(t, rec.Body.String(), tc.code, name)
-			require.NotContains(t, rec.Body.String(), "4111", name)
+			require.NotContains(t, withoutRequestID(rec.Body.String()), "4111", name)
 		}
 	}
 }
@@ -80,7 +81,7 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 	rec := bind(`{"psp_id":"`+billing.PSPID(uuid.New()).String()+`","card_number":"4111111111111111"}`, new(billing.CreatePaymentMethodParams))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "unknown_field")
-	require.NotContains(t, rec.Body.String(), "4111")
+	require.NotContains(t, withoutRequestID(rec.Body.String()), "4111")
 	for body, message := range map[string]string{
 		`{"card":{"number":"4111111111111112","exp_month":10,"exp_year":2027,"cvc":"999"}}`: "card number is invalid",
 		`{"card":{"number":"4111111111111111","exp_month":10,"exp_year":2027}}`:             "card cvc is invalid",
@@ -89,6 +90,12 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 		rec := bind(body, new(billing.CreatePaymentMethodParams))
 		require.Equal(t, http.StatusBadRequest, rec.Code, body)
 		require.Contains(t, rec.Body.String(), message, body)
-		require.NotContains(t, rec.Body.String(), "4111", body)
+		require.NotContains(t, withoutRequestID(rec.Body.String()), "4111", body)
 	}
 }
+
+var requestIDField = regexp.MustCompile(`"request_id":"[^"]*"`)
+
+// withoutRequestID drops the random request id, whose digits can spell
+// anything.
+func withoutRequestID(body string) string { return requestIDField.ReplaceAllString(body, "") }

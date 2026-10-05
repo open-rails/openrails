@@ -72,7 +72,6 @@ internal/modules/webhooks/basistheory.go|CompletedAt:  time.Now().UTC(),|externa
 internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/converge_nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/converge_stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/webhooks/ledger_repair_alert.go|now = time.Now()|business_time_boundary|Default repair alert time only when caller supplied no time|1
 internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/reconcile/appliers.go|return time.Now().UTC()|business_time_boundary|Explicit default local-writer clock boundary; owning engine clock takes precedence|1

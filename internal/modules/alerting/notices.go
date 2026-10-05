@@ -39,7 +39,7 @@ type ledgerRepairData struct {
 	SubscriptionID    billing.SubscriptionID `json:"subscription_id,omitzero"`
 	Error             string                 `json:"error,omitempty"`
 	Metadata          map[string]any         `json:"metadata,omitempty"`
-	FiredAt           time.Time              `json:"fired_at"`
+	FiredAt           time.Time              `json:"fired_at,omitzero"`
 }
 
 // RecordLedgerRepair puts a critical notification in the merchant's inbox.
@@ -51,9 +51,6 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		return fmt.Errorf("ledger repair: %w", err)
-	}
-	if now.IsZero() {
-		now = time.Now()
 	}
 	data := ledgerRepairData{
 		Kind:          "ledger_repair_required",
@@ -131,9 +128,6 @@ func RecordWorkerStall(ctx context.Context, database *db.DB, now time.Time, stal
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		return fmt.Errorf("worker stall: %w", err)
-	}
-	if now.IsZero() {
-		now = time.Now()
 	}
 	n := Notification{
 		Severity: SeverityCritical,
