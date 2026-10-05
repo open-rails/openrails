@@ -1011,6 +1011,8 @@ ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.maintenance_runs
+    ADD CONSTRAINT maintenance_runs_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.psp_customers (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1600,6 +1602,14 @@ ALTER TABLE ONLY billing.custody_migrations
     ADD CONSTRAINT custody_migrations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.custody_migrations
     ADD CONSTRAINT custody_migrations_payment_method_fk FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE;
+ALTER TABLE ONLY billing.custody_migrations
+    ADD CONSTRAINT custody_migrations_from_custodian_fk FOREIGN KEY (merchant_id, from_custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.custody_migrations
+    ADD CONSTRAINT custody_migrations_to_custodian_fk FOREIGN KEY (merchant_id, to_custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.custody_migrations
+    ADD CONSTRAINT custody_migrations_from_psp_fk FOREIGN KEY (merchant_id, from_psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.custody_migrations
+    ADD CONSTRAINT custody_migrations_to_psp_fk FOREIGN KEY (merchant_id, to_psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 -- ---------------------------------------------------------------------------
 -- Subscriptions
@@ -2209,6 +2219,7 @@ CREATE TABLE billing.checkout_sessions (
     CONSTRAINT checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT checkout_sessions_attempt_fk FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT checkout_sessions_price_fk FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_checkout_sessions_id_hash CHECK (octet_length(id_hash) = 32),
     CONSTRAINT chk_checkout_sessions_attempt CHECK (attempt >= 0),
     CONSTRAINT chk_checkout_sessions_purge CHECK (purge_at >= expires_at)
@@ -2239,6 +2250,7 @@ CREATE TABLE billing.solana_pay_references (
     CONSTRAINT solana_pay_references_pkey PRIMARY KEY (merchant_id, reference),
     CONSTRAINT solana_pay_references_session_key UNIQUE (merchant_id, checkout_attempt_id),
     CONSTRAINT solana_pay_references_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
+    CONSTRAINT solana_pay_references_attempt_fk FOREIGN KEY (merchant_id, checkout_attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_solana_pay_references_kind CHECK (kind IN ('purchase', 'subscribe')),
     CONSTRAINT chk_solana_pay_references_status CHECK (status IN ('pending', 'confirmed', 'expired')),
     CONSTRAINT chk_solana_pay_references_signature CHECK ((status = 'confirmed') = (signature IS NOT NULL)),
@@ -2269,6 +2281,8 @@ CREATE TABLE billing.solana_pay_receipts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT solana_pay_receipts_pkey PRIMARY KEY (merchant_id, reference, signature),
     CONSTRAINT solana_pay_receipts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
+    CONSTRAINT solana_pay_receipts_attempt_fk FOREIGN KEY (merchant_id, checkout_attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT solana_pay_receipts_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_solana_pay_receipts_disposition CHECK (
         disposition = 'credited' AND payment_id IS NOT NULL AND (review_reason IS NULL OR review_reason = 'overpaid')
         OR disposition = 'review' AND payment_id IS NULL AND review_reason IN ('already_paid', 'late', 'underpaid', 'session_closed', 'wrong_asset', 'unreadable', 'settle_failed')
@@ -2302,6 +2316,7 @@ CREATE TABLE billing.rebill_cycles (
     CONSTRAINT rebill_cycles_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT rebill_cycles_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
     CONSTRAINT rebill_cycles_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT,
+    CONSTRAINT rebill_cycles_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_rebill_cycles_owner CHECK (owner IN ('engine', 'nmi_schedule', 'provider')),
     CONSTRAINT chk_rebill_cycles_amount CHECK (amount >= 0),
     CONSTRAINT chk_rebill_cycles_currency CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
@@ -2358,6 +2373,8 @@ CREATE TABLE billing.payment_attempts (
     CONSTRAINT payment_attempts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT payment_attempts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
     CONSTRAINT payment_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT,
+    CONSTRAINT payment_attempts_payment_method_fk FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE SET NULL (payment_method_id),
+    CONSTRAINT payment_attempts_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE SET NULL (payment_id),
     CONSTRAINT chk_payment_attempts_kind CHECK (kind IN ('verify', 'initial', 'upgrade', 'rebill', 'dunning_retry', 'customer_retry', 'invoice')),
     CONSTRAINT chk_payment_attempts_owner CHECK (owner IN ('engine', 'nmi_schedule', 'provider', 'none')),
     CONSTRAINT chk_payment_attempts_card_entry CHECK (card_entry IN ('new', 'saved')),
@@ -2377,6 +2394,7 @@ CREATE TABLE billing.payment_attempts (
     CONSTRAINT chk_payment_attempts_issuer CHECK (length(issuer_code) <= 32 AND length(issuer_text) <= 128)
 );
 COMMENT ON TABLE billing.payment_attempts IS 'One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer''s attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.';
+COMMENT ON COLUMN billing.payment_attempts.subscription_id IS 'The subscription the attempt renews or would create. No foreign key: a declined first charge names a subscription that is never written.';
 COMMENT ON COLUMN billing.payment_attempts.issuer_code IS 'The issuer''s raw answer (NMI processor_response_code); response_code is the gateway''s.';
 COMMENT ON COLUMN billing.payment_attempts.enriched_at IS 'When the row was filled from the PSP''s transaction read; NULL rows are read by the enrichment pass.';
 
@@ -2385,6 +2403,7 @@ CREATE UNIQUE INDEX uq_payment_attempts_operation_step ON billing.payment_attemp
 CREATE INDEX idx_payment_attempts_time ON billing.payment_attempts USING btree (merchant_id, attempted_at);
 CREATE INDEX idx_payment_attempts_checkout ON billing.payment_attempts USING btree (merchant_id, customer_id, checkout_target, attempted_at) WHERE checkout_target IS NOT NULL;
 CREATE INDEX idx_payment_attempts_cycle ON billing.payment_attempts USING btree (merchant_id, cycle_id) WHERE cycle_id IS NOT NULL;
+CREATE INDEX idx_payment_attempts_payment_method ON billing.payment_attempts USING btree (merchant_id, payment_method_id) WHERE payment_method_id IS NOT NULL;
 CREATE INDEX idx_payment_attempts_subscription ON billing.payment_attempts USING btree (merchant_id, subscription_id, attempted_at) WHERE subscription_id IS NOT NULL;
 CREATE INDEX idx_payment_attempts_checkout_id ON billing.payment_attempts USING btree (merchant_id, checkout_id, attempted_at) WHERE checkout_id IS NOT NULL;
 CREATE INDEX idx_payment_attempts_unenriched ON billing.payment_attempts USING btree (merchant_id, attempted_at)
@@ -2913,6 +2932,8 @@ ALTER TABLE ONLY billing.metered_rating_watermarks
 
 ALTER TABLE ONLY billing.metered_rating_watermarks
     ADD CONSTRAINT metered_rating_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.metered_rating_watermarks
+    ADD CONSTRAINT metered_rating_watermarks_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE;
 
 -- Admission operation reservations.
 CREATE TABLE billing.admission_operations (
@@ -2980,6 +3001,8 @@ CREATE INDEX idx_adh_merchant_hour ON billing.admission_denials_hourly USING btr
 
 ALTER TABLE ONLY billing.admission_denials_hourly
     ADD CONSTRAINT adh_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.admission_denials_hourly
+    ADD CONSTRAINT admission_denials_hourly_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE;
 
 CREATE TABLE billing.operation_authorizations (
     operation_id text NOT NULL,
@@ -3231,6 +3254,14 @@ ALTER TABLE ONLY billing.provider_intents
     ADD CONSTRAINT provider_intents_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.provider_intents
     ADD CONSTRAINT provider_intents_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT;
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE SET NULL (subscription_id);
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE SET NULL (payment_id);
+ALTER TABLE ONLY billing.provider_intents
+    ADD CONSTRAINT provider_intents_price_fk FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE SET NULL (price_id);
+ALTER TABLE ONLY billing.payment_attempts
+    ADD CONSTRAINT payment_attempts_provider_intent_fk FOREIGN KEY (merchant_id, provider_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE SET NULL (provider_intent_id);
 
 CREATE TABLE billing.provider_mutation_logs (
     id uuid DEFAULT uuidv7() NOT NULL,
