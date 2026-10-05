@@ -88,9 +88,6 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.Merchant.Slug = "m"
 			c.Catalog = &catalog.Application{SchemaVersion: 1}
 		}), config.Deps{}, "control plane's merchants"},
-		"two credential sources": {with(sandbox, func(c *config.Config) {
-			c.Merchant = config.MerchantDeclaration{Slug: "m", PSPs: map[string]config.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct", Secrets: map[string]string{"secret_key": "sk"}}}}
-		}), config.Deps{ProviderCredentials: []config.ProviderCredentialSnapshot{{Rail: "stripe"}}}, "either Deps.ProviderCredentials or Config.Merchant"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, err := New(context.Background(), tc.cfg, tc.deps)

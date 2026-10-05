@@ -30,8 +30,6 @@ type Deps struct {
 	// Vault is a borrowed, authenticated client for Config.SecretBackend
 	// vault. The host owns its renewal; OpenRails never revokes it.
 	Vault *vaultapi.Client
-	// ProviderCredentials are snapshot credentials for existing PSPs.
-	ProviderCredentials []ProviderCredentialSnapshot
 
 	// AuthKit authenticates callers with the host's AuthKit: its
 	// *authkit.Client (or an authkit Verifier for the host's audiences).

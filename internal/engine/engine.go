@@ -137,9 +137,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	}
 	rt := application.Runtime
 	rt.VaultClient = deps.Vault
-	if err := loadProviderCredentialSnapshot(ctx, rt, deps.ProviderCredentials); err != nil {
-		return fail(err)
-	}
 	// Client operations need the same provider and secret graph as the
 	// standalone server; neither workers nor routes are prerequisites.
 	if err := rt.EnsureMerchantsService(ctx); err != nil {
@@ -265,13 +262,6 @@ func validate(cfg *config.Config, deps config.Deps) error {
 		}
 		if deps.Authenticate == nil && (deps.Authorize != nil || deps.RecentSignIn != nil) {
 			return fmt.Errorf("openrails: Deps.Authorize and Deps.RecentSignIn require Deps.Authenticate")
-		}
-	}
-	if len(deps.ProviderCredentials) > 0 {
-		for _, account := range cfg.Merchant.PSPs {
-			if len(account.Secrets) > 0 {
-				return fmt.Errorf("openrails: supply snapshot credentials through either Deps.ProviderCredentials or Config.Merchant, not both")
-			}
 		}
 	}
 	if !cfg.RateLimitsDisabled {

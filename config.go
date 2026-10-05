@@ -99,9 +99,6 @@ type (
 	// deployment.
 	HyperSwitchConfig = config.HyperSwitchConfig
 
-	// ProviderCredentialSnapshot is one entry of Deps.ProviderCredentials:
-	// host-owned credentials for an existing PSP.
-	ProviderCredentialSnapshot = config.ProviderCredentialSnapshot
 	// Cache is Deps.Cache: the store behind OpenRails' shared cache.
 	Cache = cache.Cache
 	// EmailSender is Deps.EmailSender: it delivers OpenRails' rendered email,

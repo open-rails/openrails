@@ -249,7 +249,6 @@
       "type PSPSignerConfig = config.PSPSignerConfig",
       "type PrincipalKind = billingauth.PrincipalKind",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
-      "type ProviderCredentialSnapshot = config.ProviderCredentialSnapshot",
       "type ProviderSandboxConfig = config.ProviderSandboxConfig",
       "type RateLimit = config.RateLimit",
       "type RateLimitsConfig = config.RateLimitsConfig",
@@ -1052,7 +1051,7 @@
       "type CustomerHTTPScope uint8",
       "type CustomerRoutesConfig struct {\n\tPrefix string\n\n\tMerchant string\n\n\tScope CustomerHTTPScope\n\n\tDelegated bool\n}",
       "type DBConfig struct {\n\tURL string\n\n\tHost     string\n\tPort     string\n\tDatabase string\n\tUsername string\n\tPassword string\n\n\tSSLMode string\n\n\tSQLTrace bool\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tCache cache.Cache\n\n\tVault *vaultapi.Client\n\n\tProviderCredentials []ProviderCredentialSnapshot\n\n\tAuthKit billingauth.Verifier\n\n\tCustomerFor func(ctx context.Context, caller billingauth.Identity) (billing.CustomerID, error)\n\n\tAuthorityFor func(ctx context.Context, required billingauth.Requirement) (billingauth.Authority, error)\n\n\tAuthenticate func(*http.Request) (billingauth.Identity, error)\n\n\tAuthorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error\n\n\tRecentSignIn func(*http.Request) error\n\n\tAuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)\n\n\tCheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)\n\n\tUserExists func(ctx context.Context, userID string) (bool, error)\n\tUserEmail  func(ctx context.Context, userID string) (username, email string, ok bool, err error)\n\n\tResolveUsername func(ctx context.Context, username string) (userID string, err error)\n\n\tConsoleAssets fs.FS\n\n\tEmailSender EmailSender\n\n\tSMSSender SMSSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tCache cache.Cache\n\n\tVault *vaultapi.Client\n\n\tAuthKit billingauth.Verifier\n\n\tCustomerFor func(ctx context.Context, caller billingauth.Identity) (billing.CustomerID, error)\n\n\tAuthorityFor func(ctx context.Context, required billingauth.Requirement) (billingauth.Authority, error)\n\n\tAuthenticate func(*http.Request) (billingauth.Identity, error)\n\n\tAuthorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error\n\n\tRecentSignIn func(*http.Request) error\n\n\tAuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)\n\n\tCheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)\n\n\tUserExists func(ctx context.Context, userID string) (bool, error)\n\tUserEmail  func(ctx context.Context, userID string) (username, email string, ok bool, err error)\n\n\tResolveUsername func(ctx context.Context, username string) (userID string, err error)\n\n\tConsoleAssets fs.FS\n\n\tEmailSender EmailSender\n\n\tSMSSender SMSSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n\n\tAuth *iam.EmailMessage\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1068,7 +1067,6 @@
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPSignerConfig struct {\n\tMode string `yaml:\"mode,omitempty\"`\n\tKey  string `yaml:\"key,omitempty\"`\n}",
-      "type ProviderCredentialSnapshot struct {\n\tMerchantID  billing.MerchantID\n\tRail        string\n\tAccountID   string\n\tCredentials map[string]string\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
@@ -2021,9 +2019,6 @@
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "v9": "github.com/redis/go-redis/v9",
       "vaultapi": "github.com/hashicorp/vault/api"
-    },
-    "internal/config/embedding.go": {
-      "billing": "github.com/open-rails/openrails/billing"
     },
     "internal/config/hyperswitch.go": {
       "fmt": "fmt",

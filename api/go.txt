@@ -390,7 +390,6 @@ pkg openrails, type Deps struct, EmailSender config.EmailSender
 pkg openrails, type Deps struct, HasVaultedPaymentMethod func(context.Context, string) (bool, error)
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
-pkg openrails, type Deps struct, ProviderCredentials []config.ProviderCredentialSnapshot
 pkg openrails, type Deps struct, RecentSignIn func(*http.Request) error
 pkg openrails, type Deps struct, Redis *redis.Client
 pkg openrails, type Deps struct, ResolveUsername func(context.Context, string) (string, error)
@@ -507,12 +506,6 @@ pkg openrails, type PrincipalKind string
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string
-pkg openrails, type ProviderCredentialSnapshot = config.ProviderCredentialSnapshot
-pkg openrails, type ProviderCredentialSnapshot struct
-pkg openrails, type ProviderCredentialSnapshot struct, AccountID string
-pkg openrails, type ProviderCredentialSnapshot struct, Credentials map[string]string
-pkg openrails, type ProviderCredentialSnapshot struct, MerchantID billing.MerchantID
-pkg openrails, type ProviderCredentialSnapshot struct, Rail string
 pkg openrails, type ProviderSandboxConfig = config.ProviderSandboxConfig
 pkg openrails, type ProviderSandboxConfig struct
 pkg openrails, type ProviderSandboxConfig struct, CCBillDataLinkURL string
