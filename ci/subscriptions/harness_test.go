@@ -809,7 +809,7 @@ func (w *world) payments(tp topology, customerID string) []billing.Payment {
 	w.t.Helper()
 	id, err := billing.ParseCustomerID(customerID)
 	require.NoError(w.t, err)
-	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentListParams{CustomerID: id, Page: billing.PageRequest{Limit: 100}})
+	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentListParams{CustomerID: id, PageRequest: billing.PageRequest{Limit: 100}})
 	require.NoError(w.t, err)
 	return page.Items
 }

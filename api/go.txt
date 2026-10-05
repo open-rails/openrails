@@ -2002,10 +2002,10 @@ pkg openrails/billing, type InvoiceLineItem struct, EventType string `json:"even
 pkg openrails/billing, type InvoiceListParams struct
 pkg openrails/billing, type InvoiceListParams struct, Currency string
 pkg openrails/billing, type InvoiceListParams struct, CustomerID CustomerID
-pkg openrails/billing, type InvoiceListParams struct, Page PageRequest
 pkg openrails/billing, type InvoiceListParams struct, PeriodFrom *time.Time
 pkg openrails/billing, type InvoiceListParams struct, PeriodTo *time.Time
 pkg openrails/billing, type InvoiceListParams struct, Status InvoiceStatus
+pkg openrails/billing, type InvoiceListParams struct, embedded PageRequest
 pkg openrails/billing, type InvoicePayNow struct
 pkg openrails/billing, type InvoicePayNow struct, Invoice Invoice `json:"invoice"`
 pkg openrails/billing, type InvoicePayNow struct, Operation PaymentOperation `json:"operation"`
@@ -2431,13 +2431,13 @@ pkg openrails/billing, type PaymentAttemptListParams struct, Kind []string
 pkg openrails/billing, type PaymentAttemptListParams struct, ObservedVia []string
 pkg openrails/billing, type PaymentAttemptListParams struct, Owner []string
 pkg openrails/billing, type PaymentAttemptListParams struct, PSPID PSPID
-pkg openrails/billing, type PaymentAttemptListParams struct, Page PageRequest
 pkg openrails/billing, type PaymentAttemptListParams struct, Reason []string
 pkg openrails/billing, type PaymentAttemptListParams struct, ResponseCode []string
 pkg openrails/billing, type PaymentAttemptListParams struct, Since time.Time
 pkg openrails/billing, type PaymentAttemptListParams struct, Source []string
 pkg openrails/billing, type PaymentAttemptListParams struct, SubscriptionID SubscriptionID
 pkg openrails/billing, type PaymentAttemptListParams struct, Until time.Time
+pkg openrails/billing, type PaymentAttemptListParams struct, embedded PageRequest
 pkg openrails/billing, type PaymentChannel string
 pkg openrails/billing, type PaymentFailure struct
 pkg openrails/billing, type PaymentFailure struct, Field string `json:"field,omitempty"`
@@ -2448,11 +2448,11 @@ pkg openrails/billing, type PaymentKind string
 pkg openrails/billing, type PaymentListParams struct
 pkg openrails/billing, type PaymentListParams struct, CustomerID CustomerID
 pkg openrails/billing, type PaymentListParams struct, Kind PaymentKind
-pkg openrails/billing, type PaymentListParams struct, Page PageRequest
 pkg openrails/billing, type PaymentListParams struct, PriceID PriceID
 pkg openrails/billing, type PaymentListParams struct, Rail string
 pkg openrails/billing, type PaymentListParams struct, SubscriptionID SubscriptionID
 pkg openrails/billing, type PaymentListParams struct, TransactionID string
+pkg openrails/billing, type PaymentListParams struct, embedded PageRequest
 pkg openrails/billing, type PaymentMethod struct
 pkg openrails/billing, type PaymentMethod struct, BillingDetails *BillingDetails `json:"billing_details"`
 pkg openrails/billing, type PaymentMethod struct, Card *CardDetails `json:"card"`
@@ -2715,8 +2715,8 @@ pkg openrails/billing, type RebillCycleListParams struct, MissReason []string
 pkg openrails/billing, type RebillCycleListParams struct, Outcome []string
 pkg openrails/billing, type RebillCycleListParams struct, Owner []string
 pkg openrails/billing, type RebillCycleListParams struct, PSPID PSPID
-pkg openrails/billing, type RebillCycleListParams struct, Page PageRequest
 pkg openrails/billing, type RebillCycleListParams struct, SubscriptionID SubscriptionID
+pkg openrails/billing, type RebillCycleListParams struct, embedded PageRequest
 pkg openrails/billing, type RecordProviderBillingObservationParams struct
 pkg openrails/billing, type RecordProviderBillingObservationParams struct, Lifecycle ProviderBillingLifecycleEvidence `json:"lifecycle"`
 pkg openrails/billing, type RecordProviderBillingObservationParams struct, NormalizedQuery string `json:"normalized_query"`

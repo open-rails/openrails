@@ -75,7 +75,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	page := billing.PageRequest{Limit: 2}
 	for pages := 0; ; pages++ {
 		require.Less(t, pages, 3)
-		got, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: c.cid(), Page: page})
+		got, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: c.cid(), PageRequest: page})
 		require.NoError(t, err)
 		for _, p := range got.Items {
 			read = append(read, p.ID)
@@ -87,7 +87,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	}
 	require.Equal(t, recorded, read, "every payment once, newest first")
 
-	_, err := client.ListPayments(t.Context(), billing.PaymentListParams{Page: billing.PageRequest{Cursor: "not-a-cursor"}})
+	_, err := client.ListPayments(t.Context(), billing.PaymentListParams{PageRequest: billing.PageRequest{Cursor: "not-a-cursor"}})
 	requireCode(t, err, http.StatusBadRequest, "invalid_cursor")
 
 	// The customer's own list is the same page shape.

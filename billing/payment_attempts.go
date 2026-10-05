@@ -58,7 +58,7 @@ type PaymentAttempt struct {
 // optional, and a list matches any of its values. Since and Until bound
 // attempted_at to [Since, Until).
 type PaymentAttemptListParams struct {
-	Page                                                   PageRequest
+	PageRequest
 	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
 	Source, ObservedVia, AVSResult, CVVResult              []string
 	PSPID                                                  PSPID
@@ -103,7 +103,7 @@ type RebillCycle struct {
 // optional, and a list matches any of its values. DueSince and DueUntil bound
 // due_at to [DueSince, DueUntil).
 type RebillCycleListParams struct {
-	Page                                     PageRequest
+	PageRequest
 	Owner, FirstOutcome, MissReason, Outcome []string
 	PSPID                                    PSPID
 	SubscriptionID                           SubscriptionID

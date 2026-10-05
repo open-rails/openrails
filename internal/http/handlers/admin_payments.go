@@ -481,7 +481,7 @@ func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool)
 	if !ok {
 		return billing.PaymentListParams{}, false
 	}
-	params := billing.PaymentListParams{Page: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
+	params := billing.PaymentListParams{PageRequest: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
 	for name, parse := range map[string]func(string) error{
 		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
 		"price_id":        func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return },

@@ -13,7 +13,7 @@ import (
 // ListPaymentAttempts is one page of the merchant's payment attempts, newest
 // first.
 func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.PaymentAttemptListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error) {
-	q := pageValues(nil, filter.Page)
+	q := pageValues(nil, filter.PageRequest)
 	setQuery(q, map[string]string{"kind": commaList(filter.Kind), "owner": commaList(filter.Owner), "category": commaList(filter.Category), "reason": commaList(filter.Reason),
 		"response_code": commaList(filter.ResponseCode), "card_entry": commaList(filter.CardEntry), "source": commaList(filter.Source),
 		"observed_via": commaList(filter.ObservedVia), "avs_result": commaList(filter.AVSResult), "cvv_result": commaList(filter.CVVResult),
@@ -43,7 +43,7 @@ func (c *Client) GetPaymentAttempt(ctx context.Context, id billing.PaymentAttemp
 // ListRebillCycles is one page of the merchant's rebill cycles, latest due
 // first.
 func (c *Client) ListRebillCycles(ctx context.Context, filter billing.RebillCycleListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.RebillCycle], error) {
-	q := pageValues(nil, filter.Page)
+	q := pageValues(nil, filter.PageRequest)
 	setQuery(q, map[string]string{"owner": commaList(filter.Owner), "first_outcome": commaList(filter.FirstOutcome), "miss_reason": commaList(filter.MissReason),
 		"outcome": commaList(filter.Outcome), "psp_id": filter.PSPID.String(), "subscription_id": filter.SubscriptionID.String(),
 		"due_since": timeQuery(filter.DueSince), "due_until": timeQuery(filter.DueUntil)})
