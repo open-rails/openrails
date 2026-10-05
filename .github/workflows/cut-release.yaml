@@ -1,7 +1,7 @@
 name: Cut release
 
 # Tags master's head with the next version:
-#   gh workflow run cut-release.yaml -f bump=minor   (or bump=patch)
+#   gh workflow run cut-release.yaml -f bump=minor   (or bump=patch, bump=major)
 # The tag push runs release.yaml and docker-publish.yaml. Tags pushed with
 # GITHUB_TOKEN start no workflows, so this pushes with the RELEASE_TOKEN
 # secret: a fine-grained PAT on this repository with Contents and Workflows
@@ -12,7 +12,7 @@ on:
       bump:
         description: Version part to increment
         type: choice
-        options: [minor, patch]
+        options: [minor, patch, major]
         default: minor
 
 permissions:
@@ -59,9 +59,10 @@ jobs:
           IFS=. read -r major minor patch <<<"${latest:-v0.0.0}"
           major="${major#v}"
           case "$BUMP" in
+            major) next="v$((major + 1)).0.0" ;;
             minor) next="v${major}.$((minor + 1)).0" ;;
             patch) next="v${major}.${minor}.$((patch + 1))" ;;
-            *) echo "::error::bump must be minor or patch" && exit 1 ;;
+            *) echo "::error::bump must be major, minor or patch" && exit 1 ;;
           esac
           git tag "$next" "$GITHUB_SHA"
           git push origin "refs/tags/$next"

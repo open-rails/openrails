@@ -121,11 +121,10 @@ fails on any other.
 ## Releases
 
 ```sh
-gh workflow run cut-release.yaml -f bump=minor   # or bump=patch
+gh workflow run cut-release.yaml -f bump=minor   # or bump=patch, bump=major
 ```
 
-This tags master's head with the next minor or patch version (a new major
-version is tagged by hand); the tag runs `release.yaml`
+This tags master's head with the next version; the tag runs `release.yaml`
 (GoReleaser: binaries, checksums, SBOMs, generated notes, the
 `openrails-billing-ui-X.Y.Z.tgz` asset, build provenance) and
 `docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR).
