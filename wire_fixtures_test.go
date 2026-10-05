@@ -86,8 +86,7 @@ func canonicalWireFixtures() map[string]any {
 		"price.json": priceFixtureValue,
 		"product.json": billing.Product{ID: productFixture, CatalogID: billing.CatalogID(productFixture), Key: "pro", DisplayName: "Pro", EntitlementsSpec: map[string]*int{"pro": nil},
 			Prices: []billing.Price{priceFixtureValue}, CreatedAt: when, UpdatedAt: when},
-		"checkout_attempt.json": billing.CheckoutAttempt{
-			Object: "checkout_attempt", ID: sessionFixture, CustomerID: customerFixture, Status: billing.CheckoutAttemptSucceeded, Mode: "subscription",
+		"checkout_attempt.json": billing.CheckoutAttempt{ID: sessionFixture, CustomerID: customerFixture, Status: billing.CheckoutAttemptSucceeded, Mode: "subscription",
 			PriceID: &priceFixture, Amount: new(maxMoney), Currency: new("USD"), SubscriptionID: &subscriptionFixture, PaymentID: &paymentFixture,
 			ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"},
 		},

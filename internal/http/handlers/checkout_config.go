@@ -131,7 +131,7 @@ func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, boo
 		r.ErrorCode(billing.CodeInternalError, "failed to load solana checkout configuration")
 		return merchants.PublicCheckoutConfig{}, false
 	}
-	return merchants.PublicCheckoutConfig{Object: "checkout_config", PSPs: psps, Solana: solana}, true
+	return merchants.PublicCheckoutConfig{PSPs: psps, Solana: solana}, true
 }
 
 // pspArmed reports whether a declared account resolves with its full credential

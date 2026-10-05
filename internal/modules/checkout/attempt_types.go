@@ -84,11 +84,29 @@ type CheckoutAttemptConfirmRequest struct {
 	Payment CheckoutAttemptConfirmPayment
 }
 
-type CheckoutAttemptRedirectToURL = billing.CheckoutAttemptRedirectToURL
+// CheckoutAttemptNextAction is the engine's next step for the buyer; the
+// service turns it into billing.NextAction.
+type CheckoutAttemptNextAction struct {
+	Type          string                        `json:"type"`
+	RedirectToURL *CheckoutAttemptRedirectToURL `json:"redirect_to_url,omitempty"`
+	// Transactions are base64 unsigned Solana transactions the wallet signs
+	// and sends in order (solana_sign_transactions).
+	Transactions []string `json:"transactions,omitempty"`
+}
 
-type CheckoutAttemptNextAction = billing.CheckoutAttemptNextAction
+type CheckoutAttemptRedirectToURL struct {
+	URL string `json:"url,omitempty"`
+}
 
-type CheckoutAttemptPaymentResponse = billing.CheckoutAttemptPaymentResponse
+// CheckoutAttemptPaymentResponse is the rail's side of an attempt.
+type CheckoutAttemptPaymentResponse struct {
+	Rail           string `json:"rail"`
+	Reference      string `json:"reference,omitempty"`
+	TransactionURL string `json:"transaction_url,omitempty"`
+	SolanaPayURL   string `json:"solana_pay_url,omitempty"`
+	RedirectURL    string `json:"redirect_url,omitempty"`
+	TransactionID  string `json:"transaction_id,omitempty"`
+}
 
 // CheckoutAttemptMembershipQuote is the immutable commercial agreement shown
 // before the customer confirms. It carries no provider or execution authority.

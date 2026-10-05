@@ -136,7 +136,7 @@ function ChangeTierForm({
     preview.error instanceof Error ? preview.error.message : ""
   const changeError = change.error instanceof Error ? change.error.message : ""
   const responseMessage = change.data?.message
-  const responseURL = change.data?.url ?? change.data?.payment.redirect_url
+  const responseURL = change.data?.next_action?.url ?? undefined
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

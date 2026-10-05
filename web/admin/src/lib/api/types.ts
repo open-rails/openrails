@@ -111,43 +111,10 @@ export interface AdminSubscription extends RawSubscription {
   payments?: Payment[]
 }
 
-export interface TierChangePreview {
-  object: "tier_change_preview"
-  action: "upgrade" | "downgrade"
-  price_id: string
-  rail: Rail
-  currency: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  effective: "now" | "period_end"
-  is_estimate: boolean
-  message?: string
-}
-
-export interface TierChangeResult {
-  object: "tier_change"
-  // "processing": the provider outcome is unresolved (HTTP 202); retrying
-  // with the same Idempotency-Key reads the stored result.
-  status: "succeeded" | "processing" | "requires_action" | "blocked"
-  mode: "tier_change"
-  action: "upgrade" | "downgrade"
-  price_id: string
-  url?: string
-  payment: {
-    rail?: Rail
-    redirect_url?: string
-    transaction_id?: string
-  }
-  subscription_id?: string
-  message?: string
-  delayed_start?: string
-  currency?: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  operation_id?: string
-}
+export type {
+  TierChange as TierChangeResult,
+  TierChangePreview,
+} from "./generated/wire"
 
 // --- Catalog ---
 

@@ -45,6 +45,5 @@ func LookupCurrency(code string) (CurrencyUnits, bool) {
 
 // CurrencyRegistry is the GET /v1/currencies document.
 type CurrencyRegistry struct {
-	Object     string          `json:"object"`
 	Currencies []CurrencyUnits `json:"currencies"`
 }

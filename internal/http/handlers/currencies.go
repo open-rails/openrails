@@ -9,5 +9,5 @@ import (
 // string on this deployment's wire is expressed in.
 func GetCurrencies(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "public, max-age=3600")
-	r.SuccessJSON(billing.CurrencyRegistry{Object: "currencies", Currencies: billing.Currencies()})
+	r.SuccessJSON(billing.CurrencyRegistry{Currencies: billing.Currencies()})
 }

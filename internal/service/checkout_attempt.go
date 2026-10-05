@@ -297,7 +297,7 @@ func checkoutAttemptPayment(payment billing.CheckoutPaymentOptions, card *cardgu
 // steps become one NextAction.
 func checkoutAttemptFromResponse(resp *checkout.CheckoutAttemptResponse, customer billing.CustomerID) *billing.CheckoutAttempt {
 	out := &billing.CheckoutAttempt{
-		Object: "checkout_attempt", ID: resp.ID, CustomerID: customer,
+		ID: resp.ID, CustomerID: customer,
 		Status: billing.CheckoutAttemptStatus(resp.Status), Mode: resp.Mode,
 		PriceID: resp.PriceID, Amount: resp.Amount, Currency: resp.Currency,
 		PaymentID: resp.PaymentID, SubscriptionID: resp.SubscriptionID, PaymentMethodID: resp.PaymentMethodID,

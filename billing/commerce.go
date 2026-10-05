@@ -36,8 +36,7 @@ type GetCheckoutConfigParams struct {
 // CheckoutConfig lists the merchant's armed PSPs and the public values a
 // browser needs to drive each one. It never contains merchant secrets.
 type CheckoutConfig struct {
-	Object string              `json:"object"`
-	PSPs   []CheckoutPSPConfig `json:"psps"`
+	PSPs []CheckoutPSPConfig `json:"psps"`
 	// Solana is present when a Solana PSP is armed: the network and the
 	// tokens the merchant accepts, so a host renders wallet options from the
 	// same document it renders card options from.
@@ -178,7 +177,6 @@ const (
 // requires_action the buyer completes NextAction, or the card payment's
 // Operation authentication (3-D Secure).
 type CheckoutAttempt struct {
-	Object          string                `json:"object"`
 	ID              CheckoutAttemptID     `json:"id"`
 	CustomerID      CustomerID            `json:"customer_id"`
 	Status          CheckoutAttemptStatus `json:"status"`

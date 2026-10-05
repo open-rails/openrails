@@ -15699,9 +15699,6 @@
       "CheckoutAttempt": {
         "type": "object",
         "properties": {
-          "object": {
-            "type": "string"
-          },
           "id": {
             "type": "string"
           },
@@ -15844,7 +15841,6 @@
           }
         },
         "required": [
-          "object",
           "id",
           "customer_id",
           "status",
@@ -15863,38 +15859,9 @@
           "metadata"
         ]
       },
-      "CheckoutAttemptPaymentResponse": {
-        "type": "object",
-        "properties": {
-          "rail": {
-            "type": "string"
-          },
-          "reference": {
-            "type": "string"
-          },
-          "transaction_url": {
-            "type": "string"
-          },
-          "solana_pay_url": {
-            "type": "string"
-          },
-          "redirect_url": {
-            "type": "string"
-          },
-          "transaction_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "rail"
-        ]
-      },
       "CheckoutConfig": {
         "type": "object",
         "properties": {
-          "object": {
-            "type": "string"
-          },
           "psps": {
             "type": "array",
             "items": {
@@ -15912,7 +15879,6 @@
           }
         },
         "required": [
-          "object",
           "psps",
           "options"
         ]
@@ -17294,9 +17260,6 @@
       "CurrencyRegistry": {
         "type": "object",
         "properties": {
-          "object": {
-            "type": "string"
-          },
           "currencies": {
             "type": "array",
             "items": {
@@ -17305,7 +17268,6 @@
           }
         },
         "required": [
-          "object",
           "currencies"
         ]
       },
@@ -24167,13 +24129,7 @@
       "TierChange": {
         "type": "object",
         "properties": {
-          "object": {
-            "type": "string"
-          },
           "status": {
-            "type": "string"
-          },
-          "mode": {
             "type": "string"
           },
           "action": {
@@ -24185,17 +24141,24 @@
           "price_id": {
             "type": "string"
           },
-          "url": {
+          "rail": {
             "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutAttemptPaymentResponse"
           },
           "subscription_id": {
             "type": "string"
           },
           "next_action": {
             "$ref": "#/components/schemas/NextAction"
+          },
+          "transaction_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "message": {
             "type": "string"
@@ -24224,11 +24187,10 @@
           }
         },
         "required": [
-          "object",
           "status",
-          "mode",
           "price_id",
-          "payment",
+          "rail",
+          "transaction_id",
           "amount_due_now",
           "next_charge_amount"
         ]
@@ -24236,9 +24198,6 @@
       "TierChangePreview": {
         "type": "object",
         "properties": {
-          "object": {
-            "type": "string"
-          },
           "action": {
             "type": "string"
           },
@@ -24274,7 +24233,6 @@
           }
         },
         "required": [
-          "object",
           "action",
           "price_id",
           "rail",

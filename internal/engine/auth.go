@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/identity"
 	"net/http"
 
 	"github.com/open-rails/authkit/iam"
@@ -121,7 +122,7 @@ func (d userDirectoryFuncs) EmailIdentity(ctx context.Context, userID string) (s
 	return d.email(ctx, userID)
 }
 
-func userDirectory(deps config.Deps) billing.UserDirectory {
+func userDirectory(deps config.Deps) identity.UserDirectory {
 	if deps.UserExists == nil || deps.UserEmail == nil {
 		return nil
 	}
@@ -134,7 +135,7 @@ func (f usernameResolverFunc) GetUserIDByUsername(ctx context.Context, username 
 	return f(ctx, username)
 }
 
-func usernameResolver(deps config.Deps) billing.UsernameResolver {
+func usernameResolver(deps config.Deps) identity.UsernameResolver {
 	if deps.ResolveUsername == nil {
 		return nil
 	}

@@ -255,12 +255,10 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 	}
 
 	out := billing.TierChange{
-		Object:           "tier_change",
-		Mode:             "tier_change",
 		Action:           "downgrade",
 		Effective:        "period_end",
 		PriceID:          billing.PriceID(resolved.newPrice.ID),
-		Payment:          billing.CheckoutAttemptPaymentResponse{Rail: string(models.RailSolana)},
+		Rail:             string(models.RailSolana),
 		Currency:         resolved.newPrice.Currency,
 		NextChargeAmount: resolved.newPrice.Amount,
 		NextChargeDate:   resolved.oldSub.CurrentPeriodEndsAt,

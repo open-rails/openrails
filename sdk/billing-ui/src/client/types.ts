@@ -337,7 +337,6 @@ export const tierChangeSchema = z.object({
   price_id: z.string().nullish(),
   /** The subscription now carrying the plan (an upgrade may open a successor). */
   subscription_id: z.string().nullish(),
-  url: z.string().nullish(),
   /** `payment_authentication` uses `operation_id`. */
   next_action: nextActionSchema.nullish(),
   /** When a scheduled downgrade takes effect. */

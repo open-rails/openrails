@@ -391,7 +391,6 @@ export type CheckProductAccessParams = {
 }
 
 export type CheckoutAttempt = {
-  object: string
   id: string
   customer_id: string
   status: "canceled" | "created" | "expired" | "failed" | "processing" | "requires_action" | "succeeded"
@@ -410,17 +409,7 @@ export type CheckoutAttempt = {
   metadata: Record<string, string> | null
 }
 
-export type CheckoutAttemptPaymentResponse = {
-  rail: string
-  reference?: string
-  transaction_url?: string
-  solana_pay_url?: string
-  redirect_url?: string
-  transaction_id?: string
-}
-
 export type CheckoutConfig = {
-  object: string
   psps: CheckoutPSPConfig[]
   solana?: SolanaCheckoutConfig
   options: CheckoutOption[]
@@ -756,7 +745,6 @@ export type CreditTransaction = {
 }
 
 export type CurrencyRegistry = {
-  object: string
   currencies: CurrencyUnits[]
 }
 
@@ -2313,16 +2301,14 @@ export type Tier = {
 }
 
 export type TierChange = {
-  object: string
   status: string
-  mode: string
   action?: string
   effective?: string
   price_id: string
-  url?: string
-  payment: CheckoutAttemptPaymentResponse
+  rail: string
   subscription_id?: string
   next_action?: NextAction
+  transaction_id: string | null
   message?: string
   delayed_start?: string
   currency?: string
@@ -2333,7 +2319,6 @@ export type TierChange = {
 }
 
 export type TierChangePreview = {
-  object: string
   action: string
   price_id: string
   rail: string

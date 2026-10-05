@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/identity"
 	"io/fs"
 	"net"
 	"net/http"
@@ -73,8 +74,8 @@ type BootstrapOptions struct {
 	Clock       clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
-	UserDirectory    billing.UserDirectory
-	UsernameResolver billing.UsernameResolver
+	UserDirectory    identity.UserDirectory
+	UsernameResolver identity.UsernameResolver
 	// EmailSender replaces the sender Config.SendGrid selects.
 	EmailSender config.EmailSender
 
@@ -167,13 +168,13 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 			}
 			return nil
 		}(),
-		UserDirectory: func() billing.UserDirectory {
+		UserDirectory: func() identity.UserDirectory {
 			if opts != nil {
 				return opts.UserDirectory
 			}
 			return nil
 		}(),
-		UsernameResolver: func() billing.UsernameResolver {
+		UsernameResolver: func() identity.UsernameResolver {
 			if opts != nil {
 				return opts.UsernameResolver
 			}
