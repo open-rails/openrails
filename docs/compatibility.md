@@ -43,7 +43,7 @@ are struct tags, so the list covers the YAML and JSON documents too.
 
 - **Additive:** a new package, identifier or `*Client` method; a struct field
   whose zero value keeps the old behavior (write keyed struct literals); a new
-  value of a typed enum; a new `billing.Err*` sentinel.
+  value of a typed enum; a new error sentinel in `billing`.
 - **Breaking:** removing or renaming a line of `api/go.txt`; changing a
   signature, a field's type or tag, or a constant's value; adding a method to
   an interface a host implements (`EmailSender`, `SMSSender`, `Cache`,

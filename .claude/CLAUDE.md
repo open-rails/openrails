@@ -4,104 +4,140 @@ OpenRails is a multi-merchant billing/payments platform (Go). It runs **standalo
 (hosted SaaS, many merchants) and **embedded** (a host app embeds it for one merchant).
 One merchant ↔ one controlling org (deliberately 1:1). The repo is **source-available** —
 keep secrets and customer/account-specific identifiers OUT of editable committed
-files (code, trackers, this file). Previously applied migration bodies are immutable
-integrity artifacts and must not be rewritten solely to change their prose.
-Neutral examples in this repository use `host-one` through `host-four`; these are
-placeholders, not customer or repository names.
+files (code, trackers, this file). Neutral examples in this repository use `host-one`
+through `host-four`; these are placeholders, not customer or repository names.
+
+## v1 is frozen
+- From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):
+  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `web/admin`), the HTTP API,
+  and the database schema.
+- Each has a generated snapshot: `api/go.txt` (`TestGoAPISurface`), `api/openapi.json`
+  (`TestGeneratedContractIsFresh`), `api/schema.txt` (`TestSchemaSnapshot` in `ci/`).
+  `go run ./scripts/contracts -write` rewrites all three; the schema needs
+  `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18. Never hand-merge them.
+- A removed or changed snapshot line is a break. Don't make one without the owner.
+
+## Public surface
+- The root package is the interface: one `*openrails.Client` from `openrails.New` (in
+  process) or `openrails.NewRemote`, flat methods (`Get/List/Create/Update/Delete/Set/Ensure`),
+  `ctx` first, request structs, typed IDs (`billing.CustomerID`, `billing.PSPID`, …) and
+  typed enums. Types live in `billing`; the catalog document in `catalog`. Everything
+  else is `internal/`. `Config` is plain data; anything that reaches outside the process
+  is in `Deps`.
+- The Go client is the merchant API: each merchant route has one `*Client` method.
+  Customer self-service (`/v1/me`) is for browsers through `sdk/billing-ui`.
+- Every route is declared once in the route catalog (`internal/http/routes`, one file
+  per resource) with its tier, permission, request, responses and error codes. The
+  catalog mounts the route and generates `api/openapi.json`, the TypeScript wire types
+  of billing-ui and the console, and `docs/api/routes.md` / `error-codes.md`.
+- Route groups: checkout, customer (`/v1/me`), one merchant group (`/v1/merchant`,
+  gated by permission, `Config.HTTP.Merchant`), creator catalogs (`/v1/catalog`),
+  webhooks, and the standalone control plane and platform.
+- Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
+  present; times are RFC 3339 UTC; unknown request fields are refused; error codes
+  come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
+- Vocabulary: customer (not payer or user); invoker for the opaque caller; `canceled`.
 
 ## Money
-- All amounts are **micros** (millionths of a currency unit). Not cents, not millicents.
+- All amounts are **micros** (millionths of a currency unit) for USD; every currency's
+  scale is in the registry (`GET /v1/currencies`). Not cents, not millicents.
+- In Go an `int64`, on the wire a decimal string named `amount` beside a `currency`;
+  never a currency in a field name.
 - A double-entry ledger is the source of truth for money; a separate grant ledger tracks
   credit lots. FX is forbidden inside the ledger (no cross-currency transfers).
 
 ## Rails and PSPs
-- TERMINOLOGY (frozen 2026-07-11): a **rail** is the gateway KIND (nmi/ccbill/stripe/solana —
-  the `models.Rail` enum; row vocabulary: subscriptions.rail etc.). A **PSP** (payment service
-  provider) is a merchant's concrete ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi) —
-  credentials + account_id + manifest key (`psps.key`). Catalog `psps:`/`psp_links:`,
-  `prices.psp_links` entry keys, and the checkout wire value speak PSP vocabulary; a PSP link
-  entry records its rail inside (`rail:` field). Reserved gateways (stripe/ccbill/solana) are
-  their own PSP names. A PSP is NOT the acquiring bank — it's the service layer (Stripe bundles
-  acquiring; MobiusPay is a high-risk ISO fronting NMI gateway tech; solana is the self-custody
-  wallet slot, the one deliberate stretch of the term).
-- Example profiles: two embedded hosts may share NMI, CCBill, and Solana PSPs;
-  another may use Stripe; a metered-usage host may have no payment PSP.
+- TERMINOLOGY (frozen): a **rail** is the gateway KIND (nmi/ccbill/stripe/solana — the
+  `billing.Rail` enum). A **PSP** (payment service provider) is a merchant's concrete
+  ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi): credentials + `account_id` + key
+  (`psps.key`). A PSP is NOT the acquiring bank. Solana is the self-custody wallet slot.
+- PSP routes are `/v1/merchant/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, `ArchivePSP`);
+  rails are read at `/v1/merchant/rails`. Provider callbacks land on
+  `/v1/webhooks/{rail}/{account_id}`.
+- A table that stores both `rail` and `psp_id` keeps them in agreement by a composite
+  foreign key to `psps`.
+- A provider-owned subscription is never moved or canceled by OpenRails; it stays on its
+  (possibly archived) PSP until it drains.
 - ALL outbound Stripe HTTP goes through the choke-point client `internal/integrations/stripeapi`
   (readonly mode blocks writes at the transport). It pins the Stripe API version via
-  `stripeapi.APIVersion` — ONE const drives both the outbound `Stripe-Version` header AND the
-  webhook-endpoint registration. Bump it deliberately (re-run the breaking-change audit); don't float.
+  `stripeapi.APIVersion`: ONE const drives the outbound `Stripe-Version` header AND the
+  webhook-endpoint registration. Bump it deliberately; don't float.
 - ALL NMI HTTP goes through `internal/integrations/nmi`.
 
 ## PSP identity
-- `billing.psps` (was rail_merchant_accounts ← provider_accounts) is an OPERATOR-DECLARED
-  catalog (manifest `account_id`). There is NO runtime "whoami"/identity resolution and NO
-  account-mismatch guard — that whole subsystem was ripped out (#592). `account_id` is an
-  opaque, operator-declared label.
-- The merchant-config manifest key is `merchants.<slug>.psps.<key>.<rail>` (env overlay
-  `BILLING_MERCHANTS_<M>_PSPS_…`); the merchant-secret name prefix is `psps/…`. The retired
-  keys/anchors (accounts, rail_merchant_accounts, provider_accounts) fail loudly with a rename
-  error — no aliases.
+- `billing.psps` is an OPERATOR-DECLARED catalog. There is NO runtime "whoami" and NO
+  account-mismatch guard. `account_id` is an opaque, operator-declared label.
+- A merchant declares a PSP as `psps.<key>: {rail: nmi, account_id: …, settings: …}`
+  (`openrails.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
+  credentials under `psps.<key>.secrets`. The merchant-secret name is
+  `psps/<rail>/<environment>/<account_id>/<key>`. The retired manifest keys
+  (`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename error.
 - Per rail, the declared `account_id` is:
-  - **NMI / Mobius** — the dashboard **"Gateway ID"**. In NMI this IS the *merchant account* id
-    (NMI provisions every merchant as a "gateway account"; its v4 API documents `{gateway_id}` as
-    "the merchant ID"). It is NOT the reseller/ISO (e.g. MobiusPay). It is NOT fetchable from the
-    `security_key` — operator must declare it.
-  - **Stripe** — `acct_…`, operator-declared like every other rail. (It does NOT self-discover:
-    there is no `GET /v1/account` call in the tree and `stripeapi` is transport-only. The operator
-    runs that curl themselves and pastes the result — see docs/rails/stripe.md.)
-  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined (dash-joined like `999999-0000`, #697 — never a slash).
+  - **NMI** — the dashboard **"Gateway ID"**, which IS the merchant account id. It is NOT
+    the reseller/ISO, and is NOT fetchable from the `security_key`.
+  - **Stripe** — `acct_…`, operator-declared like every other rail (there is no
+    `GET /v1/account` call in the tree; see docs/rails/stripe.md).
+  - **CCBill** — `clientAccnum-clientSubacc`, dash-joined like `999999-0000`.
   - **Solana** — DERIVED from the signer public key (a declared `account_id` is ignored
-    with a warning); the payout destination is `settings.recipient_wallet`, defaulting to
-    the signer pubkey.
-  - Don't try to derive any of these from credentials at runtime. The structural reason (not just
-    "no API exists"): `account_id` is a SEGMENT of the merchant-secret path
-    `psps/<rail>/<env>/<account_id>/<key>`, so fetching it from a credential needs the credential,
-    which needs the path, which needs the id. Circular on every rail.
-  - Elsewhere the rule is the opposite — **the less a merchant configures, the better**. Where an
-    authoritative source exists (an on-chain mint, a curated registry), derive from it and delete
-    the knob rather than validating it.
+    with a warning); the payout destination is `settings.recipient_wallet`.
+  - Don't derive these from credentials at runtime: `account_id` is a SEGMENT of the
+    secret path, so fetching it needs the credential, which needs the path. Circular.
+  - Elsewhere the rule is the opposite: **the less a merchant configures, the better**.
+    Where an authoritative source exists, derive from it and delete the knob.
 
 ## Catalog
-- Declarative provider model. The **pull** reconciliation job
-  (`internal/river/jobs_catalog_reconciliation.go`) is ALERT-ONLY — it never mutates providers.
-- The **push** path (OpenRails definitions → provider) is the provider adapter — e.g. the Stripe
-  adapter `AutoCreate` in `internal/service/catalog_provider_stripe.go` (find-or-create Product + Price,
-  and entitlement Features). Entitlements are plain strings: the keys of `product.EntitlementsSpec`,
-  mirrored to Stripe Features (`lookup_key` = the string).
+- One document model, `catalog.Application` (`catalog.ParseApplicationYAML`); a host
+  whose file is the truth sets `Config.Catalog`, and `New` applies it.
+- The **pull** reconciliation job (`internal/river/jobs_catalog_reconciliation.go`) is
+  ALERT-ONLY: it never mutates providers.
+- The **push** path is the provider adapter, e.g. `AutoCreate` in
+  `internal/service/catalog_provider_stripe.go`. Entitlements are plain strings: the
+  keys of a product's `entitlements_spec`.
 
 ## Schema / DB
-- SQL is authored in `billing` (`config.DefaultSchema`, the default `db.schema`) and runs there
-  verbatim; any other schema is reached by one token-aware rewriter (`internal/sqlschema`, used by
-  migrations and every runtime statement) that moves schema references only — never other
-  literals or comments, so `'openrails.…'` lock keys/domain values stay identical. The role that runs migrations owns
-  every object and is the role OpenRails runs as (no grants, no runtime role). There is NO row-level
-  security: tenant isolation is the explicit `merchant_id` (or `psp_id`) predicate on every tenant
-  query, plus composite foreign keys. The `app.merchant_id` GUC MerchantTx sets only serves stored
-  functions and queries that call `current_merchant_id()`; it filters nothing on its own.
-- One baseline, `internal/migrate/postgres/0001_schema.up.sql`; new migrations start at 0002.
-  Pre-launch, existing databases are wiped rather than upgraded.
+- SQL is authored in `billing` (`config.DefaultSchema`) and runs there verbatim; any
+  other schema is reached by one token-aware rewriter (`internal/sqlschema`) that moves
+  schema references only.
+- One baseline, `internal/migrate/postgres/0001_schema.up.sql`, immutable after v1.0.0;
+  a schema change is a new numbered migration, and `api/schema.txt` shows it.
+- The role that runs `Migrate` owns every object unless `Config.SchemaOwner` names an
+  existing role to hand them to (two apps sharing one schema). No grants, no runtime role.
+- There is NO row-level security: tenant isolation is the explicit `merchant_id` (or
+  `psp_id`) predicate on every tenant query, plus composite foreign keys and
+  `PRIMARY KEY (merchant_id, id)` on tenant tables.
+- Text + CHECK, never Postgres enums. SQL lives in sqlc queries (`TestNoInlineSQL`), and
+  `TestQueryAudit` plans every one.
+- Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
+  state), stated in its table comment; `docs/operations.md` lists the periods.
+  `usage_events` and `admission_operations` are partitioned by month, so every read of
+  them names a time range.
+- External writes are `provider_intents` and `provider_mutation_logs`; per-PSP state is
+  `psp_customers` and `psp_refresh_watermarks`; upstream compute cost is
+  `cost_qualifications` and `cost_observations`. A `checkout_attempts` row (`chk_`) is a
+  provider attempt; a `checkout_sessions` row (`ocs_`) is what a browser pays.
+- A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 
-## Layer altitude (#688)
-- A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen` directly;
-  repo-style wrappers exist only where they carry logic (tx/locks/mapping/doctrine) and they live IN
-  the owning module. Module services do NOT re-export their data surface as one-line forwards.
-  Handlers may call `gen` for orchestration-free reads. Never add a wrapper just to "complete" a layer.
+## Layer altitude
+- A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen`
+  directly; repo-style wrappers exist only where they carry logic and live IN the owning
+  module. Handlers may call `gen` for orchestration-free reads. Never add a wrapper just
+  to "complete" a layer.
 
 ## Trackers (issues)
-- The tracker is the separate `open-rails/tracker` repository (normally the
-  `../tracker` workspace sibling). OpenRails issues are one file each: active
-  `openrails/<id>.md`, parked `openrails/future/<id>.md`, and completed
-  `openrails/completed/<id>.md`. `openrails/README.md` owns the shared `next_id`
-  counter and active index; moves update both affected indexes.
-- CONCURRENT-EDIT SAFE: only edit the issue you own and its index entries;
-  never rewrite an index wholesale while another agent may be editing it.
+- The tracker is the separate `open-rails/tracker` repository. OpenRails issues are one
+  file each: active `openrails/<id>.md`, parked `openrails/future/<id>.md`, completed
+  `openrails/completed/<id>.md`. `openrails/README.md` owns the shared `next_id` counter.
+- CONCURRENT-EDIT SAFE: only edit the issue you own and its index entries.
+
+## Docs
+- `docs/` is public documentation for integrators and operators; design history lives in
+  the tracker. No tracker ids, no host names. `TestDocsNameWhatExists` fails a document
+  that names a route, Go identifier, table, permission or error code that does not exist.
 
 ## Tests
-- Integration tests: build tag `integration`, run against testcontainers (Postgres + Redis) or
-  `OPENRAILS_TEST_DB_URL` (fallback `OPENRAILS_TEST_DB_DSN`) /
-  `OPENRAILS_TEST_REDIS_ADDR`. Each package gets an isolated, self-cleaning database.
-- `ci/` is the SEPARATE end-to-end suite (build tags `e2e,integration`; run with
-  `scripts/e2e.sh`) that asserts behavioural contracts. A deliberate behaviour change must
-  sweep it too — `grep ci/` for the codes/constants/statuses you changed. Twice now (or#870,
-  or#842) a fix updated only its own package's tests and left the suite red asserting the old
-  contract. Green-in-my-package is not green.
+- Package tests (`go test ./...`) are guards, contracts and focused regressions; they
+  need no database.
+- `ci/` is the end-to-end suite (build tags `e2e,integration`; `scripts/e2e.sh` with
+  `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18). Every test gets its own schema.
+  A deliberate behaviour change must sweep it: `grep ci/` for the codes, constants and
+  statuses you changed. Green-in-my-package is not green.
