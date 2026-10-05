@@ -30,7 +30,7 @@ func ListInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 		if !ok {
 			return
 		}
-		params := billing.InvoiceListParams{Page: page}
+		params := billing.InvoiceListParams{PageRequest: page}
 		if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
 			id, err := billing.ParseCustomerID(raw)
 			if err != nil || id.IsZero() {
@@ -196,7 +196,7 @@ func ListMyInvoices(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListInvoices(r.Request.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(payer), Page: page})
+	out, err := svc.ListInvoices(r.Request.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(payer), PageRequest: page})
 	if err != nil {
 		writeInvoiceError(r, err)
 		return

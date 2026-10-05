@@ -337,14 +337,10 @@ func (s *Assembler) captchaClientScriptHandler(w http.ResponseWriter, r *http.Re
 // challenged.
 func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeStore, resolver *iputil.TrustedProxies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]any{
-			"enabled":           config.CaptchaEnabled(cfg),
-			"required":          false,
-			"token_header":      captcha.TokenHeader,
-			"client_script_url": captchaClientScriptURL(r),
-		}
+		resp := billing.CaptchaStatus{Enabled: config.CaptchaEnabled(cfg), TokenHeader: captcha.TokenHeader, ClientScriptURL: captchaClientScriptURL(r)}
 		if cfg != nil {
-			resp["provider"] = config.CaptchaProvider(cfg)
+			provider := config.CaptchaProvider(cfg)
+			resp.Provider = &provider
 		}
 		if config.CaptchaEnabled(cfg) && store != nil {
 			for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r, resolver) {
@@ -353,7 +349,7 @@ func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeSto
 					continue
 				}
 				if challenged {
-					resp["required"] = true
+					resp.Required = true
 					break
 				}
 			}

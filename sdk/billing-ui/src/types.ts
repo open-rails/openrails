@@ -186,16 +186,6 @@ export const payRequestSchema = z.object({
   option_id: z.string(),
   payment_token: z.string().optional(),
   payment_method_id: z.string().optional(),
-  // Canonical billing identity. The compact card paths send only their
-  // required fields; optional address fields remain available to an explicit
-  // provider-specific source that models them.
-  email: z.string().optional(),
-  name_on_card: z.string().optional(),
-  address1: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  zip: z.string().optional(),
-  country: z.string().optional(),
   // A new card for a rail whose driver is card; never beside payment_token.
   card: z
     .object({
@@ -205,10 +195,25 @@ export const payRequestSchema = z.object({
       cvc: z.string(),
     })
     .optional(),
-  // Collect.js display metadata for a new card (never the PAN).
-  last_four: z.string().optional(),
-  card_type: z.string().optional(),
-  expiry_date: z.string().optional(),
+  // A new card's billing identity; the compact card form sends the name,
+  // postal code and country.
+  billing_details: z
+    .object({
+      name: z.string().optional(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      address: z
+        .object({
+          line1: z.string().optional(),
+          line2: z.string().optional(),
+          city: z.string().optional(),
+          state: z.string().optional(),
+          postal_code: z.string().optional(),
+          country: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   token_symbol: z.string().optional(),
 })
 export type PayRequest = z.infer<typeof payRequestSchema>

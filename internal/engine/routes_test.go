@@ -10,8 +10,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -231,7 +233,7 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer "+audience {
 				return nil, billingauth.ErrUnauthenticated
 			}
-			return &billingauth.DelegatedPrincipal{MerchantID: "11111111-1111-4111-8111-111111111111", SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
+			return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.MustParse("11111111-1111-4111-8111-111111111111")), SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
 		}
 	}
 	audiences := map[string]string{"/billing/v1/me": "portal", "/api/v1/merchants/{slug}/billing/me": "platform"}
@@ -322,7 +324,7 @@ func TestCustomerCookieAdmission(t *testing.T) {
 		if _, err := r.Cookie("session"); err != nil {
 			return nil, billingauth.ErrUnauthenticated
 		}
-		return &billingauth.DelegatedPrincipal{MerchantID: "11111111-1111-4111-8111-111111111111", SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
+		return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.MustParse("11111111-1111-4111-8111-111111111111")), SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
 	}
 	routes := []config.CustomerRoutesConfig{{Prefix: "/portal", Scope: config.CustomerSubscriptionManagement, Delegated: true}}
 	mux := mountAt(t, httpRuntime(&config.HTTPConfig{CustomerRoutes: routes}, false, authn), "/api/pay")

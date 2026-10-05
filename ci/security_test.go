@@ -52,7 +52,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "refund@example.test"}, PriceID: price.ID,
-		Entitlement: "content:refunded", OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
+		Entitlement: "content:refunded", OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"},
 		IdempotencyKey: "security-" + uuid.NewString(), SuccessURL: "https://example.test/success", CancelURL: "https://example.test/cancel",
 	})
 	require.NoError(t, err)

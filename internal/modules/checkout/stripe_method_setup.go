@@ -39,7 +39,7 @@ func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal)
 		return mid, uuid.Nil, err
 	}
 	customer, err := uuid.Parse(p.SubjectID)
-	if err != nil || customer == uuid.Nil || billingauth.ValidateDelegatedPrincipal(&p) != nil || p.CredentialClass != billingauth.CredentialClassUserSession || p.Invoker != "" || p.MerchantID != mid.String() {
+	if err != nil || customer == uuid.Nil || billingauth.ValidateDelegatedPrincipal(&p) != nil || p.CredentialClass != billingauth.CredentialClassUserSession || p.Invoker != "" || p.MerchantID != mid {
 		return mid, uuid.Nil, apperr.New(403, "customer_session_required", "saved card setup requires its interactive customer session")
 	}
 	return mid, customer, nil

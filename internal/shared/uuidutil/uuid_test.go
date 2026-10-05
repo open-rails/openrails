@@ -23,7 +23,7 @@ func TestDeterministicIDIsStableAndInjective(t *testing.T) {
 	for _, parts := range [][]string{
 		{"a", "bc"}, {"ab", "c"}, {"abc"}, {"a", "b", "c"},
 		{"a/b", "c"}, {"a", "b/c"}, {"", "abc"}, {"abc", ""}, {}, {""},
-		{"945280-0000", "live"}, {"945280", "0000-live"},
+		{"999999-0000", "live"}, {"999999", "0000-live"},
 	} {
 		id := DeterministicID(DeterministicNamespace, parts...)
 		if prev, ok := seen[id]; ok {

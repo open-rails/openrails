@@ -234,14 +234,14 @@ func TestCCBillStableDedupeKey(t *testing.T) {
 // CCBill signs nothing: the armed account identity is the per-merchant auth, and it fails closed.
 func TestCCBillWebhookAuthFailsClosed(t *testing.T) {
 	t.Parallel()
-	armed := ccbill.NewRESTClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0000"})
+	armed := ccbill.NewRESTClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000"})
 	for name, tc := range map[string]struct {
 		client *ccbill.RESTClient
 		body   string
 	}{
 		"wrong account":    {armed, `{"subscriptionId":"s","transactionId":"t","clientAccnum":"111111","clientSubacc":"0000"}`},
-		"wrong subaccount": {armed, `{"subscriptionId":"s","transactionId":"t","clientAccnum":945280,"clientSubacc":"0001"}`},
-		"no armed account": {nil, `{"subscriptionId":"s","transactionId":"t","clientAccnum":"945280","clientSubacc":"0000"}`},
+		"wrong subaccount": {armed, `{"subscriptionId":"s","transactionId":"t","clientAccnum":999999,"clientSubacc":"0001"}`},
+		"no armed account": {nil, `{"subscriptionId":"s","transactionId":"t","clientAccnum":"999999","clientSubacc":"0000"}`},
 		"unparseable":      {armed, `{`},
 	} {
 		svc := &CCBillWebhookService{Data: CCBillWebhookEvent{EventType: EventTypeRenewalSuccess, EventBody: []byte(tc.body)}, CCBillClient: tc.client}

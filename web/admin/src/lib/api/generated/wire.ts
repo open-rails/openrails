@@ -63,7 +63,7 @@ export type AdmitParams = {
   request_id?: string
   customer_id?: string
   invoker?: string
-  invoker_type?: "delegated" | "payer"
+  invoker_type?: "customer" | "delegated"
   trust_level?: string
   resource?: string
   currency?: string
@@ -259,6 +259,14 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
+export type CaptchaStatus = {
+  enabled: boolean
+  required: boolean
+  provider: string | null
+  token_header: string
+  client_script_url: string
+}
+
 export type CaptureAdmissionParams = {
   amount?: string
   usage?: CaptureUsage
@@ -383,7 +391,6 @@ export type CheckProductAccessParams = {
 }
 
 export type CheckoutAttempt = {
-  object: string
   id: string
   customer_id: string
   status: "canceled" | "created" | "expired" | "failed" | "processing" | "requires_action" | "succeeded"
@@ -402,17 +409,7 @@ export type CheckoutAttempt = {
   metadata: Record<string, string> | null
 }
 
-export type CheckoutAttemptPaymentResponse = {
-  rail: string
-  reference?: string
-  transaction_url?: string
-  solana_pay_url?: string
-  redirect_url?: string
-  transaction_id?: string
-}
-
 export type CheckoutConfig = {
-  object: string
   psps: CheckoutPSPConfig[]
   solana?: SolanaCheckoutConfig
   options: CheckoutOption[]
@@ -426,9 +423,9 @@ export type CheckoutCustomerIdentity = {
 }
 
 export type CheckoutOption = {
-  selector: string
+  psp: string
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   mode: string
   driver?: string
   public_config?: Record<string, string>
@@ -450,23 +447,13 @@ export type CheckoutPSPConfig = {
 }
 
 export type CheckoutPaymentOptions = {
-  psp_id?: string
-  rail?: string
+  psp?: string
   payment_method_id?: string
   payment_token?: string
+  billing_details?: BillingDetails
   token_symbol?: string
   flow?: string
   wallet?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
 }
 
 export type CheckoutRoutingMatch = {
@@ -758,7 +745,6 @@ export type CreditTransaction = {
 }
 
 export type CurrencyRegistry = {
-  object: string
   currencies: CurrencyUnits[]
 }
 
@@ -1235,10 +1221,6 @@ export type MerchantSettings = {
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
 }
 
-export type Message = {
-  message: string
-}
-
 export type Meter = {
   key: string
   event_type: string
@@ -1426,13 +1408,6 @@ export type NotificationData = {
   product_name?: string
   payment_method?: string
   user_email?: string
-  kind?: string
-  provider?: string
-  operation?: string
-  affected_customer_id?: string
-  original_payment_id?: string
-  error?: string
-  metadata?: Record<string, unknown>
 }
 
 export type Offer = {
@@ -1552,32 +1527,13 @@ export type PackagePrice = {
   free_units?: number
 }
 
-export type PathPageOfPlatformMerchantItem = {
-  object: string
-  data: PlatformMerchantItem[]
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
-}
-
 export type PayCheckoutSessionParams = {
   option_id?: string
-  payment_token?: string
   payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
+  payment_token?: string
   card?: CardEntry
+  billing_details?: BillingDetails
+  token_symbol?: string
 }
 
 export type PayInvoiceParams = {
@@ -1763,16 +1719,16 @@ export type PlanMigrationResult = {
   source_archived: boolean
 }
 
-export type PlatformMerchantItem = {
+export type PlatformMerchant = {
   id: string
   slug: string
   status: string
-  display_name?: string
+  display_name: string | null
   created_at: string
   updated_at: string
-  deleted_at?: string
+  deleted_at: string | null
   rails_armed: string[]
-  last_payment_at?: string
+  last_payment_at: string | null
 }
 
 export type PortalResponse = {
@@ -2034,7 +1990,7 @@ export type ReplacePaymentMethodCardParams = {
 export type ReportWastedSpendParams = {
   customer_id?: string
   invoker?: string
-  invoker_type?: "delegated" | "payer"
+  invoker_type?: "customer" | "delegated"
   currency?: string
   amount?: string
   source?: string
@@ -2338,16 +2294,14 @@ export type Tier = {
 }
 
 export type TierChange = {
-  object: string
   status: string
-  mode: string
   action?: string
   effective?: string
   price_id: string
-  url?: string
-  payment: CheckoutAttemptPaymentResponse
+  rail: string
   subscription_id?: string
   next_action?: NextAction
+  transaction_id: string | null
   message?: string
   delayed_start?: string
   currency?: string
@@ -2358,7 +2312,6 @@ export type TierChange = {
 }
 
 export type TierChangePreview = {
-  object: string
   action: string
   price_id: string
   rail: string
@@ -2493,6 +2446,11 @@ export type WastedSpendReport = {
   charged_amount: string
   policy_charged_amount: string | null
   action: "charged" | "duplicate" | "forgiven" | "ignored" | "invoker_cutoff_tracked"
+}
+
+export type WebhookReceipt = {
+  status: string
+  code: string | null
 }
 
 export type WorkerHealth = {

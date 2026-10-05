@@ -21,13 +21,13 @@ type InvokerType = billing.InvokerType
 
 const (
 	InvokerTypeDelegated = billing.InvokerTypeDelegated
-	InvokerTypePayer     = billing.InvokerTypePayer
+	InvokerTypeCustomer  = billing.InvokerTypeCustomer
 )
 
 // IsDirectPayerInvoker reports whether t is the direct-payer credential type.
 // Anything else is delegated: the stricter abuse cutoff.
 func IsDirectPayerInvoker[T ~string](t T) bool {
-	return strings.TrimSpace(string(t)) == string(InvokerTypePayer)
+	return strings.TrimSpace(string(t)) == string(InvokerTypeCustomer)
 }
 
 // CustomerIDFromString parses s as a customer id. Empty or non-UUID

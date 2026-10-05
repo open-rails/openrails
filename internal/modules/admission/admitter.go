@@ -138,7 +138,7 @@ func (a *Admitter) recordDenial(ctx context.Context, merchantID string, customer
 type AdmitRequest struct {
 	CustomerID  identity.CustomerID // the merchant subject
 	Invoker     string              // canonical invoker: user:<id> / apiKey:<key_id> / <issuer>:<sub>
-	InvokerType string              // "payer" for direct payer credential; empty/other = delegated
+	InvokerType string              // "customer" for the customer's own credential; empty/other = delegated
 	TrustLevel  string              // optional payer trust level; empty resolves from OpenRails money state
 	Resource    string              // caller-supplied resource string for host-side attribution only
 	Roles       []uuid.UUID         // immutable role UUIDs the invoker holds (#473)

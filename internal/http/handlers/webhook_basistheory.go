@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -63,16 +62,16 @@ func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID billin
 	}
 	// Basis Theory's account segment is its custodian tenant ID, not a PSP ID.
 	if tenantID := basisTheoryWebhookTenantID(body); tenantID == "" || tenantID != accountID {
-		r.ErrorJSON(http.StatusBadRequest, "Webhook account does not match payload")
+		r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 		return false
 	}
 	if r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
+		r.ErrorCode(billing.CodeServiceUnavailable, "Merchant webhook routing is not configured")
 		return false
 	}
 	custodian, found, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), models.CustodianBasisTheory, webhookProviderEnvironment(r), accountID)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Webhook account resolution failed")
+		r.ErrorCode(billing.CodeInternalError, "Webhook account resolution failed")
 		return false
 	}
 	if !found || custodian.MerchantID != merchantID {
@@ -90,17 +89,17 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 	if err := basisTheoryVerifier(r).Verify(r.Request.Context(), body, sig, sigVersion); err != nil {
 		r.State.WebhookHealth.Rejected(r.Request.Context())
 		log.Warn("basistheory webhook signature verification failed")
-		r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
 		return false
 	}
 	var evt basistheory.Event
 	if err := json.Unmarshal(body, &evt); err != nil || strings.TrimSpace(evt.ID) == "" || strings.TrimSpace(evt.Type) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid webhook payload")
+		r.ErrorCode(billing.CodeInvalidParam, "Invalid webhook payload")
 		return false
 	}
 	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
+		r.ErrorCode(billing.CodeInternalError, "Webhook processing unavailable")
 		return false
 	}
 	verified := true
@@ -123,7 +122,7 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 			return true
 		}
 		log.WithError(err).Error("merchant basistheory webhook processing failed")
-		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
+		r.ErrorCode(billing.CodeInternalError, "Webhook processing failed")
 		return false
 	}
 	return true

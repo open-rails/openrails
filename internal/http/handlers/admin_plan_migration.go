@@ -19,26 +19,26 @@ import (
 func planMigrationServiceRequest(r *httprequest.Request, b billing.CreatePlanMigrationParams) (subscriptions.CreatePlanMigrationParams, bool) {
 	var out subscriptions.CreatePlanMigrationParams
 	if strings.TrimSpace(b.SourcePrice) == "" || strings.TrimSpace(b.TargetPrice) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "source_price and target_price required")
+		r.ErrorCode(billing.CodeInvalidParam, "source_price and target_price required")
 		return out, false
 	}
 	if !b.EffectiveAt.IsZero() && b.NoticeDays > 0 {
-		r.ErrorJSON(http.StatusBadRequest, "effective_at and notice_days are mutually exclusive")
+		r.ErrorCode(billing.CodeInvalidParam, "effective_at and notice_days are mutually exclusive")
 		return out, false
 	}
 	ctx := r.Request.Context()
 	if r.State.PlanMigrationService == nil || r.State.PriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "plan migration service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "plan migration service unavailable")
 		return out, false
 	}
 	source, err := catalog.ResolveReference(ctx, r.State.PriceService, b.SourcePrice)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "source_price not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "source_price not found")
 		return out, false
 	}
 	target, err := catalog.ResolveReference(ctx, r.State.PriceService, b.TargetPrice)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "target_price not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "target_price not found")
 		return out, false
 	}
 	effective := b.EffectiveAt
@@ -63,7 +63,7 @@ func writePlanMigrationError(r *httprequest.Request, err error) {
 		errors.Is(err, subscriptions.ErrPlanMigrationBadFallback),
 		errors.Is(err, subscriptions.ErrRepriceCrossCurrency),
 		errors.Is(err, subscriptions.ErrRepriceInactivePrice):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidParam, err.Error())
 	default:
 		writeRepriceError(r, err)
 	}

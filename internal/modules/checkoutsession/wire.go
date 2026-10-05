@@ -103,25 +103,17 @@ type CheckoutSessionSavedMethod struct {
 	Card     *billing.CardDetails    `json:"card"`
 }
 
-// PayCheckoutSessionParams is the browser's POST .../pay body.
+// PayCheckoutSessionParams is the browser's POST .../pay body: the option,
+// and a saved card, a token, a card entered in the page, or nothing (redirect,
+// Solana Pay), with the new card's billing details.
 type PayCheckoutSessionParams struct {
-	OptionID        string `json:"option_id"`
-	PaymentToken    string `json:"payment_token,omitempty"`
-	PaymentMethodID string `json:"payment_method_id,omitempty"`
-	Email           string `json:"email,omitempty"`
-	NameOnCard      string `json:"name_on_card,omitempty"`
-	Address1        string `json:"address1,omitempty"`
-	City            string `json:"city,omitempty"`
-	State           string `json:"state,omitempty"`
-	Zip             string `json:"zip,omitempty"`
-	Country         string `json:"country,omitempty"`
-	TokenSymbol     string `json:"token_symbol,omitempty"`
-	// The tokenized new card's display facts, as billing-ui sends them.
-	LastFour   string `json:"last_four,omitempty"`
-	CardType   string `json:"card_type,omitempty"`
-	ExpiryDate string `json:"expiry_date,omitempty"`
+	OptionID        string                  `json:"option_id"`
+	PaymentMethodID billing.PaymentMethodID `json:"payment_method_id,omitzero"`
+	PaymentToken    string                  `json:"payment_token,omitempty"`
 	// Card is a new card entered in the page, for an option whose driver is card.
-	Card *cardguard.Card `json:"card,omitempty"`
+	Card           *cardguard.Card         `json:"card,omitempty"`
+	BillingDetails *billing.BillingDetails `json:"billing_details,omitempty"`
+	TokenSymbol    string                  `json:"token_symbol,omitempty"`
 }
 
 // CheckoutSessionPayResult answers a pay request. With status

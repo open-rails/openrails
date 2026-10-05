@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -20,7 +18,7 @@ type MySubscriptionsQuery struct {
 func GetMySubscriptions(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
 		return
 	}
 	var q MySubscriptionsQuery

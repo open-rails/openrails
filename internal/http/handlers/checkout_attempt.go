@@ -25,7 +25,7 @@ func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.DelegatedPrin
 	if !ok {
 		return billingauth.DelegatedPrincipal{}
 	}
-	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: principal.Subject, Invoker: principal.Invoker}
+	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: billing.MerchantID(principal.MerchantID), SubjectID: principal.Subject, Invoker: principal.Invoker}
 }
 
 // checkoutAttemptErrorContext carries per-request context threaded into
@@ -105,17 +105,17 @@ func writeCheckoutAttemptError(r *httprequest.Request, err error, ectx checkoutA
 	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
 		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "custodian_capture_unavailable", "custodian capture is unavailable"))
 	case errors.Is(err, checkout.ErrCheckoutAttemptNotFound):
-		r.ErrorJSON(http.StatusNotFound, err.Error())
+		r.ErrorCode(billing.CodeResourceNotFound, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutAttemptForbidden):
-		r.ErrorJSON(http.StatusForbidden, err.Error())
+		r.ErrorCode(billing.CodeResourceAccessDenied, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutAttemptExpired):
-		r.ErrorJSON(http.StatusGone, err.Error())
+		r.ErrorCode("checkout_attempt_expired", err.Error())
 	case errors.Is(err, checkout.ErrCheckoutAttemptPending), errors.Is(err, checkout.ErrCheckoutProcessing):
-		r.ErrorJSON(http.StatusConflict, err.Error())
+		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutAttemptConflict):
-		r.ErrorJSON(http.StatusConflict, err.Error())
+		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidParam, err.Error())
 	default:
 		writeRefusal(r, err, "checkout attempt request failed")
 	}

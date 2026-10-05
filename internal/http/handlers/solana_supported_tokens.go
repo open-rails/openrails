@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,7 +112,7 @@ func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig
 func GetSupportedTokens(r *httprequest.Request) {
 	cfg := r.State.Config
 	if cfg == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
+		r.ErrorCode(billing.CodeInternalError, "Solana configuration missing")
 		return
 	}
 	solanaConf, err := effectiveSolanaRailConfig(r)
@@ -122,7 +121,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 	if solanaConf == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
+		r.ErrorCode(billing.CodeInternalError, "Solana configuration missing")
 		return
 	}
 

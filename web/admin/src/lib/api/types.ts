@@ -111,43 +111,10 @@ export interface AdminSubscription extends RawSubscription {
   payments?: Payment[]
 }
 
-export interface TierChangePreview {
-  object: "tier_change_preview"
-  action: "upgrade" | "downgrade"
-  price_id: string
-  rail: Rail
-  currency: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  effective: "now" | "period_end"
-  is_estimate: boolean
-  message?: string
-}
-
-export interface TierChangeResult {
-  object: "tier_change"
-  // "processing": the provider outcome is unresolved (HTTP 202); retrying
-  // with the same Idempotency-Key reads the stored result.
-  status: "succeeded" | "processing" | "requires_action" | "blocked"
-  mode: "tier_change"
-  action: "upgrade" | "downgrade"
-  price_id: string
-  url?: string
-  payment: {
-    rail?: Rail
-    redirect_url?: string
-    transaction_id?: string
-  }
-  subscription_id?: string
-  message?: string
-  delayed_start?: string
-  currency?: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  operation_id?: string
-}
+export type {
+  TierChange as TierChangeResult,
+  TierChangePreview,
+} from "./generated/wire"
 
 // --- Catalog ---
 
@@ -291,63 +258,6 @@ export interface FindingsGauges {
   duplicate_coverage: number
   open_by_severity: Record<string, number>
   total_open: number
-}
-
-// NotificationData mirrors openrails.NotificationData: every event fills the
-// fields it has; money is an exact decimal string, ids are typed.
-export interface NotificationData {
-  reason?: string
-  message?: string
-  source?: string
-  entitlement?: string
-  ended_at?: string
-  currency?: string
-  subscription_id?: string // sub_...
-  from_price_id?: string // price_...
-  to_price_id?: string // price_...
-  to_product_id?: string // prod_...
-  to_product_name?: string
-  old_amount?: string
-  new_amount?: string
-  effective_at?: string
-  downgrade_applied?: boolean
-  new_product?: string
-  overdue_amount?: string
-  overdue_invoices?: number
-  overdue_since?: string
-  from_state?: string
-  to_state?: string
-  invoice_id?: string
-  invoice_number?: string
-  amount_due?: string
-  due_at?: string
-  failure_code?: string
-  failure_reason?: string
-  decline_outcome?: string
-  next_attempt_at?: string
-  rail?: string
-  rail_subscription_id?: string
-  transaction_id?: string
-  amount?: string
-  product_name?: string
-  payment_method?: string
-  kind?: string
-  provider?: string
-  operation?: string
-  affected_customer_id?: string
-  original_payment_id?: string // pay_...
-  error?: string
-  metadata?: Record<string, unknown>
-}
-
-// RepairAlert mirrors openrails.Notification (system_alert rows).
-export interface RepairAlert {
-  id: string
-  customer_id: string
-  event_type: string
-  data: NotificationData
-  seen: boolean
-  created_at: string
 }
 
 export interface WorkerHealth {

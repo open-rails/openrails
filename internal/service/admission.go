@@ -88,8 +88,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		if err := spendgate.ValidateRequest(in.SourceID, in.EstimatedAmount, in.AccrualRateDeltaPerHour); err != nil {
 			return nil, err
 		}
-		if in.InvokerType != billing.InvokerTypePayer && in.InvokerType != billing.InvokerTypeDelegated {
-			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be payer or delegated"}
+		if in.InvokerType != billing.InvokerTypeCustomer && in.InvokerType != billing.InvokerTypeDelegated {
+			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be customer or delegated"}
 		}
 	}
 	currency, err := requireCurrency(in.Currency)
@@ -975,7 +975,7 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 				"policy_currency":          payerPolicyCurrency,
 				"policy_amount":            strconv.FormatInt(policyAmount, 10),
 				"policy_chargeable_amount": strconv.FormatInt(chargeablePolicy, 10),
-				"invoker_type":             string(identity.InvokerTypePayer),
+				"invoker_type":             string(identity.InvokerTypeCustomer),
 				"chargeable_amount":        strconv.FormatInt(chargeable, 10),
 			},
 		})

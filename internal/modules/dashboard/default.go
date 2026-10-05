@@ -60,8 +60,8 @@ func DefaultWidgets(hasUsage bool) []Widget {
 				Grid: Grid{X: 6, Y: 6, W: 6, H: 4},
 			},
 			Widget{
-				ID: "top-payers", Title: "Top payers by usage revenue", Viz: "table",
-				Query: metrics.Query{Measures: []string{"usage_revenue"}, By: []string{"payer"}, Range: last30,
+				ID: "top-customers", Title: "Top customers by usage revenue", Viz: "table",
+				Query: metrics.Query{Measures: []string{"usage_revenue"}, By: []string{"customer"}, Range: last30,
 					Order: []metrics.OrderTerm{{Measure: "usage_revenue", Dir: "desc"}}, Limit: intp(10)},
 				Grid: Grid{X: 0, Y: 10, W: 6, H: 4},
 			},

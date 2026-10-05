@@ -51,10 +51,10 @@ func CancelSubscription(r *httprequest.Request) {
 	reason := strings.TrimSpace(req.Reason)
 	switch n := utf8.RuneCountInString(reason); {
 	case n < minCancelReasonChars:
-		r.ErrorJSON(http.StatusBadRequest, "Please tell us why you're canceling (at least 4 characters).")
+		r.ErrorCode(billing.CodeInvalidParam, "Please tell us why you're canceling (at least 4 characters).")
 		return
 	case n > maxCancelReasonChars:
-		r.ErrorJSON(http.StatusBadRequest, "The cancellation reason must be 500 characters or fewer.")
+		r.ErrorCode(billing.CodeInvalidParam, "The cancellation reason must be 500 characters or fewer.")
 		return
 	}
 	userID, sub, ok := ownSubscription(r)
@@ -67,7 +67,7 @@ func CancelSubscription(r *httprequest.Request) {
 		signature := strings.TrimSpace(req.Signature)
 		if signature == "" {
 			if r.State.SolanaPrepareCancelService == nil {
-				r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+				r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 				return
 			}
 			prepared, err := r.State.SolanaPrepareCancelService.Prepare(ctx, sub.ID)
@@ -81,7 +81,7 @@ func CancelSubscription(r *httprequest.Request) {
 			return
 		}
 		if r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil {
-			r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+			r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 			return
 		}
 		svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
@@ -193,17 +193,17 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 	if !subscriptions.Resumable(sub, now) {
 		switch {
 		case sub.Status != models.StatusCanceled:
-			r.ErrorJSON(http.StatusBadRequest, "subscription is not canceled")
+			r.ErrorCode(billing.CodeInvalidParam, "subscription is not canceled")
 		case subscriptions.CancelModeFor(sub, now) != subscriptions.CancelModeReversible:
-			r.ErrorJSON(http.StatusBadRequest, "resume unsupported for rail")
+			r.ErrorCode(billing.CodeInvalidParam, "resume unsupported for rail")
 		default:
-			r.ErrorJSON(http.StatusBadRequest, "subscription can no longer be resumed")
+			r.ErrorCode(billing.CodeInvalidParam, "subscription can no longer be resumed")
 		}
 		return false
 	}
 	ctx := db.WithPSPID(r.Request.Context(), sub.PspID)
 	if r.State.SubscriptionLifecycleService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "subscriptions are not configured")
+		r.ErrorCode(billing.CodeServiceUnavailable, "subscriptions are not configured")
 		return false
 	}
 	var err error
@@ -219,7 +219,7 @@ func resume(r *httprequest.Request, sub *models.Subscription) bool {
 	case rails.IsNMI(sub.Rail):
 		err = resumeNMI(ctx, r, sub)
 	default:
-		r.ErrorJSON(http.StatusBadRequest, "resume unsupported for rail")
+		r.ErrorCode(billing.CodeInvalidParam, "resume unsupported for rail")
 		return false
 	}
 	if err != nil {
@@ -292,7 +292,7 @@ func subscriptionIDParam(r *httprequest.Request) (uuid.UUID, bool) {
 func ownSubscription(r *httprequest.Request) (string, *models.Subscription, bool) {
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
 		return "", nil, false
 	}
 	id, ok := subscriptionIDParam(r)
@@ -361,7 +361,7 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 func writeMerchantSubscription(r *httprequest.Request, id uuid.UUID) {
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "admin subscription service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "admin subscription service unavailable")
 		return
 	}
 	subscription, err := svc.GetSubscriptionByID(r.Request.Context(), id)

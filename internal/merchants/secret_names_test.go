@@ -17,7 +17,7 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 		want                    string
 	}{
 		{" Stripe ", "production", "acct_1", "SECRET_KEY", "psps/stripe/live/acct_1/secret_key"},
-		{"nmi", "sandbox", " 945280-0000 ", "security_key", "psps/nmi/test/945280-0000/security_key"},
+		{"nmi", "sandbox", " 999999-0000 ", "security_key", "psps/nmi/test/999999-0000/security_key"},
 		{"solana", "devnet", "AKnL4", "private_key", "psps/solana/test/AKnL4/private_key"},
 		// Account ids are path-escaped so they can never add a path segment.
 		{"stripe", "live", "../evil/x", "secret_key", "psps/stripe/live/..%2Fevil%2Fx/secret_key"},
@@ -153,13 +153,13 @@ func TestValidateCredentialNeverPersists(t *testing.T) {
 
 // #662: the PSP id is a pure function of the canonical global natural key.
 func TestPSPIDDerivesFromCanonicalNaturalKey(t *testing.T) {
-	base := PspID("nmi", "live", "945280-0000")
-	for _, alias := range [][3]string{{"NMI", "live", "945280-0000"}, {" nmi ", "LIVE", "945280-0000"}, {"nmi", "production", "945280-0000"}, {"nmi", "mainnet", "945280-0000"}, {"nmi", "live", " 945280-0000 "}} {
+	base := PspID("nmi", "live", "999999-0000")
+	for _, alias := range [][3]string{{"NMI", "live", "999999-0000"}, {" nmi ", "LIVE", "999999-0000"}, {"nmi", "production", "999999-0000"}, {"nmi", "mainnet", "999999-0000"}, {"nmi", "live", " 999999-0000 "}} {
 		require.Equal(t, base, PspID(alias[0], alias[1], alias[2]), "%q", alias)
 	}
-	for _, other := range [][3]string{{"stripe", "live", "945280-0000"}, {"nmi", "test", "945280-0000"}, {"nmi", "live", "945280-0001"}} {
+	for _, other := range [][3]string{{"stripe", "live", "999999-0000"}, {"nmi", "test", "999999-0000"}, {"nmi", "live", "999999-0001"}} {
 		require.NotEqual(t, base, PspID(other[0], other[1], other[2]), "%q", other)
 	}
-	id, rail, env, account := PSPNaturalKey("NMI", "production", " 945280-0000 ")
-	require.Equal(t, []any{base, "nmi", "live", "945280-0000"}, []any{id, rail, env, account})
+	id, rail, env, account := PSPNaturalKey("NMI", "production", " 999999-0000 ")
+	require.Equal(t, []any{base, "nmi", "live", "999999-0000"}, []any{id, rail, env, account})
 }

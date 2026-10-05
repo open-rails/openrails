@@ -24,15 +24,16 @@ func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context, merchant
 	return count, err
 }
 
-const createMerchantNotification = `-- name: CreateMerchantNotification :one
+const createMerchantNotification = `-- name: CreateMerchantNotification :execrows
 
-INSERT INTO billing.notifications (merchant_id, recipient_kind, event_type, severity, title, body, link, data)
-VALUES ($1::uuid, 'merchant', 'operator.alert', $2::text, $3::text, $4::text, $5::text, COALESCE($6::jsonb, '{}'::jsonb))
-RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
+INSERT INTO billing.notifications (merchant_id, id, recipient_kind, event_type, severity, title, body, link, data)
+VALUES ($1::uuid, COALESCE($2::uuid, uuidv7()), 'merchant', 'operator.alert', $3::text, $4::text, $5::text, $6::text, COALESCE($7::jsonb, '{}'::jsonb))
+ON CONFLICT (merchant_id, id) DO NOTHING
 `
 
 type CreateMerchantNotificationParams struct {
 	MerchantID uuid.UUID
+	ID         *uuid.UUID
 	Severity   string
 	Title      string
 	Body       string
@@ -43,32 +44,21 @@ type CreateMerchantNotificationParams struct {
 // ============================================================================
 // notifications  (in_app bell)
 // ============================================================================
-func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerchantNotificationParams) (BillingNotification, error) {
-	row := q.db.QueryRow(ctx, createMerchantNotification,
+// A given id makes the write idempotent: a second write of it is a no-op.
+func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerchantNotificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createMerchantNotification,
 		arg.MerchantID,
+		arg.ID,
 		arg.Severity,
 		arg.Title,
 		arg.Body,
 		arg.Link,
 		arg.Data,
 	)
-	var i BillingNotification
-	err := row.Scan(
-		&i.ID,
-		&i.EventType,
-		&i.Data,
-		&i.RecipientKind,
-		&i.ReadAt,
-		&i.Severity,
-		&i.Title,
-		&i.Body,
-		&i.Link,
-		&i.CreatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.EmailedAt,
-	)
-	return i, err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const createMerchantWebhook = `-- name: CreateMerchantWebhook :one

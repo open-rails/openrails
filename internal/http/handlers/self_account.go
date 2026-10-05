@@ -1,8 +1,9 @@
 package handlers
 
 import (
-	"net/http"
 	"strings"
+
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 
@@ -23,12 +24,12 @@ import (
 func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
 		return identity.CustomerID(uuid.Nil), false
 	}
 	payer := identity.CustomerIDFromString(user.ID)
 	if payer.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "payer could not be resolved from subject")
+		r.ErrorCode(billing.CodeInvalidParam, "payer could not be resolved from subject")
 		return identity.CustomerID(uuid.Nil), false
 	}
 	return payer, true

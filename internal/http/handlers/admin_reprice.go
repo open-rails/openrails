@@ -20,7 +20,7 @@ func writeRepriceError(r *httprequest.Request, err error) {
 
 func repriceServiceReady(r *httprequest.Request) bool {
 	if r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "reprice service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "reprice service unavailable")
 		return false
 	}
 	return true

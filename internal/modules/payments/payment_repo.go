@@ -519,11 +519,11 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 	if err != nil {
 		return out, err
 	}
-	limit, err := pagination.Limit(p.Page)
+	limit, err := pagination.Limit(p.PageRequest)
 	if err != nil {
 		return out, err
 	}
-	afterAt, afterID, err := pagination.After(p.Page.Cursor)
+	afterAt, afterID, err := pagination.After(p.PageRequest.Cursor)
 	if err != nil {
 		return out, err
 	}

@@ -24,7 +24,7 @@ type Verifier interface {
 // CustomerIdentity is the host's explicit mapping to a billing account. A
 // delegated or machine credential must never become a customer-present session.
 type CustomerIdentity struct {
-	ID              string
+	ID              billing.CustomerID
 	CredentialClass CredentialClass
 	Invoker         string
 }
@@ -42,7 +42,7 @@ func SubjectCustomerID(_ context.Context, principal auth.Principal) (CustomerIde
 	if err != nil || id == uuid.Nil || id.String() != i.Subject {
 		return CustomerIdentity{}, ErrUnauthenticated
 	}
-	return CustomerIdentity{ID: i.Subject, CredentialClass: CredentialClassUserSession}, nil
+	return CustomerIdentity{ID: billing.CustomerID(id), CredentialClass: CredentialClassUserSession}, nil
 }
 
 // Authority maps a billing requirement to one trusted immutable authority scope.

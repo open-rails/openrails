@@ -171,16 +171,16 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 	}
 
 	service := NMIWebhookService{
-		DB:                           d.DB,
-		PriceService:                 d.PriceService,
-		ProductService:               d.ProductService,
-		Data:                         payload,
-		Rail:                         event.Rail,
-		SubscriptionService:          d.SubscriptionService,
-		PaymentService:               d.PaymentService,
-		MoneyService:                 d.MoneyService,
-		DeduplicationService:         d.DeduplicationService,
-		NotificationService:          d.NotificationService,
+		DB:                   d.DB,
+		PriceService:         d.PriceService,
+		ProductService:       d.ProductService,
+		Data:                 payload,
+		Rail:                 event.Rail,
+		SubscriptionService:  d.SubscriptionService,
+		PaymentService:       d.PaymentService,
+		MoneyService:         d.MoneyService,
+		DeduplicationService: d.DeduplicationService,
+
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 		NMIResolver:                  d.NMIResolver,
@@ -228,16 +228,16 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ProductService:               d.ProductService,
 		SubscriptionService:          d.SubscriptionService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
-		NotificationService:          d.NotificationService,
-		PurchaseRegistrar:            d.PurchaseRegistrar,
-		PaymentService:               d.PaymentService,
-		MoneyService:                 d.MoneyService,
-		DeduplicationService:         d.DeduplicationService,
-		RailCustomerService:          d.RailCustomerService,
-		CheckoutAttemptService:       d.CheckoutAttemptService,
-		Clock:                        d.Clock,
-		ConvergeEnqueuer:             d.ConvergeEnqueuer,
-		StripePaymentState:           paymentState,
+
+		PurchaseRegistrar:      d.PurchaseRegistrar,
+		PaymentService:         d.PaymentService,
+		MoneyService:           d.MoneyService,
+		DeduplicationService:   d.DeduplicationService,
+		RailCustomerService:    d.RailCustomerService,
+		CheckoutAttemptService: d.CheckoutAttemptService,
+		Clock:                  d.Clock,
+		ConvergeEnqueuer:       d.ConvergeEnqueuer,
+		StripePaymentState:     paymentState,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
 }

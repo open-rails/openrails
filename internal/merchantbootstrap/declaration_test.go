@@ -13,7 +13,7 @@ func TestValidateMerchantDeclaration(t *testing.T) {
 	}
 	sandbox := &config.Config{TestMode: config.CredentialPostureSandbox}
 	ccbill := func(secrets map[string]string) config.MerchantDeclaration {
-		return config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "ccbill", AccountID: "945280-0000", Secrets: secrets}}}
+		return config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "ccbill", AccountID: "999999-0000", Secrets: secrets}}}
 	}
 	live := &config.Config{TestMode: config.CredentialPostureLive}
 	for _, tc := range []struct {

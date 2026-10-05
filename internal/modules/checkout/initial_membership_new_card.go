@@ -60,6 +60,8 @@ func (s *CheckoutAttemptService) vaultEnrollmentCard(ctx context.Context, paymen
 		FirstName:    payment.FirstName,
 		LastName:     payment.LastName,
 		Address1:     payment.Address1,
+		Address2:     payment.Address2,
+		Phone:        payment.Phone,
 		City:         payment.City,
 		State:        payment.State,
 		Zip:          payment.Zip,

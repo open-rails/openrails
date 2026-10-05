@@ -384,8 +384,8 @@ func (s *RepriceService) emitScheduledNotification(ctx context.Context, sub *mod
 		EventType:  models.NotificationSubscriptionRepriceScheduled,
 		Data: billing.NotificationData{
 			SubscriptionID: billing.SubscriptionID(sub.ID),
-			FromPriceID:    (billing.PriceID(from.ID)).String(),
-			ToPriceID:      (billing.PriceID(to.ID)).String(),
+			FromPriceID:    billing.PriceID(from.ID),
+			ToPriceID:      billing.PriceID(to.ID),
 			OldAmount:      &from.Amount,
 			NewAmount:      &to.Amount,
 			Currency:       to.Currency,

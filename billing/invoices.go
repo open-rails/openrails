@@ -184,7 +184,7 @@ type InvoiceListParams struct {
 	Status     InvoiceStatus
 	PeriodFrom *time.Time
 	PeriodTo   *time.Time
-	Page       PageRequest
+	PageRequest
 }
 
 // RetryInvoiceCollectionParams charges an open invoice to one of the

@@ -93,7 +93,7 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*billing.Catalo
 // catalogDrift reads one catalog.* reconciliation finding.
 func catalogDrift(r gen.BillingReconciliationFinding) billing.CatalogDrift {
 	view := billing.CatalogDrift{
-		ID: r.ID, Rail: r.Rail, Kind: strings.TrimPrefix(r.FindingType, "catalog."), ResourceType: r.OpenrailsResourceType,
+		ID: billing.FindingID(r.ID), Rail: r.Rail, Kind: strings.TrimPrefix(r.FindingType, "catalog."), ResourceType: r.OpenrailsResourceType,
 		ResourceID: derefText(r.OpenrailsResourceID), ExternalResourceID: derefText(r.ExternalResourceID),
 		Field: derefText(r.Field), OpenRailsValue: derefText(r.OpenrailsValue), ExternalValue: derefText(r.ExternalValue),
 		DetectedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,

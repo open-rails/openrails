@@ -14,7 +14,7 @@ import (
 func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (identity.CustomerID, bool) {
 	id := servicePayer(customerID)
 	if id == nil {
-		r.ErrorJSON(http.StatusBadRequest, "valid customer_id required")
+		r.ErrorCode(billing.CodeInvalidParam, "valid customer_id required")
 		return identity.CustomerID{}, false
 	}
 	if !requireServiceCustomerScope(r, *id) {
@@ -30,19 +30,12 @@ func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 	if !r.BindJSON(&input) {
 		return
 	}
-	if raw := input.PaymentOptions.PaymentMethodID; raw != "" {
-		id, err := billing.ParsePaymentMethodID(raw)
-		if err != nil || id.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
-			return
-		}
-	}
 	if _, ok := commerceCustomer(r, input.Customer.ID); !ok {
 		return
 	}
 	input.IdempotencyKey = r.Header("Idempotency-Key")
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
+		r.ErrorCode("idempotency_key_required", "")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -52,7 +45,7 @@ func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 	}
 	out, err := svc.CreateCheckoutAttempt(r.Request.Context(), input)
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{Rail: input.PaymentOptions.Rail, Wallet: input.PaymentOptions.Wallet})
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{Rail: input.PaymentOptions.PSP, Wallet: input.PaymentOptions.Wallet})
 		return
 	}
 	r.SuccessJSON(out)
@@ -63,7 +56,7 @@ func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 func attemptInScope(r *httprequest.Request, svc *billingservice.Service) (billing.CheckoutAttemptID, bool) {
 	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid checkout attempt id")
 		return id, false
 	}
 	owner, err := svc.CheckoutAttemptOwner(r.Request.Context(), id)

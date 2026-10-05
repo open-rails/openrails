@@ -36,13 +36,13 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 	if req.PriceID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid price_id")
 		return
 	}
 
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
 		return
 	}
 	// An upgrade charges the saved card now.
@@ -52,19 +52,19 @@ func ChangeTier(r *httprequest.Request) {
 
 	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		r.ErrorCode(billing.CodeInvalidParam, "subscription ID required")
 		return
 	}
 
 	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		r.ErrorCode(billing.CodeInvalidParam, "Invalid subscription ID format")
 		return
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 
 	if r.State.CheckoutService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "checkout service unavailable")
 		return
 	}
 
@@ -116,31 +116,31 @@ func ChangeTierPreview(r *httprequest.Request) {
 		return
 	}
 	if req.PriceID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid price_id")
 		return
 	}
 
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
 		return
 	}
 
 	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		r.ErrorCode(billing.CodeInvalidParam, "subscription ID required")
 		return
 	}
 
 	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		r.ErrorCode(billing.CodeInvalidParam, "Invalid subscription ID format")
 		return
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 
 	if r.State.CheckoutService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "checkout service unavailable")
 		return
 	}
 
@@ -187,19 +187,19 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 
 	switch {
 	case errors.Is(err, checkout.ErrTierChangeNoSubscription):
-		r.ErrorJSON(http.StatusNotFound, "no active subscription found")
+		r.ErrorCode(billing.CodeResourceNotFound, "no active subscription found")
 	case errors.Is(err, checkout.ErrTierChangeNotSupported):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidParam, err.Error())
 	case errors.Is(err, checkout.ErrTierChangeBlocked):
-		r.ErrorJSON(http.StatusConflict, err.Error())
+		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrTierChangePending), errors.Is(err, checkout.ErrCheckoutProcessing):
-		r.ErrorJSON(http.StatusConflict, err.Error())
+		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrTierChangeSameProduct):
-		r.ErrorJSON(http.StatusConflict, "already on this plan")
+		r.ErrorCode(billing.CodeResourceConflict, "already on this plan")
 	case errors.Is(err, checkout.ErrTierChangeDifferentGroup):
-		r.ErrorJSON(http.StatusBadRequest, "cannot change to a different tier group")
+		r.ErrorCode(billing.CodeInvalidParam, "cannot change to a different tier group")
 	case errors.Is(err, subscriptions.ErrRepriceCrossCurrency):
-		r.ErrorJSON(http.StatusBadRequest, "cannot change to a plan in a different currency")
+		r.ErrorCode(billing.CodeInvalidParam, "cannot change to a plan in a different currency")
 	default:
 		writeRefusal(r, err, "tier change request failed")
 	}

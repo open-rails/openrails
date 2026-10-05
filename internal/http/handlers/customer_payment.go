@@ -65,7 +65,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 	}
 	id, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid subscription id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription id")
 		return
 	}
 	var body billing.RetrySubscriptionNowParams
@@ -73,7 +73,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		return
 	}
 	if body.PaymentMethodID != nil && body.PaymentMethodID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid payment_method_id")
 		return
 	}
 	body.SubscriptionID, body.IdempotencyKey = id, key

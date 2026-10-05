@@ -34,7 +34,7 @@ func TestMuxRegistrationAndMiddlewareChain(t *testing.T) {
 	group := root.Group("/me", mw("group"))
 	group.Handle(http.MethodGet, "/subscriptions/:id", func(r *request.Request) {
 		order = append(order, "handler:"+r.Param("id"))
-		r.SuccessJSONMessage("ok")
+		r.NoContent()
 	}, mw("route"))
 	group.Group("/nested", mw("nested")).Handle(http.MethodPost, "", func(r *request.Request) {
 		order = append(order, "unreachable")
@@ -43,7 +43,7 @@ func TestMuxRegistrationAndMiddlewareChain(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/me/subscriptions/sub_123", nil))
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Equal(t, []string{"group", "route", "handler:sub_123"}, order)
 
 	order = nil

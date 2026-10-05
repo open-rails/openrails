@@ -137,7 +137,7 @@ func (s *Service) invoiceRecovery(ctx context.Context, invoice *models.Invoice) 
 		if err != nil {
 			return nil, err
 		}
-		out.Operation = &billing.PaymentOperation{ID: row.ID, Status: row.Status}
+		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(row.ID), Status: row.Status}
 		out.BlockedReason = "payment_in_progress"
 	case invoice.AmountDue <= 0 || (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible"):
 		out.BlockedReason = "invoice_not_payable"
@@ -234,7 +234,7 @@ func (s *Service) PayInvoice(ctx context.Context, payer identity.CustomerID, inv
 		if err := customerPaymentRefusal(result.Operation); err != nil {
 			return err
 		}
-		out = &billing.InvoicePayNow{Invoice: InvoiceView(result.Invoice), Payment: InvoicePaymentView(result.Attempt), Operation: billing.PaymentOperation{ID: result.Operation.ID, Status: result.Operation.Status}, Replayed: result.Replayed}
+		out = &billing.InvoicePayNow{Invoice: InvoiceView(result.Invoice), Payment: InvoicePaymentView(result.Attempt), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.Operation.ID), Status: result.Operation.Status}, Replayed: result.Replayed}
 		return nil
 	})
 	return out, err

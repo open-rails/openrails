@@ -1480,8 +1480,7 @@ func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChange
 	rail := string(existingSub.Rail)
 	now := s.now()
 	resp := &TierChangePreviewResponse{
-		Object:           "tier_change_preview",
-		PriceID:          (billing.PriceID(newPrice.ID)).String(),
+		PriceID:          billing.PriceID(newPrice.ID),
 		Rail:             rail,
 		Currency:         newPrice.Currency,
 		NextChargeAmount: newPrice.Amount,
@@ -1642,8 +1641,8 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 	if existingSub.ScheduledPriceID != nil {
 		return &TierChangeResponse{
-			Object: "tier_change", Status: "blocked", Mode: "tier_change", Action: action,
-			PriceID: (billing.PriceID(newPrice.ID)).String(), Payment: CheckoutAttemptPaymentResponse{Rail: "stripe"},
+			Status: "blocked", Action: action,
+			PriceID: billing.PriceID(newPrice.ID), Rail: "stripe",
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
@@ -1768,12 +1767,10 @@ func (s *CheckoutService) processTierChangeCCBill(
 ) (*TierChangeResponse, error) {
 	if action == "downgrade" {
 		return &TierChangeResponse{
-			Object:  "tier_change",
 			Status:  "blocked",
-			Mode:    "tier_change",
 			Action:  action,
-			PriceID: (billing.PriceID(newPrice.ID)).String(),
-			Payment: CheckoutAttemptPaymentResponse{Rail: "ccbill"},
+			PriceID: billing.PriceID(newPrice.ID),
+			Rail:    "ccbill",
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
 	}
@@ -1787,18 +1784,12 @@ func (s *CheckoutService) processTierChangeCCBill(
 	// Map to TierChangeResponse
 	subID := billing.SubscriptionID(existingSub.ID)
 	resp := &TierChangeResponse{
-		Object:         "tier_change",
 		Status:         "requires_action",
-		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        (billing.PriceID(newPrice.ID)).String(),
-		URL:            checkoutResp.RedirectURL,
+		PriceID:        billing.PriceID(newPrice.ID),
 		SubscriptionID: &subID,
-		Payment: CheckoutAttemptPaymentResponse{
-			Rail:        "ccbill",
-			RedirectURL: checkoutResp.RedirectURL,
-		},
-		Message: "Redirect to CCBill to complete upgrade",
+		Rail:           "ccbill",
+		Message:        "Redirect to CCBill to complete upgrade",
 	}
 
 	// Build NextAction for redirect

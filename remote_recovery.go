@@ -4,19 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
-	"strconv"
 
 	"github.com/open-rails/openrails/billing"
 )
-
-func pageQuery(options billing.PageOptions) url.Values {
-	limit := options.Limit
-	if limit == 0 {
-		limit = 50
-	}
-	return url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(options.Offset)}}
-}
 
 // ListSubscriptions returns one page of the merchant's subscriptions matching
 // params, newest first.

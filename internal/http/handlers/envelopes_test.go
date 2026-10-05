@@ -270,11 +270,11 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 
 	for status, want := range map[string]int{"processing": http.StatusAccepted, "succeeded": http.StatusOK} {
 		r, rec := newTestRequest(http.MethodPost, "/", nil, &app.Runtime{})
-		writeTierChangeResponse(r, &checkout.TierChangeResponse{Object: "tier_change", Status: status, OperationID: "op-1"})
+		writeTierChangeResponse(r, &checkout.TierChangeResponse{Status: status, OperationID: billing.PaymentOperationID{1}})
 		require.Equal(t, want, rec.Code)
 		var body checkout.TierChangeResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		require.Equal(t, "op-1", body.OperationID, "a lost first response can be read back")
+		require.Equal(t, billing.PaymentOperationID{1}, body.OperationID, "a lost first response can be read back")
 	}
 }
 

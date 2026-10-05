@@ -54,15 +54,17 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}
 		}), config.Deps{}, "may only add CustomerRoutes"},
-		"river schema injection":      {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
-		"river schema host owned":     {with(sandbox, func(c *config.Config) { c.River = config.RiverHostOwned; c.RiverSchema = "jobs" }), config.Deps{}, "applies to managed River"},
-		"unknown river owner":         {with(sandbox, func(c *config.Config) { c.River = "nobody" }), config.Deps{}, "Config.River"},
-		"posture unset":               {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
-		"write mode unset":            {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
-		"unknown write mode":          {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
-		"authorize without authn":     {sandbox, config.Deps{Authorize: func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return nil }}, "require Deps.Authenticate"},
-		"authkit and authenticate":    {sandbox, config.Deps{AuthKit: verifier{}, Authenticate: authenticate}, "not both"},
-		"customer hook without kit":   {sandbox, config.Deps{CustomerFor: func(context.Context, billingauth.Identity) (string, error) { return "", nil }}, "require Deps.AuthKit"},
+		"river schema injection":   {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
+		"river schema host owned":  {with(sandbox, func(c *config.Config) { c.River = config.RiverHostOwned; c.RiverSchema = "jobs" }), config.Deps{}, "applies to managed River"},
+		"unknown river owner":      {with(sandbox, func(c *config.Config) { c.River = "nobody" }), config.Deps{}, "Config.River"},
+		"posture unset":            {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
+		"write mode unset":         {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
+		"unknown write mode":       {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
+		"authorize without authn":  {sandbox, config.Deps{Authorize: func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return nil }}, "require Deps.Authenticate"},
+		"authkit and authenticate": {sandbox, config.Deps{AuthKit: verifier{}, Authenticate: authenticate}, "not both"},
+		"customer hook without kit": {sandbox, config.Deps{CustomerFor: func(context.Context, billingauth.Identity) (billing.CustomerID, error) {
+			return billing.CustomerID{}, nil
+		}}, "require Deps.AuthKit"},
 		"nil authkit client":          {sandbox, config.Deps{AuthKit: (*verifier)(nil)}, "Deps.AuthKit"},
 		"authkit staff without group": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{AuthKit: verifier{}}, "Deps.AuthorityFor"},
 		"control plane and authkit":   {with(sandbox, func(c *config.Config) { c.ControlPlane = &config.ControlPlaneConfig{} }), config.Deps{AuthKit: verifier{}}, "its own AuthKit"},
@@ -86,9 +88,6 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.Merchant.Slug = "m"
 			c.Catalog = &catalog.Application{SchemaVersion: 1}
 		}), config.Deps{}, "control plane's merchants"},
-		"two credential sources": {with(sandbox, func(c *config.Config) {
-			c.Merchant = config.MerchantDeclaration{Slug: "m", PSPs: map[string]config.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct", Secrets: map[string]string{"secret_key": "sk"}}}}
-		}), config.Deps{ProviderCredentials: []config.ProviderCredentialSnapshot{{Rail: "stripe"}}}, "either Deps.ProviderCredentials or Config.Merchant"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, err := New(context.Background(), tc.cfg, tc.deps)
@@ -178,14 +177,14 @@ func TestAuthKitDerivesAuthentication(t *testing.T) {
 	r := request()
 	got, err := derived.Authentication.AuthenticateRequest(r.Context(), r)
 	require.NoError(t, err)
-	require.Equal(t, billingauth.Identity{Kind: billingauth.User, Issuer: issuer, SubjectID: user, CustomerID: user, Email: "u@example.com", CredentialClass: billingauth.CredentialClassUserSession}, got)
+	require.Equal(t, billingauth.Identity{Kind: billingauth.User, Issuer: issuer, SubjectID: user, CustomerID: billing.CustomerID(uuid.MustParse(user)), Email: "u@example.com", CredentialClass: billingauth.CredentialClassUserSession}, got)
 	require.Nil(t, derived.Authorization, "no AuthorityFor publishes no staff routes")
 	require.ErrorIs(t, derived.RecentSignIn.CheckRecentSignIn(r.Context(), r), auth.ErrStepUpRequired)
 
 	mapped, err := integration(config.Deps{AuthKit: kit,
-		CustomerFor: func(_ context.Context, caller billingauth.Identity) (string, error) {
+		CustomerFor: func(_ context.Context, caller billingauth.Identity) (billing.CustomerID, error) {
 			require.Equal(t, user, caller.SubjectID)
-			return org, nil
+			return billing.CustomerID(uuid.MustParse(org)), nil
 		},
 		AuthorityFor: func(_ context.Context, required billingauth.Requirement) (billingauth.Authority, error) {
 			return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: "staff"}, Permission: required.Permission}, nil
@@ -195,7 +194,7 @@ func TestAuthKitDerivesAuthentication(t *testing.T) {
 	r = request()
 	got, err = mapped.Authentication.AuthenticateRequest(r.Context(), r)
 	require.NoError(t, err)
-	require.Equal(t, org, got.CustomerID, "the hook names who pays")
+	require.Equal(t, org, got.CustomerID.String(), "the hook names who pays")
 	require.NoError(t, mapped.Authorization.Authorize(r.Context(), r, got, billingauth.Requirement{Permission: "merchant:payments:refund"}))
 	var gate billingauth.GateError
 	require.ErrorAs(t, mapped.Authorization.Authorize(r.Context(), r, got, billingauth.Requirement{Permission: "merchant:settings:update"}), &gate)

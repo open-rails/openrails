@@ -6,18 +6,19 @@ import "time"
 // processing, requires_action or blocked; NextAction names the customer's
 // step when it is requires_action.
 type TierChange struct {
-	Object         string                         `json:"object"`                    // "tier_change"
-	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
-	Mode           string                         `json:"mode"`                      // "tier_change"
-	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	Effective      string                         `json:"effective,omitempty"`       // now (upgrade) | period_end (downgrade)
-	PriceID        string                         `json:"price_id"`                  // Target price ID
-	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
-	Payment        CheckoutAttemptPaymentResponse `json:"payment"`                   // Rail info
-	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
-	NextAction     *NextAction                    `json:"next_action,omitempty"`
-	Message        string                         `json:"message,omitempty"`       // User-friendly message
-	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"` // For scheduled downgrades
+	Status         string          `json:"status"`              // succeeded, processing, requires_action, blocked
+	Action         string          `json:"action,omitempty"`    // upgrade, downgrade
+	Effective      string          `json:"effective,omitempty"` // now (upgrade) | period_end (downgrade)
+	PriceID        PriceID         `json:"price_id"`
+	Rail           string          `json:"rail"`
+	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
+	// NextAction is the customer's step when Status is requires_action: a
+	// redirect to a provider page, or Solana transactions to sign.
+	NextAction *NextAction `json:"next_action,omitempty"`
+	// TransactionID is the provider's charge for an upgrade that settled.
+	TransactionID *string    `json:"transaction_id"`
+	Message       string     `json:"message,omitempty"`       // User-friendly message
+	DelayedStart  *time.Time `json:"delayed_start,omitempty"` // For scheduled downgrades
 	// Money summary so the client can confirm/announce what actually happened.
 	// AmountDueNow is what was charged immediately (0 for a scheduled downgrade);
 	// NextChargeAmount/NextChargeDate describe the next renewal at the new price.
@@ -32,7 +33,7 @@ type TierChange struct {
 	// outcome is unresolved, and a "requires_action" answer names the payment
 	// the customer must authenticate (GET /v1/me/payment-operations/{id}/
 	// authentication); the same Idempotency-Key replays the stored result.
-	OperationID string `json:"operation_id,omitempty"`
+	OperationID PaymentOperationID `json:"operation_id,omitzero"`
 }
 
 // Tier-change refusals carry these StatusError.Code values.
@@ -76,9 +77,8 @@ const (
 )
 
 type TierChangePreview struct {
-	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
-	PriceID          string     `json:"price_id"`
+	PriceID          PriceID    `json:"price_id"`
 	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
 	AmountDueNow     int64      `json:"amount_due_now,string"`     // native units charged immediately (0 for downgrade)
@@ -87,30 +87,6 @@ type TierChangePreview struct {
 	Effective        string     `json:"effective"`   // "now" (upgrade) | "period_end" (downgrade)
 	IsEstimate       bool       `json:"is_estimate"` // true when the rail finalizes the exact amount (Stripe upgrades)
 	Message          string     `json:"message,omitempty"`
-}
-
-type CheckoutAttemptNextAction struct {
-	Type          string                        `json:"type"`
-	RedirectToURL *CheckoutAttemptRedirectToURL `json:"redirect_to_url,omitempty"`
-	// Transactions carries base64-encoded UNSIGNED Solana transactions the
-	// subscriber's wallet must sign + send, in order, for type
-	// "solana_sign_transactions" (recurring subscribe, #261). After sending, the
-	// frontend calls confirm with the resulting signature; if the session is still
-	// requires_action it signs the next returned transaction and confirms again.
-	Transactions []string `json:"transactions,omitempty"`
-}
-
-type CheckoutAttemptRedirectToURL struct {
-	URL string `json:"url,omitempty"`
-}
-
-type CheckoutAttemptPaymentResponse struct {
-	Rail           string `json:"rail"`
-	Reference      string `json:"reference,omitempty"`
-	TransactionURL string `json:"transaction_url,omitempty"`
-	SolanaPayURL   string `json:"solana_pay_url,omitempty"`
-	RedirectURL    string `json:"redirect_url,omitempty"`
-	TransactionID  string `json:"transaction_id,omitempty"`
 }
 
 // ChangeTierParams moves a subscription to another price of its tier group.

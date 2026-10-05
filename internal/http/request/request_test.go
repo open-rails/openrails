@@ -219,17 +219,6 @@ func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
 		require.Empty(t, rec.Header().Get("Content-Type"))
 	}
 
-	req, rec = newReq(http.MethodGet, "/items", "")
-	req.SuccessJSONPaginated([]string{"a", "b"}, 5, 2, 2)
-	var page map[string]any
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page))
-	require.Equal(t, true, page["has_more"])
-	require.Equal(t, "/items", page["url"])
-	req, rec = newReq(http.MethodGet, "/items", "")
-	req.SuccessJSONPaginated([]string{"a"}, 5, 2, 4)
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page))
-	require.Equal(t, false, page["has_more"])
-
 	for _, tc := range []struct{ name, supplied, want string }{
 		{"caller id preserved", "req-149", "req-149"},
 		{"missing id generated", "", ""},

@@ -1,5 +1,5 @@
 // Command multimerchant hosts one engine for several merchants, as
-// OpenRails-SaaS does: no declared merchant, so each operation names its
+// the hosted product does: no declared merchant, so each operation names its
 // merchant, and OpenRails runs its own River fleet. OPENRAILS_DATABASE_URL and
 // a comma-separated OPENRAILS_MERCHANT_IDS are required.
 package main

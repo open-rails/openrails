@@ -468,7 +468,12 @@ export function Checkout({
         // The card leaves the form here and goes to OpenRails only.
         const card = nativeCardRef.current.take()
         if (!card) return null
-        if (!client) return { option_id: rail.id, card, ...parsed.data }
+        if (!client)
+          return {
+            option_id: rail.id,
+            card,
+            billing_details: billingDetailsOf(parsed.data),
+          }
         const display = cardEntryDisplay(card)
         const method = await client.addPaymentMethod({
           psp_id: rail.id,
@@ -492,8 +497,7 @@ export function Checkout({
         return {
           option_id: rail.id,
           payment_token: tokenized.token,
-          ...parsed.data,
-          ...display,
+          billing_details: billingDetailsOf(parsed.data),
         }
       }
       const method = await client.addPaymentMethod({
@@ -548,7 +552,10 @@ export function Checkout({
           changePhase("ready")
           return
         }
-        request = { option_id: active.id, ...parsed.data }
+        request = {
+          option_id: active.id,
+          billing_details: billingDetailsOf(parsed.data),
+        }
       }
       if (isCardRail(active) && usingSavedMethod) {
         request = { option_id: active.id, payment_method_id: savedMethodID }

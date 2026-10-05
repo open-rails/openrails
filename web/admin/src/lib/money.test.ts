@@ -3,7 +3,7 @@
 // may round-trip through one.
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import currencyUnits from "./currency-units.json"
+import { OPENRAILS_CURRENCY_SCALES as currencyUnits } from "./api/generated/currencies"
 import {
   amountFromInput, currencyScale, formatNativeAmount, formatUnits,
   nativeAmountFromInput, nativeAmountToInput, unitsToDecimal,

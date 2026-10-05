@@ -8,8 +8,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 )
 
-// FleetAnalytics returns cross-merchant operator aggregates (openrails-saas
-// #28) — the fleet view no per-merchant scope can compute. Its queries
+// FleetAnalytics returns cross-merchant operator aggregates —
+// the fleet view no per-merchant scope can compute. Its queries
 // return aggregates only, never merchant rows. Like
 // SearchMerchants (#226) this is a sensitive cross-merchant read: the CALLER
 // gates it behind platform-superadmin authority and audits every request.

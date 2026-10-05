@@ -96,7 +96,7 @@ func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.Publ
 	t.Helper()
 	session, err := s.w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(b.id)}, PriceID: pid(s.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: s.option.Selector, PSPID: s.option.PSPID, TokenSymbol: "DUSD", Wallet: wallet.String()},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: s.option.PSP, TokenSymbol: "DUSD", Wallet: wallet.String()},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)

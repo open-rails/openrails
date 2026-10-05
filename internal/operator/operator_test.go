@@ -68,7 +68,7 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 		},
 		"RunBootstrap":                       func() error { _, err := RunBootstrap(ctx, a, BootstrapOptions{}); return err },
 		"ListMerchantsForSubject":            func() error { _, err := ListMerchantsForSubject(ctx, a, "user"); return err },
-		"ListActiveMerchantIDs":              func() error { _, err := ListActiveMerchantIDs(ctx, a, 10, 0); return err },
+		"ListActiveMerchantIDs":              func() error { _, err := ListActiveMerchantIDs(ctx, a, billing.PageRequest{}); return err },
 		"SetMerchantAPIHost":                 func() error { return SetMerchantAPIHost(ctx, a, id, "api.shop.example") },
 		"FleetAnalytics":                     func() error { _, err := FleetAnalytics(ctx, a, billing.MerchantID{}, 30); return err },
 		"FleetTimeseries":                    func() error { _, err := FleetTimeseries(ctx, a, billing.MerchantID{}, 12); return err },

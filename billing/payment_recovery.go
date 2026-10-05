@@ -18,8 +18,30 @@ type PaymentRecovery struct {
 }
 
 type PaymentOperation struct {
-	ID     uuid.UUID `json:"id"`
-	Status string    `json:"status"`
+	ID     PaymentOperationID `json:"id"`
+	Status string             `json:"status"`
+}
+
+// PaymentOperationID names one payment operation; on the wire "pop_<uuid>".
+type PaymentOperationID uuid.UUID
+
+const paymentOperationIDPrefix = "pop_"
+
+func ParsePaymentOperationID(s string) (PaymentOperationID, error) {
+	u, err := parsePrefixedID("payment operation", paymentOperationIDPrefix, s)
+	return PaymentOperationID(u), err
+}
+
+func (id PaymentOperationID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id PaymentOperationID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
+func (id PaymentOperationID) String() string {
+	return formatPrefixedID(paymentOperationIDPrefix, uuid.UUID(id))
+}
+func (id PaymentOperationID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id *PaymentOperationID) UnmarshalText(b []byte) error {
+	v, err := ParsePaymentOperationID(string(b))
+	*id = v
+	return err
 }
 
 func (o PaymentOperation) Unresolved() bool {

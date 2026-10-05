@@ -102,7 +102,7 @@ func ListProductAccess(r *httprequest.Request) {
 	}
 	svc := productAccessService(r)
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
 	grants, more, err := svc.ListAccessibleProductsPage(r.Request.Context(), customer.String(), after, limit)
@@ -152,7 +152,7 @@ func CheckProductAccess(r *httprequest.Request) {
 	}
 	svc := productAccessService(r)
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
 	access := map[string]bool{}
@@ -209,12 +209,12 @@ func createProductAccess(r *httprequest.Request, gate billingauth.Gate) {
 	}
 	admin := r.GetUser()
 	if admin == nil || admin.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "missing admin identity")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "missing admin identity")
 		return
 	}
 	svc := productAccessService(r)
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
 	grant, _, err := svc.GrantProductAccess(r.Request.Context(), productaccess.GrantParams{
@@ -244,7 +244,7 @@ func DeleteProductAccess(r *httprequest.Request) {
 	}
 	svc := productAccessService(r)
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
 	grant, err := svc.GetGrant(r.Request.Context(), id.UUID())

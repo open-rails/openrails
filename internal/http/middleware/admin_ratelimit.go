@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -136,7 +138,7 @@ func (l *AdminOperationLimiter) AdminRateLimitMW(operation AdminOperation) route
 
 			userID, err := canonicalAdminUserID(user.UserID)
 			if err != nil {
-				r.AbortJSON(http.StatusInternalServerError, "administrative operation rate limit unavailable")
+				r.AbortCode(billing.CodeInternalError, "administrative operation rate limit unavailable")
 				return
 			}
 			decision := l.evaluate(r.Request.Context(), userID, operation)

@@ -79,8 +79,8 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentPriceID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
-			event.Payment = &billing.PaymentSettledEvent{PaymentID: billing.PaymentID(*row.PaymentID), CustomerID: billing.CustomerID(*row.PaymentCustomerID).String(),
-				PriceID: billing.PriceID(*row.PaymentPriceID).String(), Amount: *row.Amount, Currency: row.Currency}
+			event.Payment = &billing.PaymentSettledEvent{PaymentID: billing.PaymentID(*row.PaymentID), CustomerID: billing.CustomerID(*row.PaymentCustomerID),
+				PriceID: billing.PriceID(*row.PaymentPriceID), Amount: *row.Amount, Currency: row.Currency}
 			if row.PaymentSubscriptionID != nil {
 				subscriptionID := billing.SubscriptionID(*row.PaymentSubscriptionID)
 				event.Payment.SubscriptionID = &subscriptionID
@@ -97,7 +97,7 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			if err := json.Unmarshal(row.Data, &payload); err != nil {
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
-			payload.CustomerID = (billing.CustomerID(row.SubjectID)).String()
+			payload.CustomerID = billing.CustomerID(row.SubjectID)
 			payload.Currency = row.Currency
 			payload.DelinquencyHostEvent.OverdueAmount = payload.OverdueAmount
 			payload.DelinquencyHostEvent.AmountFloor = payload.AmountFloor

@@ -215,7 +215,7 @@ func (f *dataLinkFake) canceled(id string) int {
 func (f *dataLinkFake) list(subscriptionID, rebill, expiry string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.members = []string{fmt.Sprintf(`"ACTIVEMEMBERS","945280","x","%s","2020-01-01","member","member@example.test","1","%s","%s"`, subscriptionID, rebill, expiry)}
+	f.members = []string{fmt.Sprintf(`"ACTIVEMEMBERS","999999","x","%s","2020-01-01","member","member@example.test","1","%s","%s"`, subscriptionID, rebill, expiry)}
 }
 
 // newDataLinkWorld is a world whose CCBill account has DataLink credentials,

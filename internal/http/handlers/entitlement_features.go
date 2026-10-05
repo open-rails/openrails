@@ -36,12 +36,12 @@ type activeEntitlement struct {
 // arbitrary user_id.
 func SelfGetActiveEntitlements(r *httprequest.Request) {
 	if r.State == nil || r.State.EntitlementService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "entitlement service unavailable")
 		return
 	}
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "missing user identity")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "missing user identity")
 		return
 	}
 	at, ok := parseAtQuery(r)
@@ -53,7 +53,7 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 	}
 	windows, err := r.State.EntitlementService.ListActiveRecords(r.Request.Context(), user.ID, at)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve active entitlements")
+		r.ErrorCode(billing.CodeInternalError, "failed to resolve active entitlements")
 		return
 	}
 	items := make([]activeEntitlement, 0, len(windows))
@@ -88,7 +88,7 @@ func parseAtQuery(r *httprequest.Request) (time.Time, bool) {
 	}
 	parsed, err := timeutil.ParseRFC3339UTC(atStr)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid 'at' timestamp format; use RFC3339")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid 'at' timestamp format; use RFC3339")
 		return time.Time{}, false
 	}
 	return parsed, true

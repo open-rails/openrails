@@ -36,7 +36,7 @@ import (
 )
 
 // A fleet is N host processes embedding OpenRails over one database and one
-// set of provider accounts, as Doujins and Hentai0 deploy: each replica has
+// set of provider accounts, as host-one and host-two deploy: each replica has
 // its own connections, River client (own leader election and liveness),
 // engine clock and HTTP server. A hard crash cuts the replica's database
 // link at once, so nothing it was doing afterwards is recorded.
@@ -686,7 +686,7 @@ func (f *fleet) requireExactlyOnce(e *engineCase, renewals, submissions int) {
 	if submissions >= 0 {
 		require.Equal(t, submissions, f.submissions(e), "provider charge requests")
 	}
-	page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 100}})
+	page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), PageRequest: billing.PageRequest{Limit: 100}})
 	require.NoError(t, err)
 	paid := completed(page.Items)
 	require.Len(t, paid, 1+renewals, "one local payment per paid period")

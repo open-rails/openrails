@@ -65,12 +65,12 @@ func adminRefundLockKey(paymentID string) int64 {
 func RefundPayment(r *httprequest.Request) {
 	var path paymentPath
 	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidParam, err.Error())
 		return
 	}
 	typedPaymentID, err := billing.ParsePaymentID(path.PaymentID)
 	if err != nil || typedPaymentID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid payment ID")
 		return
 	}
 	paymentID := typedPaymentID.UUID()
@@ -84,7 +84,7 @@ func RefundPayment(r *httprequest.Request) {
 	}
 	idempotencyKey := strings.TrimSpace(strings.TrimSpace(r.Header("Idempotency-Key")))
 	if idempotencyKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
+		r.ErrorCode(billing.CodeInvalidParam, adminRefundIdempotencyHeader+" is required")
 		return
 	}
 	refund, status, err := executeAdminRefund(r.Request.Context(), r, paymentID, req, idempotencyKey)
@@ -481,7 +481,7 @@ func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool)
 	if !ok {
 		return billing.PaymentListParams{}, false
 	}
-	params := billing.PaymentListParams{Page: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
+	params := billing.PaymentListParams{PageRequest: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
 	for name, parse := range map[string]func(string) error{
 		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
 		"price_id":        func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return },

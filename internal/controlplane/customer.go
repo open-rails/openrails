@@ -62,8 +62,8 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID billing.Mer
 	return row.ID, nil
 }
 
-// MerchantForSubject is one merchant a subject holds a customer record with
-// (openrails-saas #18): the directory identity a hosted portal needs to scope
+// MerchantForSubject is one merchant a subject holds a customer record with:
+// the directory identity a hosted portal needs to scope
 // the subject's self-service billing to.
 type MerchantForSubject struct {
 	ID          billing.MerchantID
@@ -72,7 +72,7 @@ type MerchantForSubject struct {
 }
 
 // ListMerchantsForSubject returns the active merchants where subject has a
-// customer record, ordered by slug (openrails-saas #18). subject is the stable
+// customer record, ordered by slug. subject is the stable
 // AuthKit UUID subject (the merchant-scoped customer ID). An empty subject
 // yields no rows rather than an error.
 //

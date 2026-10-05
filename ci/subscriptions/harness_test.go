@@ -42,7 +42,7 @@ const (
 	mountPrefix = "/billing"
 	stripeAcct  = "acct_e2e"
 	nmiAcct     = "e2e-nmi"
-	ccbillAcct  = "945280-0000"
+	ccbillAcct  = "999999-0000"
 	whsecStripe = "whsec_e2e"
 	whsecNMI    = "nmi_webhook_e2e"
 	monthHours  = 720
@@ -246,7 +246,7 @@ func (w *world) start() {
 		Verifier: w.auth,
 		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
 			if _, err := uuid.Parse(p.Identity().Subject); err == nil {
-				return billingauth.CustomerIdentity{ID: p.Identity().Subject, CredentialClass: billingauth.CredentialClassUserSession}, nil
+				return billingauth.CustomerIdentity{ID: cid(p.Identity().Subject), CredentialClass: billingauth.CredentialClassUserSession}, nil
 			}
 			return billingauth.CustomerIdentity{}, nil
 		},
@@ -712,7 +712,7 @@ func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method st
 	c.w.t.Helper()
 	attempt, err := c.w.client[tp].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
-		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
+		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)
@@ -729,6 +729,14 @@ func (c *customer) identity() billing.CheckoutCustomerIdentity {
 
 // cid and pid read test ids as their typed form.
 func cid(id string) billing.CustomerID { return billing.CustomerID(uuid.MustParse(id)) }
+
+func pmid(id string) billing.PaymentMethodID {
+	parsed, err := billing.ParsePaymentMethodID(id)
+	if err != nil {
+		panic(err)
+	}
+	return parsed
+}
 
 func pid(id string) billing.PriceID {
 	parsed, err := billing.ParsePriceID(id)
@@ -801,7 +809,7 @@ func (w *world) payments(tp topology, customerID string) []billing.Payment {
 	w.t.Helper()
 	id, err := billing.ParseCustomerID(customerID)
 	require.NoError(w.t, err)
-	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentListParams{CustomerID: id, Page: billing.PageRequest{Limit: 100}})
+	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentListParams{CustomerID: id, PageRequest: billing.PageRequest{Limit: 100}})
 	require.NoError(w.t, err)
 	return page.Items
 }

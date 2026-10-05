@@ -7,10 +7,10 @@ import "time"
 // what a browser needs to render it; an empty Driver means no browser flow can
 // execute the option.
 type CheckoutOption struct {
-	// Selector is the checkout payment.rail value (the PSP key).
-	Selector string `json:"selector"`
-	PSPID    PSPID  `json:"psp_id"`
-	Rail     string `json:"rail"`
+	// PSP is the PSP's key: the value a checkout attempt's payment.psp names.
+	PSP   string `json:"psp"`
+	PSPID PSPID  `json:"psp_id"`
+	Rail  Rail   `json:"rail"`
 	// Mode is one_off or subscription.
 	Mode string `json:"mode"`
 	// Driver is collect_js, card, stripe_elements, redirect or solana_pay.
@@ -36,8 +36,7 @@ type GetCheckoutConfigParams struct {
 // CheckoutConfig lists the merchant's armed PSPs and the public values a
 // browser needs to drive each one. It never contains merchant secrets.
 type CheckoutConfig struct {
-	Object string              `json:"object"`
-	PSPs   []CheckoutPSPConfig `json:"psps"`
+	PSPs []CheckoutPSPConfig `json:"psps"`
 	// Solana is present when a Solana PSP is armed: the network and the
 	// tokens the merchant accepts, so a host renders wallet options from the
 	// same document it renders card options from.
@@ -142,31 +141,21 @@ type CreateCheckoutAttemptParams struct {
 // or wallet. A Client cannot carry a card number: cards are entered on a
 // checkout session.
 type CheckoutPaymentOptions struct {
-	PSPID           PSPID  `json:"psp_id,omitzero"`
-	Rail            string `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
-	PaymentMethodID string `json:"payment_method_id,omitzero"` // For returning customers with saved payment methods
-	PaymentToken    string `json:"payment_token"`              // For new card tokenization (NMI Collect.js)
-
-	// Solana-specific
-	TokenSymbol string `json:"token_symbol"` // e.g., "USDC", "SOL"
-	Flow        string `json:"flow"`         // "transfer_request" or "transaction_request"
-	Wallet      string `json:"wallet"`       // Solana wallet address
-
-	// Billing details. CCBill requires the canonical name, postal code, and
-	// country; its verified email comes from CheckoutCustomerIdentity. Street,
-	// city, and state are optional. Stripe hosted Checkout collects its own.
-	Email      string `json:"email"`
-	NameOnCard string `json:"name_on_card"` // Full name as it appears on the card.
-	Address1   string `json:"address1"`
-	City       string `json:"city"`
-	State      string `json:"state"`
-	Zip        string `json:"zip"`
-	Country    string `json:"country"`
-
-	// Card details (for display, from tokenization)
-	LastFour   string `json:"last_four"`
-	CardType   string `json:"card_type"`
-	ExpiryDate string `json:"expiry_date"`
+	// PSP is the PSP's key (CheckoutOption.PSP); empty lets the merchant's
+	// checkout routing pick.
+	PSP string `json:"psp,omitempty"`
+	// PaymentMethodID is a saved card of the customer's; PaymentToken a card
+	// the PSP's browser fields tokenized.
+	PaymentMethodID PaymentMethodID `json:"payment_method_id,omitzero"`
+	PaymentToken    string          `json:"payment_token,omitempty"`
+	// BillingDetails go with a new card. CCBill needs the name, postal code
+	// and country; the verified email comes from CheckoutCustomerIdentity.
+	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
+	// TokenSymbol (USDC, SOL), Flow (transfer_request or
+	// transaction_request) and Wallet pay on Solana.
+	TokenSymbol string `json:"token_symbol,omitempty"`
+	Flow        string `json:"flow,omitempty"`
+	Wallet      string `json:"wallet,omitempty"`
 }
 
 // CheckoutAttemptStatus is where an attempt stands. processing: the provider
@@ -188,7 +177,6 @@ const (
 // requires_action the buyer completes NextAction, or the card payment's
 // Operation authentication (3-D Secure).
 type CheckoutAttempt struct {
-	Object          string                `json:"object"`
 	ID              CheckoutAttemptID     `json:"id"`
 	CustomerID      CustomerID            `json:"customer_id"`
 	Status          CheckoutAttemptStatus `json:"status"`

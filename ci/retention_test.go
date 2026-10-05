@@ -136,7 +136,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	require.NoError(t, err)
 	request, deadline := "job-"+uuid.NewString(), now.Add(time.Hour)
 	verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
-		RequestID: request, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypePayer,
+		RequestID: request, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer,
 		Currency: "USD", EstimatedAmount: 100_000, ExpiresAt: &deadline,
 	}})
 	require.NoError(t, err)
@@ -270,7 +270,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	admit := func(c billing.CustomerID, request string, deadline time.Time) billing.AdmissionVerdict {
 		t.Helper()
 		verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
-			RequestID: request, CustomerID: c, Invoker: c.String(), InvokerType: billing.InvokerTypePayer,
+			RequestID: request, CustomerID: c, Invoker: c.String(), InvokerType: billing.InvokerTypeCustomer,
 			Currency: "USD", EstimatedAmount: 1_000, ExpiresAt: &deadline,
 		}})
 		require.NoError(t, err)

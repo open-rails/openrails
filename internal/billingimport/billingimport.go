@@ -1,5 +1,5 @@
 // Package billingimport is the #737 DeclaredBilling import seam: a host (or a
-// SaaS merchant over HTTP) hands over its legacy billing book as FACTS and
+// hosted merchant over HTTP) hands over its legacy billing book as FACTS and
 // OpenRails classifies them through the same decider pipeline the
 // pull/probe/webhook planes use, evaluated at the declared AsOf horizon.
 // Admin comps ride the same book (AdminGrants): SourceID idempotency,

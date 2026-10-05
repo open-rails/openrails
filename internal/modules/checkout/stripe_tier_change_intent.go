@@ -760,15 +760,17 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 	subID := billing.SubscriptionID(p.SubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: (billing.PriceID(p.PriceID)).String(),
-		Payment: CheckoutAttemptPaymentResponse{Rail: string(models.RailStripe)}, SubscriptionID: &subID,
+		Action: p.Action, PriceID: billing.PriceID(p.PriceID),
+		Rail: string(models.RailStripe), SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
-		OperationID: in.ID.String(), Effective: effectiveOf(p.Action),
+		OperationID: billing.PaymentOperationID(in.ID), Effective: effectiveOf(p.Action),
 	}
 	switch in.Status {
 	case intents.StatusSucceeded:
 		resp.Status = "succeeded"
-		resp.Payment.TransactionID = intents.EvidenceString(in, "transaction_id")
+		if tx := intents.EvidenceString(in, "transaction_id"); tx != "" {
+			resp.TransactionID = &tx
+		}
 		// Dates come from the receipt Stripe answered with, not the estimate.
 		var progress stripeTierChangeProgress
 		_ = json.Unmarshal(in.ResultEvidence, &progress)

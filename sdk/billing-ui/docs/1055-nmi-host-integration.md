@@ -1,7 +1,6 @@
 # NMI host integration and pending checkout states
 
 Owner: `/root/astra_neutral_resume`.
-Worktree: `/home/fidika/cozy/.worktrees/billing-ui/1055-nmi-checkout-ui-20260923`.
 Branch: `feat/1055-nmi-checkout-ui-20260923`.
 Base: `05d6e27` from freshly fetched `origin/master`.
 

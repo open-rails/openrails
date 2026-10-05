@@ -78,7 +78,7 @@ type PaymentListParams struct {
 	Rail           string
 	Kind           PaymentKind
 	TransactionID  string
-	Page           PageRequest
+	PageRequest
 }
 
 // PaymentSettlementStatus reports whether a customer has ever paid for a

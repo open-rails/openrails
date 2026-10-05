@@ -152,9 +152,9 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "invalid delegated token", opts: GateOptions{DelegatedResolver: delegatedResolver{err: credential.ErrDelegatedInvalid}}, header: bearer("a.b.c"), want: want{status: 401, message: "delegated_token_invalid"}},
 		{name: "opaque token skips delegated resolver", opts: GateOptions{DelegatedResolver: delegatedOK}, header: bearer("opaque"), want: want{status: 401, message: "bearer principal required"}},
 
-		{name: "host delegated principal", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{read}}, nil)}, want: want{merchant: merchantA, subject: userA, userID: userA}},
-		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{billing.MerchantUsageRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
-		{name: "host delegated principal with opaque subject", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: "user-1", Permissions: []string{read}}, nil)}, want: want{status: 401, message: "delegated_principal_invalid"}},
+		{name: "host delegated principal", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(merchantA), SubjectID: userA, Permissions: []string{read}}, nil)}, want: want{merchant: merchantA, subject: userA, userID: userA}},
+		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(merchantA), SubjectID: userA, Permissions: []string{billing.MerchantUsageRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
+		{name: "host delegated principal with opaque subject", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(merchantA), SubjectID: "user-1", Permissions: []string{read}}, nil)}, want: want{status: 401, message: "delegated_principal_invalid"}},
 		{name: "host delegated rejection", opts: GateOptions{DelegatedAuthenticator: hostDelegated(nil, billingauth.ErrUnauthenticated)}, want: want{status: 401, message: "authentication required"}},
 
 		{name: "no credential path", want: want{status: 401, message: "bearer principal required"}},

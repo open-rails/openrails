@@ -52,7 +52,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 	repriced.Amount = 123
 	require.ErrorIs(t, quoteInitialMembership(ctx, &restored, &repriced, &product, method, now), ErrCheckoutAttemptConflict, "a quoted session is never re-quoted")
 
-	principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: customer.String()}
+	principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: billing.MerchantID(mid), SubjectID: customer.String()}
 	accepted, err := acceptedInitialMembershipQuote(ctx, &restored, principal, now.Add(10*time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, quoted.PaymentID, accepted.PaymentID)
@@ -63,7 +63,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 		func(p *billingauth.DelegatedPrincipal) { p.CredentialClass = billingauth.CredentialClassAutomation },
 		func(p *billingauth.DelegatedPrincipal) { p.CredentialClass = billingauth.CredentialClassUnknown },
 		func(p *billingauth.DelegatedPrincipal) { p.Invoker = "agent" },
-		func(p *billingauth.DelegatedPrincipal) { p.MerchantID = uuid.NewString() },
+		func(p *billingauth.DelegatedPrincipal) { p.MerchantID = billing.MerchantID(uuid.New()) },
 		func(p *billingauth.DelegatedPrincipal) { p.SubjectID = uuid.NewString() },
 	} {
 		bad := principal

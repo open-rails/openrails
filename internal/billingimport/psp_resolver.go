@@ -64,8 +64,8 @@ func (r *pspResolver) resolve(ref PSPRef, rail, subject string) (uuid.UUID, erro
 			"%w: %s declares no PSP and the book set no default_psp — a provider row must state which account it came from (known PSPs: %s)",
 			ErrInvalidPSPReference, subject, r.knownList())
 	}
-	if ref.ID != nil && *ref.ID != uuid.Nil {
-		p, ok := r.byID[*ref.ID]
+	if ref.ID != nil && !ref.ID.IsZero() {
+		p, ok := r.byID[ref.ID.UUID()]
 		if !ok {
 			return uuid.Nil, fmt.Errorf("%w: %s names PSP %s, which this merchant does not own", ErrInvalidPSPReference, subject, *ref.ID)
 		}

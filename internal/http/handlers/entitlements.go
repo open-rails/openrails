@@ -229,12 +229,12 @@ func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 	}
 	req.Entitlement = strings.TrimSpace(req.Entitlement)
 	if req.Entitlement == "" {
-		r.ErrorJSON(http.StatusBadRequest, "entitlement is required")
+		r.ErrorCode(billing.CodeInvalidParam, "entitlement is required")
 		return
 	}
 	svc := r.State.EntitlementService
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "entitlement service unavailable")
 		return
 	}
 	// #511: a manual grant is an admin-sourced ledger fact whose SourceID is
@@ -243,18 +243,18 @@ func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 	params := entitlements.PushNewEntitlementParams{UserID: customerID.String(), Entitlement: req.Entitlement, SourceType: models.EntitlementSourceAdmin, SourceID: uuidutil.NewV7()}
 	switch {
 	case req.Hours != nil && req.EndsAt != nil:
-		r.ErrorJSON(http.StatusBadRequest, "hours and ends_at are mutually exclusive")
+		r.ErrorCode(billing.CodeInvalidParam, "hours and ends_at are mutually exclusive")
 		return
 	case req.Hours != nil:
 		if *req.Hours <= 0 || int64(*req.Hours) > maxGrantHours {
-			r.ErrorJSON(http.StatusBadRequest, fmt.Sprintf("hours must be between 1 and %d (or omit for indefinite)", maxGrantHours))
+			r.ErrorCode(billing.CodeInvalidParam, fmt.Sprintf("hours must be between 1 and %d (or omit for indefinite)", maxGrantHours))
 			return
 		}
 		d := time.Duration(*req.Hours) * time.Hour
 		params.Duration = &d
 	case req.EndsAt != nil:
 		if !req.EndsAt.After(r.Clock.Now()) {
-			r.ErrorJSON(http.StatusBadRequest, "ends_at must be in the future")
+			r.ErrorCode(billing.CodeInvalidParam, "ends_at must be in the future")
 			return
 		}
 		endAt := req.EndsAt.UTC()
@@ -268,12 +268,12 @@ func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 	var err error
 	params.CustomerID, err = tenantSubjectForEntitlementGrantTarget(r, customerID.String())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve target tenant subject")
+		r.ErrorCode(billing.CodeInternalError, "failed to resolve target tenant subject")
 		return
 	}
 	ent, err := svc.PushNewEntitlement(r.Request.Context(), params)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.ErrorCode(billing.CodeInternalError, err.Error())
 		return
 	}
 	convergeAfterMutation(r, params.CustomerID) // #511: re-converge the customer inline

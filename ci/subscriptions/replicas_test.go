@@ -508,7 +508,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 		require.NoError(t, err)
 	}
 	refund := func(t *testing.T, f *fleet, r *world, e *engineCase) {
-		page, err := r.client[remote].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 10}})
+		page, err := r.client[remote].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), PageRequest: billing.PageRequest{Limit: 10}})
 		require.NoError(t, err)
 		paid := completed(page.Items)
 		require.Len(t, paid, 1)
@@ -552,7 +552,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				}
 				require.Len(t, f.charges(e), want)
 				require.Equal(t, want, f.submissions(e), "nothing is sent after the cancel")
-				page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 10}})
+				page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), PageRequest: billing.PageRequest{Limit: 10}})
 				require.NoError(t, err)
 				charged := 0
 				for _, p := range completed(page.Items) {

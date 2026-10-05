@@ -22,12 +22,12 @@ func MerchantListMine(svc MerchantLister) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		uc, ok := r.UserContext()
 		if !ok || strings.TrimSpace(uc.UserID) == "" {
-			r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+			r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
 			return
 		}
 		list, err := svc.ListUserMerchants(r.Request.Context(), uc.UserID)
 		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to list merchants")
+			r.ErrorCode(billing.CodeInternalError, "failed to list merchants")
 			return
 		}
 		r.SuccessJSON(billing.ListPage[billing.UserMerchant]{Items: list})
@@ -49,7 +49,7 @@ func MerchantCreate(svc MerchantCreator) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		uc, ok := r.UserContext()
 		if !ok || strings.TrimSpace(uc.UserID) == "" {
-			r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+			r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
 			return
 		}
 		var req billing.CreateMerchantParams
@@ -63,7 +63,7 @@ func MerchantCreate(svc MerchantCreator) func(*httprequest.Request) {
 			return
 		}
 		if err := svc.SetMerchantDisplayName(ctx, m.ID, req.DisplayName); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set merchant display name failed")
+			r.ErrorCode(billing.CodeInternalError, "set merchant display name failed")
 			return
 		}
 		status := http.StatusOK
@@ -100,6 +100,6 @@ func merchantCreateError(r *httprequest.Request, err error) {
 	case errors.Is(err, billing.ErrMerchantCreationRefused):
 		r.ErrorCode("creation_refused", "merchant creation refused")
 	default:
-		r.ErrorJSON(http.StatusInternalServerError, "merchant creation failed")
+		r.ErrorCode(billing.CodeInternalError, "merchant creation failed")
 	}
 }

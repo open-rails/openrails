@@ -82,6 +82,8 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 		FirstName:     ResolveCheckoutFirstName(req, user),
 		LastName:      ResolveCheckoutLastName(req),
 		Address1:      req.Address1,
+		Address2:      req.Address2,
+		Phone:         req.Phone,
 		City:          req.City,
 		State:         req.State,
 		Zip:           req.Zip,

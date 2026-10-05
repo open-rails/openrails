@@ -1,4 +1,4 @@
-// App shell sidebar — same anatomy as the openrails-saas product shell
+// App shell sidebar — same anatomy as the hosted product's shell
 // (inset variant, brand header, nav, footer user menu, rail).
 import { HugeiconsIcon } from "@hugeicons/react"
 import {

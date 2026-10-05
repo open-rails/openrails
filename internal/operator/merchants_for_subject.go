@@ -9,7 +9,7 @@ import (
 )
 
 // ListMerchantsForSubject returns the active merchants where the AuthKit subject
-// holds a customer record (openrails-saas #18) — the "which merchants do I buy
+// holds a customer record — the "which merchants do I buy
 // from" enumeration a hosted customer portal needs, and which no per-merchant
 // surface can answer. Delegates to the control plane's cross-merchant
 // directory read.

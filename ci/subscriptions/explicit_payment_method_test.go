@@ -35,7 +35,7 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 			}{{sale.ID, "content:post", billing.OfferPermanent}, {member.ID, "content:members", billing.OfferRecurring}} {
 				_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 					OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: offer.entitlement, PriceID: offer.price,
-					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi"},
+					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi"},
 				})
 				require.ErrorIs(t, err, billing.ErrPaymentMethodRequired)
 				require.ErrorIs(t, err, billing.ErrInvalid)

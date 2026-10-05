@@ -40,9 +40,8 @@ func TestPricedCheckoutRejectsBeforeEngine(t *testing.T) {
 		{`{"subscription_id":"x"}`, billing.CodeUnknownField},
 		{`{"new_price_id":"x"}`, billing.CodeUnknownField},
 		{`{"payment":{"card":{"number":"4111111111111111"}}}`, billing.CodeUnknownField},
-		{`{"payment":{"payment_method_id":"550e8400-e29b-41d4-a716-446655440000"}}`, "invalid payment_method_id"},
-		{`{"payment":{"payment_method_id":"price_550e8400-e29b-41d4-a716-446655440000"}}`, "invalid payment_method_id"},
-		{`{"payment":{"payment_method_id":"pm_00000000-0000-0000-0000-000000000000"}}`, "invalid payment_method_id"},
+		{`{"payment":{"payment_method_id":"550e8400-e29b-41d4-a716-446655440000"}}`, billing.CodeInvalidParam},
+		{`{"payment":{"payment_method_id":"price_550e8400-e29b-41d4-a716-446655440000"}}`, billing.CodeInvalidParam},
 	} {
 		r, rec := newTestRequest(http.MethodPost, "/v1/merchant/checkout-attempts", strings.NewReader(tc.body), nil)
 		ServiceCreateCheckoutAttempt(r)
@@ -71,7 +70,7 @@ func TestCustomerActionRequiresInteractiveSession(t *testing.T) {
 				require.Equal(t, http.StatusForbidden, rec.Code)
 				require.Contains(t, rec.Body.String(), "customer_action_required")
 			}
-			require.Equal(t, billingauth.DelegatedPrincipal{CredentialClass: class, Invoker: invoker, SubjectID: payer, MerchantID: mid.String()}, checkoutVerifiedPrincipal(r))
+			require.Equal(t, billingauth.DelegatedPrincipal{CredentialClass: class, Invoker: invoker, SubjectID: payer, MerchantID: mid}, checkoutVerifiedPrincipal(r))
 		}
 	}
 	r, rec := newTestRequest(http.MethodPost, "/", nil, nil)

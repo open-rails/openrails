@@ -9,20 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
-
-// systemCustomerNamespace permanently anchors the per-merchant payable subject
-// that owns platform-initiated rows with no human principal (for example,
-// ledger repair alerts). It must not change after per-merchant IDs ship because
-// persisted notification rows refer to the IDs derived from it.
-var systemCustomerNamespace = uuid.MustParse("00000000-0000-0000-0000-000000000001")
-
-// SystemCustomerID derives the well-known system payable subject for merchantID.
-// Its namespace separates synthetic platform activity from human subjects.
-func SystemCustomerID(merchantID uuid.UUID) uuid.UUID {
-	return uuidutil.DeterministicID(systemCustomerNamespace, merchantID.String())
-}
 
 // errNonUUIDSubject builds the rejection for non-UUID payable identities.
 // OpenRails is UUID-only (#364): there is no legacy issuer, no generated row

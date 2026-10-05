@@ -62,6 +62,7 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 		consoleDir + "wire.ts":          all.wireTS(),
 		consoleDir + "routes.ts":        all.routesTS(),
 		consoleDir + "error-codes.ts":   errorCodesTS(),
+		consoleDir + "currencies.ts":    currenciesTS(),
 	}, nil
 }
 

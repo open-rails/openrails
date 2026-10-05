@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -38,7 +39,7 @@ func passedGates(code int) bool {
 
 func customerAuth(invoker string, perms ...string) router.Middleware {
 	return middleware.DelegatedPrincipalRequired(hostDelegated(&billingauth.DelegatedPrincipal{
-		MerchantID: merchantA.String(), MerchantSlug: "acme", SubjectID: userA, Invoker: invoker, Permissions: perms,
+		MerchantID: billing.MerchantID(merchantA), MerchantSlug: "acme", SubjectID: userA, Invoker: invoker, Permissions: perms,
 	}, nil))
 }
 

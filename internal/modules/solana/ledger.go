@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"math"
 	"strconv"
 	"strings"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/webhooks"
 )
 
 // ReferenceKind says what a landed transaction on a reference means.
@@ -339,11 +339,11 @@ func (l *PayLedger) RaiseReview(ctx context.Context, r Receipt, customerID strin
 	if r.LandedAt != nil {
 		meta["landed_at"] = r.LandedAt.UTC().Format(time.RFC3339)
 	}
-	return webhooks.RecordLedgerRepairAlert(ctx, nil, l.db, now, webhooks.LedgerRepairAlert{
+	return alerting.RecordLedgerRepair(ctx, l.db, now, alerting.LedgerRepair{
 		Provider:          string(models.RailSolana),
 		Operation:         "solana_pay_" + r.ReviewReason,
 		TransactionID:     r.Signature,
-		UserID:            customerID,
+		CustomerID:        customerID,
 		IdempotencyKey:    "solana-pay-review:" + r.Reference + ":" + r.Signature,
 		OriginalPaymentID: r.PaymentID,
 		Err:               fmt.Errorf("solana transfer %s: %s (expected %d, received %d)", r.Signature, r.ReviewReason, r.ExpectedAmount, r.ReceivedAmount),
@@ -364,11 +364,11 @@ type LateSettlement struct {
 // RecordLateSettlement surfaces a payment that landed past its quote's late
 // window: it grants nothing, and the operator refunds or grants by hand.
 func RecordLateSettlement(ctx context.Context, database *db.DB, landedAt time.Time, reference, signature string, late LateSettlement) error {
-	if err := webhooks.RecordLedgerRepairAlert(ctx, nil, database, landedAt, webhooks.LedgerRepairAlert{
+	if err := alerting.RecordLedgerRepair(ctx, database, landedAt, alerting.LedgerRepair{
 		Provider:       string(models.RailSolana),
 		Operation:      "late_quote_settlement",
 		TransactionID:  signature,
-		UserID:         late.UserID,
+		CustomerID:     late.UserID,
 		IdempotencyKey: "solana-late:" + signature,
 		Err:            fmt.Errorf("transfer landed %s after its quote expired", landedAt.Sub(late.ExpiresAt).Round(time.Second)),
 		Metadata: map[string]any{

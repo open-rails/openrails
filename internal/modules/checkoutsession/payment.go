@@ -31,24 +31,14 @@ func TakesCards(driver string) bool {
 // The card, when the page sent one, is returned beside the options: it
 // travels to the engine and nowhere else.
 func Payment(option Option, input PayCheckoutSessionParams, verifiedEmail string, savedMethod func(id string) bool) (billing.CheckoutPaymentOptions, *cardguard.Card, error) {
-	input = trimPayment(input)
-	if exceedsPaymentLimits(input) {
+	in := billingInputOf(input.BillingDetails)
+	input.OptionID, input.PaymentToken, input.TokenSymbol = strings.TrimSpace(input.OptionID), strings.TrimSpace(input.PaymentToken), strings.TrimSpace(input.TokenSymbol)
+	if len(input.OptionID) > 128 || len(input.PaymentToken) > 4096 || len(input.TokenSymbol) > 16 || in.exceedsLimits() {
 		return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 	}
-	if raw := input.PaymentMethodID; raw != "" {
-		if id, err := billing.ParsePaymentMethodID(raw); err != nil || id.IsZero() {
-			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
-		}
-	}
 	var card *cardguard.Card
-	out := billing.CheckoutPaymentOptions{
-		Rail: option.Selector, PSPID: option.PSPID,
-		PaymentToken: input.PaymentToken, PaymentMethodID: input.PaymentMethodID,
-		Email: verifiedEmail, NameOnCard: input.NameOnCard,
-		Address1: input.Address1, City: input.City, State: input.State, Zip: input.Zip, Country: input.Country,
-		LastFour: input.LastFour, CardType: input.CardType, ExpiryDate: input.ExpiryDate,
-	}
-	hasToken, hasMethod, hasCard := input.PaymentToken != "", input.PaymentMethodID != "", input.Card != nil
+	out := billing.CheckoutPaymentOptions{PSP: option.Selector, PaymentToken: input.PaymentToken, PaymentMethodID: input.PaymentMethodID}
+	hasToken, hasMethod, hasCard := input.PaymentToken != "", !input.PaymentMethodID.IsZero(), input.Card != nil
 	switch option.Driver {
 	case "collect_js", "card":
 		// A collect_js page tokenizes the card; a card page (the PSP's
@@ -61,31 +51,28 @@ func Payment(option Option, input PayCheckoutSessionParams, verifiedEmail string
 			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 		}
 		if hasCard {
-			// The card names itself; the engine stamps its display fields.
-			card, out.LastFour, out.CardType, out.ExpiryDate = input.Card, "", "", ""
+			card = input.Card
 		}
-		// The compact card form collects name, country and postal code only.
-		out.Address1, out.City, out.State = "", "", ""
 		if hasMethod {
-			if !savedMethod(input.PaymentMethodID) {
+			if !savedMethod(input.PaymentMethodID.String()) {
 				return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 			}
 			// The vaulted method owns its billing identity.
-			out.NameOnCard, out.Zip, out.Country = "", "", ""
-			out.LastFour, out.CardType, out.ExpiryDate = "", "", ""
+			in = billingInput{}
 			break
 		}
-		if input.NameOnCard == "" || !validCountry(input.Country) ||
-			(postalRequired(input.Country) && input.Zip == "") || !validUSPostal(input.Country, input.Zip) {
+		if in.name == "" || !validCountry(in.country) ||
+			(postalRequired(in.country) && in.postal == "") || !validUSPostal(in.country, in.postal) {
 			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 		}
+		// The compact card form collects name, country and postal code only.
+		in = billingInput{name: in.name, postal: in.postal, country: in.country}
 	case "stripe_elements":
 		// The card was saved in Stripe's fields; the page names it.
-		if hasToken || hasCard || !hasMethod || !savedMethod(input.PaymentMethodID) {
+		if hasToken || hasCard || !hasMethod || !savedMethod(input.PaymentMethodID.String()) {
 			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 		}
-		out.NameOnCard, out.Address1, out.City, out.State, out.Zip, out.Country = "", "", "", "", "", ""
-		out.LastFour, out.CardType, out.ExpiryDate = "", "", ""
+		in = billingInput{}
 	case "redirect":
 		if hasToken || hasMethod || hasCard {
 			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
@@ -99,34 +86,63 @@ func Payment(option Option, input PayCheckoutSessionParams, verifiedEmail string
 			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 		}
 		out.TokenSymbol, out.Flow = bound, "transfer_request"
+		in = billingInput{}
 	default:
 		return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 	}
+	// The email is the buyer's verified one, never the page's.
+	in.email = strings.TrimSpace(verifiedEmail)
+	out.BillingDetails = in.details()
 	return out, card, nil
 }
 
-func trimPayment(in PayCheckoutSessionParams) PayCheckoutSessionParams {
-	in.OptionID = strings.TrimSpace(in.OptionID)
-	in.PaymentToken = strings.TrimSpace(in.PaymentToken)
-	in.PaymentMethodID = strings.TrimSpace(in.PaymentMethodID)
-	in.NameOnCard = strings.TrimSpace(in.NameOnCard)
-	in.Address1 = strings.TrimSpace(in.Address1)
-	in.City = strings.TrimSpace(in.City)
-	in.State = strings.TrimSpace(in.State)
-	in.Zip = strings.TrimSpace(in.Zip)
-	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
-	in.TokenSymbol = strings.TrimSpace(in.TokenSymbol)
-	in.LastFour = strings.TrimSpace(in.LastFour)
-	in.CardType = strings.TrimSpace(in.CardType)
-	in.ExpiryDate = strings.TrimSpace(in.ExpiryDate)
+// billingInput is a pay body's billing details, trimmed.
+type billingInput struct {
+	name, email, phone, line1, line2, city, state, postal, country string
+}
+
+func billingInputOf(d *billing.BillingDetails) billingInput {
+	text := func(v *string) string {
+		if v == nil {
+			return ""
+		}
+		return strings.TrimSpace(*v)
+	}
+	var in billingInput
+	if d == nil {
+		return in
+	}
+	in.name, in.phone = text(d.Name), text(d.Phone)
+	if a := d.Address; a != nil {
+		in.line1, in.line2, in.city, in.state = text(a.Line1), text(a.Line2), text(a.City), text(a.State)
+		in.postal, in.country = text(a.PostalCode), strings.ToUpper(text(a.Country))
+	}
 	return in
 }
 
-func exceedsPaymentLimits(in PayCheckoutSessionParams) bool {
-	return len(in.OptionID) > 128 || len(in.PaymentToken) > 4096 || len(in.PaymentMethodID) > 64 ||
-		utf8.RuneCountInString(in.NameOnCard) > 200 || len(in.Address1) > 200 ||
-		len(in.City) > 100 || len(in.State) > 100 || len(in.Zip) > 32 || len(in.Country) > 3 ||
-		len(in.TokenSymbol) > 16 || len(in.LastFour) > 4 || len(in.CardType) > 32 || len(in.ExpiryDate) > 7
+func (in billingInput) exceedsLimits() bool {
+	return utf8.RuneCountInString(in.name) > 200 || len(in.phone) > 32 || len(in.line1) > 200 || len(in.line2) > 200 ||
+		len(in.city) > 100 || len(in.state) > 100 || len(in.postal) > 32 || len(in.country) > 3
+}
+
+// details is the input as billing details, nil when empty.
+func (in billingInput) details() *billing.BillingDetails {
+	value := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
+	out := &billing.BillingDetails{Name: value(in.name), Email: value(in.email), Phone: value(in.phone)}
+	address := &billing.BillingAddress{Line1: value(in.line1), Line2: value(in.line2), City: value(in.city), State: value(in.state),
+		PostalCode: value(in.postal), Country: value(in.country)}
+	if *address != (billing.BillingAddress{}) {
+		out.Address = address
+	}
+	if *out == (billing.BillingDetails{}) {
+		return nil
+	}
+	return out
 }
 
 func validCountry(country string) bool {

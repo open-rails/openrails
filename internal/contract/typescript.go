@@ -106,8 +106,6 @@ func (m *model) bodyTS(v any) string {
 	switch body := v.(type) {
 	case nil:
 		return "null"
-	case routes.Untyped:
-		return `"unknown"`
 	case routes.Stream:
 		return fmt.Sprintf("%q", body.ContentType)
 	}

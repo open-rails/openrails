@@ -43,9 +43,6 @@ const (
 	NotificationInvoiceIssued  NotificationEventType = "invoice_issued"
 	NotificationInvoiceOverdue NotificationEventType = "invoice_overdue"
 
-	// System notifications (1 type)
-	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
-
 	// Translation notifications
 	NotificationTranslationCompleted              NotificationEventType = "translation_completed"                // Voted translation completed (rate-limited)
 	NotificationTranslationCompletedPendingDigest NotificationEventType = "translation_completed_pending_digest" // queued for weekly digest
@@ -82,7 +79,7 @@ func (nq *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(n
 
 // View is the wire shape of the row.
 func (nq *NotificationQueue) View() billing.Notification {
-	return billing.Notification{ID: billing.NotificationID(nq.ID), CustomerID: billing.CustomerID(nq.CustomerID).String(), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
+	return billing.Notification{ID: billing.NotificationID(nq.ID), CustomerID: billing.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
 }
 
 // IsSeen checks if the notification has been seen by the user

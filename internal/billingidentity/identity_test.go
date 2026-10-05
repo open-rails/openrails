@@ -25,7 +25,7 @@ func TestCustomerIDFromStringIsUUIDOnly(t *testing.T) {
 
 // Unknown invoker types fail closed into the stricter delegated cutoffs.
 func TestInvokerTypeFailsClosed(t *testing.T) {
-	for in, payer := range map[string]bool{"payer": true, " payer ": true, "PAYER": false, "": false, "delegated": false, "admin": false} {
+	for in, payer := range map[string]bool{"customer": true, " customer ": true, "CUSTOMER": false, "": false, "delegated": false, "admin": false} {
 		if IsDirectPayerInvoker(in) != payer {
 			t.Errorf("IsDirectPayerInvoker(%q) = %v", in, !payer)
 		}

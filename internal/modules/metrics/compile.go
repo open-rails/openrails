@@ -254,11 +254,11 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: plan.HasTime, balance: true}, nil
 }
 
-// compileDepletion: payers whose prepaid balance at the edge covers <= N days
-// of their trailing-7d burn, in any currency. Bounded: edges x payers.
+// compileDepletion: customers whose prepaid balance at the edge covers <= N days
+// of their trailing-7d burn, in any currency. Bounded: edges x customers.
 func compileDepletion(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, error) {
 	edges := snapshotEdges(plan, leaves)
-	sql := fmt.Sprintf(`SELECT edge.bucket AS bucket, COUNT(DISTINCT x.customer_id) AS m_payers_at_depletion_risk
+	sql := fmt.Sprintf(`SELECT edge.bucket AS bucket, COUNT(DISTINCT x.customer_id) AS m_customers_at_depletion_risk
 FROM unnest($2::timestamptz[]) AS edge(bucket)
 LEFT JOIN LATERAL (
   SELECT bal.customer_id

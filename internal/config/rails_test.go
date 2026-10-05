@@ -79,8 +79,8 @@ func TestRailSetShapeValidation(t *testing.T) {
 		"two stripe with ids":         {PSPSet{"a": withAccount(stripeRail("sk_test_a"), "acct_a"), "b": withAccount(stripeRail("sk_test_b"), "acct_b")}, ""},
 		"archived still needs id":     {PSPSet{"a": func() *ResolvedPSP { p := stripeRail("sk_test_a"); p.Archived = true; return p }(), "b": stripeRail("sk_test_b")}, "must declare account_id"},
 		"two solana need no id":       {PSPSet{"a": solana("helius", "k"), "b": solana("public", "")}, ""},
-		"ccbill dash identity":        {PSPSet{"ccbill": ccbill("945280-0000")}, ""},
-		"ccbill slash identity":       {PSPSet{"ccbill": ccbill("945280/0000")}, "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000"},
+		"ccbill dash identity":        {PSPSet{"ccbill": ccbill("999999-0000")}, ""},
+		"ccbill slash identity":       {PSPSet{"ccbill": ccbill("999999/0000")}, "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000"},
 		"ccbill missing identity":     {PSPSet{"ccbill": ccbill("")}, "account_id is required"},
 		"ccbill half datalink":        {PSPSet{"ccbill": {Rail: models.RailCCBill, AccountID: "1-2", CCBill: &CCBillRailConfig{Salt: "s", DataLinkUsername: "u"}}}, "datalink_username and datalink_password"},
 		"ccbill without salt":         {PSPSet{"ccbill": {Rail: models.RailCCBill, AccountID: "1-2", CCBill: &CCBillRailConfig{}}}, "salt is required"},
@@ -104,9 +104,9 @@ func TestRailSetShapeValidation(t *testing.T) {
 		})
 	}
 
-	derived := ccbill("945280-0000").ToCCBillConfig()
-	require.Equal(t, [3]string{"945280", "0000", "s"}, [3]string{derived.ClientAccNum, derived.ClientSubAcc, derived.Salt})
-	require.Empty(t, ccbill("945280").ToCCBillConfig().ClientAccNum, "a malformed identity never half-derives")
+	derived := ccbill("999999-0000").ToCCBillConfig()
+	require.Equal(t, [3]string{"999999", "0000", "s"}, [3]string{derived.ClientAccNum, derived.ClientSubAcc, derived.Salt})
+	require.Empty(t, ccbill("999999").ToCCBillConfig().ClientAccNum, "a malformed identity never half-derives")
 }
 
 // Config-only selection is deterministic (sorted keys) and never picks an

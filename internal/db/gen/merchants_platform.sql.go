@@ -12,25 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countPlatformMerchants = `-- name: CountPlatformMerchants :one
-SELECT count(*)
-FROM billing.merchants
-WHERE ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
-`
-
-type CountPlatformMerchantsParams struct {
-	Status *string
-	Query  *string
-}
-
-func (q *Queries) CountPlatformMerchants(ctx context.Context, arg CountPlatformMerchantsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPlatformMerchants, arg.Status, arg.Query)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getPlatformMerchant = `-- name: GetPlatformMerchant :one
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
 FROM billing.merchants
@@ -149,15 +130,17 @@ SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
 FROM billing.merchants
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
+  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $4::bigint OFFSET $3::bigint
+LIMIT $5::int
 `
 
 type ListPlatformMerchantsParams struct {
-	Status     *string
-	Query      *string
-	PageOffset int64
-	PageLimit  int64
+	Status   *string
+	Query    *string
+	AfterAt  *time.Time
+	AfterID  *uuid.UUID
+	RowLimit int32
 }
 
 type ListPlatformMerchantsRow struct {
@@ -175,13 +158,15 @@ type ListPlatformMerchantsRow struct {
 // soft-delete/restore tombstone. Soft delete here is DIRECTORY state (list
 // exclusion + merchant-auth resolution failure); it is NOT the #225 gated purge
 // (internal/merchants/delete.go), which stays the only row-destroying path.
-// query searches current names only; former names are not listed.
+// One page of the directory, newest first, after a (created_at, id) cursor;
+// query searches current names only.
 func (q *Queries) ListPlatformMerchants(ctx context.Context, arg ListPlatformMerchantsParams) ([]ListPlatformMerchantsRow, error) {
 	rows, err := q.db.Query(ctx, listPlatformMerchants,
 		arg.Status,
 		arg.Query,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

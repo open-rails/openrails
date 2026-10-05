@@ -2,18 +2,6 @@ package billing
 
 import "time"
 
-// Page is the common bounded list envelope. Empty lists contain data: [].
-type Page[T any] struct {
-	Object  string `json:"object"`
-	Data    []T    `json:"data"`
-	Total   int64  `json:"total"`
-	Limit   int    `json:"limit"`
-	Offset  int    `json:"offset"`
-	HasMore bool   `json:"has_more"`
-}
-
-type PageOptions struct{ Limit, Offset int }
-
 // SubscriptionStatus is a subscription's lifecycle state: whether it will
 // rebill.
 type SubscriptionStatus string

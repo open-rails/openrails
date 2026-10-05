@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
@@ -40,7 +42,7 @@ func refuseBlockedCardAttempt(r *httprequest.Request, customerID string) bool {
 	wait, blocked, err := ledger.Blocked(r.Request.Context(), merchantID, abuse.CustomerSubject(customerID), abuse.AddressSubject(r.ClientIP()))
 	if err != nil {
 		log.WithError(err).WithField("request_id", r.RequestID()).Error("card attempt ledger unavailable")
-		r.ErrorJSON(http.StatusServiceUnavailable, "card attempts are temporarily unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "card attempts are temporarily unavailable")
 		return true
 	}
 	if !blocked {

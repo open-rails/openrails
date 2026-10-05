@@ -153,11 +153,11 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
 			subject := p.Identity().Subject
 			if _, err := uuid.Parse(subject); err == nil {
-				return billingauth.CustomerIdentity{ID: subject, CredentialClass: billingauth.CredentialClassUserSession}, nil
+				return billingauth.CustomerIdentity{ID: cid(subject), CredentialClass: billingauth.CredentialClassUserSession}, nil
 			}
 			if id, ok := strings.CutPrefix(subject, "auto-"); ok {
 				if _, err := uuid.Parse(id); err == nil {
-					return billingauth.CustomerIdentity{ID: id, CredentialClass: billingauth.CredentialClassAutomation}, nil
+					return billingauth.CustomerIdentity{ID: cid(id), CredentialClass: billingauth.CredentialClassAutomation}, nil
 				}
 			}
 			return billingauth.CustomerIdentity{}, nil
@@ -247,7 +247,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
 	_, err = r.client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: e.ent, PriceID: pid(e.price),
-		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
+		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(e.method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.Error(t, err)
@@ -258,7 +258,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = own.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
-		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
+		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(e.method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.Error(t, err, "a foreign merchant's saved card is not chargeable")

@@ -24,7 +24,7 @@ type UpdateSubscriptionPaymentMethodBody = billing.SetSubscriptionPaymentMethodP
 func SetSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "Authentication required")
 		return
 	}
 	updateSubscriptionPaymentMethod(r, user.ID, true)
@@ -37,13 +37,13 @@ func AdminUpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID string, enforceOwnership bool) {
 	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
-		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
+		r.ErrorCode(billing.CodeInvalidParam, "subscription ID required")
 		return
 	}
 
 	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
+		r.ErrorCode(billing.CodeInvalidParam, "Invalid subscription ID format")
 		return
 	}
 	subscriptionID := typedSubscriptionID.UUID()
@@ -54,7 +54,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	}
 
 	if req.PaymentMethodID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid payment_method_id format")
+		r.ErrorCode(billing.CodeInvalidParam, "Invalid payment_method_id format")
 		return
 	}
 	paymentMethodID := req.PaymentMethodID.UUID()
@@ -65,17 +65,17 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	subscription, err := r.State.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
-			r.ErrorJSON(http.StatusNotFound, "Subscription not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "Subscription not found")
 			return
 		}
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("Failed to get subscription")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to retrieve subscription")
+		r.ErrorCode(billing.CodeInternalError, "Failed to retrieve subscription")
 		return
 	}
 
 	targetUserID := subscription.CustomerID.String()
 	if enforceOwnership && targetUserID != authenticatedUserID {
-		r.ErrorJSON(http.StatusNotFound, "Subscription not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "Subscription not found")
 		return
 	}
 
@@ -88,12 +88,12 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 	if !rails.IsNMI(subscription.Rail) {
-		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed subscriptions can have their payment method updated")
+		r.ErrorCode(billing.CodeInvalidParam, "Only NMI-backed subscriptions can have their payment method updated")
 		return
 	}
 
 	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod {
-		r.ErrorJSON(http.StatusBadRequest, "Cannot update payment method for canceled subscriptions")
+		r.ErrorCode(billing.CodeInvalidParam, "Cannot update payment method for canceled subscriptions")
 		return
 	}
 
@@ -101,24 +101,24 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	if err != nil {
 		switch {
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
 			return
 		default:
 			log.WithError(err).WithFields(log.Fields{"payment_method_id": paymentMethodID, "user_id": targetUserID}).Error("Failed to validate payment method ownership")
-			r.ErrorJSON(http.StatusInternalServerError, "Failed to validate payment method")
+			r.ErrorCode(billing.CodeInternalError, "Failed to validate payment method")
 			return
 		}
 	}
 
 	if !rails.IsNMI(paymentMethod.Rail) {
-		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed payment methods can be used")
+		r.ErrorCode(billing.CodeInvalidParam, "Only NMI-backed payment methods can be used")
 		return
 	}
 	if !rails.SameRail(paymentMethod.Rail, subscription.Rail) {
-		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different payment provider")
+		r.ErrorCode(billing.CodeInvalidParam, "Payment method belongs to a different payment provider")
 		return
 	}
 	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(paymentMethod, subscription) {
@@ -135,12 +135,12 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	_, providerKey, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.CollectionResolver, subscription)
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscription.ID).Error("failed to resolve NMI PSP for subscription")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to resolve payment rail")
+		r.ErrorCode(billing.CodeInternalError, "Failed to resolve payment rail")
 		return
 	}
 	if !ok {
 		log.WithFields(log.Fields{"rail": subscription.Rail, "psp": providerKey}).Error("NMI client not found for subscription PSP")
-		r.ErrorJSON(http.StatusServiceUnavailable, "Payment rail not available")
+		r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail not available")
 		return
 	}
 
@@ -160,7 +160,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			// it attributed to another PSP (#657): a refusal, not a fault.
 			writePaymentMethodPSPMismatch(r)
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
 		default:
 			writeRefusal(r, err, "Failed to update payment method")
 		}
@@ -177,12 +177,12 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		writeRefusal(r, subscriptions.ErrPaymentMethodNotPSPVaulted, "Failed to update payment method")
 	case out.Terminal:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID, "reason": out.Reason}).Error("Failed to update subscription payment source with NMI")
-		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
+		r.ErrorCode("payment_method_update_failed", "")
 	default:
 		// Ambiguous/parked: neither success nor decline — the durable intent
 		// finishes out-of-band and a retried request maps onto the SAME intent.
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Warn("Payment-source update unresolved inline; intent ledger will converge")
-		r.ErrorJSON(http.StatusConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
+		r.ErrorCode(billing.CodeResourceConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
 	}
 }
 

@@ -1,7 +1,5 @@
 package config
 
-import "github.com/open-rails/openrails/billing"
-
 // RiverOwnership says who runs OpenRails' River job fleet. The fleet is where
 // money moves (renewals, dunning, invoices, provider intents), so it always
 // runs somewhere.
@@ -79,14 +77,4 @@ type CustomerRoutesConfig struct {
 	// which names an explicit merchant and paying customer, instead of
 	// Deps.Authenticate.
 	Delegated bool
-}
-
-// ProviderCredentialSnapshot supplies immutable host-owned credentials for an
-// existing PSP without changing its metadata or arming it. The environment
-// follows Config.TestMode. Values are never persisted.
-type ProviderCredentialSnapshot struct {
-	MerchantID  billing.MerchantID
-	Rail        string
-	AccountID   string
-	Credentials map[string]string
 }

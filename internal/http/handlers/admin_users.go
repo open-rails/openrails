@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -123,7 +121,7 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 	}
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "admin subscription service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "admin subscription service unavailable")
 		return
 	}
 	subs, err := svc.ListSubscriptions(r.Request.Context(), filters, page)
@@ -140,18 +138,18 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 func GetAdminSubscription(r *httprequest.Request) {
 	var path adminSubscriptionPath
 	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidParam, err.Error())
 		return
 	}
 	typedSubscriptionID, err := billing.ParseSubscriptionID(path.SubscriptionID)
 	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
 		return
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "admin subscription service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "admin subscription service unavailable")
 		return
 	}
 	subscription, err := svc.GetSubscriptionByID(r.Request.Context(), subscriptionID)

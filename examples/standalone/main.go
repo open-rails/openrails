@@ -1,4 +1,4 @@
-// Command standalone calls an OpenRails server (self-hosted or OpenRails-SaaS)
+// Command standalone calls an OpenRails server (self-hosted or the hosted product)
 // with a merchant API key. OPENRAILS_URL, OPENRAILS_API_KEY and
 // OPENRAILS_MERCHANT_ID are required.
 package main

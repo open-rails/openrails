@@ -99,9 +99,6 @@ type (
 	// deployment.
 	HyperSwitchConfig = config.HyperSwitchConfig
 
-	// ProviderCredentialSnapshot is one entry of Deps.ProviderCredentials:
-	// host-owned credentials for an existing PSP.
-	ProviderCredentialSnapshot = config.ProviderCredentialSnapshot
 	// Cache is Deps.Cache: the store behind OpenRails' shared cache.
 	Cache = cache.Cache
 	// EmailSender is Deps.EmailSender: it delivers OpenRails' rendered email,
@@ -210,6 +207,12 @@ var (
 	// ErrForbidden is what Deps.Authorize returns to refuse a permission (403).
 	ErrForbidden = billingauth.ErrForbidden
 )
+
+// ParseMerchantDeclaration reads Config.Merchant from one YAML document,
+// refusing unknown fields; the slug comes from the caller, not the document.
+func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
+	return config.ParseMerchantDeclaration(raw)
+}
 
 // PSPFromEnv declares one PSP from conventionally named variables, so enabling
 // a provider is configuration only. With P = upper(key)+"_": P+"RAIL"

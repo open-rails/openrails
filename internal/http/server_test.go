@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	auth "github.com/open-rails/helpers/auth"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
@@ -138,7 +139,7 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 type hostAuthenticator struct{}
 
 func (hostAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
-	return &billingauth.DelegatedPrincipal{MerchantID: uuid.NewString(), SubjectID: "11111111-1111-1111-1111-111111111111"}, nil
+	return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.New()), SubjectID: "11111111-1111-1111-1111-111111111111"}, nil
 }
 
 type proofRejectingResolver struct{ origin string }

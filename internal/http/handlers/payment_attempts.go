@@ -164,7 +164,7 @@ func GetRebillCycle(r *httprequest.Request) {
 
 func readScope(r *httprequest.Request) (uuid.UUID, bool) {
 	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "payment attempts unavailable")
+		r.ErrorCode(billing.CodeInternalError, "payment attempts unavailable")
 		return uuid.Nil, false
 	}
 	mid, err := merchant.Require(r.Request.Context())

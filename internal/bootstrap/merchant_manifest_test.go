@@ -104,7 +104,7 @@ func TestMerchantManifestValidation(t *testing.T) {
 		"nmi tokenization is setting":  {base("    psps:\n      mobius:\n        rail: nmi\n        account_id: p\n        secrets: {tokenization_key: t}\n"), "unknown PSP secret"},
 		"solana network not a PSP key": {base("    psps:\n      solana:\n        rail: solana\n        network: devnet\n"), `unknown field "network"`},
 		"solana without signer":        {base("    psps:\n      solana:\n        rail: solana\n        archived: false\n"), "requires a signer"},
-		"ccbill slash account":         {base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"945280/0000\"\n"), "CCBill account_id uses a dash"},
+		"ccbill slash account":         {base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"999999/0000\"\n"), "CCBill account_id uses a dash"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseMerchantConfigManifest([]byte(tc.body))
@@ -115,9 +115,9 @@ func TestMerchantManifestValidation(t *testing.T) {
 	// A declared Solana account_id is ignored (derived from the signer), not an error.
 	_, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      solana:\n        rail: solana\n        account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n        signer: { mode: local_keypair }\n        secrets:\n          private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")))
 	require.NoError(t, err)
-	m, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"945280-0000\"\n")))
+	m, err := ParseMerchantConfigManifest([]byte(base("    psps:\n      ccbill:\n        rail: ccbill\n        account_id: \"999999-0000\"\n")))
 	require.NoError(t, err)
-	require.Equal(t, "945280-0000", m.Merchants["host-three"].PSPs["ccbill"].AccountID)
+	require.Equal(t, "999999-0000", m.Merchants["host-three"].PSPs["ccbill"].AccountID)
 }
 
 // The CLI file path is as strict as the bytes path: koanf alone would drop a

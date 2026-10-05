@@ -21,7 +21,7 @@ func flexQuery(t *testing.T, resp *FlexFormResponse, err error, wantPrefix strin
 }
 
 func TestFlexFormURLCarriesAccountPriceCurrencyAndSignature(t *testing.T) {
-	cfg := &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Salt: "pepper"}
+	cfg := &config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0001", Salt: "pepper"}
 	sum := sha256.Sum256([]byte("alice" + "pepper"))
 	signature := hex.EncodeToString(sum[:])
 
@@ -33,13 +33,13 @@ func TestFlexFormURLCarriesAccountPriceCurrencyAndSignature(t *testing.T) {
 	})
 	q := flexQuery(t, resp, err, sandboxFlexFormBase+"/flex-1")
 	require.Equal(t, url.Values{
-		"clientAccnum": {"945280"}, "clientSubacc": {"0001"}, "formName": {"premium"}, "language": {"English"},
+		"clientAccnum": {"999999"}, "clientSubacc": {"0001"}, "formName": {"premium"}, "language": {"English"},
 		"currencyCode": {"978"}, "email": {"a@example.com"}, "username": {"alice"}, "signature": {signature},
 		"customer_fname": {"Alice"}, "customer_lname": {"Liddell"}, "address1": {"1 Main"},
 		"zipcode": {"12345"}, "country": {"US"}, "reservationId": {"res-9"},
 	}, q, "blank optional address fields are omitted, never sent empty")
 
-	client, err = NewClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0000", Salt: "pepper"}, false)
+	client, err = NewClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000", Salt: "pepper"}, false)
 	require.NoError(t, err)
 	resp, err = client.GenerateUpgradeFlexFormURL(&GenerateUpgradeFlexFormURLParams{
 		Username: "alice", Email: "a@example.com", FormName: "gold", FlexID: "flex-2", Currency: "aud", OriginalSubscriptionID: "0125217202000000017",
@@ -52,7 +52,7 @@ func TestFlexFormURLCarriesAccountPriceCurrencyAndSignature(t *testing.T) {
 }
 
 func TestFlexFormRefusesIncompleteOrUnbillableRequests(t *testing.T) {
-	client, err := NewClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0000", Salt: "pepper"}, true)
+	client, err := NewClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000", Salt: "pepper"}, true)
 	require.NoError(t, err)
 	valid := func() GenerateFlexFormURLParams {
 		return GenerateFlexFormURLParams{Username: "u", Email: "e", FormName: "f", FlexID: "x", Currency: "USD"}
@@ -82,7 +82,7 @@ func TestFlexFormRefusesIncompleteOrUnbillableRequests(t *testing.T) {
 	require.Panics(t, func() { _, _ = NewClient(nil, true) })
 	// A missing salt never yields an unsigned or empty-salt link (#1081).
 	for _, salt := range []string{"", "  "} {
-		_, err := NewClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0000", Salt: salt}, true)
+		_, err := NewClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000", Salt: salt}, true)
 		require.ErrorIs(t, err, ErrMissingSalt)
 	}
 }
@@ -105,9 +105,9 @@ func TestCurrencyCodesRoundTripOneTable(t *testing.T) {
 }
 
 func TestWebhookAuthPinsTheArmedAccount(t *testing.T) {
-	c := NewRESTClient(&config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001"})
-	require.NoError(t, c.ValidateWebhookAuth("945280", "0001"))
+	c := NewRESTClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0001"})
+	require.NoError(t, c.ValidateWebhookAuth("999999", "0001"))
 	require.ErrorContains(t, c.ValidateWebhookAuth("945281", "0001"), "clientAccnum")
-	require.ErrorContains(t, c.ValidateWebhookAuth("945280", "0000"), "clientSubacc")
-	require.Error(t, c.ValidateWebhookAuth("945280", ""))
+	require.ErrorContains(t, c.ValidateWebhookAuth("999999", "0000"), "clientSubacc")
+	require.Error(t, c.ValidateWebhookAuth("999999", ""))
 }

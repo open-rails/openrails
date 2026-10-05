@@ -1,5 +1,4 @@
 {
-  "object": "checkout_attempt",
   "id": "chk_ffffffff-ffff-4fff-8fff-ffffffffffff",
   "customer_id": "22222222-2222-2222-2222-222222222222",
   "status": "succeeded",

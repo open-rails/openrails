@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"strings"
 	"time"
 	"unicode"
@@ -43,7 +44,6 @@ type NMIWebhookService struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
-	NotificationService          *subscriptions.NotificationService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	// NMIResolver arms the account's NMI client for the reads a notice needs
 	// (the vault behind an Account Updater notice, #1115).
@@ -663,7 +663,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			unmatchedCount++
 			cbMetadata["requires_manual_review"] = true
 			// SEC-33: an unmatched chargeback is durable operator work, never a log line.
-			if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+			if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 				Provider:      rail,
 				Operation:     "chargeback_unmatched",
 				TransactionID: "chargeback:" + cb.ID.Trimmed(),
@@ -815,11 +815,11 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				if strings.TrimSpace(alertTransactionID) == "" {
 					alertTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
 				}
-				if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+				if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 					Provider:          rail,
 					Operation:         "chargeback_reversal",
 					TransactionID:     alertTransactionID,
-					UserID:            match.UserID,
+					CustomerID:        match.UserID,
 					OriginalPaymentID: &paymentID,
 					SubscriptionID:    subID,
 					Err:               entryLedgerErr,
@@ -909,7 +909,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	if err != nil {
 		// #675: never downgrade a refund to a 0-amount no-op — durable alert,
 		// then terminal (redelivery resends the same unparseable bytes).
-		if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+		if alertErr := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 			Provider:      s.Rail,
 			Operation:     "refund_amount_parse_failed",
 			TransactionID: txnID,

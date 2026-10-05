@@ -159,7 +159,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
 				r.ErrorCode(billing.CodeMerchantUnresolved, "")
 			default:
-				r.ErrorJSON(http.StatusInternalServerError, "failed to mint API key")
+				r.ErrorCode(billing.CodeInternalError, "failed to mint API key")
 			}
 			return
 		}
@@ -182,7 +182,7 @@ func MerchantListAPIKeys(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 				r.ErrorCode(billing.CodeMerchantUnresolved, "")
 				return
 			}
-			r.ErrorJSON(http.StatusInternalServerError, "failed to list API keys")
+			r.ErrorCode(billing.CodeInternalError, "failed to list API keys")
 			return
 		}
 		r.SuccessJSON(billing.ListPage[billing.APIKey]{Items: keys})
@@ -218,7 +218,7 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				r.ErrorCode(billing.CodeMerchantUnresolved, "")
 				return
 			}
-			r.ErrorJSON(http.StatusInternalServerError, "failed to revoke API key")
+			r.ErrorCode(billing.CodeInternalError, "failed to revoke API key")
 			return
 		}
 		if !revoked {

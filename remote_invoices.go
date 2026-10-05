@@ -10,7 +10,7 @@ import (
 
 // ListInvoices is one page of the merchant's invoices, newest period first.
 func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Invoice], error) {
-	q := pageValues(nil, params.Page)
+	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "currency": normalizeCurrency(params.Currency), "status": string(params.Status)})
 	if params.PeriodFrom != nil {
 		q.Set("period_from", params.PeriodFrom.UTC().Format(time.RFC3339Nano))

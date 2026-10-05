@@ -30,8 +30,6 @@ func (m *model) bodyDoc(v any) string {
 	switch body := v.(type) {
 	case nil:
 		return "—"
-	case routes.Untyped:
-		return "untyped"
 	case routes.Stream:
 		return "`" + body.ContentType + "`"
 	}

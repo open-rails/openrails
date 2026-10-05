@@ -207,6 +207,7 @@ var errorCodes = []ErrorCode{
 	{"checkout_session_expired", 410, invalid, "The checkout session expired."},
 	{"checkout_session_unavailable", 403, authz, "The checkout session is not available to this caller."},
 	{"checkout_attempt_closed", 409, invalid, "The checkout attempt already completed or was canceled."},
+	{"checkout_attempt_expired", 410, invalid, "The checkout attempt expired before it was paid."},
 	{"checkout_payment_in_progress", 409, invalid, "A payment on this checkout session is already being processed."},
 	{"checkout_request_invalid", 422, invalid, "The checkout request is invalid."},
 	{"checkout_offer_unavailable", 422, invalid, "The purchase is not available."},

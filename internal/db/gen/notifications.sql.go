@@ -371,69 +371,6 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 	return items, nil
 }
 
-const listRepairAlerts = `-- name: ListRepairAlerts :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
-WHERE nq.merchant_id = $1::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = $2::uuid
-  AND nq.event_type = $3::text
-  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
-  AND ($4::boolean IS NULL OR (nq.read_at IS NOT NULL) = $4::boolean)
-  AND ($5::timestamptz IS NULL OR (nq.created_at, nq.id) < ($5::timestamptz, $6::uuid))
-ORDER BY nq.created_at DESC, nq.id DESC
-LIMIT $7::int
-`
-
-type ListRepairAlertsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	EventType  string
-	Seen       *bool
-	AfterAt    *time.Time
-	AfterID    *uuid.UUID
-	RowLimit   int32
-}
-
-func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]BillingNotification, error) {
-	rows, err := q.db.Query(ctx, listRepairAlerts,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.EventType,
-		arg.Seen,
-		arg.AfterAt,
-		arg.AfterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingNotification
-	for rows.Next() {
-		var i BillingNotification
-		if err := rows.Scan(
-			&i.ID,
-			&i.EventType,
-			&i.Data,
-			&i.RecipientKind,
-			&i.ReadAt,
-			&i.Severity,
-			&i.Title,
-			&i.Body,
-			&i.Link,
-			&i.CreatedAt,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.EmailedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listUndeliveredNotifications = `-- name: ListUndeliveredNotifications :many
 SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
 WHERE nq.merchant_id = $1::uuid

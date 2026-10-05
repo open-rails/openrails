@@ -134,11 +134,10 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/merchant/invoices/{id}/retry-collection":                                  billing.MerchantInvoicesCollect,
 		"POST /v1/merchant/metrics/query":                                                   billing.MerchantMetricsRead,
 		"PUT /v1/merchant/dashboard":                                                        billing.MerchantDashboardUpdate,
-		"GET /v1/merchant/notifications":                                                    billing.MerchantMetricsRead,
-		"POST /v1/merchant/notifications/{id}/read":                                         billing.MerchantMetricsRead,
-		"GET /v1/merchant/repair-alerts":                                                    billing.MerchantRepairAlertsRead,
-		"GET /v1/merchant/worker-health":                                                    billing.MerchantRepairAlertsRead,
-		"GET /v1/merchant/findings/{id}":                                                    billing.MerchantRepairAlertsRead,
+		"GET /v1/merchant/notifications":                                                    billing.MerchantOperationsRead,
+		"POST /v1/merchant/notifications/{id}/read":                                         billing.MerchantOperationsRead,
+		"GET /v1/merchant/worker-health":                                                    billing.MerchantOperationsRead,
+		"GET /v1/merchant/findings/{id}":                                                    billing.MerchantOperationsRead,
 		"POST /v1/merchant/findings/{id}/resolve":                                           billing.MerchantFindingsResolve,
 		"GET /v1/merchant/configuration":                                                    billing.MerchantSettingsRead,
 		"POST /v1/merchant/configuration/applications":                                      billing.MerchantSettingsUpdate,
@@ -339,7 +338,7 @@ func TestPlatformRoutes(t *testing.T) {
 	}
 	h := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: root, AdminLimiter: unlocker})
 	rec := do(h, http.MethodDelete, "/v1/platform/admin-rate-limit-lockouts/"+userB, nil)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	require.Equal(t, []string{billing.RootAdminRateLimitsUnlock}, asked)
 	require.Equal(t, &unlock{userB, userA}, unlocked)
 

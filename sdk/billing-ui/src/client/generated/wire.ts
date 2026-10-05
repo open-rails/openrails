@@ -37,6 +37,14 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
+export type CaptchaStatus = {
+  enabled: boolean
+  required: boolean
+  provider: string | null
+  token_header: string
+  client_script_url: string
+}
+
 export type CardDetails = {
   brand: string | null
   last4: string | null
@@ -55,26 +63,16 @@ export type ChangeTierParams = {
   price_id?: string
 }
 
-export type CheckoutAttemptPaymentResponse = {
-  rail: string
-  reference?: string
-  transaction_url?: string
-  solana_pay_url?: string
-  redirect_url?: string
-  transaction_id?: string
-}
-
 export type CheckoutConfig = {
-  object: string
   psps: CheckoutPSPConfig[]
   solana?: SolanaCheckoutConfig
   options: CheckoutOption[]
 }
 
 export type CheckoutOption = {
-  selector: string
+  psp: string
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   mode: string
   driver?: string
   public_config?: Record<string, string>
@@ -194,7 +192,6 @@ export type CreditTransaction = {
 }
 
 export type CurrencyRegistry = {
-  object: string
   currencies: CurrencyUnits[]
 }
 
@@ -372,13 +369,6 @@ export type NotificationData = {
   product_name?: string
   payment_method?: string
   user_email?: string
-  kind?: string
-  provider?: string
-  operation?: string
-  affected_customer_id?: string
-  original_payment_id?: string
-  error?: string
-  metadata?: Record<string, unknown>
 }
 
 export type PSPLinkState = {
@@ -392,20 +382,11 @@ export type PSPLinkState = {
 
 export type PayCheckoutSessionParams = {
   option_id?: string
-  payment_token?: string
   payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
+  payment_token?: string
   card?: CardEntry
+  billing_details?: BillingDetails
+  token_symbol?: string
 }
 
 export type PayInvoiceParams = {
@@ -678,16 +659,14 @@ export type SupportedTokensResponse = {
 }
 
 export type TierChange = {
-  object: string
   status: string
-  mode: string
   action?: string
   effective?: string
   price_id: string
-  url?: string
-  payment: CheckoutAttemptPaymentResponse
+  rail: string
   subscription_id?: string
   next_action?: NextAction
+  transaction_id: string | null
   message?: string
   delayed_start?: string
   currency?: string
@@ -698,7 +677,6 @@ export type TierChange = {
 }
 
 export type TierChangePreview = {
-  object: string
   action: string
   price_id: string
   rail: string

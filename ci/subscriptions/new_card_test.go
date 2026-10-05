@@ -26,9 +26,9 @@ type hostedPay struct {
 
 func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*billing.CheckoutAttempt, error) {
 	h.w.t.Helper()
-	payment.PSPID, payment.Rail = h.w.psp["nmi"], "nmi"
+	payment.PSP = "nmi"
 	if payment.PaymentToken != "" {
-		payment.NameOnCard, payment.Zip, payment.Country = "Hosted Payer", "10001", "US"
+		payment.BillingDetails = &billing.BillingDetails{Name: new("Hosted Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}
 	}
 	return h.w.client[h.tp].CreateCheckoutAttempt(h.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(h.c.id)}, PriceID: pid(h.price), IdempotencyKey: key,
@@ -143,7 +143,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
-				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+				PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 				SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)

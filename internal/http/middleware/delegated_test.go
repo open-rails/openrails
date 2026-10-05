@@ -93,7 +93,7 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 		{"host: nil authenticator", "", mws{DelegatedPrincipalRequired(nil)}, 500, "not configured"},
 		{"host: gate error keeps status", "", mws{host(nil, billingauth.GateError{Status: 403, Message: "host says no"})}, 403, "host says no"},
 		{"host: unauthenticated", "", mws{host(nil, billingauth.ErrUnauthenticated)}, 401, "authentication required"},
-		{"host: non-uuid subject", "", mws{host(&billingauth.DelegatedPrincipal{MerchantID: testMerchant.String(), SubjectID: "user-123"}, nil)}, 401, "delegated_principal_invalid"},
+		{"host: non-uuid subject", "", mws{host(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(testMerchant), SubjectID: "user-123"}, nil)}, 401, "delegated_principal_invalid"},
 		{"host: no merchant", "", mws{host(&billingauth.DelegatedPrincipal{SubjectID: payerID.String()}, nil)}, 401, "delegated_principal_invalid"},
 		{"no principal, payer gate", "", mws{PayerScopedRequired()}, 401, "bearer principal required"},
 		{"invoker on payer surface", "Bearer x", mws{self(invoker, nil), PayerScopedRequired()}, 403, "invoker_scoped_principal"},
@@ -112,7 +112,7 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 		w, _ := serveNeutral(t, "/v1/customers/x", nil, mw...)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	}
-	w, seen := serveNeutral(t, "/v1/customers/x", nil, host(&billingauth.DelegatedPrincipal{MerchantID: testMerchant.String(), SubjectID: payerID.String(), Invoker: " bot-7 ", Permissions: []string{billing.MerchantAll}}, nil))
+	w, seen := serveNeutral(t, "/v1/customers/x", nil, host(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(testMerchant), SubjectID: payerID.String(), Invoker: " bot-7 ", Permissions: []string{billing.MerchantAll}}, nil))
 	require.Equal(t, http.StatusOK, w.Code)
 	p, _ := PrincipalFromRequest(seen)
 	require.Equal(t, CredentialHostDelegatedUser, p.CredentialType)

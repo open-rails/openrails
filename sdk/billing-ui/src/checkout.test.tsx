@@ -358,9 +358,10 @@ describe("Checkout", () => {
     await waitFor(() => {
       expect(pay).toHaveBeenCalledWith({
         option_id: "option_ccbill",
-        name_on_card: "Jane Tester",
-        zip: "62704",
-        country: "US",
+        billing_details: {
+          name: "Jane Tester",
+          address: { postal_code: "62704", country: "US" },
+        },
       })
     })
   })
@@ -501,12 +502,10 @@ describe("Checkout", () => {
       expect(pay).toHaveBeenCalledWith({
         option_id: "option_nmi",
         payment_token: "preview_payment_token",
-        name_on_card: "李 小龍",
-        country: "JP",
-        zip: "100-0001",
-        last_four: "4242",
-        card_type: "visa",
-        expiry_date: "12/27",
+        billing_details: {
+          name: "李 小龍",
+          address: { postal_code: "100-0001", country: "JP" },
+        },
       })
     })
   })

@@ -57,8 +57,12 @@ func (c *Client) AuthenticateUser(r *http.Request) (Identity, error) {
 	if err != nil {
 		return Identity{}, err
 	}
+	customer, err := billing.ParseCustomerID(user.UserID)
+	if err != nil {
+		return Identity{}, ErrUnauthenticated
+	}
 	return Identity{
-		Kind: billingauth.User, Issuer: a.Config.ControlPlane.Auth.Issuer, SubjectID: user.UserID, CustomerID: user.UserID,
+		Kind: billingauth.User, Issuer: a.Config.ControlPlane.Auth.Issuer, SubjectID: user.UserID, CustomerID: customer,
 		CredentialClass: billingauth.CredentialClassUserSession, Email: user.Email, EmailVerified: user.EmailVerified,
 		Username: user.Username, SessionID: user.SessionID,
 	}, nil
@@ -98,13 +102,14 @@ func (c *Client) ListMerchantsForSubject(ctx context.Context, subject string) ([
 	return operator.ListMerchantsForSubject(ctx, a, subject)
 }
 
-// ListActiveMerchantIDs pages the merchant directory for host background work.
-func (c *Client) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]billing.MerchantID, error) {
+// ListActiveMerchantIDs pages the live merchants, newest first, for host
+// background work.
+func (c *Client) ListActiveMerchantIDs(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.MerchantID], error) {
 	a, _, err := c.controlPlane()
 	if err != nil {
 		return nil, err
 	}
-	return operator.ListActiveMerchantIDs(ctx, a, limit, offset)
+	return operator.ListActiveMerchantIDs(ctx, a, page)
 }
 
 // ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole

@@ -590,10 +590,10 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResp
 		action = "downgrade"
 	}
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: action, Effective: effectiveOf(action), PriceID: (billing.PriceID(p.PriceID)).String(),
-		Payment: CheckoutAttemptPaymentResponse{Rail: in.Rail}, SubscriptionID: &subID,
+		Action: action, Effective: effectiveOf(action), PriceID: billing.PriceID(p.PriceID),
+		Rail: in.Rail, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
-		OperationID: in.ID.String(),
+		OperationID: billing.PaymentOperationID(in.ID),
 	}
 	if p.Downgrade() {
 		resp.DelayedStart = &end
@@ -601,7 +601,9 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResp
 	switch in.Status {
 	case intents.StatusSucceeded:
 		resp.Status = "succeeded"
-		resp.Payment.TransactionID = intents.EvidenceString(in, "transaction_id")
+		if tx := intents.EvidenceString(in, "transaction_id"); tx != "" {
+			resp.TransactionID = &tx
+		}
 		resp.Message = intents.EvidenceString(in, "message")
 		return resp, nil
 	case intents.StatusFailedTerminal:

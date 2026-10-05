@@ -174,7 +174,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 		PriceID:        price.ID,
 		Entitlement:    "content:webhook",
 		OfferKind:      billing.OfferPermanent,
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"},
 		IdempotencyKey: "e2e-webhook-" + uuid.NewString(),
 		SuccessURL:     "https://example.test/success",
 		CancelURL:      "https://example.test/cancel",

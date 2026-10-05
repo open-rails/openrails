@@ -148,9 +148,6 @@ func (m *model) body(v any) *obj {
 	if stream, ok := v.(routes.Stream); ok {
 		return newObj(stream.ContentType, newObj("schema", newObj("type", "string")))
 	}
-	if _, ok := v.(routes.Untyped); ok {
-		return newObj("application/json", newObj("schema", newObj("type", "object", "description", "Not yet typed.")))
-	}
 	return newObj("application/json", newObj("schema", m.schema(t)))
 }
 

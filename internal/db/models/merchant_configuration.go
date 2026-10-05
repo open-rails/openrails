@@ -17,7 +17,7 @@ type MerchantConfiguration struct {
 
 	// ArrearsGraceDays (or#878) is how many days past an invoice's due_at a payer
 	// keeps grace before the debt is called DELINQUENT. Business policy, so it is
-	// the merchant's: a cloud vendor may give 7 days where a SaaS gives 30. Nil ⇒
+	// the merchant's: a cloud vendor may give 7 days where a software subscription gives 30. Nil ⇒
 	// delinquency.DefaultGraceDays (14). Zero is a valid explicit choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
 

@@ -508,7 +508,7 @@ func (f *SolanaFetcher) planFor(ctx context.Context, planPDA string, cache map[s
 
 // solanaDiscoveryCadence bounds how often the permissionless-subscriber
 // enumeration (getProgramAccounts per plan, #714 scan 2) runs for one plan.
-// Its response scales with subscriber count, so per the #720 SaaS-scale law
+// Its response scales with subscriber count, so per the #720 scale law
 // it can never be a per-tick lane — it demotes to roughly once per this
 // interval instead.
 const solanaDiscoveryCadence = 24 * time.Hour

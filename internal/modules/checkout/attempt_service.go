@@ -483,6 +483,10 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		}
 		return nil, err
 	}
+	// payment.psp names a PSP by its key; a rail kind names none.
+	if rail != "" && !strings.EqualFold(rail, decision.Target.PSP) {
+		return nil, fmt.Errorf("%w: psp %q is not a PSP key; name one of the checkout options' psp", ErrCheckoutAttemptValidation, rail)
+	}
 	rail = decision.Target.Rail
 	pspSelector := decision.Target.PSP
 	routingReason := decision.Reason()
@@ -850,7 +854,7 @@ func readInitialMembershipQuote(session *models.CheckoutAttempt) (subscriptions.
 
 func validateInitialMembershipPrincipal(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.DelegatedPrincipal) error {
 	mid, err := merchant.Require(ctx)
-	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != session.CustomerID.String() {
+	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != session.CustomerID.String() {
 		return ErrCheckoutAttemptForbidden
 	}
 	return nil
@@ -929,7 +933,7 @@ func (s *CheckoutAttemptService) initialMembershipSessionResponse(ctx context.Co
 		return nil, true, fmt.Errorf("unrecognized initial membership operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
-	response.Operation = &billing.PaymentOperation{ID: operation.ID, Status: operation.Status}
+	response.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(operation.ID), Status: operation.Status}
 	response.NextAction = nil
 	if operation.Status == intents.StatusFailedTerminal {
 		response.Failure = operationFailure(operation)
@@ -1150,6 +1154,8 @@ func rejectCheckoutAttemptPAN(req *CheckoutAttemptCreateRequest) error {
 		FirstName:       payment.FirstName,
 		LastName:        payment.LastName,
 		Address1:        payment.Address1,
+		Address2:        payment.Address2,
+		Phone:           payment.Phone,
 		City:            payment.City,
 		State:           payment.State,
 		Zip:             payment.Zip,
@@ -1767,6 +1773,8 @@ func (s *CheckoutAttemptService) initializeCheckoutAttempt(ctx context.Context, 
 		FirstName:         payment.FirstName,
 		LastName:          payment.LastName,
 		Address1:          payment.Address1,
+		Address2:          payment.Address2,
+		Phone:             payment.Phone,
 		City:              payment.City,
 		State:             payment.State,
 		Zip:               payment.Zip,

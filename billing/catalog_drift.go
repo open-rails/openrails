@@ -2,8 +2,6 @@ package billing
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // CatalogDrift is an open finding that a PSP's copy of a catalog resource
@@ -11,7 +9,7 @@ import (
 // one side. Findings are alerts; reconciling the price or product resolves
 // them.
 type CatalogDrift struct {
-	ID                 uuid.UUID  `json:"id"`
+	ID                 FindingID  `json:"id"`
 	PSPID              PSPID      `json:"psp_id"`
 	Rail               string     `json:"rail"`
 	Kind               string     `json:"kind"`

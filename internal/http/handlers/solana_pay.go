@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"errors"
-	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -28,16 +27,16 @@ type SolanaPayPostResponse struct {
 func GetSolanaPay(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "id is required")
+		r.ErrorCode(billing.CodeInvalidParam, "id is required")
 		return
 	}
 	if r.State.CheckoutAttemptService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout attempt service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "checkout attempt service unavailable")
 		return
 	}
 	typedParsedID, err := billing.ParseCheckoutAttemptID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid checkout attempt id")
 		return
 	}
 	parsedID := typedParsedID.UUID()
@@ -65,7 +64,7 @@ func GetSolanaPay(r *httprequest.Request) {
 func PostSolanaPay(r *httprequest.Request) {
 	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "id is required")
+		r.ErrorCode(billing.CodeInvalidParam, "id is required")
 		return
 	}
 	var req SolanaPayPostRequest
@@ -73,16 +72,16 @@ func PostSolanaPay(r *httprequest.Request) {
 		return
 	}
 	if strings.TrimSpace(req.Account) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "account is required")
+		r.ErrorCode(billing.CodeInvalidParam, "account is required")
 		return
 	}
 	if r.State.CheckoutAttemptService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "checkout attempt service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "checkout attempt service unavailable")
 		return
 	}
 	typedParsedID, err := billing.ParseCheckoutAttemptID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid checkout attempt id")
 		return
 	}
 	parsedID := typedParsedID.UUID()
@@ -97,16 +96,16 @@ func PostSolanaPay(r *httprequest.Request) {
 func writeSolanaPayError(r *httprequest.Request, err error) {
 	switch {
 	case errors.Is(err, checkout.ErrCheckoutAttemptNotFound):
-		r.ErrorJSON(http.StatusNotFound, "checkout attempt not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "checkout attempt not found")
 	case errors.Is(err, checkout.ErrCheckoutAttemptExpired):
-		r.ErrorJSON(http.StatusGone, "checkout attempt expired")
+		r.ErrorCode("checkout_attempt_expired", "")
 	case errors.Is(err, checkout.ErrCheckoutAttemptNotSolana):
-		r.ErrorJSON(http.StatusBadRequest, "not a solana checkout attempt")
+		r.ErrorCode(billing.CodeInvalidParam, "not a solana checkout attempt")
 	case errors.Is(err, checkout.ErrCheckoutAttemptAlreadyCompleted):
-		r.ErrorJSON(http.StatusConflict, "checkout attempt already completed")
+		r.ErrorCode(billing.CodeResourceConflict, "checkout attempt already completed")
 	case errors.Is(err, checkout.ErrCheckoutAttemptConflict):
-		r.ErrorJSON(http.StatusConflict, "a payment for this checkout is already in progress")
+		r.ErrorCode(billing.CodeResourceConflict, "a payment for this checkout is already in progress")
 	default:
-		r.ErrorJSON(http.StatusInternalServerError, "failed to process request")
+		r.ErrorCode(billing.CodeInternalError, "failed to process request")
 	}
 }

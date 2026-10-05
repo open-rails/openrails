@@ -26,7 +26,7 @@ func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uui
 	if err != nil {
 		return empty, err
 	}
-	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() {
+	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid {
 		return empty, apperr.New(403, "customer_session_required", "payment authentication requires an interactive customer session")
 	}
 	if s == nil || s.SubscriptionService == nil {
@@ -51,7 +51,7 @@ func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uu
 	if err != nil {
 		return StripeEngineAuthentication{}, err
 	}
-	out := StripeEngineAuthentication{Operation: billing.PaymentOperation{ID: in.ID, Status: in.Status}}
+	out := StripeEngineAuthentication{Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(in.ID), Status: in.Status}}
 	if in.Status == intents.StatusSucceeded || in.Status == intents.StatusFailedTerminal {
 		return out, nil
 	}
@@ -107,5 +107,5 @@ func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context
 	if err != nil {
 		return billing.PaymentOperation{}, err
 	}
-	return billing.PaymentOperation{ID: current.ID, Status: current.Status}, nil
+	return billing.PaymentOperation{ID: billing.PaymentOperationID(current.ID), Status: current.Status}, nil
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"strings"
 	"time"
 
@@ -195,7 +196,7 @@ func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, 
 		if txnID == "" {
 			txnID, _ = logFields["transaction_id"].(string)
 		}
-		if alertErr := recordLedgerRepairAlert(ctx, svc.NotificationService, svc.DB, svc.now(), ledgerRepairAlert{
+		if alertErr := alerting.RecordLedgerRepair(ctx, svc.DB, svc.now(), alerting.LedgerRepair{
 			Provider:      string(models.RailCCBill),
 			Operation:     "amount_mismatch",
 			TransactionID: txnID,
@@ -548,7 +549,7 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 		key = railSubID
 	}
 	if key != "" {
-		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 			Provider:       string(models.RailCCBill),
 			Operation:      "ccbill_new_sale_refused",
 			TransactionID:  transactionID,
@@ -752,7 +753,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		}
 	}
 
-	var mismatchRepairAlert *ledgerRepairAlert
+	var mismatchRepairAlert *alerting.LedgerRepair
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(txdb)
@@ -814,11 +815,11 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			// #675: durable operator trace for the real drifted charge — captured
 			// here, written after the tx rolls back (see mismatchRepairAlert).
 			subscriptionID := subscription.ID
-			mismatchRepairAlert = &ledgerRepairAlert{
+			mismatchRepairAlert = &alerting.LedgerRepair{
 				Provider:       string(models.RailCCBill),
 				Operation:      "amount_mismatch",
 				TransactionID:  transactionID,
-				UserID:         subscription.CustomerID.String(),
+				CustomerID:     subscription.CustomerID.String(),
 				SubscriptionID: &subscriptionID,
 				Err:            billingErr,
 				Metadata:       billingErr.Context,
@@ -907,7 +908,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		return nil
 	}); err != nil {
 		if mismatchRepairAlert != nil {
-			if alertErr := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), *mismatchRepairAlert); alertErr != nil {
+			if alertErr := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), *mismatchRepairAlert); alertErr != nil {
 				return fmt.Errorf("record CCBill upgrade amount mismatch repair alert: %w", alertErr)
 			}
 		}
@@ -1248,7 +1249,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 	}
 
 	var refundLedgerErr error
-	var refundRepairAlert *ledgerRepairAlert
+	var refundRepairAlert *alerting.LedgerRepair
 	var notes []*models.NotificationQueue
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
@@ -1349,11 +1350,11 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 					originalPaymentID = &id
 				}
 				subscriptionID := sub.ID
-				refundRepairAlert = &ledgerRepairAlert{
+				refundRepairAlert = &alerting.LedgerRepair{
 					Provider:          "ccbill",
 					Operation:         "refund_reversal",
 					TransactionID:     refundTransactionID,
-					UserID:            sub.CustomerID.String(),
+					CustomerID:        sub.CustomerID.String(),
 					OriginalPaymentID: originalPaymentID,
 					SubscriptionID:    &subscriptionID,
 					Err:               refundLedgerErr,
@@ -1388,7 +1389,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 	}
 	s.deliver(ctx, notes)
 	if refundRepairAlert != nil {
-		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), *refundRepairAlert); err != nil {
+		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), *refundRepairAlert); err != nil {
 			return fmt.Errorf("record CCBill refund ledger repair alert: %w", err)
 		}
 	}
@@ -1532,7 +1533,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		return err
 	}
 	var ledgerErr error
-	var chargebackRepairAlert *ledgerRepairAlert
+	var chargebackRepairAlert *alerting.LedgerRepair
 	var notes []*models.NotificationQueue
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -1616,11 +1617,11 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				originalPaymentID = &id
 			}
 			subscriptionID := sub.ID
-			chargebackRepairAlert = &ledgerRepairAlert{
+			chargebackRepairAlert = &alerting.LedgerRepair{
 				Provider:          "ccbill",
 				Operation:         "chargeback_reversal",
 				TransactionID:     chargebackTransactionID,
-				UserID:            sub.CustomerID.String(),
+				CustomerID:        sub.CustomerID.String(),
 				OriginalPaymentID: originalPaymentID,
 				SubscriptionID:    &subscriptionID,
 				Err:               ledgerErr,
@@ -1655,7 +1656,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	}
 	s.deliver(ctx, notes)
 	if chargebackRepairAlert != nil {
-		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), *chargebackRepairAlert); err != nil {
+		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), *chargebackRepairAlert); err != nil {
 			return fmt.Errorf("record CCBill chargeback ledger repair alert: %w", err)
 		}
 	}
@@ -1766,9 +1767,9 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	}
 	log.WithContext(ctx).WithError(blocked).WithFields(log.Fields{"rail_subscription_id": railSubID, "transaction_id": transactionID}).
 		Warn("CCBill RenewalSuccess on a canceled subscription; charge recorded for refund review")
-	if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+	if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 		Provider: string(models.RailCCBill), Operation: "terminal_blocked_renewal_success", TransactionID: transactionID,
-		UserID: sub.CustomerID.String(), SubscriptionID: &sub.ID, Err: blocked,
+		CustomerID: sub.CustomerID.String(), SubscriptionID: &sub.ID, Err: blocked,
 		Metadata: map[string]any{"rail_subscription_id": railSubID, "amount_cents": billedAmountCents, "currency": currencyValue, "event_type": string(s.Data.EventType)},
 	}); err != nil {
 		return fmt.Errorf("record terminal-blocked CCBill renewal success repair alert: %w", err)

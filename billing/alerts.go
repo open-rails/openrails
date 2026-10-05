@@ -133,10 +133,3 @@ type WorkerHealth struct {
 	LastAlertedAt         *time.Time `json:"last_alerted_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
-
-// RepairAlertListParams pages ledger repairs that need the merchant, newest
-// first. Seen, when set, keeps only the alerts read (or unread).
-type RepairAlertListParams struct {
-	PageRequest
-	Seen *bool
-}

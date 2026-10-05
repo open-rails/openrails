@@ -283,7 +283,7 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status, "%+v", pending)
 	require.Equal(t, "payment_authentication", pending.NextAction.Type)
-	op := pending.OperationID
+	op := pending.OperationID.String()
 	require.Equal(t, from.ID, w.subscription(embedded, sub).PriceID)
 	require.False(t, c.entitled(to.ent))
 	require.Len(t, w.stripe.ledger(""), charges)

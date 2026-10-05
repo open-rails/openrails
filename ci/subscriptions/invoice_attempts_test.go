@@ -33,7 +33,7 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	_, err := client.SetCreditLimit(ctx, customer, billing.SetCreditLimitParams{Currency: "USD", Amount: owed})
 	require.NoError(t, err)
 	request, expires := uuid.NewString(), w.clock.Now().Add(time.Hour)
-	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: customer, Invoker: c.id, InvokerType: billing.InvokerTypePayer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})
+	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: customer, Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})
 	require.NoError(t, err)
 	require.True(t, admitted[0].Allowed(), "%+v", admitted)
 	_, err = client.CaptureAdmission(ctx, request, billing.CaptureAdmissionParams{Amount: owed})

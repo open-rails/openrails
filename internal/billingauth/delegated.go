@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // DelegatedCredentialClassAttribute is the reserved signed delegated-token
@@ -40,12 +42,9 @@ type DelegatedPrincipal struct {
 	// CredentialClass is derived from verified credentials, never a request
 	// header or body. Unknown keeps existing self reads but cannot authorize CIT.
 	CredentialClass CredentialClass
-	// MerchantID is the resolved OpenRails merchant id in UUID string form
-	// (REQUIRED). The mapping from the host's credential to this merchant is
-	// per-deployment configuration owned by the host — explicit, never inferred.
-	// There is no default merchant to fall back to (#336): a deployment must
-	// resolve a real merchant id here.
-	MerchantID string
+	// MerchantID is the merchant the host maps the credential to (required).
+	// The mapping is the host's configuration, explicit and never inferred.
+	MerchantID billing.MerchantID
 
 	// MerchantSlug is the merchant's display/audit slug (optional).
 	MerchantSlug string
@@ -103,7 +102,7 @@ var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an e
 // a non-empty merchant id and subject. (Merchant-id FORMAT and the permission
 // catalog are enforced by the adapting middleware, which owns those types.)
 func ValidateDelegatedPrincipal(p *DelegatedPrincipal) error {
-	if p == nil || strings.TrimSpace(p.MerchantID) == "" || strings.TrimSpace(p.SubjectID) == "" || (p.CredentialClass != CredentialClassUnknown && p.CredentialClass != CredentialClassUserSession && p.CredentialClass != CredentialClassAutomation) {
+	if p == nil || p.MerchantID.IsZero() || strings.TrimSpace(p.SubjectID) == "" || (p.CredentialClass != CredentialClassUnknown && p.CredentialClass != CredentialClassUserSession && p.CredentialClass != CredentialClassAutomation) {
 		return ErrDelegatedPrincipalInvalid
 	}
 	return nil

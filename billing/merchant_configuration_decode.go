@@ -9,19 +9,21 @@ import (
 	"github.com/open-rails/openrails/internal/configdocument"
 )
 
+// MaxMerchantConfigurationBytes bounds a merchant configuration document.
 const MaxMerchantConfigurationBytes = 1 << 20
 
-// ParseMerchantConfigurationYAML accepts one bounded document without YAML
-// aliases, anchors, tags, duplicate fields or unknown schema fields.
+// ParseMerchantConfigurationYAML reads one ApplyMerchantConfiguration document,
+// YAML or JSON, bounded and without aliases, anchors, tags, duplicate fields
+// or unknown fields.
 func ParseMerchantConfigurationYAML(raw []byte) (*ApplyMerchantConfigurationParams, error) {
 	body, err := configdocument.YAMLToJSON(raw, MaxMerchantConfigurationBytes)
 	if err != nil {
 		return nil, err
 	}
-	return ParseMerchantConfigurationJSON(body)
+	return parseMerchantConfigurationJSON(body)
 }
 
-func ParseMerchantConfigurationJSON(raw []byte) (*ApplyMerchantConfigurationParams, error) {
+func parseMerchantConfigurationJSON(raw []byte) (*ApplyMerchantConfigurationParams, error) {
 	if err := configdocument.GuardJSON(raw, MaxMerchantConfigurationBytes); err != nil {
 		return nil, err
 	}

@@ -79,7 +79,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/db/models/product_catalog.go:Price.TrialUnitAmount trial_unit_amount":                                          notHTTPStorageRow,
 	"internal/db/models/usage_event.go:UsageEvent.Amount amount":                                                             notHTTPStorageRow,
 	"internal/http/handlers/admin_catalog.go:PaginatedResponse.Limit limit":                                                  notMoneyPageSize,
-	"internal/http/routes/route.go:PathPage.Limit limit":                                                                     notMoneyPageSize,
 	"internal/integrations/nmi/v5.go:v5PaymentRequest.Amount amount":                                                         notHTTPProviderWire,
 	"internal/nmimock/v5.go:func v5.Amount amount":                                                                           notHTTPProviderWire,
 	"internal/nmimock/v5.go:func v5.Amount plan_amount":                                                                      notHTTPProviderWire,
@@ -134,8 +133,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
 	"billing/resource_offers.go:OfferListParams.Limit limit": notMoneyPageSize,
-
-	"billing/subscriptions.go:Page.Limit limit": notMoneyPageSize,
 }
 
 const (
@@ -167,7 +164,6 @@ const (
 // log context or a page size — never served by a route. Same shrink-only rule.
 var pendingDynamicMoney = map[string]string{
 	"internal/http/handlers/admin_payments.go:func adminRefundMetadata \"admin_refund_amount\"":          notHTTPStoredMetadata,
-	"internal/http/request/request.go:func SuccessJSONPaginated \"limit\"":                               notMoneyPageSize,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                       notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                              notMoneyPurgeInventory,
 	"internal/modules/checkout/solana_settlement.go:func creditSolanaPurchase \"solana_token_amount\"":   notHTTPStoredMetadata,

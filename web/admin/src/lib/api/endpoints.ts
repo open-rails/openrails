@@ -46,7 +46,6 @@ import type {
   RailDefinition,
   RawEntitlement,
   RawProductAccessGrant,
-  RepairAlert,
   RepriceBatch,
   Reprice,
   RepriceBatchCancel,
@@ -632,12 +631,6 @@ export const resolveFinding = (
     `/merchant/findings/${id}/resolve`,
     { method: "POST", body: { outcome, notes } }
   )
-
-export const listRepairAlerts = (limit: number, signal?: AbortSignal) =>
-  api<ListPage<RepairAlert>>("/merchant/repair-alerts", {
-    query: { limit },
-    signal,
-  })
 
 export const listWorkerHealth = (signal?: AbortSignal) =>
   api<ListPage<WorkerHealth>>("/merchant/worker-health", { signal })

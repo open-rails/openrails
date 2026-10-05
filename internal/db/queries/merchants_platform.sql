@@ -5,19 +5,15 @@
 -- (internal/merchants/delete.go), which stays the only row-destroying path.
 
 -- name: ListPlatformMerchants :many
--- query searches current names only; former names are not listed.
+-- One page of the directory, newest first, after a (created_at, id) cursor;
+-- query searches current names only.
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
 FROM billing.merchants
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
-
--- name: CountPlatformMerchants :one
-SELECT count(*)
-FROM billing.merchants
-WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
-  AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0);
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetPlatformMerchant :one
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at

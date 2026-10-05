@@ -147,15 +147,13 @@ func TestNativeCustomerIdentity(t *testing.T) {
 		id   billingauth.Identity
 		ok   bool
 	}{
-		{"canonical customer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, true},
+		{"canonical customer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, true},
 		{"no customer mapping", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CredentialClass: session}, false},
-		{"opaque customer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: "user-1", CredentialClass: session}, false},
-		{"non-canonical uuid", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: strings.ToUpper(customer), CredentialClass: session}, false},
-		{"no issuer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", CustomerID: customer, CredentialClass: session}, false},
-		{"invoker scoped", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session, Invoker: "x"}, false},
-		{"machine", billingauth.Identity{Kind: billingauth.Machine, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
-		{"delegated", billingauth.Identity{Kind: billingauth.Delegated, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
-		{"unknown kind", billingauth.Identity{Kind: "unknown", SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
+		{"no issuer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
+		{"invoker scoped", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session, Invoker: "x"}, false},
+		{"machine", billingauth.Identity{Kind: billingauth.Machine, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
+		{"delegated", billingauth.Identity{Kind: billingauth.Delegated, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
+		{"unknown kind", billingauth.Identity{Kind: "unknown", SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
 	} {
 		calls := 0
 		auth := identityAuth(tc.id, &calls)
@@ -172,10 +170,10 @@ func TestNativeCustomerIdentity(t *testing.T) {
 		require.Equal(t, 1, calls, "checkout and customer gates share one verified request")
 		require.Equal(t, customer, p.SubjectID)
 		require.Equal(t, "issuer-a", p.Issuer)
-		require.Equal(t, target.MerchantID.String(), p.MerchantID)
+		require.Equal(t, target.MerchantID, p.MerchantID)
 	}
 
-	auth := identityAuth(billingauth.Identity{Kind: billingauth.User, SubjectID: "s", Issuer: "i", CustomerID: customer, CredentialClass: session}, nil)
+	auth := identityAuth(billingauth.Identity{Kind: billingauth.User, SubjectID: "s", Issuer: "i", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, nil)
 	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices/x", nil))
 	r = r.WithContext(merchanttarget.WithResolved(r.Context(), billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}))
 	_, err := nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
@@ -221,10 +219,10 @@ func TestIntegrationGate(t *testing.T) {
 	_, err = authorize(staff, allow, resolved("/v1/catalog"), billing.MerchantCatalogOwnRead)
 	requireGate(t, err, http.StatusForbidden)
 	owned := staff
-	owned.CustomerID = uuid.NewString()
+	owned.CustomerID = billing.CustomerID(uuid.New())
 	p, err = authorize(owned, allow, resolved("/v1/catalog"), billing.MerchantCatalogOwnRead)
 	require.NoError(t, err)
-	require.Equal(t, owned.CustomerID, p.Subject, "personal catalogs key on the canonical customer, never the issuer subject")
+	require.Equal(t, owned.CustomerID.String(), p.Subject, "personal catalogs key on the canonical customer, never the issuer subject")
 	withOwner := resolved("/v1/catalog")
 	withOwner.Header.Set("OpenRails-Catalog-Owner", "b3duZXI")
 	p, err = authorize(staff, allow, withOwner, billing.MerchantCatalogOwnRead)

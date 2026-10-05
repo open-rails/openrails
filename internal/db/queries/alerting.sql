@@ -31,10 +31,11 @@ DELETE FROM billing.merchant_webhooks WHERE merchant_webhooks.merchant_id = sqlc
 -- notifications  (in_app bell)
 -- ============================================================================
 
--- name: CreateMerchantNotification :one
-INSERT INTO billing.notifications (merchant_id, recipient_kind, event_type, severity, title, body, link, data)
-VALUES (sqlc.arg(merchant_id)::uuid, 'merchant', 'operator.alert', sqlc.arg(severity)::text, sqlc.arg(title)::text, sqlc.arg(body)::text, sqlc.arg(link)::text, COALESCE(sqlc.narg(data)::jsonb, '{}'::jsonb))
-RETURNING *;
+-- A given id makes the write idempotent: a second write of it is a no-op.
+-- name: CreateMerchantNotification :execrows
+INSERT INTO billing.notifications (merchant_id, id, recipient_kind, event_type, severity, title, body, link, data)
+VALUES (sqlc.arg(merchant_id)::uuid, COALESCE(sqlc.narg(id)::uuid, uuidv7()), 'merchant', 'operator.alert', sqlc.arg(severity)::text, sqlc.arg(title)::text, sqlc.arg(body)::text, sqlc.arg(link)::text, COALESCE(sqlc.narg(data)::jsonb, '{}'::jsonb))
+ON CONFLICT (merchant_id, id) DO NOTHING;
 
 -- name: ListMerchantNotifications :many
 SELECT * FROM billing.notifications

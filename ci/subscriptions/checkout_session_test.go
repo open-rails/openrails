@@ -158,7 +158,7 @@ func (s hostedSession) pay(body map[string]any) (int, map[string]any) {
 // payCard pays with a card the page just tokenized.
 func (s hostedSession) payCard(c card) (int, map[string]any) {
 	s.w.t.Helper()
-	return s.pay(map[string]any{"option_id": s.option("nmi"), "payment_token": s.w.nmi.Tokenize(c), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"})
+	return s.pay(map[string]any{"option_id": s.option("nmi"), "payment_token": s.w.nmi.Tokenize(c), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
 }
 
 // attempt is the session's stored payment attempt.
@@ -225,7 +225,7 @@ func TestHostedCheckoutAcrossHosts(t *testing.T) {
 	require.Equal(t, map[string]any{"display_name": app.slug}, doc["merchant"])
 
 	// A double click and a retry are one attempt: one idempotency key, one charge.
-	body := map[string]any{"option_id": session.option("nmi"), "payment_token": pay.nmi.Tokenize(visa), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"}
+	body := map[string]any{"option_id": session.option("nmi"), "payment_token": pay.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	subscriptions := map[string]bool{}
@@ -327,7 +327,7 @@ func TestHostedCheckoutExpiryAndUnknownIDs(t *testing.T) {
 	buyer := app.newCustomer()
 	price := app.membership("content:members", 9_990_000)
 	body := func(s hostedSession) map[string]any {
-		return map[string]any{"option_id": s.option("nmi"), "payment_token": pay.nmi.Tokenize(visa), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"}
+		return map[string]any{"option_id": s.option("nmi"), "payment_token": pay.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
 	}
 
 	for _, id := range []string{"ocs_" + strings.Repeat("0", 64), "ocs_short", uuid.NewString()} {
@@ -414,7 +414,7 @@ func TestHostedCheckoutAccountState(t *testing.T) {
 	status, out := pay.guest(http.MethodGet, "/v1/checkout-sessions/"+session.id, nil)
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
 	require.Equal(t, "checkout_session_unavailable", hostedErrorCode(out))
-	status, out = session.pay(map[string]any{"option_id": option, "payment_token": pay.nmi.Tokenize(visa), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"})
+	status, out = session.pay(map[string]any{"option_id": option, "payment_token": pay.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
 	status, out = buyer.call(http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": price.ID})
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
@@ -530,7 +530,7 @@ func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	}
 	require.NotEmpty(t, option)
 	body := func() map[string]any {
-		return map[string]any{"option_id": option, "card": entryCard(entryVisa), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"}
+		return map[string]any{"option_id": option, "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
 	}
 
 	withToken := body()

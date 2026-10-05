@@ -73,7 +73,7 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			method := c.saveCard(rail, visa)
 			request := billing.CreateCheckoutAttemptParams{
 				OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: "content:members", PriceID: price.ID,
-				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 			}
 			g := w.chargeGate(rail)

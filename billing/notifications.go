@@ -2,16 +2,13 @@ package billing
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
-// Notification is one in-app billing notification (GET /v1/me/notifications
-// for the customer's own; GET /v1/merchant/repair-alerts for the merchant's
-// system_alert rows).
+// Notification is one of a customer's in-app billing notifications
+// (GET /v1/me/notifications).
 type Notification struct {
 	ID         NotificationID   `json:"id"`
-	CustomerID string           `json:"customer_id"`
+	CustomerID CustomerID       `json:"customer_id"`
 	EventType  string           `json:"event_type"`
 	Data       NotificationData `json:"data"`
 	Seen       bool             `json:"seen"`
@@ -39,9 +36,9 @@ type NotificationData struct {
 	// Scheduled reprice / plan change (subscription_reprice_scheduled,
 	// subscription_plan_change_scheduled).
 	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
-	FromPriceID    string         `json:"from_price_id,omitzero"`
-	ToPriceID      string         `json:"to_price_id,omitzero"`
-	ToProductID    string         `json:"to_product_id,omitzero"`
+	FromPriceID    PriceID        `json:"from_price_id,omitzero"`
+	ToPriceID      PriceID        `json:"to_price_id,omitzero"`
+	ToProductID    ProductID      `json:"to_product_id,omitzero"`
 	ToProductName  string         `json:"to_product_name,omitempty"`
 	OldAmount      *int64         `json:"old_amount,omitempty,string"`
 	NewAmount      *int64         `json:"new_amount,omitempty,string"`
@@ -64,7 +61,7 @@ type NotificationData struct {
 	// Invoice lifecycle and collection (invoice_issued,
 	// payment_method_failed, payment_method_update_required,
 	// invoice_collection_stopped).
-	InvoiceID      uuid.UUID  `json:"invoice_id,omitzero"`
+	InvoiceID      InvoiceID  `json:"invoice_id,omitzero"`
 	InvoiceNumber  string     `json:"invoice_number,omitempty"`
 	AmountDue      *int64     `json:"amount_due,omitempty,string"`
 	DueAt          *time.Time `json:"due_at,omitempty"`
@@ -84,13 +81,4 @@ type NotificationData struct {
 	ProductName   string `json:"product_name,omitempty"`
 	PaymentMethod string `json:"payment_method,omitempty"`
 	UserEmail     string `json:"user_email,omitempty"`
-
-	// Merchant repair alerts (system_alert): what needs an operator and why.
-	Kind               string         `json:"kind,omitempty"`
-	Provider           string         `json:"provider,omitempty"`
-	Operation          string         `json:"operation,omitempty"`
-	AffectedCustomerID string         `json:"affected_customer_id,omitzero"`
-	OriginalPaymentID  PaymentID      `json:"original_payment_id,omitzero"`
-	Error              string         `json:"error,omitempty"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
 }

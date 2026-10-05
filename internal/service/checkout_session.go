@@ -356,8 +356,8 @@ func (s *Service) hostedOptionCurrent(ctx context.Context, session checkoutsessi
 		return err
 	}
 	for _, current := range options {
-		if strings.EqualFold(current.Selector, bound.Selector) && current.PSPID == bound.PSPID &&
-			strings.EqualFold(current.Rail, bound.Rail) && current.Mode == bound.Mode {
+		if strings.EqualFold(current.PSP, bound.Selector) && current.PSPID == bound.PSPID &&
+			strings.EqualFold(string(current.Rail), bound.Rail) && current.Mode == bound.Mode {
 			return nil
 		}
 	}
@@ -422,8 +422,8 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 			return checkoutsession.Offer{}, uuid.Nil, err
 		}
 		offer.Options = append(offer.Options, checkoutsession.Option{
-			CheckoutSessionOption: checkoutsession.CheckoutSessionOption{ID: "option_" + hex.EncodeToString(raw), PSPID: option.PSPID, Rail: option.Rail, Mode: option.Mode, Driver: option.Driver, PublicConfig: option.PublicConfig},
-			Selector:              option.Selector,
+			CheckoutSessionOption: checkoutsession.CheckoutSessionOption{ID: "option_" + hex.EncodeToString(raw), PSPID: option.PSPID, Rail: string(option.Rail), Mode: option.Mode, Driver: option.Driver, PublicConfig: option.PublicConfig},
+			Selector:              option.PSP,
 		})
 	}
 	if len(offer.Options) == 0 {

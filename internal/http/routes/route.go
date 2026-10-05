@@ -133,26 +133,6 @@ type Reply struct {
 	Body   any
 }
 
-// Untyped is a JSON object whose shape no Go type declares yet. A route that
-// answers or accepts one is not frozen: its lane replaces it with a type.
-type Untyped map[string]any
-
-// Message is the {message} body some writes still answer.
-type Message struct {
-	Message string `json:"message"`
-}
-
-// PathPage is the offset list that echoes its request path.
-type PathPage[T any] struct {
-	Object  string `json:"object"`
-	Data    []T    `json:"data"`
-	Total   int64  `json:"total"`
-	Limit   int    `json:"limit"`
-	Offset  int    `json:"offset"`
-	HasMore bool   `json:"has_more"`
-	URL     string `json:"url"`
-}
-
 // Stream is a body that is not JSON: an archive, a script.
 type Stream struct{ ContentType string }
 
@@ -291,20 +271,6 @@ type Route struct {
 	// when it needs more than the request. Exactly one is set.
 	Handler router.Handler
 	Bind    func(*Env) router.Handler
-}
-
-// Untyped reports whether the route accepts or answers a body no Go type
-// declares.
-func (r Route) Untyped() bool {
-	if _, ok := r.Request.(Untyped); ok {
-		return true
-	}
-	for _, reply := range r.Responses {
-		if _, ok := reply.Body.(Untyped); ok {
-			return true
-		}
-	}
-	return false
 }
 
 // Key is the route's identity: "GET /v1/merchant/payments/{id}".

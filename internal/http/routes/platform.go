@@ -9,6 +9,7 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/handlers"
@@ -16,8 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
-// platformRoutes is the cross-merchant operator directory (#721;
-// openrails-saas #16): standalone only, human operator sessions only.
+// platformRoutes is the cross-merchant operator directory (#721):
+// standalone only, human operator sessions only.
 // Deliberately no platform create or patch, no hard delete, and nothing that
 // touches a merchant's customers, payments or subscriptions.
 var platformRoutes = []Route{
@@ -27,17 +28,17 @@ var platformRoutes = []Route{
 	{Method: GET, Path: "/v1/platform/worker-health", Group: Platform, Auth: AuthOperator, Perm: billing.RootWorkerHealthRead, NoConn: true,
 		Responses: []Reply{{200, billing.ListPage[billing.WorkerHealth]{}}}, Handler: h(handlers.GetPlatformWorkerHealth)},
 	{Method: GET, Path: "/v1/platform/merchants", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRead, NoConn: true,
-		Query: queryOf(handlers.PlatformMerchantListQuery{}), Responses: []Reply{{200, PathPage[handlers.PlatformMerchantItem]{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PlatformListMerchants)},
+		Query: params(pageParams, queryOf(handlers.PlatformMerchantListQuery{})), Responses: []Reply{{200, billing.ListPage[handlers.PlatformMerchant]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.PlatformListMerchants)},
 	{Method: GET, Path: "/v1/platform/merchants/{id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRead, NoConn: true,
-		Responses: []Reply{{200, handlers.PlatformMerchantItem{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PlatformGetMerchant)},
+		Responses: []Reply{{200, handlers.PlatformMerchant{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PlatformGetMerchant)},
 	{Method: DELETE, Path: "/v1/platform/merchants/{id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsDelete, NoConn: true,
-		Responses: []Reply{{200, handlers.PlatformMerchantItem{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PlatformSoftDeleteMerchant)},
+		Responses: []Reply{{200, handlers.PlatformMerchant{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.PlatformSoftDeleteMerchant)},
 	{Method: POST, Path: "/v1/platform/merchants/{id}/restore", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRestore, NoConn: true,
-		Responses: []Reply{{200, handlers.PlatformMerchantItem{}}}, Errors: codes("invalid_param", "resource_conflict", "resource_not_found"), Handler: h(handlers.PlatformRestoreMerchant)},
+		Responses: []Reply{{200, handlers.PlatformMerchant{}}}, Errors: codes("invalid_param", "name_taken", "resource_conflict", "resource_not_found"), Handler: h(handlers.PlatformRestoreMerchant)},
 	// Root-owner-only manual override. Bounded merchant-directory roles do not
 	// hold this distinct permission.
 	{Method: DELETE, Path: "/v1/platform/admin-rate-limit-lockouts/{user_id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootAdminRateLimitsUnlock, NoConn: true,
-		Responses: []Reply{{200, Message{}}}, Errors: codes("authentication_required", "invalid_param", "service_unavailable"), Bind: unlockAdminRateLimit},
+		Responses: []Reply{{204, nil}}, Errors: codes("authentication_required", "invalid_param", "service_unavailable"), Bind: unlockAdminRateLimit},
 }
 
 // RootPermissionChecker authorizes the user r authenticates as against the
@@ -75,24 +76,24 @@ func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOpti
 func unlockAdminRateLimit(e *Env) router.Handler {
 	return func(r *httprequest.Request) {
 		if e.Unlocker == nil {
-			r.AbortJSON(http.StatusServiceUnavailable, "admin rate limit unlock unavailable")
+			r.AbortCode(billing.CodeServiceUnavailable, "admin rate limit unlock unavailable")
 			return
 		}
 		target := r.Param("user_id")
 		if _, err := uuid.Parse(target); err != nil {
-			r.AbortJSON(http.StatusBadRequest, "invalid user_id")
+			r.AbortAPIError(api.Coded(billing.CodeInvalidParam, "invalid user_id").WithParam("user_id"))
 			return
 		}
 		actor, ok := r.UserContext()
 		if !ok || actor.UserID == "" {
-			r.AbortJSON(http.StatusUnauthorized, "authentication required")
+			r.AbortCode(billing.CodeAuthenticationRequired, "")
 			return
 		}
 		if err := e.Unlocker.Unlock(r.Request.Context(), target, actor.UserID); err != nil {
-			r.AbortJSON(http.StatusServiceUnavailable, "admin rate limit unlock unavailable")
+			r.AbortCode(billing.CodeServiceUnavailable, "admin rate limit unlock unavailable")
 			return
 		}
-		r.SuccessJSONMessage("admin rate limit lockout cleared")
+		r.NoContent()
 	}
 }
 

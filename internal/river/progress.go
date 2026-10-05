@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"sort"
 	"strings"
 	"time"
@@ -16,8 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/webhooks"
 )
 
 // #895: the progress detector must NOT be a River job.
@@ -124,8 +123,7 @@ type ProgressMonitor struct {
 	Clock       clockwork.Clock
 	// Registrations is the kind -> declared cadence set built at worker
 	// registration; it is what "expected" means.
-	Registrations       *WorkerRegistrations
-	NotificationService *subscriptions.NotificationService
+	Registrations *WorkerRegistrations
 
 	// Tunables; zero values take the defaults below.
 	FailureThreshold int           // consecutive failures before alerting (default 3)
@@ -458,9 +456,8 @@ func workerAlertDue(row gen.BillingWorkerState, now time.Time, reAlertEvery time
 	return now.Sub(*row.LastAlertedAt) >= reAlertEvery
 }
 
-// RaiseAlerts routes every unhealthy kind — and the fleet-level stall itself —
-// to the durable repair-alert channel (notifications system alerts, the
-// same admin surface the ledger reconcilers use).
+// RaiseAlerts puts every unhealthy kind, and the fleet-level stall itself,
+// in each merchant's inbox.
 func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport) error {
 	if m == nil || m.DB == nil {
 		return fmt.Errorf("river progress: DB is required")
@@ -485,7 +482,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 		if workerAlertDue(fleetRow, report.CheckedAt, m.reAlertEvery()) {
 			if err := m.raiseAlert(ctx, fleetRow, report.Reason, report.CheckedAt, report); err != nil {
 				failedAlerts++
-				log.WithContext(ctx).WithError(err).Error("river progress: failed to raise fleet repair alert")
+				log.WithContext(ctx).WithError(err).Error("river progress: failed to raise fleet stall alert")
 			} else {
 				alerted++
 				if err := q.SeedWorkerHealth(ctx, gen.SeedWorkerHealthParams{WorkerKind: fleetHealthKind}); err != nil {
@@ -512,7 +509,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 		if err := m.raiseAlert(ctx, row, kp.Reason, report.CheckedAt, report); err != nil {
 			failedAlerts++
 			log.WithContext(ctx).WithError(err).WithField("worker_kind", kp.Kind).
-				Error("river progress: failed to raise repair alert")
+				Error("river progress: failed to raise stall alert")
 			continue
 		}
 		alerted++
@@ -526,7 +523,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 			Warn("river progress: unhealthy periodic fleet")
 	}
 	if failedAlerts > 0 {
-		return fmt.Errorf("river progress: %d repair alerts failed to record", failedAlerts)
+		return fmt.Errorf("river progress: %d stall alerts failed to record", failedAlerts)
 	}
 	return nil
 }
@@ -568,31 +565,20 @@ func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.BillingWorkerS
 	if report.FleetLastCompletedAt != nil {
 		metadata["fleet_last_completed_at"] = report.FleetLastCompletedAt.UTC().Format(time.RFC3339)
 	}
-	alertErr := fmt.Errorf("worker %s unhealthy: %s", row.WorkerKind, reason)
-	if row.WorkerKind == fleetHealthKind {
-		alertErr = fmt.Errorf("river periodic fleet is not progressing: %s", reason)
-	}
-	if row.LastError != nil && *row.LastError != "" {
-		alertErr = fmt.Errorf("worker %s unhealthy (%s): %s", row.WorkerKind, reason, *row.LastError)
-	}
 	alertErrors := make([]error, 0)
 	idempotencyKey := workerHealthAlertIdempotencyKey(row, reason)
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		if err := m.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			return webhooks.RecordLedgerRepairAlert(ctx, m.NotificationService, m.DB, now, webhooks.LedgerRepairAlert{
-				Provider:       "openrails",
-				Operation:      "river_progress",
-				IdempotencyKey: idempotencyKey,
-				Err:            alertErr,
-				Metadata:       metadata,
+			return alerting.RecordWorkerStall(ctx, m.DB, now, alerting.WorkerStall{
+				WorkerKind: row.WorkerKind, Reason: reason, IdempotencyKey: idempotencyKey, Metadata: metadata,
 			})
 		}); err != nil {
 			alertErrors = append(alertErrors, fmt.Errorf("merchant %s: %w", mid, err))
 		}
 	}
 	if err := errors.Join(alertErrors...); err != nil {
-		return fmt.Errorf("record repair alerts: %w", err)
+		return fmt.Errorf("record worker stall: %w", err)
 	}
 	return nil
 }
