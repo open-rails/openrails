@@ -45,8 +45,10 @@ type Payment struct {
 	// Optional linkage back to the payment that this record refunds
 	RefundedPaymentID *uuid.UUID `json:"refunded_payment_id,omitempty"`
 
-	Rail          Rail   `json:"rail"` // Rail: nmi, ccbill, solana
-	TransactionID string `json:"transaction_id"`
+	// Channel defaults to rail; a manual payment has no Rail and no PspID.
+	Channel       Channel `json:"channel"`
+	Rail          Rail    `json:"rail"`
+	TransactionID string  `json:"transaction_id"`
 
 	// Payment details - amount in MICROS (millionths of a major currency unit)
 	Amount     int64  `json:"amount"`

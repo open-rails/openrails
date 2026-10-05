@@ -142,8 +142,8 @@ func PolicyFromConfig(cfg models.MerchantConfiguration) (Policy, error) {
 //
 // The candidate set is DUE WORK, never a roster. Two indexed scans:
 //
-//	ENTER — payers with an overdue open receivable (ix_invoices_open_due);
-//	EXIT  — payers already parked non-current (ix_customer_delinquency_open),
+//	ENTER — payers with an overdue open receivable (invoices_customer_id_currency_due_at_idx);
+//	EXIT  — payers already parked non-current (customer_delinquency_customer_id_currency_idx),
 //	        which is the only way a settled debt gets noticed, since a paid
 //	        invoice simply stops appearing in the first scan.
 //

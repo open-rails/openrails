@@ -1,13 +1,10 @@
 -- billing.payments — immutable payment event log.
 --
--- Insert semantics replicate the bun-era model tags: a zero value on a
--- column with a default (status, currency, purchased_at, created_at) falls
--- back to that default via COALESCE/NULLIF, matching bun's
--- "zero + default tag => DEFAULT" rule. merchant_id is written explicitly.
+-- Inserts name the status; a zero purchased_at or created_at means now.
 
 -- name: CreatePayment :execrows
 INSERT INTO billing.payments (
-    id, merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    id, merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     metadata, purchased_at, created_at, card_brand,
@@ -15,9 +12,9 @@ INSERT INTO billing.payments (
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
     money_movement
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
+    $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
     sqlc.arg(currency),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed'),
+    sqlc.arg(status)::text,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
     sqlc.narg(discount_metadata), sqlc.narg(entitlements_spec_snapshot),
@@ -33,7 +30,7 @@ INSERT INTO billing.payments (
 
 -- name: CreatePaymentIfNotExists :execrows
 INSERT INTO billing.payments (
-    id, merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    id, merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, discount_code,
     discount_reason, discount_metadata, entitlements_spec_snapshot,
     metadata, purchased_at, created_at, card_brand,
@@ -41,9 +38,9 @@ INSERT INTO billing.payments (
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
     money_movement
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
+    $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
     sqlc.arg(currency),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed'),
+    sqlc.arg(status)::text,
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
     sqlc.narg(discount_metadata), sqlc.narg(entitlements_spec_snapshot),
@@ -88,7 +85,8 @@ ORDER BY purch.purchased_at DESC;
 SELECT * FROM billing.payments purch
 WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
   AND purch.psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid
-  AND purch.rail = $1 AND purch.transaction_id = $2
+  AND purch.channel = sqlc.arg(channel)::text AND purch.rail IS NOT DISTINCT FROM sqlc.narg(rail)::text
+  AND purch.transaction_id = sqlc.arg(transaction_id)::text
   AND purch.deleted_at IS NULL;
 
 -- name: DeletePayment :execrows
@@ -150,10 +148,17 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND status = 'pending'
   AND deleted_at IS NULL;
 
--- name: GetPaymentByPSPMetadataValue :one
+-- name: GetPaymentByNMISubscriptionOrder :one
 SELECT * FROM billing.payments purch
 WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.psp_id = sqlc.arg(psp_id)::uuid
-  AND purch.metadata ->> sqlc.arg(key)::text = sqlc.arg(value)::text
+  AND purch.metadata ->> 'nmi_subscription_order_id' = sqlc.arg(order_id)::text
+  AND purch.deleted_at IS NULL
+LIMIT 1;
+
+-- name: GetPaymentByStripeInvoice :one
+SELECT * FROM billing.payments purch
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.psp_id = sqlc.arg(psp_id)::uuid
+  AND purch.metadata ->> 'stripe_invoice_id' = sqlc.arg(invoice_id)::text
   AND purch.deleted_at IS NULL
 LIMIT 1;
 
@@ -255,7 +260,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id
   AND (p.subscription_id IS NULL OR sub.id IS NOT NULL)
   AND p.refunded_payment_id IS NULL
   AND p.deleted_at IS NULL
-  AND p.rail = sqlc.arg(rail)
+  AND p.rail = sqlc.arg(rail)::text
   AND p.amount > 0
   AND p.amount = sqlc.arg(amount_cents)::bigint * 10000
   AND (pm.card_last4 = sqlc.arg(last4)::text

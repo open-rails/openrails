@@ -77,7 +77,7 @@ func TestSubscriptionWithLifecycleAuditIsNeverDeleted(t *testing.T) {
 		var pgErr *pgconn.PgError
 		require.ErrorAs(t, err, &pgErr)
 		require.Equal(t, "23001", pgErr.Code, pgErr.Message)
-		require.Equal(t, "sst_subscription_fk", pgErr.ConstraintName)
+		require.Equal(t, "subscription_status_transitions_subscription_id_fkey", pgErr.ConstraintName)
 	}
 	_, err := w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.subscriptions WHERE id = $1::uuid`), sub)
 	refused(err)

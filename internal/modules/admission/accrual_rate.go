@@ -21,7 +21,7 @@ const secondsPerHour = int64(3600)
 // The measurement is a LOOKBACK, not a history: it sums usage_events over the
 // policy's window and scales to an hour, so the read is bounded by what the
 // payer did in that window and never by how long it has been a customer. It is
-// served by ix_usage_events_payer_time (merchant_id, customer_id, occurred_at).
+// served by usage_events_customer_id_occurred_at_idx (merchant_id, customer_id, occurred_at).
 //
 // What it can and cannot see, stated plainly because a quota that silently
 // under-measures is worse than none: it observes what has been REPORTED. A

@@ -77,10 +77,28 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
 	}
+	if p.Status == "" {
+		return gen.CreatePaymentParams{}, fmt.Errorf("payment status required")
+	}
+	channel, rail := p.Channel, (*string)(nil)
+	switch channel {
+	case "", models.ChannelRail:
+		if p.Rail == "" {
+			return gen.CreatePaymentParams{}, fmt.Errorf("payment rail required")
+		}
+		channel, rail = models.ChannelRail, new(string(p.Rail))
+	case models.ChannelManual:
+		if p.Rail != "" || p.PspID != nil {
+			return gen.CreatePaymentParams{}, fmt.Errorf("a manual payment names no rail or PSP")
+		}
+	default:
+		return gen.CreatePaymentParams{}, fmt.Errorf("payment channel %q is not a known value", channel)
+	}
 	return gen.CreatePaymentParams{
 		ID:                       p.ID,
 		PriceID:                  p.PriceID,
-		Rail:                     string(p.Rail),
+		Channel:                  string(channel),
+		Rail:                     rail,
 		TransactionID:            p.TransactionID,
 		Amount:                   p.Amount,
 		ListAmount:               p.ListAmount,
@@ -121,10 +139,8 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	// or#893 / payments_psp_required_on_rail: a charge on a real rail must name
-	// the account that took it. Off-rail channels (admin comp, manual entry)
-	// legitimately have none — there was no provider.
-	if params.PspID == nil && !models.IsOffRailChannel(string(payment.Rail)) {
+	// or#893: a charge on a rail names the account that took it.
+	if params.PspID == nil && params.Channel == string(models.ChannelRail) {
 		psp, perr := db.RequirePSPID(ctx)
 		if perr != nil {
 			return fmt.Errorf("create payment %s/%s: %w", payment.Rail, payment.TransactionID, perr)
@@ -154,10 +170,8 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		return false, terr
 	}
 	params.MerchantID = tid.UUID()
-	// or#893 / payments_psp_required_on_rail: a charge on a real rail must name
-	// the account that took it. Off-rail channels (admin comp, manual entry)
-	// legitimately have none — there was no provider.
-	if params.PspID == nil && !models.IsOffRailChannel(string(payment.Rail)) {
+	// or#893: a charge on a rail names the account that took it.
+	if params.PspID == nil && params.Channel == string(models.ChannelRail) {
 		psp, perr := db.RequirePSPID(ctx)
 		if perr != nil {
 			return false, fmt.Errorf("create payment %s/%s: %w", payment.Rail, payment.TransactionID, perr)
@@ -262,6 +276,16 @@ func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models
 }
 
 func (r *PaymentRepo) GetByPSPTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
+	return r.getByTransactionID(ctx, models.ChannelRail, rail, transactionID)
+}
+
+// GetManualByTransactionID reads a manual payment by the reference the
+// merchant recorded it under.
+func (r *PaymentRepo) GetManualByTransactionID(ctx context.Context, transactionID string) (*models.Payment, error) {
+	return r.getByTransactionID(ctx, models.ChannelManual, "", transactionID)
+}
+
+func (r *PaymentRepo) getByTransactionID(ctx context.Context, channel models.Channel, rail models.Rail, transactionID string) (*models.Payment, error) {
 	transactionID = strings.TrimSpace(transactionID)
 	if transactionID == "" {
 		return nil, errors.New("provider transaction reference is required")
@@ -270,20 +294,15 @@ func (r *PaymentRepo) GetByPSPTransactionID(ctx context.Context, rail models.Rai
 	if err != nil {
 		return nil, err
 	}
-	var pspID *uuid.UUID
-	if rail != models.Rail(models.ChannelManual) {
+	params := gen.GetPaymentByPSPTransactionIDParams{MerchantID: merchantID.UUID(), Channel: string(channel), TransactionID: transactionID}
+	if channel == models.ChannelRail {
 		id, err := db.RequirePSPID(ctx)
 		if err != nil {
 			return nil, err
 		}
-		pspID = &id
+		params.PspID, params.Rail = &id, new(string(rail))
 	}
-	row, err := r.db.Gen(ctx).GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{
-		MerchantID:    merchantID.UUID(),
-		PspID:         pspID,
-		Rail:          string(rail),
-		TransactionID: transactionID,
-	})
+	row, err := r.db.Gen(ctx).GetPaymentByPSPTransactionID(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -446,23 +465,40 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 	return nil
 }
 
-func (r *PaymentRepo) GetByPSPMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	mid, err := merchant.Require(ctx)
+// GetByNMISubscriptionOrder reads the attempt an NMI subscription order
+// reference names.
+func (r *PaymentRepo) GetByNMISubscriptionOrder(ctx context.Context, orderID string) (*models.Payment, error) {
+	mid, pspID, err := r.pspScope(ctx)
 	if err != nil {
 		return nil, err
 	}
-	pspID, err := db.RequirePSPID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetPaymentByPSPMetadataValue(ctx, gen.GetPaymentByPSPMetadataValueParams{MerchantID: mid.UUID(), PspID: pspID,
-		Key:   strings.TrimSpace(key),
-		Value: strings.TrimSpace(value),
-	})
+	row, err := r.db.Gen(ctx).GetPaymentByNMISubscriptionOrder(ctx, gen.GetPaymentByNMISubscriptionOrderParams{MerchantID: mid, PspID: pspID, OrderID: strings.TrimSpace(orderID)})
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
+}
+
+// GetByStripeInvoice reads the payment a Stripe invoice settled.
+func (r *PaymentRepo) GetByStripeInvoice(ctx context.Context, invoiceID string) (*models.Payment, error) {
+	mid, pspID, err := r.pspScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetPaymentByStripeInvoice(ctx, gen.GetPaymentByStripeInvoiceParams{MerchantID: mid, PspID: pspID, InvoiceID: strings.TrimSpace(invoiceID)})
+	if err != nil {
+		return nil, err
+	}
+	return models.PaymentFromGen(row)
+}
+
+func (r *PaymentRepo) pspScope(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	return mid.UUID(), pspID, err
 }
 
 func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {

@@ -364,7 +364,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 			return nil
 		}))
 		var def string
-		require.NoError(t, s.w.pool.QueryRow(t.Context(), `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'uq_checkout_attempts_solana_signature'`, s.w.schema).Scan(&def))
+		require.NoError(t, s.w.pool.QueryRow(t.Context(), `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'checkout_attempts_transaction_id_key'`, s.w.schema).Scan(&def))
 		require.Contains(t, def, "(transaction_id)")
 		s.requireNothingGranted(t, other, c)
 	})

@@ -405,7 +405,7 @@ export type Payment = {
   price_id: string
   price: Price | null
   product: ProductSummary | null
-  channel: "admin" | "manual" | "rail"
+  channel: "manual" | "rail"
   rail: string | null
   psp_id: string | null
   transaction_id: string
@@ -644,8 +644,8 @@ export type SubscriptionAccess = {
   source_id?: string
   subscription_id?: string
   rail?: string
-  start_at: string
-  end_at?: string
+  starts_at: string
+  ends_at?: string
 }
 
 export type SubscriptionRetryNowResult = {

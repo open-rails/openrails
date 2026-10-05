@@ -304,7 +304,7 @@ var families = map[Family]familySpec{
 	FamEntitlSnapshot: {
 		Kind: "snapshot",
 		From: `billing.entitlements e`,
-		BaseWhere: `e.start_at <= edge.bucket AND (e.end_at IS NULL OR e.end_at > edge.bucket)
+		BaseWhere: `e.starts_at <= edge.bucket AND (e.ends_at IS NULL OR e.ends_at > edge.bucket)
 		  AND (e.revoked_at IS NULL OR e.revoked_at > edge.bucket) AND e.deleted_at IS NULL`,
 		DimExprs: map[string]string{
 			"entitlement": `e.entitlement`,

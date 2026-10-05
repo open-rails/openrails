@@ -555,10 +555,6 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if e != nil {
 			return e
 		}
-		// Off-rail manual invoice settlement is recorded under the manual channel.
-		// or#893: no psp_id — a channel has no PSP, and
-		// invoice_payments_psp_required_on_rail states exactly that exemption.
-		rail := string(models.ChannelManual)
 		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:               uuidutil.NewV7(),
 			MerchantID:       tid.UUID(),
@@ -568,7 +564,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			Currency:         invoiceRow.Currency,
 			Amount:           amount,
 			Status:           "settled",
-			Rail:             &rail,
+			Channel:          string(models.ChannelManual),
 			RailPaymentID:    &railPaymentID,
 			AttemptedAt:      now,
 			SettledAt:        &now,

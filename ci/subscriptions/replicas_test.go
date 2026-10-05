@@ -91,9 +91,9 @@ func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
 		require.Equal(t, "23505", pgErr.Code)
 		require.Equal(t, constraint, pgErr.ConstraintName)
 	}
-	refused(clone(-1, "failed_terminal"), "uq_provider_intents_subscription_collection_slot")
+	refused(clone(-1, "failed_terminal"), "provider_intents_subscription_collection_slot_key")
 	require.NoError(t, clone(98, "pending"))
-	refused(clone(99, "pending"), "uq_provider_intents_open_subscription_collection")
+	refused(clone(99, "pending"), "provider_intents_open_subscription_collection_key")
 	_, err := f.base.pool.Exec(t.Context(), f.q(`DELETE FROM billing.provider_intents WHERE subscription_id = $1 AND status = 'pending'`), subUUID(e.sub))
 	require.NoError(t, err)
 }

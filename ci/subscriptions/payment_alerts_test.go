@@ -40,10 +40,19 @@ func (w *world) seedAttempts(customerID string, s attemptSeed) {
 	w.t.Helper()
 	source, via := s.source()
 	if s.cycles {
+		// Each batch's cycles hang off their own inert subscription.
+		var products int
+		require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM billing.products p JOIN billing.merchants m ON m.id = p.merchant_id WHERE m.slug = $1`), w.slug).Scan(&products))
+		if products == 0 {
+			w.membershipEvery("content:members", 9_990_000, monthHours)
+		}
 		_, err := w.pool.Exec(w.t.Context(), w.q(`WITH m AS (SELECT id FROM billing.merchants WHERE slug = $1),
+			s AS (INSERT INTO billing.subscriptions (merchant_id, product_id, rail, customer_id, psp_id, collection_policy, status, canceled_at, cancel_type)
+				SELECT m.id, (SELECT p.id FROM billing.products p WHERE p.merchant_id = m.id ORDER BY p.id LIMIT 1), $4, $2::uuid, $3::uuid, CASE $4 WHEN 'nmi' THEN 'nmi_schedule' ELSE 'provider' END, 'canceled', now(), 'user'
+				FROM m RETURNING id),
 			c AS (INSERT INTO billing.rebill_cycles (merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
-				SELECT m.id, gen_random_uuid(), $2::uuid, $3::uuid, $4, $5, $6::timestamptz - (g * interval '1 second') - interval '1 minute', 9990000, 'USD'
-				FROM m, generate_series(1, $7::int) g RETURNING id, merchant_id, subscription_id, due_at)
+				SELECT m.id, s.id, $2::uuid, $3::uuid, $4, $5, $6::timestamptz - (g * interval '1 second') - interval '1 minute', 9990000, 'USD'
+				FROM m, s, generate_series(1, $7::int) g RETURNING id, merchant_id, subscription_id, due_at)
 			INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, cycle_id, subscription_id)
 			SELECT c.merchant_id, $2::uuid, $3::uuid, $4, 'rebill', $5, 'saved', $11, $12, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', c.due_at + interval '1 minute', c.id, c.subscription_id FROM c`),
 			w.slug, customerID, s.psp, s.rail, s.owner, s.at, s.n, s.category, s.reason, s.code, source, via)

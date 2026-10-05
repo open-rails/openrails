@@ -188,7 +188,7 @@ describe("SubscriptionsPanel", () => {
         }),
         paymentMethod({
           id: "pm_other_psp",
-          psp_id: "99999999-9999-9999-9999-999999999999",
+          psp_id: "psp_99999999-9999-9999-9999-999999999999",
           card: { brand: "amex", last4: "0005" },
         }),
       ],

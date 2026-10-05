@@ -162,10 +162,10 @@ func (s *CheckoutAttemptService) creditSolanaPurchase(ctx context.Context, d *db
 // transactionIDConstraints are the unique indexes a transfer's transaction id
 // collides with when it already settled another payment or checkout.
 var transactionIDConstraints = map[string]bool{
-	"uq_payments_merchant_offrail_transaction":      true,
-	"uq_payments_merchant_psp_transaction":          true,
-	"uq_checkout_attempts_merchant_psp_transaction": true,
-	"uq_checkout_attempts_solana_signature":         true,
+	"payments_channel_transaction_id_key":         true,
+	"payments_psp_id_transaction_id_key":          true,
+	"checkout_attempts_psp_id_transaction_id_key": true,
+	"checkout_attempts_transaction_id_key":        true,
 }
 
 // transientSettleError is a failure another attempt can get past: the

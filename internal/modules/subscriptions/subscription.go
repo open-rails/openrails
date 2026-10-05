@@ -146,7 +146,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 
 	if err := s.subscriptionRepo.Create(ctx, subscription); err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_subscriptions_customer_product_lifecycle" {
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "subscriptions_customer_id_product_id_key" {
 			return ErrActiveSubscriptionExists
 		}
 		return err
@@ -264,8 +264,8 @@ func (s *SubscriptionService) GetByPSPSubscriptionID(ctx context.Context, rail, 
 	return s.subscriptionRepo.GetByPSPSubscriptionID(ctx, rail, railSubscriptionID)
 }
 
-func (s *SubscriptionService) GetByPSPMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByPSPMetadataValue(ctx, rail, key, value)
+func (s *SubscriptionService) GetByGatewayOrder(ctx context.Context, rail, orderID string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByGatewayOrder(ctx, rail, orderID)
 }
 
 // GetActiveSubscriptionsForPSP gets all active subscriptions for a rail

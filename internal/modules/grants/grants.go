@@ -67,7 +67,7 @@ type DepositProvenance struct {
 //     any wall-clock. A grant event carries a real window [starts_at, ends_at];
 //     a termination event (revoke/expire/supersede) is a WINDOW-LESS point event
 //     whose effective instant is starts_at and whose ends_at is always NULL
-//     (enforced by grants_termination_no_window).
+//     (enforced by grants_termination_no_window_check).
 //   - TRANSACTION TIME (when we wrote the row) lives in created_at. It is never
 //     read as a business fact.
 type Ledger struct {
@@ -156,7 +156,7 @@ func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason strin
 // asOf is the effective revocation instant recorded on starts_at (valid time);
 // the zero Time falls back to now(), mirroring Grant()'s zero-StartsAt handling.
 // ends_at is ALWAYS NULL: a termination is a window-less point event (see the
-// clock convention on Ledger), so it never trips grants_valid_window even when the
+// clock convention on Ledger), so it never trips grants_valid_window_check even when the
 // grant it terminates already expired.
 func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string, asOf time.Time) (gen.BillingGrant, error) {
 	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
@@ -205,7 +205,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 			return err
 		}
 		// #691 projection inversion: a grant sourced from an AUTO-RENEW sub in a
-		// non-terminal provider-owned state projects one STANDING open window (end_at NULL) per
+		// non-terminal provider-owned state projects one STANDING open window (ends_at NULL) per
 		// (customer, entitlement, source) instead of per-period windows. The grant
 		// ledger stays per-period/bounded; only the projection is standing. Access
 		// for that legacy cohort ends only by PROOF (cancel closure, terminal dunning, provider-
@@ -260,8 +260,8 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 				entSourceID = parsed
 			}
 			if err := l.q.MaterializeEntitlement(ctx, gen.MaterializeEntitlementParams{
-				Entitlement: f, StartAt: g.StartsAt, SourceType: g.SourceType,
-				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: endAt,
+				Entitlement: f, StartsAt: g.StartsAt, SourceType: g.SourceType,
+				MerchantID: l.merchant, CustomerID: g.CustomerID, EndsAt: endAt,
 				SourceID: &entSourceID, GrantID: gid,
 			}); err != nil {
 				return fmt.Errorf("grants: materialize entitlement %q: %w", f, err)

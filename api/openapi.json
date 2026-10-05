@@ -20747,7 +20747,6 @@
           "channel": {
             "type": "string",
             "enum": [
-              "admin",
               "manual",
               "rail"
             ]
@@ -23819,11 +23818,11 @@
           "rail": {
             "type": "string"
           },
-          "start_at": {
+          "starts_at": {
             "type": "string",
             "format": "date-time"
           },
-          "end_at": {
+          "ends_at": {
             "type": "string",
             "format": "date-time"
           }
@@ -23831,7 +23830,7 @@
         "required": [
           "kind",
           "entitlement",
-          "start_at"
+          "starts_at"
         ]
       },
       "SubscriptionRetryNowResult": {

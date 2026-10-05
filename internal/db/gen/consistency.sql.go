@@ -282,8 +282,8 @@ WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'subscription'
   AND ent.deleted_at IS NULL
   AND sub.id IS NULL
   AND NOT (ent.revoked_at IS NULL
-           AND ent.start_at <= $2::timestamptz
-           AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz))
+           AND ent.starts_at <= $2::timestamptz
+           AND (ent.ends_at IS NULL OR ent.ends_at > $2::timestamptz))
   AND ($3::uuid IS NULL OR ent.customer_id = $3::uuid)
 `
 

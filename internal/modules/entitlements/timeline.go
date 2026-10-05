@@ -139,7 +139,7 @@ func GetTimelineIndefinite(ctx context.Context, qx gen.DBTX, tenantSubjectID uui
 	return models.EntitlementFromGen(row), nil
 }
 
-// GetTimelineTailEnd returns the latest finite end_at on the timeline, or nil
+// GetTimelineTailEnd returns the latest finite ends_at on the timeline, or nil
 // when the timeline has no finite windows.
 func GetTimelineTailEnd(ctx context.Context, qx gen.DBTX, tenantSubjectID uuid.UUID, entitlement string) (*time.Time, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)

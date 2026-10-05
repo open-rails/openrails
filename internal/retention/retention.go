@@ -132,7 +132,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 // to a provider: once finished, nothing reads them back, and they are deleted
 // after ProviderWrites. Every other intent type is the record of money moved
 // or refused, a membership enrolled or a card erased, and is permanent. The
-// baseline's idx_provider_intents_finished_outbox lists the same types.
+// baseline's provider_intents_updated_at_idx lists the same types.
 var OutboxIntentTypes = []string{
 	"nmi_delete_subscription",
 	"stripe_cancel_subscription",

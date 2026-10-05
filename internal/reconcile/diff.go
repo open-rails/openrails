@@ -594,7 +594,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		blockers = append(blockers, planNote)
 	}
 	if r.Status == SubscriptionStatusPastDue && r.NextBillingAt == nil {
-		// Local past_due requires a period end (chk_past_due_has_period_end).
+		// Local past_due requires a period end (subscriptions_past_due_has_period_end_check).
 		blockers = append(blockers, "remote is past_due without a next billing date; local past_due requires a period end")
 	}
 	localStatus, materializable := LocalMaterializeStatus(r.Status)
@@ -627,7 +627,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	}
 	if r.LastBilledAt != nil {
 		action.StartedAt = r.LastBilledAt
-		// chk_valid_period: only carry the period start when it precedes the end.
+		// subscriptions_valid_period_check: only carry the period start when it precedes the end.
 		if r.NextBillingAt == nil || r.LastBilledAt.Before(*r.NextBillingAt) {
 			action.PeriodStartsAt = r.LastBilledAt
 		}
@@ -1146,8 +1146,8 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				SubscriptionID: sub.ID,
 				CustomerID:     sub.CustomerID,
 				Entitlements:   sub.EntitlementNames,
-				StartAt:        start,
-				EndAt:          sub.CurrentPeriodEndsAt,
+				StartsAt:       start,
+				EndsAt:         sub.CurrentPeriodEndsAt,
 			}
 			f.RecommendedAction += "; the charge's period is current, so missing subscription entitlements are granted too"
 		}

@@ -76,7 +76,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 		return err
 	}
 	customer, _ := uuid.Parse(p.UserID)
-	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || observed.PriceID != p.PriceID || observed.Rail != "nmi" || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
+	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || observed.PriceID != p.PriceID || observed.Rail == nil || *observed.Rail != "nmi" || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
 		return errors.New("sale result points to another payment or commercial decision")
 	}
 	if !payments.PaymentStatusCompleted(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {

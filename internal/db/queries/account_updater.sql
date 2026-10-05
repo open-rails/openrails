@@ -29,7 +29,7 @@ WHERE c.kind = lower(sqlc.arg(custodian)::text)
   AND EXISTS (
         SELECT 1 FROM billing.payment_methods pm
          WHERE pm.merchant_id = c.merchant_id
-           AND pm.custodian = c.kind AND pm.custodian_id = c.id
+           AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
            AND pm.rail_method_ref <> ''
            AND (pm.account_updater_checked_at IS NULL
                 OR pm.account_updater_checked_at < sqlc.arg(now)::timestamptz - w.lookahead)
@@ -61,6 +61,7 @@ LIMIT sqlc.arg(merchant_limit)::int;
 SELECT pm.id, pm.rail_method_ref, pm.card_exp_month, pm.card_exp_year
 FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
+  AND pm.custodian <> 'psp'
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.custodian = sqlc.arg(custodian)
   AND pm.rail_method_ref <> ''

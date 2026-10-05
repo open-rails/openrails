@@ -90,7 +90,7 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 			// #765: this handler's entire surface is browser tier — always the
 			// static permissive `*` grant, no per-request source.
 			middleware.PermissiveCORSHTTP(middleware.AllRequests),
-			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
 			// Resolve current authority on each request, including privileged
 			// restore/bootstrap integrations that bind after graph construction.

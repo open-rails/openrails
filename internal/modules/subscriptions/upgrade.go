@@ -50,7 +50,7 @@ func (s *SubscriptionLifecycleService) CompleteUpgradeTx(ctx context.Context, tx
 		return err
 	}
 	for name := range next.EntitlementsSpecSnapshot {
-		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: next.CustomerID.String(), Entitlement: name, NotBefore: &at, EndAt: next.CurrentPeriodEndsAt, SourceType: models.EntitlementSourceSubscription, SourceID: next.ID}); err != nil {
+		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: next.CustomerID.String(), Entitlement: name, NotBefore: &at, EndsAt: next.CurrentPeriodEndsAt, SourceType: models.EntitlementSourceSubscription, SourceID: next.ID}); err != nil {
 			return err
 		}
 	}
@@ -193,7 +193,7 @@ func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txD
 		return err
 	}
 	for name := range sub.EntitlementsSpecSnapshot {
-		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &at, EndAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
+		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &at, EndsAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
 			return err
 		}
 	}

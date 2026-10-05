@@ -275,7 +275,7 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 		}
 	}
 	if invoiceID := strings.TrimSpace(rec.LatestInvoiceID); invoiceID != "" {
-		existing, err := s.PaymentService.GetByPSPMetadataValue(ctx, "stripe_invoice_id", invoiceID)
+		existing, err := s.PaymentService.GetByStripeInvoice(ctx, invoiceID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return false, nil

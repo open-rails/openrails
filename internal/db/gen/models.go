@@ -386,8 +386,8 @@ type BillingDestructiveRunBeforeImage struct {
 type BillingEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
-	StartAt      time.Time
-	EndAt        *time.Time
+	StartsAt     time.Time
+	EndsAt       *time.Time
 	SourceID     uuid.UUID
 	SourceType   string
 	RevokedAt    *time.Time
@@ -536,6 +536,7 @@ type BillingInvoicePayment struct {
 	Currency         string
 	Amount           int64
 	Status           string
+	Channel          string
 	Rail             *string
 	RailPaymentID    *string
 	FailureCode      *string
@@ -544,7 +545,7 @@ type BillingInvoicePayment struct {
 	SettledAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement.
+	// PSP that took this invoice payment attempt. Set exactly when channel = rail (invoice_payments_channel_psp_check).
 	PspID           *uuid.UUID
 	FailureReason   *string
 	PaymentMethodID *uuid.UUID
@@ -849,9 +850,11 @@ type BillingOperationAuthorization struct {
 
 // Records of all payment transactions. Retention: permanent, never pruned.
 type BillingPayment struct {
-	ID            uuid.UUID
-	PriceID       uuid.UUID
-	Rail          string
+	ID      uuid.UUID
+	PriceID uuid.UUID
+	// How the money arrived: rail (through a PSP), manual (recorded by the merchant) or admin (an operator comp). Off-rail rows have no rail and no PSP.
+	Channel       string
+	Rail          *string
 	TransactionID string
 	Amount        int64
 	ListAmount    int64
@@ -871,7 +874,7 @@ type BillingPayment struct {
 	CardLast4                *string
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
-	// PSP that took this charge. Required on every real rail (payments_psp_required_on_rail); NULL only for off-rail channels (manual/admin), which have no provider.
+	// PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).
 	PspID *uuid.UUID
 	// initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
 	AttemptKind *string
@@ -893,32 +896,33 @@ type BillingPayment struct {
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
 type BillingPaymentAttempt struct {
-	ID               uuid.UUID
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	PspID            uuid.UUID
-	Rail             string
-	Kind             string
-	Owner            string
-	CardEntry        string
-	Source           string
-	ObservedVia      string
-	Category         string
-	Reason           *string
-	Action           *string
-	ResponseCode     *string
-	ResponseText     *string
-	TransactionID    *string
-	AvsResult        *string
-	CvvResult        *string
-	CardBrand        *string
-	CardLast4        *string
-	TokenType        *string
-	Amount           int64
-	Currency         *string
-	AttemptedAt      time.Time
-	CheckoutID       *uuid.UUID
-	CheckoutTarget   *string
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Kind           string
+	Owner          string
+	CardEntry      string
+	Source         string
+	ObservedVia    string
+	Category       string
+	Reason         *string
+	Action         *string
+	ResponseCode   *string
+	ResponseText   *string
+	TransactionID  *string
+	AvsResult      *string
+	CvvResult      *string
+	CardBrand      *string
+	CardLast4      *string
+	TokenType      *string
+	Amount         int64
+	Currency       *string
+	AttemptedAt    time.Time
+	CheckoutID     *uuid.UUID
+	CheckoutTarget *string
+	// The subscription the attempt renews or would create. No foreign key: a declined first charge names a subscription that is never written.
 	SubscriptionID   *uuid.UUID
 	PaymentMethodID  *uuid.UUID
 	PaymentID        *uuid.UUID
@@ -1017,7 +1021,7 @@ type BillingPrice struct {
 	TrialUnitAmount *int64
 	// Optional trial first-phase length in HOURS; NULL = no trial.
 	TrialDurationHours *int32
-	// Durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see uq_prices_merchant_key_current. Archived rows keep their key as a back-reference to the chain.
+	// Durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see prices_key_key. Archived rows keep their key as a back-reference to the chain.
 	Key string
 }
 
@@ -1109,7 +1113,7 @@ type BillingProviderIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (provider_intents_addressed).
+	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (provider_intents_addressed_check).
 	PspID *uuid.UUID
 	// The destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
 	DestructiveRunID    *uuid.UUID
@@ -1123,7 +1127,7 @@ type BillingProviderMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed).
+	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed_check).
 	PspID            *uuid.UUID
 	ProviderIntentID *uuid.UUID
 	IntentType       *string
@@ -1375,7 +1379,7 @@ type BillingSubscription struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs uq_subscriptions_customer_tier_group_active: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
+	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs subscriptions_customer_id_tier_group_key: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID

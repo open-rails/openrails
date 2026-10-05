@@ -117,7 +117,7 @@ func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) e
 // ReplaceForTierChange atomically persists a tier change: it writes oldSub
 // (pre-mutated by the caller to its canceled state) and inserts newSub in ONE
 // transaction. The partial unique index
-// uq_subscriptions_customer_tier_group_active allows only one live
+// subscriptions_customer_id_tier_group_key allows only one live
 // subscription per (tenant_subject, tier_group), so the old row's cancel and
 // the new row's insert must commit together — and the cancel must execute
 // first. On any failure the transaction rolls back and the old subscription
@@ -531,9 +531,11 @@ func (r *SubscriptionRepo) GetByPSPSubscriptionID(ctx context.Context, rail, rai
 	return r.oneWithDetails(ctx, row, false)
 }
 
-func (r *SubscriptionRepo) GetByPSPMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
-	if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
-		return nil, errors.New("provider metadata key and reference are required")
+// GetByGatewayOrder reads the subscription whose gateway response names the
+// order reference.
+func (r *SubscriptionRepo) GetByGatewayOrder(ctx context.Context, rail, orderID string) (*models.Subscription, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return nil, errors.New("gateway order reference is required")
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -543,12 +545,11 @@ func (r *SubscriptionRepo) GetByPSPMetadataValue(ctx context.Context, rail, key,
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetSubscriptionByPSPMetadataValue(ctx, gen.GetSubscriptionByPSPMetadataValueParams{
+	row, err := r.db.Gen(ctx).GetSubscriptionByGatewayOrder(ctx, gen.GetSubscriptionByGatewayOrderParams{
 		MerchantID: merchantID.UUID(),
 		PspID:      pspID,
 		Rail:       strings.TrimSpace(rail),
-		Key:        strings.TrimSpace(key),
-		Value:      strings.TrimSpace(value),
+		OrderID:    strings.TrimSpace(orderID),
 	})
 	if err != nil {
 		return nil, err

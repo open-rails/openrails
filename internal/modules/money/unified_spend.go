@@ -234,7 +234,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		return 0, 0, false, fmt.Errorf("amount must be positive")
 	}
 	// or#891 items 1+4: every leg posted below carries this key — the ledger
-	// transfers AND the pending invoice item behind uq_invoice_items_source. A
+	// transfers AND the pending invoice item behind invoice_items_customer_id_currency_source_type_source_id_key. A
 	// blank key used to reach here and be papered over with a freshly minted
 	// uuidv7, which can never collide, so every replay of a keyless spend accrued
 	// a NEW invoice item. The ledger does not mint keys on a caller's behalf.

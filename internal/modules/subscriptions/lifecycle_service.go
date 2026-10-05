@@ -659,7 +659,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				UserID:      subscription.CustomerID.String(),
 				Entitlement: ent,
 				NotBefore:   &notBefore,
-				EndAt:       &endAt,
+				EndsAt:      &endAt,
 				SourceType:  models.EntitlementSourceSubscription,
 				SourceID:    subscription.ID,
 			})
@@ -683,8 +683,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.CustomerID.String(),
 				"entitlement":     ent,
-				"window_start":    window.StartAt,
-				"window_end":      window.EndAt,
+				"window_start":    window.StartsAt,
+				"window_end":      window.EndsAt,
 			}).Info("Granted subscription entitlement")
 		}
 		if len(entNames) > 0 {
@@ -1346,7 +1346,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			return fmt.Errorf("failed to update reactivated subscription: %w", err)
 		}
 
-		// #691 resume: re-open the advance-written cancel closure (end_at back to
+		// #691 resume: re-open the advance-written cancel closure (ends_at back to
 		// NULL) so an auto-renew resume restores STANDING access; the pushes below
 		// then only record the paid-period fact.
 		if err := entitlementService.ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
@@ -1390,7 +1390,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 				UserID:      subscription.CustomerID.String(),
 				Entitlement: entName,
 				NotBefore:   &notBefore,
-				EndAt:       &endAt,
+				EndsAt:      &endAt,
 				SourceType:  subSource,
 				SourceID:    subID,
 			}); err != nil {
@@ -1628,7 +1628,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	now := s.now()
 	endedAt := c.EndedAt
 	// canceled_at is the operation instant, but never after ended_at: the
-	// chk_ended_not_before_canceled constraint requires ended_at >= canceled_at,
+	// subscriptions_ended_not_before_canceled_check constraint requires ended_at >= canceled_at,
 	// and an immediate revoke pins ended_at to the caller's `now` (computed a hair
 	// before this method's own s.now()).
 	canceledAt := now

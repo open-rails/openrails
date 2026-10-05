@@ -35,8 +35,8 @@ var (
 	partitionBy  = regexp.MustCompile(`(?m)^\) PARTITION BY RANGE \((\w+)\);$`)
 	tableComment = regexp.MustCompile(`(?m)^COMMENT ON TABLE billing\.(\w+) IS '((?:[^']|'')*)';$`)
 	guardTrigger = regexp.MustCompile(`(?s)BEFORE DELETE ON billing\.(\w+)\s+FOR EACH ROW(?: WHEN \([^)]*\))? EXECUTE FUNCTION billing\.guard_retention_delete\('(\w+)', '(\d+) days'\);`)
-	outboxIndex  = regexp.MustCompile(`(?s)CREATE INDEX idx_provider_intents_finished_outbox .*?intent_type IN \(([^)]*)\);`)
-	holdLifetime = regexp.MustCompile(`admission_operations_hold_lifetime CHECK \(expires_at IS NULL OR expires_at <= admitted_at \+ interval '(\d+) hours'\)`)
+	outboxIndex  = regexp.MustCompile(`(?s)CREATE INDEX provider_intents_updated_at_idx .*?intent_type IN \(([^)]*)\);`)
+	holdLifetime = regexp.MustCompile(`admission_operations_hold_lifetime_check CHECK \(expires_at IS NULL OR expires_at <= admitted_at \+ interval '(\d+) hours'\)`)
 )
 
 // A table added to the baseline without a retention class fails here.
@@ -152,7 +152,7 @@ func TestBaselinePeriodsAreTheConstants(t *testing.T) {
 	}
 	m := holdLifetime.FindStringSubmatch(sql)
 	if m == nil {
-		t.Fatal("admission_operations_hold_lifetime not found in the baseline")
+		t.Fatal("admission_operations_hold_lifetime_check not found in the baseline")
 	}
 	if hours, _ := strconv.Atoi(m[1]); time.Duration(hours)*time.Hour != AdmissionMaxHold {
 		t.Errorf("baseline hold lifetime is %s hours, AdmissionMaxHold is %s", m[1], AdmissionMaxHold)
@@ -211,7 +211,7 @@ func TestPartitionCalendar(t *testing.T) {
 func TestOutboxIntentTypesMatchTheBaseline(t *testing.T) {
 	m := outboxIndex.FindStringSubmatch(baseline(t))
 	if m == nil {
-		t.Fatal("idx_provider_intents_finished_outbox not found in the baseline")
+		t.Fatal("provider_intents_updated_at_idx not found in the baseline")
 	}
 	var indexed []string
 	for _, q := range regexp.MustCompile(`'(\w+)'`).FindAllStringSubmatch(m[1], -1) {

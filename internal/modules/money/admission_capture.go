@@ -127,7 +127,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 			})
 			if err != nil {
 				var conflict *pgconn.PgError
-				if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "uq_usage_events_idem" {
+				if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "usage_events_idem_key" {
 					return fmt.Errorf("%w: capture usage coordinate belongs to another operation", ErrIdempotencyKeyReused)
 				}
 				return err

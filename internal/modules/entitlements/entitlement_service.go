@@ -332,10 +332,10 @@ type PushNewEntitlementParams struct {
 	// grants use NotBefore as their source start when supplied.
 	NotBefore *time.Time
 
-	// Exactly one of (Indefinite, Duration, EndAt) must be set.
+	// Exactly one of (Indefinite, Duration, EndsAt) must be set.
 	Indefinite bool
 	Duration   *time.Duration
-	EndAt      *time.Time
+	EndsAt     *time.Time
 
 	SourceType models.EntitlementSourceType
 	SourceID   uuid.UUID
@@ -362,16 +362,16 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	if p.Duration != nil {
 		setCount++
 	}
-	if p.EndAt != nil {
+	if p.EndsAt != nil {
 		setCount++
 	}
 	if setCount != 1 {
-		return nil, fmt.Errorf("exactly one of Indefinite, Duration, or EndAt must be set")
+		return nil, fmt.Errorf("exactly one of Indefinite, Duration, or EndsAt must be set")
 	}
 	if p.Duration != nil && *p.Duration <= 0 {
 		return nil, fmt.Errorf("duration must be > 0")
 	}
-	if p.EndAt != nil && p.EndAt.IsZero() {
+	if p.EndsAt != nil && p.EndsAt.IsZero() {
 		return nil, fmt.Errorf("endAt must be non-zero")
 	}
 
@@ -416,7 +416,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceSubscription && p.EndAt != nil {
+		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceSubscription && p.EndsAt != nil {
 			latest, lookupErr := gen.New(tx).LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
 				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, SourceType: string(grants.Subscription),
 				SourceID: p.SourceID.String(), Entitlement: p.Entitlement,
@@ -426,7 +426,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			}
 			// A newly paid period may restore the same subscription; replaying
 			// the revoked period itself must never restore its effect.
-			if !p.EndAt.After(latest) {
+			if !p.EndsAt.After(latest) {
 				created = models.EntitlementFromGen(previous)
 				return nil
 			}
@@ -437,17 +437,17 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceGrace {
 			err = pgx.ErrNoRows
 		}
-		if err == nil && (previous.EndAt == nil || p.Duration != nil ||
-			(p.EndAt != nil && !p.EndAt.After(*previous.EndAt))) {
+		if err == nil && (previous.EndsAt == nil || p.Duration != nil ||
+			(p.EndsAt != nil && !p.EndsAt.After(*previous.EndsAt))) {
 			created = models.EntitlementFromGen(previous)
-			if previous.RevokedAt == nil && p.SourceType == models.EntitlementSourceSubscription && p.EndAt != nil {
+			if previous.RevokedAt == nil && p.SourceType == models.EntitlementSourceSubscription && p.EndsAt != nil {
 				if err := s.appendCoveredPeriodGrant(ctx, tx, merchantID.UUID(), p, now); err != nil {
 					return err
 				}
 			}
 			return nil
 		}
-		// Duration purchases append paid time; explicit EndAt/indefinite sources
+		// Duration purchases append paid time; explicit EndsAt/indefinite sources
 		// retain their own coverage and may overlap unrelated sources.
 		var tailEnd *time.Time
 		if p.Duration != nil {
@@ -460,7 +460,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		start := now
 		if p.NotBefore != nil {
 			nb := p.NotBefore.UTC()
-			if p.EndAt != nil || nb.After(start) {
+			if p.EndsAt != nil || nb.After(start) {
 				start = nb
 			}
 		}
@@ -475,8 +475,8 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		case p.Duration != nil:
 			e := start.Add(*p.Duration)
 			endAt = &e
-		case p.EndAt != nil:
-			e := p.EndAt.UTC()
+		case p.EndsAt != nil:
+			e := p.EndsAt.UTC()
 			if !e.After(start) {
 				return fmt.Errorf("endAt must be after entitlement start")
 			}
@@ -523,7 +523,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 // timeline lock held.
 func (s *EntitlementService) appendCoveredPeriodGrant(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p PushNewEntitlementParams, now time.Time) error {
 	q := gen.New(tx)
-	end := p.EndAt.UTC()
+	end := p.EndsAt.UTC()
 	start := now
 	if p.NotBefore != nil && !p.NotBefore.IsZero() {
 		start = p.NotBefore.UTC()
@@ -564,7 +564,7 @@ func (s *EntitlementService) appendCoveredPeriodGrant(ctx context.Context, tx pg
 }
 
 // BoundSubscriptionAccess writes the PROVEN closure for a subscription's access
-// (#691): live subscription-sourced windows get end_at = endAt — advance-written
+// (#691): live subscription-sourced windows get ends_at = endAt — advance-written
 // on disk, so a dead system cannot extend a canceled sub — and scheduled
 // windows starting at/after the closure are removed. Idempotent.
 func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
@@ -580,19 +580,19 @@ func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscr
 		}
 		if err := q.SoftDeleteFutureEntitlementsBySubscription(ctx, gen.SoftDeleteFutureEntitlementsBySubscriptionParams{
 			MerchantID: scopeMerchantID.UUID(),
-			SourceID:   subscriptionID, EndAt: endAt.UTC(), Now: now,
+			SourceID:   subscriptionID, EndsAt: endAt.UTC(), Now: now,
 		}); err != nil {
 			return err
 		}
 		return q.EndActiveEntitlementsBySubscription(ctx, gen.EndActiveEntitlementsBySubscriptionParams{
 			MerchantID: scopeMerchantID.UUID(),
-			SourceID:   subscriptionID, EndAt: endAt.UTC(), Now: now, SetRevoked: false,
+			SourceID:   subscriptionID, EndsAt: endAt.UTC(), Now: now, SetRevoked: false,
 		})
 	})
 }
 
 // ResumeSubscriptionAccess re-opens a resumed auto-renew subscription's latest
-// bounded window (end_at = NULL), undoing an advance-written cancel closure
+// bounded window (ends_at = NULL), undoing an advance-written cancel closure
 // (#691). Gated on the sub actually projecting standing access again (auto-renew
 // price + non-terminal status), so terminal/bounded subs are a no-op.
 func (s *EntitlementService) ResumeSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID) error {
@@ -630,7 +630,7 @@ func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, sub
 }
 
 // extendActiveBySubscription extends active entitlements for a subscription to endAt.
-// It only updates rows whose end_at is NULL or before endAt, and will never shorten a window.
+// It only updates rows whose ends_at is NULL or before endAt, and will never shorten a window.
 func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Preserve the purchased duration of following scheduled windows when
@@ -643,7 +643,7 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 		rows, err := q.ListExtendableSubscriptionEntitlements(ctx, gen.ListExtendableSubscriptionEntitlementsParams{
 			MerchantID: scopeMerchantID.UUID(),
 			SourceID:   subscriptionID,
-			EndAt:      endAt,
+			EndsAt:     endAt,
 		})
 		if err != nil {
 			return err
@@ -671,14 +671,14 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 				return errors.New("entitlement target changed during extension")
 			}
 			ent := models.EntitlementFromGen(current)
-			if ent.RevokedAt != nil || ent.EndAt == nil || ent.EndAt.IsZero() {
+			if ent.RevokedAt != nil || ent.EndsAt == nil || ent.EndsAt.IsZero() {
 				continue
 			}
-			oldEnd, newEnd := ent.EndAt.UTC(), endAt.UTC()
+			oldEnd, newEnd := ent.EndsAt.UTC(), endAt.UTC()
 			if !newEnd.After(oldEnd) {
 				continue
 			}
-			if !newEnd.After(ent.StartAt) {
+			if !newEnd.After(ent.StartsAt) {
 				return fmt.Errorf("cannot extend entitlement before its start")
 			}
 
@@ -728,14 +728,14 @@ func (s *EntitlementService) endActiveByPayment(ctx context.Context, paymentID u
 			MerchantID: scopeMerchantID.UUID(),
 			SourceID:   paymentID,
 			Now:        now,
-			EndAt:      endAt,
+			EndsAt:     endAt,
 		}); err != nil {
 			return err
 		}
 		return q.RevokeActiveOneOffEntitlements(ctx, gen.RevokeActiveOneOffEntitlementsParams{
 			MerchantID:   scopeMerchantID.UUID(),
 			SourceID:     paymentID,
-			EndAt:        endAt,
+			EndsAt:       endAt,
 			Now:          now,
 			RevokeReason: models.RevokeReasonPtr(reason),
 		})
@@ -838,7 +838,7 @@ type RevokeExistingEntitlementParams struct {
 // - revoking any active entitlement window(s) at now (revoked_at + revoke_reason)
 // - soft-deleting any future scheduled windows
 //
-// It does not mutate end_at of existing windows (end_at is immutable).
+// It does not mutate ends_at of existing windows (ends_at is immutable).
 func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p RevokeExistingEntitlementParams) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
@@ -878,10 +878,10 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 					return nil
 				}
 			}
-			if ent.StartAt.After(now) {
+			if ent.StartsAt.After(now) {
 				return SoftDeleteEntitlementByID(ctx, tx, ent.ID, now)
 			}
-			if ent.EndAt == nil || ent.EndAt.After(now) {
+			if ent.EndsAt == nil || ent.EndsAt.After(now) {
 				return RevokeEntitlementByID(ctx, tx, ent.ID, p.Reason, now)
 			}
 			return nil

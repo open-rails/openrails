@@ -671,7 +671,7 @@ type DestructiveGate interface {
 // so every mirror row a handler or verifier writes inherits the provenance the
 // intent row already recorded instead of re-resolving it (or#893). An intent
 // names a PSP, a custodian, or — for a custodian-proxy write — both;
-// provider_intents_addressed guarantees at least one.
+// provider_intents_addressed_check guarantees at least one.
 func pinIntentAddress(ctx context.Context, intent gen.BillingProviderIntent) context.Context {
 	ctx = db.WithPSPID(ctx, derefUUID(intent.PspID))
 	return db.WithCustodianID(ctx, derefUUID(intent.CustodianID))

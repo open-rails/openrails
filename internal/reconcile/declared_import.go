@@ -366,7 +366,7 @@ func ImportDeclaredSubscriptions(
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					// Another live row already owns the customer's lifecycle slot
-					// (e.g. uq_subscriptions_customer_product_lifecycle: a twin on
+					// (e.g. subscriptions_customer_id_product_id_key: a twin on
 					// a different rail). The row stays parked as seeded — block
 					// loudly instead of failing the whole batch.
 					block("lifecycle conflict: " + pgErr.ConstraintName)

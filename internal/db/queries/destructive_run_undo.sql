@@ -77,7 +77,7 @@ SELECT
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*) FROM billing.payments
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL
-        AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
+        AND channel = 'rail')::bigint AS payments,
     (SELECT count(*) FROM billing.checkout_attempts
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_attempts,
     -- payment_methods carries no soft-delete column; every row is live. A
@@ -88,7 +88,7 @@ SELECT
     -- provider_intents excludes the CUSTODIAN-addressed lane (or#795's batch
     -- account updater): those rows carry no psp_id because the write goes to a
     -- custodian that backs many PSPs, so no PSP-scoped operation was ever
-    -- supposed to reach them. provider_intents_addressed guarantees they name a
+    -- supposed to reach them. provider_intents_addressed_check guarantees they name a
     -- custodian instead, which is what makes the exclusion safe rather than a
     -- second blind spot.
     (SELECT count(*) FROM billing.provider_intents

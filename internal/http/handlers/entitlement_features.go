@@ -25,8 +25,8 @@ type activeEntitlement struct {
 	ID         uuid.UUID                    `json:"id"`
 	CustomerID billing.CustomerID           `json:"customer_id"`
 	LookupKey  string                       `json:"lookup_key"`
-	StartAt    time.Time                    `json:"start_at"`
-	EndAt      *time.Time                   `json:"end_at,omitempty"`
+	StartsAt   time.Time                    `json:"starts_at"`
+	EndsAt     *time.Time                   `json:"ends_at,omitempty"`
 	SourceType models.EntitlementSourceType `json:"source_type"`
 	SourceID   string                       `json:"source_id,omitempty"`
 }
@@ -62,8 +62,8 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 			ID:         w.ID,
 			CustomerID: billing.CustomerID(w.CustomerID),
 			LookupKey:  w.Entitlement,
-			StartAt:    w.StartAt,
-			EndAt:      w.EndAt,
+			StartsAt:   w.StartsAt,
+			EndsAt:     w.EndsAt,
 			SourceType: w.SourceType,
 		}
 		if w.SourceID != nil {

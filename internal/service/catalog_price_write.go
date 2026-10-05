@@ -30,7 +30,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 
 		// #774: resolve the price key (explicit or auto-default) and repoint it.
 		// A key names AT MOST one non-archived row per merchant
-		// (uq_prices_merchant_key_current) — so whatever OTHER row currently holds
+		// (prices_key_key) — so whatever OTHER row currently holds
 		// this key must be archived FIRST (never after), or the create/reactivate
 		// below would transiently double-hold the key and violate that index.
 		// Declaring the SAME key with a NEW substance is exactly the version-bump

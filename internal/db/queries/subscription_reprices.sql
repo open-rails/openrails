@@ -30,7 +30,7 @@ RETURNING *;
 SELECT * FROM billing.subscription_reprices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- The subscription's current scheduled reprice, if any (at most one by
--- uq_subscription_reprices_one_scheduled) — used both to refuse a second
+-- subscription_reprices_subscription_id_key) — used both to refuse a second
 -- schedule and, at the renewal boundary, to check whether it is DUE
 -- (effective_at <= now, checked in Go).
 -- name: GetScheduledRepriceForSubscription :one
@@ -100,7 +100,7 @@ LIMIT sqlc.arg(batch_size)::int;
 
 -- #816: the re-driver's un-block — the exact inverse of
 -- BlockSubscriptionReprice, status-predicated so a concurrent transition wins
--- cleanly. uq_subscription_reprices_one_scheduled makes this fail (unique
+-- cleanly. subscription_reprices_subscription_id_key makes this fail (unique
 -- violation) if the subscription acquired another scheduled row meanwhile —
 -- callers treat that as a skip.
 -- name: UnblockSubscriptionReprice :execrows

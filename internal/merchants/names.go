@@ -104,7 +104,7 @@ func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]Direct
 func nameClaimError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
-		(pgErr.ConstraintName == "uq_merchants_live_slug" || pgErr.ConstraintName == "merchant_slug_aliases_pkey") {
+		(pgErr.ConstraintName == "merchants_slug_key" || pgErr.ConstraintName == "merchant_slug_aliases_pkey") {
 		return fmt.Errorf("%w: %w", billing.ErrMerchantNameTaken, err)
 	}
 	return err

@@ -1,7 +1,5 @@
 package models
 
-import "strings"
-
 // (Removed) GrantSource: use EntitlementSourceType instead (admin, grace, one_off, subscription)
 
 // Rail is a payment GATEWAY integration OpenRails codes against. There is one
@@ -30,28 +28,12 @@ func (r Rail) EventSource() EventSource { return EventSource(r) }
 // EventSourceBasisTheory: the custodian, not the NMI rail it proxies into.
 const EventSourceBasisTheory EventSource = EventSource(CustodianBasisTheory)
 
-// Channel is an off-rail mechanism for RECORDING a payment that never flowed
-// through a gateway integration — admin comps and manually-entered payments
-// (cash, bank transfer, etc.). A channel is NOT a rail: it has no adapter, no
-// credentials, and no PSP. Off-rail payments are recorded in the
-// same source column as the rail (payments.rail), so a value there is either a
-// Rail or a Channel; the two enums keep the senses distinct in Go.
+// Channel is how a payment's money arrived: through a PSP on a rail, or
+// recorded by the merchant with no provider (cash, bank transfer). A manual
+// payment has no rail and no PSP.
 type Channel string
 
 const (
-	ChannelAdmin  Channel = "admin"  // Admin-initiated payment (comp / manual entry by an admin)
-	ChannelManual Channel = "manual" // Off-channel payment recorded by an admin (cash, bank transfer, …)
+	ChannelRail   Channel = "rail"
+	ChannelManual Channel = "manual"
 )
-
-// IsOffRailChannel reports whether a value in a `rail` column is a Channel
-// rather than a Rail. It is the one place that decides which rows may carry no
-// PSP: or#893 requires provider provenance on every real rail, and a channel
-// has no provider to name. Mirrors the DB CHECKs
-// payments_psp_required_on_rail / invoice_payments_psp_required_on_rail.
-func IsOffRailChannel(rail string) bool {
-	switch Channel(strings.ToLower(strings.TrimSpace(rail))) {
-	case ChannelAdmin, ChannelManual:
-		return true
-	}
-	return false
-}

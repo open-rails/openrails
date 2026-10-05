@@ -202,7 +202,7 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	mux := http.NewServeMux()
 	httproutes.RegisterMerchantRoutesUnder(router.NewMux(mux, "/v1", rt), rt,
 		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})}, "/v1/merchant/billing-archive")
-	handler := middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux)
+	handler := middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)(mux)
 	transport, hostCapability := inprocess.NewTransport(handler, rt.ConfiguredMerchant)
 	clientOpts = append(clientOpts,
 		openrails.WithHTTPClient(&http.Client{Transport: transport}),

@@ -209,7 +209,7 @@ WHERE c.kind = lower($2::text)
   AND EXISTS (
         SELECT 1 FROM billing.payment_methods pm
          WHERE pm.merchant_id = c.merchant_id
-           AND pm.custodian = c.kind AND pm.custodian_id = c.id
+           AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
            AND pm.rail_method_ref <> ''
            AND (pm.account_updater_checked_at IS NULL
                 OR pm.account_updater_checked_at < $5::timestamptz - w.lookahead)
@@ -271,6 +271,7 @@ const listDueAccountUpdaterInstruments = `-- name: ListDueAccountUpdaterInstrume
 SELECT pm.id, pm.rail_method_ref, pm.card_exp_month, pm.card_exp_year
 FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1
+  AND pm.custodian <> 'psp'
   AND pm.custodian_id = $2::uuid
   AND pm.custodian = $3
   AND pm.rail_method_ref <> ''

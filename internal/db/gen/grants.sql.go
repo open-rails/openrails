@@ -17,7 +17,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = $1::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
-      AND g.source_type = 'admin' AND g.source_id = $2::text
+      AND g.source_type = 'admin' AND g.source_id = $2::text AND g.source_id <> ''
 ) AS exists
 `
 
@@ -870,7 +870,7 @@ WHERE g.merchant_id = $1::uuid
               AND e2.entitlement = feat
               AND e2.source_type = 'subscription'
               AND e2.source_id::text = g.source_id
-              AND e2.end_at IS NULL
+              AND e2.ends_at IS NULL
               AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))
     ))
 

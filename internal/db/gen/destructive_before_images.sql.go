@@ -174,7 +174,7 @@ type InvalidateEntitlementsFromBeforeImagesParams struct {
 // Class D is INVALIDATED, never restored (or#859 §3.3, §4).
 //
 // The measured damage to entitlements is not a delete and not always a revoke:
-// a terminal cancel BOUNDS the access window (end_at pulled back to the
+// a terminal cancel BOUNDS the access window (ends_at pulled back to the
 // cancellation instant, revoked_at often still NULL). Leaving those rows in
 // place would defeat the recomputation, because derive-2 treats an existing
 // unrevoked row as the effect already being present — the subscription would

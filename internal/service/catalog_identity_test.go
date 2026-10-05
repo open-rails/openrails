@@ -29,7 +29,7 @@ func (p priceTerms) id() uuid.UUID {
 }
 
 // #662: the price id is a pure function of the immutable financial tuple
-// (the unique_prices_product_amount_window columns), so every column
+// (the prices_product_amount_window_key columns), so every column
 // participates and equal terms always hash equal.
 func TestPriceDeterministicID(t *testing.T) {
 	base := priceTerms{uuid.MustParse("11111111-1111-4111-8111-111111111111"), 1_000_000, "usd", intPtr(720), true, int64Ptr(0), intPtr(72)}

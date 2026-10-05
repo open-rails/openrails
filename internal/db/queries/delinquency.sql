@@ -25,7 +25,7 @@ LIMIT sqlc.arg(merchant_limit)::int;
 -- The ENTER leg of the evaluation: per (payer, currency), how much is overdue
 -- and since when. This is the whole derivation input — delinquency is a reading
 -- of invoice truth against the merchant's policy, not a separately-maintained
--- fact. Rides ix_invoices_open_due (partial on exactly the open, still-owed set).
+-- fact. Rides invoices_customer_id_currency_due_at_idx (partial on exactly the open, still-owed set).
 --
 -- OLDEST DEBT FIRST, and capped: one pass is bounded work. If a merchant ever
 -- has more overdue payers than the cap, the ones who have owed longest are the

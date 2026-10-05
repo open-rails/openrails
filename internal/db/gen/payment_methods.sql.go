@@ -372,6 +372,7 @@ func (q *Queries) GetCollectionCustodianAccountsForShare(ctx context.Context, ar
 const getPaymentMethodByCustodianRef = `-- name: GetPaymentMethodByCustodianRef :one
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
+  AND pm.custodian <> 'psp'
   AND pm.custodian_id = $2::uuid
   AND pm.rail_method_ref = $3::text
 ORDER BY pm.created_at, pm.id
@@ -1651,6 +1652,7 @@ UPDATE billing.payment_methods SET
     network_token_status = $1,
     updated_at = now()
 WHERE merchant_id = $2::uuid
+  AND custodian <> 'psp'
   AND custodian_id = $3::uuid
   AND custodian = $4
   AND network_token_id = $5

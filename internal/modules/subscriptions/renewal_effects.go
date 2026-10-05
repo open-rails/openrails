@@ -62,7 +62,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			}
 		}
 		if effects.PeriodEnd.After(s.now().UTC()) {
-			if _, err := entitlementsService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &effects.PeriodStart, EndAt: &effects.PeriodEnd, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
+			if _, err := entitlementsService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &effects.PeriodStart, EndsAt: &effects.PeriodEnd, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
 				return nil, fmt.Errorf("grant renewal entitlement %s: %w", name, err)
 			}
 		}

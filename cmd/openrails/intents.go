@@ -165,7 +165,7 @@ func newIntentsLogCmd() *cobra.Command {
 }
 
 // activeStatuses is the live working set — the statuses the executor/verifier
-// can still act on (mirrors the idx_provider_intents_due partial index). This
+// can still act on (mirrors the provider_intents_next_attempt_at_idx partial index). This
 // is the default `openrails intents` view (#607): succeeded tombstones,
 // terminal/superseded/expired rows are queryable via --status but stay out of
 // the everyday "what's queued" picture.

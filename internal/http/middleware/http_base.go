@@ -49,11 +49,20 @@ func SecurityHeadersHTTP() HTTPMiddleware {
 	}
 }
 
-// BodyLimitHTTP validates the complete bounded body before any route can
-// mutate state, including routes with optional or absent request bodies.
-func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
+// MaxIdempotencyKeyBytes bounds a caller's Idempotency-Key.
+const MaxIdempotencyKeyBytes = 255
+
+// RequestLimitsHTTP refuses an oversized Idempotency-Key and validates the
+// complete bounded body before any route can mutate state, including routes
+// with optional or absent request bodies.
+func RequestLimitsHTTP(maxBytes int64) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(r.Header.Get("Idempotency-Key")) > MaxIdempotencyKeyBytes {
+				w.Header().Set("X-Request-ID", httprequest.EnsureRequestID(r))
+				billingauth.WriteJSONError(w, http.StatusBadRequest, billing.CodeInvalidParam, "Idempotency-Key must be at most 255 bytes")
+				return
+			}
 			if maxBytes > 0 && r.Body != nil {
 				limit := requestBodyLimit(r, maxBytes)
 				body := http.MaxBytesReader(w, r.Body, limit)

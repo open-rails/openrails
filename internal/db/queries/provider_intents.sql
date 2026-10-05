@@ -439,7 +439,7 @@ SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
 
 -- The one unresolved tier change that owns a subscription
--- (uq_provider_intents_tier_change_subscription).
+-- (provider_intents_subscription_id_tier_change_subscription_key).
 -- name: GetLiveTierChangeProviderIntent :one
 SELECT * FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid

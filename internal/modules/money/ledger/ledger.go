@@ -40,7 +40,7 @@ const (
 
 // TransferType is the closed vocabulary of ledger_transfers.transfer_type,
 // mirrored by the schema's ledger_transfers_type_check (#832). It was free text:
-// idx_ledger_transfers_lot_once — what stops a credit lot being deposited,
+// ledger_transfers_grant_id_transfer_type_key — what stops a credit lot being deposited,
 // expired or revoked twice — is PARTIAL on named transfer_type literals, so a
 // typo fell outside the index and the duplicate posted silently.
 type TransferType string
@@ -65,7 +65,7 @@ const (
 var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
-// idx_ledger_transfers_lot_once.
+// ledger_transfers_grant_id_transfer_type_key.
 var LotOnceTransferTypes = []TransferType{Deposit, CreditExpire, CreditRevoke}
 
 // Operation is the KIND of money write that posted a transfer — the or#894
@@ -99,7 +99,7 @@ const (
 
 // UsageOperation is the operation kind of a metered usage charge. event_type is
 // part of the kind because usage_events already dedupes on it
-// (uq_usage_events_idem): two different event types at one (source, source_id)
+// (usage_events_idem_key): two different event types at one (source, source_id)
 // are two events, so they must be two ledger legs.
 func UsageOperation(eventType string) Operation {
 	return Operation(usageOpPrefix + strings.TrimSpace(eventType))
@@ -123,8 +123,14 @@ func (c Coord) Validate() error {
 	if strings.TrimSpace(c.Source) == "" || strings.TrimSpace(c.SourceID) == "" {
 		return fmt.Errorf("ledger: source and source_id required on the idempotency coordinate")
 	}
+	if len(c.Operation) > MaxCoordBytes || len(c.Source) > MaxCoordBytes || len(c.SourceID) > MaxCoordBytes {
+		return fmt.Errorf("ledger: each part of the idempotency coordinate is at most %d bytes", MaxCoordBytes)
+	}
 	return nil
 }
+
+// MaxCoordBytes bounds each part of a coordinate; ledger_transfers checks it.
+const MaxCoordBytes = 512
 
 func (c Coord) String() string {
 	return string(c.Operation) + "/" + c.Source + "/" + c.SourceID
@@ -292,7 +298,7 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.BillingLedgerTransf
 // ApplyIdempotent is THE durable money write (or#892). Every ledger movement in
 // the system funnels through it, and once-only is enforced by the DATABASE:
 // the insert is ON CONFLICT DO NOTHING against
-// idx_ledger_transfers_operation_once, so a replay at the same coordinate
+// ledger_transfers_operation_once_key, so a replay at the same coordinate
 // inserts nothing no matter what order the caller took its locks in.
 //
 // applied reports what happened:

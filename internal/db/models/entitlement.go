@@ -31,7 +31,7 @@ const (
 )
 
 // Entitlement models a temporal access window to a named entitlement (e.g., "premium")
-// SCD2-style: [StartAt, EndAt) with optional soft delete and revoke markers.
+// SCD2-style: [StartsAt, EndsAt) with optional soft delete and revoke markers.
 type Entitlement struct {
 	ID uuid.UUID `json:"id"`
 
@@ -45,8 +45,8 @@ type Entitlement struct {
 	// GrantID is the grant this window projects.
 	GrantID uuid.UUID `json:"grant_id"`
 
-	StartAt time.Time  `json:"start_at"`
-	EndAt   *time.Time `json:"end_at,omitempty"`
+	StartsAt time.Time  `json:"starts_at"`
+	EndsAt   *time.Time `json:"ends_at,omitempty"`
 
 	// Optional polymorphic source reference (e.g. subscription or one-off payment).
 	SourceID   *uuid.UUID            `json:"source_id,omitempty"`

@@ -413,7 +413,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	if req.TransactionID == "" {
 		return nil, errors.New("transaction_id is required")
 	}
-	if req.Rail == "" {
+	if req.Rail == "" && req.Channel != models.ChannelManual {
 		return nil, errors.New("rail is required")
 	}
 
@@ -471,11 +471,13 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		CustomerID:               customerID,
 		PriceID:                  price.ID,
 		SubscriptionID:           req.SubscriptionID,
+		Channel:                  req.Channel,
 		Rail:                     models.Rail(req.Rail),
 		TransactionID:            req.TransactionID,
 		Amount:                   amount,
 		ListAmount:               price.Amount,
 		Currency:                 currency,
+		Status:                   payments.PaymentStatusCompletedValue,
 		PurchasedAt:              purchasedAt,
 		CreatedAt:                now,
 		DiscountCode:             req.DiscountCode,
@@ -501,7 +503,13 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
 	if !created {
-		existingPayment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
+		lookup := func() (*models.Payment, error) {
+			if req.Channel == models.ChannelManual {
+				return s.PaymentService.GetManualByTransactionID(ctx, req.TransactionID)
+			}
+			return s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
+		}
+		existingPayment, err := lookup()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}
@@ -660,7 +668,7 @@ func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID
 // grantProductEntitlements grants the product's entitlements for the access
 // window the price bought (#622). The window is the price's access_duration_hours
 // (the same window that drives product_access ends_at — G3): a finite value sets
-// a finite entitlement end_at; nil = indefinite. Re-purchase stacks: a new window
+// a finite entitlement ends_at; nil = indefinite. Re-purchase stacks: a new window
 // starts at the existing coverage end.
 func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, accessDurationHours *int, skipExistingSource bool, acceptedAt time.Time) error {
 	if s.EntitlementService == nil || entitlementsSpec == nil {
@@ -706,14 +714,14 @@ func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, 
 			params.Indefinite = true
 		} else {
 			e := endAt.UTC()
-			params.EndAt = &e
+			params.EndsAt = &e
 		}
 
 		if _, err := s.EntitlementService.PushNewEntitlement(ctx, params); err != nil {
 			log.WithError(err).WithFields(log.Fields{"user_id": userID, "entitlement": entitlementName, "payment_id": paymentID}).Error("failed to grant entitlement")
 			return err
 		}
-		log.WithFields(log.Fields{"user_id": userID, "entitlement": entitlementName, "payment_id": paymentID, "start_at": startAt, "end_at": endAt}).Info(fmt.Sprintf("granted entitlement from %s purchase", sourceType))
+		log.WithFields(log.Fields{"user_id": userID, "entitlement": entitlementName, "payment_id": paymentID, "starts_at": startAt, "ends_at": endAt}).Info(fmt.Sprintf("granted entitlement from %s purchase", sourceType))
 	}
 
 	return nil

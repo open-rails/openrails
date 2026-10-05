@@ -385,15 +385,15 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 -- subscription. Admin grants and grace windows are different source types and
 -- are untouchable by construction.
 -- PS-4: backfill a rail charge that has no local payment record.
--- Dedupe rides the uq_payments_merchant_rail_transaction identity.
+-- Dedupe rides the payments_psp_id_transaction_id_key identity.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO billing.payments (
-    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, psp_id,
     money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(rail)::text,
+    sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
@@ -408,12 +408,12 @@ ON CONFLICT DO NOTHING;
 -- amount payment row linked to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
 INSERT INTO billing.payments (
-    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(rail)::text,
+    sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
@@ -649,8 +649,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND expired.source_id = s.id
         AND expired.revoked_at IS NULL
         AND expired.deleted_at IS NULL
-        AND expired.end_at IS NOT NULL
-        AND expired.end_at <= sqlc.arg(now)::timestamptz
+        AND expired.ends_at IS NOT NULL
+        AND expired.ends_at <= sqlc.arg(now)::timestamptz
   )
   AND NOT EXISTS (
       SELECT 1 FROM billing.entitlements live
@@ -659,7 +659,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND live.source_id = s.id
         AND live.revoked_at IS NULL
         AND live.deleted_at IS NULL
-        AND (live.end_at IS NULL OR live.end_at > sqlc.arg(now)::timestamptz)
+        AND (live.ends_at IS NULL OR live.ends_at > sqlc.arg(now)::timestamptz)
   )
 ORDER BY s.id
 LIMIT sqlc.arg(row_limit);
@@ -690,8 +690,8 @@ CROSS JOIN LATERAL (
           AND e.source_type = 'subscription' AND e.source_id = s.id
           AND e.entitlement = feat
           AND e.deleted_at IS NULL
-          AND e.start_at < s.current_period_ends_at
-          AND (e.end_at IS NULL OR e.end_at > COALESCE(s.current_period_starts_at, s.started_at))
+          AND e.starts_at < s.current_period_ends_at
+          AND (e.ends_at IS NULL OR e.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
     )
 
 ) missing
@@ -744,11 +744,11 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
         AND (
-            e.end_at IS NULL
+            e.ends_at IS NULL
             OR (
-                e.end_at > sqlc.arg(now)::timestamptz
+                e.ends_at > sqlc.arg(now)::timestamptz
                 AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
-                     OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
+                     OR e.ends_at > GREATEST(s.current_period_ends_at, s.ended_at))
             )
         )
   )
@@ -780,12 +780,12 @@ LIMIT sqlc.arg(row_limit)::int;
 -- re-import): (1) grant-justification by source — live windows LEFT JOIN live
 -- grants on (customer, source) counting NULLs per source_type; (2)
 -- window-vs-paid-through by status — live windows joined to subscriptions
--- grouped by status comparing end_at against GREATEST(current_period_ends_at,
+-- grouped by status comparing ends_at against GREATEST(current_period_ends_at,
 -- ended_at). This query is the union of both, restricted to proven-dead
 -- sources. customer_id nullable: NULL = merchant-wide sweep.
 -- name: ListUnjustifiedEntitlementWindows :many
 SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
-       e.source_type, e.source_id, e.start_at, e.end_at,
+       e.source_type, e.source_id, e.starts_at, e.ends_at,
        pay.id AS payment_id,
        pr.product_id AS payment_product_id,
        CASE
@@ -802,8 +802,8 @@ LEFT JOIN billing.prices pr
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-  AND e.start_at <= sqlc.arg(now)::timestamptz
-  AND (e.end_at IS NULL OR e.end_at > sqlc.arg(now)::timestamptz)
+  AND e.starts_at <= sqlc.arg(now)::timestamptz
+  AND (e.ends_at IS NULL OR e.ends_at > sqlc.arg(now)::timestamptz)
   AND e.source_type IN ('subscription', 'purchase')
   -- no live un-terminated entitlement grant covering now justifies the window
   AND NOT EXISTS (
@@ -835,7 +835,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   )
 -- or#837: oldest window first, capped. Surface-only findings, so truncation
 -- delays an operator decision rather than losing one.
-ORDER BY e.start_at, e.id
+ORDER BY e.starts_at, e.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- #690/#691 `verification_pressure` gauge input: subscriptions parked (or
@@ -863,9 +863,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 -- uncovered tail is measured.
 -- name: CountErrorEpisodeTotals :one
 WITH win AS (
-    SELECT e.entitlement, e.source_type, e.start_at,
+    SELECT e.entitlement, e.source_type, e.starts_at,
            LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                 COALESCE(e.end_at, 'infinity'::timestamptz)) AS window_end,
+                 COALESCE(e.ends_at, 'infinity'::timestamptz)) AS window_end,
            s.status AS sub_status, s.next_retry_at,
            GREATEST(s.current_period_ends_at, s.ended_at) AS paid_through,
            p.status AS payment_status,
@@ -898,7 +898,7 @@ WITH win AS (
            f.unpaid_from, f.unpaid_until
       FROM win w
       CROSS JOIN LATERAL (
-          SELECT GREATEST(w.start_at,
+          SELECT GREATEST(w.starts_at,
                      CASE WHEN w.source_type = 'subscription' THEN COALESCE(w.paid_through, '-infinity'::timestamptz)
                           WHEN w.payment_status = 'completed' THEN 'infinity'::timestamptz
                           WHEN w.payment_status = 'refunded' THEN w.refund_effective_at
@@ -932,10 +932,10 @@ WITH win AS (
     SELECT c.cov_end > now() AS open,
            GREATEST(c.cov_start, COALESCE((
                SELECT max(LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                                COALESCE(e.end_at, 'infinity'::timestamptz)))
+                                COALESCE(e.ends_at, 'infinity'::timestamptz)))
                  FROM billing.entitlements e
                 WHERE e.merchant_id = c.merchant_id AND e.customer_id = c.customer_id
-                  AND e.source_type = c.source_type AND e.source_id = c.source_id AND e.start_at <= now()),
+                  AND e.source_type = c.source_type AND e.source_id = c.source_id AND e.starts_at <= now()),
                '-infinity'::timestamptz)) AS uncovered_from,
            LEAST(c.cov_end, now()) AS uncovered_until
       FROM coverage c
@@ -958,7 +958,7 @@ ORDER BY id;
 
 -- #789 NOTIFY `notify.access_ended` detector: customers whose LAST entitlement
 -- window closed inside (closed_after, now] — the close instant is
--- LEAST(end_at, revoked_at) (NULL = infinity; matches idx_entitlements_closed_at)
+-- LEAST(ends_at, revoked_at) (NULL = infinity; matches entitlements_closed_at_idx)
 -- — with NO other live window for the same (customer, entitlement). One row per
 -- customer (latest close) — one email per customer, whatever ended the access
 -- (dunning, reconcile-driven cancel, grant lapse). customer_id nullable:
@@ -966,23 +966,23 @@ ORDER BY id;
 -- name: ListRecentlyClosedLastEntitlementWindows :many
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.entitlement,
-       LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
+       LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
        e.source_type, e.source_id
 FROM billing.entitlements e
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
   AND e.deleted_at IS NULL
-  AND (e.end_at IS NOT NULL OR e.revoked_at IS NOT NULL)
-  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(closed_after)::timestamptz
-  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz
+  AND (e.ends_at IS NOT NULL OR e.revoked_at IS NOT NULL)
+  AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(closed_after)::timestamptz
+  AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM billing.entitlements live
       WHERE live.merchant_id = e.merchant_id
         AND live.customer_id = e.customer_id
         AND live.entitlement = e.entitlement
         AND live.deleted_at IS NULL AND live.revoked_at IS NULL
-        AND live.start_at <= sqlc.arg(now)::timestamptz
-        AND (live.end_at IS NULL OR live.end_at > sqlc.arg(now)::timestamptz)
+        AND live.starts_at <= sqlc.arg(now)::timestamptz
+        AND (live.ends_at IS NULL OR live.ends_at > sqlc.arg(now)::timestamptz)
   )
   -- A tier change supersedes the replaced tier's window while the customer
   -- holds the new tier's access: that is not access ending.
@@ -991,10 +991,10 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE nw.merchant_id = e.merchant_id
         AND nw.customer_id = e.customer_id
         AND nw.deleted_at IS NULL AND nw.revoked_at IS NULL
-        AND (nw.end_at IS NULL OR nw.end_at > sqlc.arg(now)::timestamptz)
+        AND (nw.ends_at IS NULL OR nw.ends_at > sqlc.arg(now)::timestamptz)
   ))
 ORDER BY e.customer_id,
-         LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC;
+         LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC;
 
 -- name: ResolveStandingFinding :execrows
 -- A standing finding whose subject is healthy again closes itself.

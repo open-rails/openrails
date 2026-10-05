@@ -49,7 +49,7 @@ func (s *Store) LogExternalMutation(ctx context.Context, p MutationLogParams) er
 	if p.MerchantID == uuid.Nil || p.Provider == "" || p.Phase == "" {
 		return fmt.Errorf("intents: mutation log requires merchant_id, provider, and phase")
 	}
-	// provider_mutation_logs_addressed: the log records which account the attempt was
+	// provider_mutation_logs_addressed_check: the log records which account the attempt was
 	// sent to, and a custodian-addressed attempt names a custodian.
 	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
 		return fmt.Errorf("intents: mutation log for %s: %w", p.Provider, db.ErrNoPSPInContext)

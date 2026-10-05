@@ -158,16 +158,15 @@ func (q *Queries) CountInvoicePaymentAttemptsByPayer(ctx context.Context, arg Co
 const failClaimedInvoicePaymentAttempt = `-- name: FailClaimedInvoicePaymentAttempt :execrows
 UPDATE billing.invoice_payments
 SET status = 'failed',
-    rail = $4,
-    rail_payment_id = $5,
-    failure_code = $6,
-    failure_reason = $7,
-    failure_message = $8,
-    updated_at = $9::timestamptz
+    rail_payment_id = $4,
+    failure_code = $5,
+    failure_reason = $6,
+    failure_message = $7,
+    updated_at = $8::timestamptz
 WHERE merchant_id = $1
   AND customer_id = $2
   AND invoice_id = $3
-  AND id = $10
+  AND id = $9
   AND status = 'attempted'
 `
 
@@ -175,7 +174,6 @@ type FailClaimedInvoicePaymentAttemptParams struct {
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	InvoiceID      uuid.UUID
-	Rail           *string
 	RailPaymentID  *string
 	FailureCode    *string
 	FailureReason  *string
@@ -189,7 +187,6 @@ func (q *Queries) FailClaimedInvoicePaymentAttempt(ctx context.Context, arg Fail
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.InvoiceID,
-		arg.Rail,
 		arg.RailPaymentID,
 		arg.FailureCode,
 		arg.FailureReason,
@@ -392,7 +389,7 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 }
 
 const getInvoicePaymentAttempt = `-- name: GetInvoicePaymentAttempt :one
-SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
+SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, channel, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
 WHERE merchant_id = $1
   AND customer_id = $2
   AND invoice_id = $3
@@ -424,6 +421,7 @@ func (q *Queries) GetInvoicePaymentAttempt(ctx context.Context, arg GetInvoicePa
 		&i.Currency,
 		&i.Amount,
 		&i.Status,
+		&i.Channel,
 		&i.Rail,
 		&i.RailPaymentID,
 		&i.FailureCode,
@@ -441,7 +439,7 @@ func (q *Queries) GetInvoicePaymentAttempt(ctx context.Context, arg GetInvoicePa
 }
 
 const getInvoicePaymentAttemptByKey = `-- name: GetInvoicePaymentAttemptByKey :one
-SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
+SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, channel, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
 WHERE merchant_id = $1
   AND customer_id = $2
   AND invoice_id = $3
@@ -473,6 +471,7 @@ func (q *Queries) GetInvoicePaymentAttemptByKey(ctx context.Context, arg GetInvo
 		&i.Currency,
 		&i.Amount,
 		&i.Status,
+		&i.Channel,
 		&i.Rail,
 		&i.RailPaymentID,
 		&i.FailureCode,
@@ -593,15 +592,15 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 const insertInvoicePayment = `-- name: InsertInvoicePayment :exec
 INSERT INTO billing.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
-    currency, amount, status, rail, rail_payment_id,
+    currency, amount, status, channel, rail, rail_payment_id,
     failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
     payment_method_id, idempotency_key, psp_id
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8, $9,
-    $10, $11, $12, $13,
-    $14, $15, $16, $17,
-    $18, $19, $20::uuid
+    $6, $7, $8, $9::text, $10,
+    $11, $12, $13, $14,
+    $15, $16, $17, $18,
+    $19, $20, $21::uuid
 )
 `
 
@@ -614,6 +613,7 @@ type InsertInvoicePaymentParams struct {
 	Currency         string
 	Amount           int64
 	Status           string
+	Channel          string
 	Rail             *string
 	RailPaymentID    *string
 	FailureCode      *string
@@ -638,6 +638,7 @@ func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePay
 		arg.Currency,
 		arg.Amount,
 		arg.Status,
+		arg.Channel,
 		arg.Rail,
 		arg.RailPaymentID,
 		arg.FailureCode,
@@ -773,7 +774,7 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 }
 
 const listEncodedInvoiceAttemptsForArchive = `-- name: ListEncodedInvoiceAttemptsForArchive :many
-SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, l.amount AS ledger_amount,
+SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.channel, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
@@ -821,6 +822,7 @@ func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg 
 			&i.BillingInvoicePayment.Currency,
 			&i.BillingInvoicePayment.Amount,
 			&i.BillingInvoicePayment.Status,
+			&i.BillingInvoicePayment.Channel,
 			&i.BillingInvoicePayment.Rail,
 			&i.BillingInvoicePayment.RailPaymentID,
 			&i.BillingInvoicePayment.FailureCode,
@@ -944,7 +946,7 @@ func (q *Queries) ListInvoicePayers(ctx context.Context, arg ListInvoicePayersPa
 }
 
 const listInvoicePaymentsPage = `-- name: ListInvoicePaymentsPage :many
-SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
+SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.channel, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
 FROM billing.invoice_payments p
 WHERE p.merchant_id = $1::uuid
   AND p.customer_id = $2::uuid
@@ -991,6 +993,7 @@ func (q *Queries) ListInvoicePaymentsPage(ctx context.Context, arg ListInvoicePa
 			&i.Currency,
 			&i.Amount,
 			&i.Status,
+			&i.Channel,
 			&i.Rail,
 			&i.RailPaymentID,
 			&i.FailureCode,
@@ -1440,14 +1443,13 @@ const settleClaimedInvoicePaymentAttempt = `-- name: SettleClaimedInvoicePayment
 UPDATE billing.invoice_payments
 SET status = 'settled',
     ledger_transfer_id = $4,
-    rail = $5,
-    rail_payment_id = $6,
-    settled_at = $7::timestamptz,
-    updated_at = $7::timestamptz
+    rail_payment_id = $5,
+    settled_at = $6::timestamptz,
+    updated_at = $6::timestamptz
 WHERE merchant_id = $1
   AND customer_id = $2
   AND invoice_id = $3
-  AND id = $8
+  AND id = $7
   AND status = 'attempted'
 `
 
@@ -1456,7 +1458,6 @@ type SettleClaimedInvoicePaymentAttemptParams struct {
 	CustomerID       uuid.UUID
 	InvoiceID        uuid.UUID
 	LedgerTransferID *uuid.UUID
-	Rail             *string
 	RailPaymentID    *string
 	Now              time.Time
 	AttemptID        uuid.UUID
@@ -1468,7 +1469,6 @@ func (q *Queries) SettleClaimedInvoicePaymentAttempt(ctx context.Context, arg Se
 		arg.CustomerID,
 		arg.InvoiceID,
 		arg.LedgerTransferID,
-		arg.Rail,
 		arg.RailPaymentID,
 		arg.Now,
 		arg.AttemptID,

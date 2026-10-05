@@ -137,9 +137,9 @@ func (w *world) chargeAgain(customerID string, after time.Duration, newPrice boo
 		priceExpr = `(SELECT p2.id FROM billing.prices p2 JOIN billing.prices p1 ON p1.id = pay.price_id WHERE p2.product_id = p1.product_id AND p2.id <> p1.id LIMIT 1)`
 		w.anotherPrice(customerID)
 	}
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id,
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payments (id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id,
 			entitlements_spec_snapshot, metadata, purchased_at, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement)
-		SELECT $3::uuid, `+priceExpr+`, rail, transaction_id || '-again', amount, list_amount, currency, status, subscription_id,
+		SELECT $3::uuid, `+priceExpr+`, channel, rail, transaction_id || '-again', amount, list_amount, currency, status, subscription_id,
 			entitlements_spec_snapshot, `+metadataExpr+`, purchased_at + $2::interval, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement
 		FROM billing.payments pay WHERE customer_id = $1::uuid AND status = 'completed' ORDER BY purchased_at DESC LIMIT 1`), customerID, fmt.Sprintf("%d seconds", int(after.Seconds())), id)
 	require.NoError(w.t, err)
