@@ -41,5 +41,5 @@ var pspsRoutes = []Route{
 	// its merchant; runtime bindings and signatures remain mandatory. The body
 	// is the provider's own payload.
 	{Method: POST, Path: "/v1/webhooks/{rail}/{account_id}", Group: Webhooks, Auth: AuthProvider, NoConn: true,
-		Query: params(text("eventType")), Request: Untyped{}, Responses: []Reply{{200, Untyped{}}}, Errors: codes("authentication_required", "credential_custody_transition_required", "invalid_param", "resource_access_denied", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
+		Query: params(text("eventType")), Request: Stream{"application/json"}, Responses: []Reply{{200, handlers.WebhookReceipt{}}}, Errors: codes("authentication_required", "credential_custody_transition_required", "invalid_param", "resource_access_denied", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
 }

@@ -17,7 +17,6 @@ internal/http/handlers/customer_payment.go 2
 internal/http/handlers/entitlement_features.go 4
 internal/http/handlers/entitlements.go 7
 internal/http/handlers/payment_attempts.go 1
-internal/http/handlers/platform_merchants.go 15
 internal/http/handlers/portal.go 3
 internal/http/handlers/product_access.go 5
 internal/http/handlers/self_account.go 2
@@ -35,7 +34,6 @@ internal/http/handlers/webhook_basistheory.go 7
 internal/http/middleware/admin_ratelimit.go 1
 internal/http/middleware/ratelimit_neutral.go 1
 internal/http/request/request.go 1
-internal/http/routes/platform.go 4
 internal/standalonehandlers/merchant_api_keys.go 3
 internal/standalonehandlers/merchant_name.go 1
 internal/standalonehandlers/merchant_team.go 1

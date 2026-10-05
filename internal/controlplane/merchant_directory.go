@@ -7,35 +7,32 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
-const maxActiveMerchantPageSize = 200
-
-// ListActiveMerchantIDs returns one directory page for privileged host
-// orchestration that must enter each merchant's scope independently.
-func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]billing.MerchantID, error) {
+// ListActiveMerchantIDs returns one page of the live merchants, newest first,
+// for privileged host orchestration that enters each merchant's scope
+// independently.
+func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.MerchantID], error) {
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for merchant enumeration")
 	}
-	if limit <= 0 || limit > maxActiveMerchantPageSize {
-		limit = maxActiveMerchantPageSize
+	limit, err := pagination.Limit(page)
+	if err != nil {
+		return nil, err
 	}
-	if offset < 0 {
-		offset = 0
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return nil, err
 	}
 	status := "active"
 	rows, err := gen.New(c.pool).ListPlatformMerchants(ctx, gen.ListPlatformMerchantsParams{
-		Status:     &status,
-		PageOffset: int64(offset),
-		PageLimit:  int64(limit),
+		Status: &status, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: list active merchant ids: %w", err)
 	}
-
-	ids := make([]billing.MerchantID, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, billing.MerchantID(row.ID))
-	}
-	return ids, nil
+	cut := pagination.Cut(rows, limit, func(row gen.ListPlatformMerchantsRow) any { return pagination.TimeID{At: row.CreatedAt, ID: row.ID} })
+	out := pagination.Map(cut, func(row gen.ListPlatformMerchantsRow) billing.MerchantID { return billing.MerchantID(row.ID) })
+	return &out, nil
 }

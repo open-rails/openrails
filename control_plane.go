@@ -102,13 +102,14 @@ func (c *Client) ListMerchantsForSubject(ctx context.Context, subject string) ([
 	return operator.ListMerchantsForSubject(ctx, a, subject)
 }
 
-// ListActiveMerchantIDs pages the merchant directory for host background work.
-func (c *Client) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]billing.MerchantID, error) {
+// ListActiveMerchantIDs pages the live merchants, newest first, for host
+// background work.
+func (c *Client) ListActiveMerchantIDs(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.MerchantID], error) {
 	a, _, err := c.controlPlane()
 	if err != nil {
 		return nil, err
 	}
-	return operator.ListActiveMerchantIDs(ctx, a, limit, offset)
+	return operator.ListActiveMerchantIDs(ctx, a, page)
 }
 
 // ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole

@@ -133,7 +133,7 @@ pkg openrails, method (*Client) HasEntitlement(context.Context, billing.Customer
 pkg openrails, method (*Client) HasRootPermission(context.Context, *http.Request, string) (bool, error)
 pkg openrails, method (*Client) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
-pkg openrails, method (*Client) ListActiveMerchantIDs(context.Context, int, int) ([]billing.MerchantID, error)
+pkg openrails, method (*Client) ListActiveMerchantIDs(context.Context, billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (*Client) ListCatalogDrift(context.Context, billing.CatalogDriftListParams, ...RequestOption) (*billing.ListPage[billing.CatalogDrift], error)
 pkg openrails, method (*Client) ListCatalogs(context.Context, billing.CatalogListParams, ...RequestOption) (*billing.ListPage[billing.Catalog], error)
@@ -1318,6 +1318,12 @@ pkg openrails/billing, type CancelSubscriptionParams struct, RevokeAccess bool `
 pkg openrails/billing, type Capabilities struct
 pkg openrails/billing, type Capabilities struct, Features map[string]bool `json:"features"`
 pkg openrails/billing, type Capabilities struct, RouteGroups map[string]bool `json:"route_groups"`
+pkg openrails/billing, type CaptchaStatus struct
+pkg openrails/billing, type CaptchaStatus struct, ClientScriptURL string `json:"client_script_url"`
+pkg openrails/billing, type CaptchaStatus struct, Enabled bool `json:"enabled"`
+pkg openrails/billing, type CaptchaStatus struct, Provider *string `json:"provider"`
+pkg openrails/billing, type CaptchaStatus struct, Required bool `json:"required"`
+pkg openrails/billing, type CaptchaStatus struct, TokenHeader string `json:"token_header"`
 pkg openrails/billing, type CaptureAdmissionParams struct
 pkg openrails/billing, type CaptureAdmissionParams struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type CaptureAdmissionParams struct, Usage *CaptureUsage `json:"usage,omitempty"`

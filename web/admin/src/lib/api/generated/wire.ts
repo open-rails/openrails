@@ -259,6 +259,14 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
+export type CaptchaStatus = {
+  enabled: boolean
+  required: boolean
+  provider: string | null
+  token_header: string
+  client_script_url: string
+}
+
 export type CaptureAdmissionParams = {
   amount?: string
   usage?: CaptureUsage
@@ -1225,10 +1233,6 @@ export type MerchantSettings = {
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
 }
 
-export type Message = {
-  message: string
-}
-
 export type Meter = {
   key: string
   event_type: string
@@ -1542,16 +1546,6 @@ export type PackagePrice = {
   free_units?: number
 }
 
-export type PathPageOfPlatformMerchantItem = {
-  object: string
-  data: PlatformMerchantItem[]
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
-}
-
 export type PayCheckoutSessionParams = {
   option_id?: string
   payment_method_id?: string
@@ -1744,16 +1738,16 @@ export type PlanMigrationResult = {
   source_archived: boolean
 }
 
-export type PlatformMerchantItem = {
+export type PlatformMerchant = {
   id: string
   slug: string
   status: string
-  display_name?: string
+  display_name: string | null
   created_at: string
   updated_at: string
-  deleted_at?: string
+  deleted_at: string | null
   rails_armed: string[]
-  last_payment_at?: string
+  last_payment_at: string | null
 }
 
 export type PortalResponse = {
@@ -2474,6 +2468,11 @@ export type WastedSpendReport = {
   charged_amount: string
   policy_charged_amount: string | null
   action: "charged" | "duplicate" | "forgiven" | "ignored" | "invoker_cutoff_tracked"
+}
+
+export type WebhookReceipt = {
+  status: string
+  code: string | null
 }
 
 export type WorkerHealth = {

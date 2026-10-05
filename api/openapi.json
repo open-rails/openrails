@@ -814,8 +814,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/CaptchaStatus"
                 }
               }
             }
@@ -11372,8 +11371,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "type": "string"
               }
             }
           }
@@ -11384,8 +11382,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/WebhookReceipt"
                 }
               }
             }
@@ -13691,14 +13688,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -13725,7 +13722,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfPlatformMerchantItem"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PlatformMerchant"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -13742,7 +13757,7 @@
         "x-openrails-auth": "operator",
         "x-openrails-permission": "root:merchants:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:operator",
@@ -13771,7 +13786,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformMerchantItem"
+                  "$ref": "#/components/schemas/PlatformMerchant"
                 }
               }
             }
@@ -13815,7 +13830,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformMerchantItem"
+                  "$ref": "#/components/schemas/PlatformMerchant"
                 }
               }
             }
@@ -13861,7 +13876,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlatformMerchantItem"
+                  "$ref": "#/components/schemas/PlatformMerchant"
                 }
               }
             }
@@ -13879,6 +13894,7 @@
         "x-openrails-permission": "root:merchants:restore",
         "x-openrails-errors": [
           "invalid_param",
+          "name_taken",
           "resource_conflict",
           "resource_not_found"
         ],
@@ -13903,15 +13919,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -15168,6 +15177,40 @@
         "required": [
           "route_groups",
           "features"
+        ]
+      },
+      "CaptchaStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "token_header": {
+            "type": "string"
+          },
+          "client_script_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "required",
+          "provider",
+          "token_header",
+          "client_script_url"
         ]
       },
       "CaptureAdmissionParams": {
@@ -19338,17 +19381,6 @@
           }
         }
       },
-      "Message": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
-        ]
-      },
       "Meter": {
         "type": "object",
         "properties": {
@@ -20742,44 +20774,6 @@
           }
         }
       },
-      "PathPageOfPlatformMerchantItem": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PlatformMerchantItem"
-            }
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more",
-          "url"
-        ]
-      },
       "PayCheckoutSessionParams": {
         "type": "object",
         "properties": {
@@ -21710,7 +21704,7 @@
           "source_archived"
         ]
       },
-      "PlatformMerchantItem": {
+      "PlatformMerchant": {
         "type": "object",
         "properties": {
           "id": {
@@ -21723,7 +21717,14 @@
             "type": "string"
           },
           "display_name": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -21734,8 +21735,15 @@
             "format": "date-time"
           },
           "deleted_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rails_armed": {
             "type": "array",
@@ -21744,17 +21752,27 @@
             }
           },
           "last_payment_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
           "slug",
           "status",
+          "display_name",
           "created_at",
           "updated_at",
-          "rails_armed"
+          "deleted_at",
+          "rails_armed",
+          "last_payment_at"
         ]
       },
       "PortalResponse": {
@@ -24855,6 +24873,28 @@
           "charged_amount",
           "policy_charged_amount",
           "action"
+        ]
+      },
+      "WebhookReceipt": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "code": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "code"
         ]
       },
       "WorkerHealth": {

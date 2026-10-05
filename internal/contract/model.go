@@ -47,7 +47,6 @@ const (
 var (
 	timeType          = reflect.TypeFor[time.Time]()
 	rawMessageType    = reflect.TypeFor[json.RawMessage]()
-	untypedType       = reflect.TypeFor[routes.Untyped]()
 	streamType        = reflect.TypeFor[routes.Stream]()
 	jsonMarshalerType = reflect.TypeFor[json.Marshaler]()
 	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
@@ -98,7 +97,7 @@ func classify(t reflect.Type) (kind, error) {
 	switch {
 	case t == timeType:
 		return kindTime, nil
-	case t == rawMessageType, t == untypedType:
+	case t == rawMessageType:
 		return kindAny, nil
 	case t == streamType:
 		return kindStream, nil
@@ -321,7 +320,7 @@ func newModel(fsys fs.FS, list []routes.Route) (*model, error) {
 			if t.Name() != "" {
 				name = baseName(t)
 			} else if name == "" {
-				return fmt.Errorf("contract: anonymous struct %s as a body; name it or declare the route Untyped", t)
+				return fmt.Errorf("contract: anonymous struct %s as a body; name it", t)
 			}
 			reached[t] = name
 			for _, f := range fieldsOf(t) {

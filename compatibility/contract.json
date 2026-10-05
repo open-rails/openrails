@@ -102,7 +102,7 @@
       "func (c *Client) HasRootPermission(ctx context.Context, r *http.Request, permission string) (bool, error)",
       "func (c *Client) ImportBilling(ctx context.Context, book billing.DeclaredBilling, requestOptions ...RequestOption) (*billing.BillingImportResult, error)",
       "func (c *Client) ImportBillingArchive(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*billing.BillingArchiveImport, error)",
-      "func (c *Client) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]billing.MerchantID, error)",
+      "func (c *Client) ListActiveMerchantIDs(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)",
       "func (c *Client) ListAlertWebhooks(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)",
       "func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDriftListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CatalogDrift], error)",
       "func (c *Client) ListCatalogs(ctx context.Context, params billing.CatalogListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Catalog], error)",
@@ -594,6 +594,7 @@
       "type CancelEvidence struct {\n\tKind string    `json:\"kind,omitempty\"`\n\tAt   time.Time `json:\"at,omitempty\"`\n\n\tScheduleLive bool `json:\"schedule_live,omitempty\"`\n}",
       "type CancelSubscriptionParams struct {\n\tReason       string `json:\"reason\"`\n\tRevokeAccess bool   `json:\"revoke_access,omitempty\"`\n\n\tAccountDeletion bool `json:\"account_deletion,omitempty\"`\n}",
       "type Capabilities struct {\n\tRouteGroups map[string]bool `json:\"route_groups\"`\n\tFeatures    map[string]bool `json:\"features\"`\n}",
+      "type CaptchaStatus struct {\n\tEnabled         bool    `json:\"enabled\"`\n\tRequired        bool    `json:\"required\"`\n\tProvider        *string `json:\"provider\"`\n\tTokenHeader     string  `json:\"token_header\"`\n\tClientScriptURL string  `json:\"client_script_url\"`\n}",
       "type CaptureAdmissionParams struct {\n\tAmount int64         `json:\"amount,string\"`\n\tUsage  *CaptureUsage `json:\"usage,omitempty\"`\n}",
       "type CaptureReceipt struct {\n\tRequestID           string               `json:\"request_id\"`\n\tCustomerID          CustomerID           `json:\"customer_id\"`\n\tCurrency            string               `json:\"currency\"`\n\tAmount              int64                `json:\"amount,string\"`\n\tCreditTransactionID *CreditTransactionID `json:\"credit_transaction_id\"`\n\tReplayed            bool                 `json:\"replayed\"`\n}",
       "type CaptureUsage struct {\n\tEventType  string           `json:\"event_type\"`\n\tResource   string           `json:\"resource,omitempty\"`\n\tMetadata   map[string]any   `json:\"metadata,omitempty\"`\n\tSource     string           `json:\"source,omitempty\"`\n\tSourceID   string           `json:\"source_id,omitempty\"`\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n}",
@@ -1243,7 +1244,7 @@
       "type MintCheckoutSessionParams struct {\n\tPriceID    billing.PriceID `json:\"price_id\"`\n\tPriceKey   string          `json:\"price_key\"`\n\tSuccessURL string          `json:\"success_url\" binding:\"omitempty,url\"`\n}",
       "type PaginatedResponse[T any] struct {\n\tItems  []T   `json:\"items\"`\n\tTotal  int64 `json:\"total\"`\n\tLimit  int   `json:\"limit\"`\n\tOffset int   `json:\"offset\"`\n}",
       "type PaymentMethodSetupParams struct {\n\tPSPID   billing.PSPID `json:\"psp_id\"`\n\tConsent bool          `json:\"consent\"`\n}",
-      "type PlatformMerchantItem struct {\n\tID          string     `json:\"id\"`\n\tSlug        string     `json:\"slug\"`\n\tStatus      string     `json:\"status\"`\n\tDisplayName *string    `json:\"display_name,omitempty\"`\n\tCreatedAt   time.Time  `json:\"created_at\"`\n\tUpdatedAt   time.Time  `json:\"updated_at\"`\n\tDeletedAt   *time.Time `json:\"deleted_at,omitempty\"`\n\n\tRailsArmed []string `json:\"rails_armed\"`\n\n\tLastPaymentAt *time.Time `json:\"last_payment_at,omitempty\"`\n}",
+      "type PlatformMerchant struct {\n\tID          billing.MerchantID `json:\"id\"`\n\tSlug        string             `json:\"slug\"`\n\tStatus      string             `json:\"status\"`\n\tDisplayName *string            `json:\"display_name\"`\n\tCreatedAt   time.Time          `json:\"created_at\"`\n\tUpdatedAt   time.Time          `json:\"updated_at\"`\n\tDeletedAt   *time.Time         `json:\"deleted_at\"`\n\n\tRailsArmed []string `json:\"rails_armed\"`\n\n\tLastPaymentAt *time.Time `json:\"last_payment_at\"`\n}",
       "type PortalResponse struct {\n\tURL string `json:\"url\"`\n}",
       "type SolanaPayGetResponse struct {\n\tLabel string `json:\"label\"`\n\tIcon  string `json:\"icon\"`\n}",
       "type SolanaPayPostRequest struct {\n\tAccount string `json:\"account\" binding:\"required\"`\n}",
@@ -1252,13 +1253,12 @@
       "type TokenBalance struct {\n\tAmount     string `json:\"amount\"`\n\tUnits      uint64 `json:\"units,string\"`\n\tSufficient bool   `json:\"sufficient\"`\n}",
       "type TokenInfo struct {\n\tSymbol   string `json:\"symbol\"`\n\tName     string `json:\"name\"`\n\tMint     string `json:\"mint\"`\n\tDecimals int    `json:\"decimals\"`\n\tPrice    string `json:\"price,omitempty\"`\n\n\tPreferred bool `json:\"preferred\"`\n\n\tRecurringEligible bool          `json:\"recurring_eligible\"`\n\tQuote             *TokenQuote   `json:\"quote,omitempty\"`\n\tBalance           *TokenBalance `json:\"balance,omitempty\"`\n}",
       "type TokenQuote struct {\n\tAmount        string    `json:\"amount\"`\n\tUnits         uint64    `json:\"units,string\"`\n\tTokenPriceUSD string    `json:\"token_price_usd\"`\n\tFXRate        string    `json:\"fx_rate\"`\n\tFXCurrency    string    `json:\"fx_currency\"`\n\tQuotedAt      time.Time `json:\"quoted_at\"`\n\tExpiresAt     time.Time `json:\"expires_at\"`\n}",
+      "type WebhookReceipt struct {\n\tStatus string  `json:\"status\"`\n\tCode   *string `json:\"code\"`\n}",
       "type activeEntitlement struct {\n\tID         uuid.UUID                    `json:\"id\"`\n\tCustomerID billing.CustomerID           `json:\"customer_id\"`\n\tLookupKey  string                       `json:\"lookup_key\"`\n\tStartAt    time.Time                    `json:\"start_at\"`\n\tEndAt      *time.Time                   `json:\"end_at,omitempty\"`\n\tSourceType models.EntitlementSourceType `json:\"source_type\"`\n\tSourceID   string                       `json:\"source_id,omitempty\"`\n}",
       "type stripeThinEnvelope struct {\n\tID            string          `json:\"id\"`\n\tObject        string          `json:\"object\"`\n\tType          string          `json:\"type\"`\n\tAccount       string          `json:\"account\"`\n\tContext       string          `json:\"context\"`\n\tCreated       json.RawMessage `json:\"created\"`\n\tSnapshotEvent string          `json:\"snapshot_event\"`\n\tRelatedObject *struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t\tURL  string `json:\"url\"`\n\t} `json:\"related_object\"`\n\tData struct {\n\t\tObject             json.RawMessage `json:\"object\"`\n\t\tPreviousAttributes json.RawMessage `json:\"previous_attributes\"`\n\t} `json:\"data\"`\n}"
     ],
     "internal/http/routes": [
-      "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}",
-      "type Message struct {\n\tMessage string `json:\"message\"`\n}",
-      "type PathPage[T any] struct {\n\tObject  string `json:\"object\"`\n\tData    []T    `json:\"data\"`\n\tTotal   int64  `json:\"total\"`\n\tLimit   int    `json:\"limit\"`\n\tOffset  int    `json:\"offset\"`\n\tHasMore bool   `json:\"has_more\"`\n\tURL     string `json:\"url\"`\n}"
+      "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}"
     ],
     "internal/integrations/basistheory": [
       "type AccountUpdaterJob struct {\n\tID          string     `json:\"id\"`\n\tTenantID    string     `json:\"tenant_id\"`\n\tState       string     `json:\"state\"`\n\tUploadURL   string     `json:\"upload_url\"`\n\tDownloadURL string     `json:\"download_url\"`\n\tCreatedAt   time.Time  `json:\"created_at\"`\n\tExpiresAt   *time.Time `json:\"expires_at\"`\n}",
@@ -2300,15 +2300,16 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/http/handlers/platform_merchants.go": {
+      "api": "github.com/open-rails/openrails/internal/api",
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
       "pgconn": "github.com/jackc/pgx/v5/pgconn",
       "strings": "strings",
       "time": "time",
@@ -2384,6 +2385,32 @@
       "utf8": "unicode/utf8",
       "uuid": "github.com/google/uuid"
     },
+    "internal/http/handlers/webhook.go": {
+      "api": "github.com/open-rails/openrails/internal/api",
+      "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "http": "net/http",
+      "httprequest": "github.com/open-rails/openrails/internal/http/request",
+      "io": "io",
+      "iputil": "github.com/open-rails/openrails/internal/shared/iputil",
+      "json": "encoding/json",
+      "log": "github.com/sirupsen/logrus",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "webhookauth": "github.com/open-rails/openrails/internal/webhookauth",
+      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks",
+      "webhookutil": "github.com/open-rails/openrails/internal/shared/webhookutil"
+    },
     "internal/http/handlers/webhook_stripe_thin.go": {
       "context": "context",
       "errors": "errors",
@@ -2401,17 +2428,6 @@
       "billing": "github.com/open-rails/openrails/billing",
       "handlers": "github.com/open-rails/openrails/internal/http/handlers",
       "http": "net/http"
-    },
-    "internal/http/routes/route.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "fmt": "fmt",
-      "http": "net/http",
-      "httprequest": "github.com/open-rails/openrails/internal/http/request",
-      "middleware": "github.com/open-rails/openrails/internal/http/middleware",
-      "reflect": "reflect",
-      "router": "github.com/open-rails/openrails/internal/http/router",
-      "sort": "sort",
-      "strings": "strings"
     },
     "internal/integrations/basistheory/accountupdater.go": {
       "bytes": "bytes",

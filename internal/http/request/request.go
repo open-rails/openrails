@@ -256,39 +256,6 @@ func (r *Request) SuccessJSON(data any) {
 	r.t.WriteJSON(http.StatusOK, data)
 }
 
-func (r *Request) SuccessJSONMessage(msg string) {
-	r.t.WriteJSON(http.StatusOK, map[string]any{
-		"message": msg,
-	})
-}
-
-func (r *Request) SuccessJSONPaginated(data any, total int64, limit, offset int) {
-	dataLen := 0
-	if slice, ok := data.([]any); ok {
-		dataLen = len(slice)
-	} else {
-		v := reflect.ValueOf(data)
-		if v.Kind() == reflect.Slice {
-			dataLen = v.Len()
-		}
-	}
-	hasMore := int64(offset+dataLen) < total
-
-	urlPath := ""
-	if r.Request != nil {
-		urlPath = r.Request.URL.Path
-	}
-	r.t.WriteJSON(http.StatusOK, map[string]any{
-		"object":   "list",
-		"data":     data,
-		"total":    total,
-		"limit":    limit,
-		"offset":   offset,
-		"has_more": hasMore,
-		"url":      urlPath,
-	})
-}
-
 func (r *Request) Bind(data any) error {
 	return r.t.Bind(data)
 }

@@ -339,7 +339,7 @@ func TestPlatformRoutes(t *testing.T) {
 	}
 	h := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: root, AdminLimiter: unlocker})
 	rec := do(h, http.MethodDelete, "/v1/platform/admin-rate-limit-lockouts/"+userB, nil)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	require.Equal(t, []string{billing.RootAdminRateLimitsUnlock}, asked)
 	require.Equal(t, &unlock{userB, userA}, unlocked)
 

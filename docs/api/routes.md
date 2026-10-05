@@ -32,7 +32,7 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 | POST | `/v1/checkout-sessions/{id}/pay` | session_id | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
 | GET | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | — | 200 `SolanaPayGetResponse` | when `solana` |
 | POST | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
-| GET | `/v1/captcha/status` | public | — | — | 200 untyped |  |
+| GET | `/v1/captcha/status` | public | — | — | 200 `CaptchaStatus` |  |
 | GET | `/v1/captcha/client.js` | public | — | — | 200 `application/javascript` |  |
 | GET | `/v1/products` | optional | — | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/prices` | optional | — | — | 200 `ListPage<Price>` |  |
@@ -285,11 +285,11 @@ The operator tier.
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/platform/worker-health` | operator | `root:worker-health:read` | — | 200 `ListPage<WorkerHealth>` |  |
-| GET | `/v1/platform/merchants` | operator | `root:merchants:read` | — | 200 `PathPageOfPlatformMerchantItem` |  |
-| GET | `/v1/platform/merchants/{id}` | operator | `root:merchants:read` | — | 200 `PlatformMerchantItem` |  |
-| DELETE | `/v1/platform/merchants/{id}` | operator | `root:merchants:delete` | — | 200 `PlatformMerchantItem` |  |
-| POST | `/v1/platform/merchants/{id}/restore` | operator | `root:merchants:restore` | — | 200 `PlatformMerchantItem` |  |
-| DELETE | `/v1/platform/admin-rate-limit-lockouts/{user_id}` | operator | `root:admin-rate-limits:unlock` | — | 200 `Message` |  |
+| GET | `/v1/platform/merchants` | operator | `root:merchants:read` | — | 200 `ListPage<PlatformMerchant>` |  |
+| GET | `/v1/platform/merchants/{id}` | operator | `root:merchants:read` | — | 200 `PlatformMerchant` |  |
+| DELETE | `/v1/platform/merchants/{id}` | operator | `root:merchants:delete` | — | 200 `PlatformMerchant` |  |
+| POST | `/v1/platform/merchants/{id}/restore` | operator | `root:merchants:restore` | — | 200 `PlatformMerchant` |  |
+| DELETE | `/v1/platform/admin-rate-limit-lockouts/{user_id}` | operator | `root:admin-rate-limits:unlock` | — | 204 — |  |
 
 ## Provider webhooks
 
@@ -297,4 +297,4 @@ Inbound provider callbacks.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | untyped | 200 untyped |  |
+| POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | `application/json` | 200 `WebhookReceipt` |  |

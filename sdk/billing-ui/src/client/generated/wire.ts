@@ -37,6 +37,14 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
+export type CaptchaStatus = {
+  enabled: boolean
+  required: boolean
+  provider: string | null
+  token_header: string
+  client_script_url: string
+}
+
 export type CardDetails = {
   brand: string | null
   last4: string | null

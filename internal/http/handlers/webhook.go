@@ -87,7 +87,7 @@ func Webhook(r *httprequest.Request) {
 	// supplied by a host middleware instead of resolving the configured account.
 	if handled, accepted := processPSPWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
 		if accepted {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
+			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 		}
 		return
 	}
@@ -145,13 +145,13 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 
 	if rails.IsNMI(models.Rail(provider)) {
 		if processMerchantNMIWebhook(r, provider, merchantID, accountID) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
+			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 		}
 		return
 	}
 	if provider == string(models.EventSourceBasisTheory) {
 		if processMerchantBasisTheoryWebhook(r, merchantID, accountID) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
+			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 		}
 		return
 	}
@@ -170,7 +170,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 			return
 		}
 		if processMerchantCCBillWebhook(r, clientIP, accountID) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
+			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 		}
 		return
 	}
@@ -273,14 +273,14 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
-			r.SuccessJSON(map[string]string{"status": "accepted"})
+			r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 			return
 		}
 		log.WithError(err).Error("merchant stripe webhook processing failed")
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
 		return
 	}
-	r.SuccessJSON(map[string]string{"status": "accepted"})
+	r.SuccessJSON(WebhookReceipt{Status: "accepted"})
 }
 
 func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP string) (handled bool, accepted bool) {
@@ -655,7 +655,7 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 	msg := ccbillWebhookMessage(clientIP, prepared, accountID)
 	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
 		if code := webhooks.WebhookRefusalCode(err); code != "" {
-			r.SuccessJSON(map[string]string{"status": "refused", "code": code})
+			r.SuccessJSON(WebhookReceipt{Status: "refused", Code: &code})
 			return false
 		}
 		if webhooks.IsWebhookErrorNonRetryable(err) {
@@ -772,4 +772,11 @@ func readRequestBody(body io.ReadCloser) ([]byte, error) {
 // provider accounts a deployment serves.
 func rejectWebhook(r *httprequest.Request) {
 	r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
+}
+
+// WebhookReceipt answers a provider's webhook: accepted, or refused with the
+// registered code of a refusal the provider should not retry.
+type WebhookReceipt struct {
+	Status string  `json:"status"`
+	Code   *string `json:"code"`
 }

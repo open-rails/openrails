@@ -20,10 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
-// untypedBudget is how many routes still accept or answer a body no Go type
-// declares. It only goes down: a lane that types a route lowers it.
-const untypedBudget = 2
-
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
 // groupPaths is where each group's routes live.
@@ -51,7 +47,6 @@ var documents = []string{"Application", "DeclaredBilling", "InvoiceProfile", "Me
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
 	require.Len(t, Catalog(), 235)
-	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -107,11 +102,7 @@ func TestCatalogDeclarations(t *testing.T) {
 		got, ok := Lookup(r.Method, r.Path)
 		require.True(t, ok, key)
 		require.Equal(t, key, got.Key())
-		if r.Untyped() {
-			untyped++
-		}
 	}
-	require.Equal(t, untypedBudget, untyped, "routes with an untyped body: lower untypedBudget when a route gains a type, and never raise it")
 }
 
 type recorder struct {
