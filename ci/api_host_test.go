@@ -220,18 +220,13 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	}
 	refused(claim(squatter, "203.0.113.7"), http.StatusBadRequest, "invalid_api_host")
 
-	// The configuration document keeps or clears the proven host; it binds no other.
-	apply := func(s shop, host string) *httptest.ResponseRecorder {
-		w := on(shared, s.session, http.MethodGet, "/v1/merchant/configuration", s.slug, nil)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		state := map[string]any{}
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&state))
-		return on(shared, s.session, http.MethodPost, "/v1/merchant/configuration/applications", s.slug,
-			map[string]any{"application_id": uuid.NewString(), "expected_revision": state["revision"], "api_host": host})
-	}
-	refused(apply(squatter, "shop.squatter.e2e.test"), http.StatusConflict, "api_host_requires_proof")
-	refused(apply(squatter, domain), http.StatusConflict, "api_host_requires_proof")
-	require.Equal(t, http.StatusOK, apply(victim, domain).Code, "restating the proven host")
+	// The configuration document binds no host: only a proven claim does.
+	w = on(shared, squatter.session, http.MethodGet, "/v1/merchant/configuration", squatter.slug, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	state := map[string]any{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&state))
+	refused(on(shared, squatter.session, http.MethodPost, "/v1/merchant/configuration/applications", squatter.slug,
+		map[string]any{"application_id": uuid.NewString(), "expected_revision": state["revision"], "api_host": domain}), http.StatusBadRequest, "unknown_field")
 
 	// Control: the squatter proves a domain it does control.
 	const own = "shop.squatter.e2e.test"

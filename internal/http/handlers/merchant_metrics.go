@@ -72,16 +72,13 @@ func MerchantMetricsAsk(r *httprequest.Request) {
 	res, err := svc.Ask(r.Request.Context(), strings.TrimSpace(body.Question))
 	if err != nil {
 		var limited *dashboard.AskRateLimitedError
-		var noAnswer *dashboard.AskNoAnswerError
-		switch {
-		case errors.As(err, &limited):
+		if errors.As(err, &limited) {
 			r.SetHeader("Retry-After", strconv.Itoa(int(math.Ceil(limited.RetryAfter.Seconds()))))
 			r.ErrorCode(billing.CodeRateLimitExceeded, "ask rate limit exceeded; try again later")
-		case errors.As(err, &noAnswer):
-			r.ErrorJSON(http.StatusBadGateway, "the model did not produce an answer within the query budget — try a narrower question")
-		default:
-			r.ErrorJSON(http.StatusBadGateway, "metrics Q&A failed: the LLM request did not complete")
+			return
 		}
+		var noAnswer *dashboard.AskNoAnswerError
+		modelFailure(r, err, errors.As(err, &noAnswer))
 		return
 	}
 	r.JSON(http.StatusOK, res)

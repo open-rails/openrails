@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
@@ -26,7 +27,7 @@ const (
 // read-only lookups (Phase 1) and, when armed, drafting tools (Phase 2) as
 // tool calls. The model never sees anything beyond aggregate catalog/
 // subscriber-count data and never triggers a mutation — see tools_draft.go.
-func (s *Service) Ask(ctx context.Context, question string) (*AskResult, error) {
+func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAnswer, error) {
 	if !s.Configured() {
 		return nil, ErrNotConfigured
 	}
@@ -48,8 +49,8 @@ func (s *Service) Ask(ctx context.Context, question string) (*AskResult, error) 
 	system := s.systemPrompt(ctx, now)
 	tools := s.toolDefs()
 	msgs := []dashboard.ToolMessage{{Role: "user", Text: question}}
-	var evidence []Evidence
-	var drafts []Draft
+	evidence := []billing.CatalogEvidence{}
+	drafts := []billing.CatalogDraft{}
 	attempts := 0
 
 	for turn := 0; turn < askMaxTurns; turn++ {
@@ -62,7 +63,7 @@ func (s *Service) Ask(ctx context.Context, question string) (*AskResult, error) 
 			if answer == "" {
 				return nil, fmt.Errorf("copilot ask: empty model response (stop_reason %q)", resp.StopReason)
 			}
-			return &AskResult{Answer: answer, Evidence: evidence, Drafts: drafts}, nil
+			return &billing.CatalogAnswer{Answer: answer, Evidence: evidence, Drafts: drafts}, nil
 		}
 		results := make([]dashboard.ToolResult, 0, len(resp.ToolCalls))
 		for _, call := range resp.ToolCalls {
@@ -98,10 +99,10 @@ func toolNames(defs []dashboard.ToolDef) []string {
 }
 
 // runTool dispatches one tool call, enforcing the shared budget and
-// translating each tool's (content, error) — or (content, *Draft, error) for
+// translating each tool's (content, error) — or (content, draft, error) for
 // drafting tools — into the wire ToolResult, collecting Q&A results into
 // evidence and drafts into drafts as a side effect.
-func (s *Service) runTool(ctx context.Context, call dashboard.ToolCall, evidence *[]Evidence, drafts *[]Draft, attempts *int) dashboard.ToolResult {
+func (s *Service) runTool(ctx context.Context, call dashboard.ToolCall, evidence *[]billing.CatalogEvidence, drafts *[]billing.CatalogDraft, attempts *int) dashboard.ToolResult {
 	errResult := func(msg string) dashboard.ToolResult {
 		return dashboard.ToolResult{ToolUseID: call.ID, Content: msg, IsError: true}
 	}
@@ -121,10 +122,10 @@ func (s *Service) runTool(ctx context.Context, call dashboard.ToolCall, evidence
 		if err != nil {
 			return errResult(err.Error())
 		}
-		*evidence = append(*evidence, Evidence{Tool: call.Name, Args: string(call.Input), Summary: content})
+		*evidence = append(*evidence, billing.CatalogEvidence{Tool: call.Name, Args: string(call.Input), Summary: content})
 		return dashboard.ToolResult{ToolUseID: call.ID, Content: content}
 	}
-	draftResult := func(content string, draft *Draft, err error) dashboard.ToolResult {
+	draftResult := func(content string, draft *billing.CatalogDraft, err error) dashboard.ToolResult {
 		if err != nil {
 			return errResult(err.Error())
 		}

@@ -27,7 +27,7 @@ const invoice = (actions: Invoice["available_actions"], overrides: Partial<Invoi
   })
 const profile = (overrides: Partial<InvoiceProfile> = {}): InvoiceProfile => ({
   net_terms_days: 30, collection_method: "send_invoice", po_number: "", tax: null,
-  billing_contacts: null, memo: "", ...overrides,
+  billing_contacts: [], memo: "", ...overrides,
 })
 
 let requests: Recorded[]
@@ -124,7 +124,7 @@ describe("invoice support model", () => {
     const actions = (available: string[]) =>
       allowedInvoiceActions({ available_actions: available } as unknown as Invoice)
     expect(actions([])).toEqual([])
-    expect(allowedInvoiceActions(invoice(null))).toEqual([])
+    expect(allowedInvoiceActions(invoice([]))).toEqual([])
     expect(actions(["void"])).toEqual(["void"])
   })
 

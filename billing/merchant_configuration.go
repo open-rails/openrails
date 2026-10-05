@@ -7,13 +7,13 @@ import (
 
 // MerchantConfigurationApplyParams is an explicit, replayable metadata update.
 // Omitted fields preserve stored values. Credentials and provider lifecycle
-// changes use the PSP methods and their separate publication receipts.
+// changes use the PSP methods and their separate publication receipts; the
+// API host is claimed, proven and released with SetAPIHost.
 type MerchantConfigurationApplyParams struct {
 	ApplicationID    string            `json:"application_id"`
 	ExpectedRevision *string           `json:"expected_revision"`
 	Settings         *MerchantSettings `json:"settings,omitempty"`
 	DisplayName      *string           `json:"display_name,omitempty"`
-	APIHost          *string           `json:"api_host,omitempty"`
 }
 
 // MarshalJSON preserves explicit empty policy lists across both Client

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (238), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (237), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -46,7 +46,7 @@ A customer acting on its own account.
 | POST | `/v1/me/checkout-sessions` | customer | — | `CheckoutSessionMintRequest` | 201 `CheckoutSessionLink` | when `checkout_sessions` |
 | POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `CustomerCancelSubscriptionRequest` | 200 `Subscription` | scope `subscription_management` |
 | POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 200 `Subscription` | scope `subscription_management` |
-| PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `UpdateSubscriptionPaymentMethodParams` | 200 `Subscription` | scope `subscription_management` |
+| PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | scope `subscription_management` |
 | GET | `/v1/me/subscriptions` | customer | — | — | 200 `ListPage<Subscription>` | scope `billing_management` |
 | GET | `/v1/me/subscriptions/{id}` | customer | — | — | 200 `Subscription` | scope `billing_management` |
 | POST | `/v1/me/subscriptions/{id}/retry-now` | customer | — | `RetrySubscriptionNowRequest` | 200 `SubscriptionRetryNowResult`<br>202 `SubscriptionRetryNowResult` | scope `billing_management` |
@@ -105,8 +105,7 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/catalogs` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Catalog>` |  |
 | POST | `/v1/merchant/catalogs` | merchant | `merchant:catalog:update` | `EnsureCatalogParams` | 200 `Catalog` | catalog write |
 | GET | `/v1/merchant/catalogs/{id}` | merchant | `merchant:catalog:read` | — | 200 `Catalog` |  |
-| POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | untyped | 200 `AskResult` | when `catalog_copilot` |
-| POST | `/v1/merchant/catalog/copilot/confirm` | merchant | `merchant:catalog:update` | untyped | 200 `Message` | when `catalog_copilot` |
+| POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
 | POST | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:update` | `CreateProductParams` | 201 `Product` | catalog write |
 | GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
@@ -126,7 +125,7 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/subscriptions/{id}/resume` | merchant | `merchant:subscriptions:update` | — | 200 `Subscription` |  |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChangePreview` |  |
-| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `merchant:subscriptions:update` | `UpdateSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
+| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `merchant:subscriptions:update` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
 | POST | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:update` | `CreateRepriceBatchParams` | 201 `RepriceBatchResult` |  |
 | POST | `/v1/merchant/reprice-batches/preview` | merchant | `merchant:subscriptions:read` | `RepriceBatchPreviewParams` | 200 `RepriceBatchPreview` |  |
 | GET | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<RepriceBatch>` |  |

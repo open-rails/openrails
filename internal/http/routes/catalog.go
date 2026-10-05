@@ -5,7 +5,6 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/modules/copilot"
 )
 
 // page is a list route's paging parameters.
@@ -73,14 +72,10 @@ var catalogRoutes = append([]Route{
 	{Method: GET, Path: "/v1/merchant/catalogs/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Responses: []Reply{{200, billing.Catalog{}}}, Errors: codes("catalog_not_found"), Handler: h(handlers.GetCatalog)},
 
-	// The catalog copilot answers questions about the catalog; it is mounted
-	// only when it is configured, and never changes a catalog row. Confirm
-	// records that a draft was applied, which only a caller who could apply
-	// it may log.
+	// The catalog assistant answers questions about the catalog and drafts
+	// price changes for a person to review; it never changes a catalog row.
 	{Method: POST, Path: "/v1/merchant/catalog/ask", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead, When: FeatureCatalogCopilot,
-		Request: Untyped{}, Responses: []Reply{{200, copilot.AskResult{}}}, Errors: codes("rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.CatalogCopilotAsk)},
-	{Method: POST, Path: "/v1/merchant/catalog/copilot/confirm", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, When: FeatureCatalogCopilot,
-		Request: Untyped{}, Responses: []Reply{{200, Message{}}}, Handler: h(handlers.CatalogCopilotConfirmDraft)},
+		Request: billing.AskCatalogParams{}, Responses: []Reply{{200, billing.CatalogAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.AskCatalog)},
 }, append(catalogResourceRoutes("/v1/merchant/catalog", Merchant, billing.MerchantCatalogRead, billing.MerchantCatalogUpdate),
 	catalogResourceRoutes("/v1/catalog", CatalogOwned, billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate)...)...)
 

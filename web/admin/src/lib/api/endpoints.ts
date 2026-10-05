@@ -11,6 +11,7 @@ import type {
   CatalogDrift,
   CatalogDriftCheck,
   CreateOffChannelPaymentParams,
+  CreatePriceParams,
   CreditLimit,
   Customer,
   ListPage,
@@ -481,23 +482,9 @@ export const listPrices = (
     signal,
   })
 
-export interface PriceRequest {
-  product_id: string
-  unit_amount: string
-  currency: string
-  access_duration_hours?: number
-  auto_renew?: boolean
-  trial_unit_amount?: string
-  trial_duration_hours?: number
-  // Declaring the key of a live price with other terms makes this its new
-  // version and archives the old one; omit for the default key.
-  key?: string
-  // The PSPs that sell the price, e.g. carried over from the version it
-  // replaces. Empty: sold through no PSP.
-  psps?: string[]
-}
-
-export const createPrice = (body: PriceRequest) =>
+// A price that declares the key of a live price with other terms becomes
+// its new version and archives the old one.
+export const createPrice = (body: CreatePriceParams) =>
   api<Price>("/merchant/catalog/prices", { method: "POST", body })
 
 // getPrice returns the price with its state on each linked PSP. verify=true

@@ -42,6 +42,7 @@ pkg openrails, method (*Client) ApplyCatalog(context.Context, *catalog.Applicati
 pkg openrails, method (*Client) ApplyMerchantConfiguration(context.Context, *billing.MerchantConfigurationApplyParams, ...RequestOption) (*billing.MerchantConfigurationReceipt, error)
 pkg openrails, method (*Client) ArchivePSP(context.Context, billing.PSPID, billing.ArchivePSPParams, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (*Client) ArchiveProduct(context.Context, billing.ArchiveProductParams, ...RequestOption) (*billing.ProductArchive, error)
+pkg openrails, method (*Client) AskCatalog(context.Context, billing.AskCatalogParams, ...RequestOption) (*billing.CatalogAnswer, error)
 pkg openrails, method (*Client) AskMetrics(context.Context, billing.AskMetricsRequest, ...RequestOption) (*billing.MetricsAnswer, error)
 pkg openrails, method (*Client) AuthKit() *authkit.Client
 pkg openrails, method (*Client) AuthenticateUser(*http.Request) (Identity, error)
@@ -105,7 +106,6 @@ pkg openrails, method (*Client) GetEffectiveTier(context.Context, billing.Custom
 pkg openrails, method (*Client) GetFinding(context.Context, billing.FindingID, ...RequestOption) (*billing.Finding, error)
 pkg openrails, method (*Client) GetFindingSummary(context.Context, ...RequestOption) (*billing.FindingSummary, error)
 pkg openrails, method (*Client) GetInvoice(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
-pkg openrails, method (*Client) GetMerchantAPIHost(context.Context, billing.MerchantID) (string, error)
 pkg openrails, method (*Client) GetMerchantConfiguration(context.Context, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (*Client) GetMeter(context.Context, string, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) GetMetricsSchema(context.Context, ...RequestOption) (*billing.MetricsSchema, error)
@@ -171,7 +171,6 @@ pkg openrails, method (*Client) ListRepriceBatches(context.Context, billing.Repr
 pkg openrails, method (*Client) ListReprices(context.Context, billing.RepriceListParams, ...RequestOption) (*billing.ListPage[billing.Reprice], error)
 pkg openrails, method (*Client) ListSpendDelegations(context.Context, billing.CustomerID, ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error)
 pkg openrails, method (*Client) ListSubscriptions(context.Context, billing.SubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.Subscription], error)
-pkg openrails, method (*Client) ListUserMerchants(context.Context, string) ([]billing.UserMerchant, error)
 pkg openrails, method (*Client) ListWorkerHealth(context.Context, ...RequestOption) (billing.ListPage[billing.WorkerHealth], error)
 pkg openrails, method (*Client) MarkInvoiceUncollectible(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) MarkNotificationRead(context.Context, billing.NotificationID, ...RequestOption) (*billing.MerchantNotification, error)
@@ -194,7 +193,6 @@ pkg openrails, method (*Client) RefundPayment(context.Context, billing.PaymentID
 pkg openrails, method (*Client) ReleaseAdmission(context.Context, string, ...RequestOption) (*billing.Admission, error)
 pkg openrails, method (*Client) ReleaseOperationAuthorization(context.Context, billing.ReleaseOperationAuthorizationParams, ...RequestOption) (*billing.OperationAuthorization, error)
 pkg openrails, method (*Client) ReleaseOperationAuthorizationTx(context.Context, pgx.Tx, billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error)
-pkg openrails, method (*Client) RenameMerchant(context.Context, billing.MerchantID, string) error
 pkg openrails, method (*Client) ReportWastedSpend(context.Context, billing.WastedSpendParams, ...RequestOption) (*billing.WastedSpendReport, error)
 pkg openrails, method (*Client) ResolveAuthorizedMerchant(context.Context, *http.Request, string, string) (billing.MerchantID, string, error)
 pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingID, billing.ResolveFindingRequest, ...RequestOption) (*billing.FindingResolution, error)
@@ -214,19 +212,18 @@ pkg openrails, method (*Client) SetCustomerBillingPolicy(context.Context, billin
 pkg openrails, method (*Client) SetCustomerInvoiceProfile(context.Context, billing.CustomerID, billing.SetInvoiceProfileParams, ...RequestOption) (*billing.InvoiceProfile, error)
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardRequest, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (*Client) SetMerchantAPIHost(context.Context, billing.MerchantID, string) error
-pkg openrails, method (*Client) SetMerchantDisplayName(context.Context, billing.MerchantID, string) error
 pkg openrails, method (*Client) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) SetMeterRateCard(context.Context, string, billing.SetMeterRateCardParams, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) SetRateOverride(context.Context, billing.CustomerID, string, billing.SetRateOverrideParams, ...RequestOption) (*billing.RateOverride, error)
 pkg openrails, method (*Client) SetSpendDelegation(context.Context, billing.CustomerID, billing.SpendDelegation, ...RequestOption) (*billing.SpendDelegation, error)
 pkg openrails, method (*Client) SetSpendDelegations(context.Context, billing.CustomerID, []billing.SpendDelegation, ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error)
+pkg openrails, method (*Client) SetSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.SetSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) SetTrustLevel(context.Context, billing.CustomerID, billing.TrustLevelParams, ...RequestOption) (*billing.TrustLevel, error)
 pkg openrails, method (*Client) Start(context.Context) error
 pkg openrails, method (*Client) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
 pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billing.UpdatePSPParams, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
-pkg openrails, method (*Client) UpdateSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.UpdateSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) VerifyAPIHost(context.Context, ...RequestOption) (*billing.MerchantAPIHost, error)
 pkg openrails, method (*Client) VoidInvoice(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) With(...ClientOption) (*Client, error)
@@ -613,6 +610,9 @@ pkg openrails/billing, const BillingModePrepaid BillingMode = "prepaid"
 pkg openrails/billing, const CardExpiryExpired CardExpiryStatus = "expired"
 pkg openrails/billing, const CardExpiryExpiringSoon CardExpiryStatus = "expiring_soon"
 pkg openrails/billing, const CardExpiryValid CardExpiryStatus = "valid"
+pkg openrails/billing, const CatalogDraftNewPrice CatalogDraftKind = "new_price"
+pkg openrails/billing, const CatalogDraftPriceChange CatalogDraftKind = "price_change"
+pkg openrails/billing, const CatalogDraftRefused CatalogDraftKind = "refused"
 pkg openrails/billing, const CatalogIDPrefix untyped string = "cat_"
 pkg openrails/billing, const ChannelAdmin PaymentChannel = "admin"
 pkg openrails/billing, const ChannelManual PaymentChannel = "manual"
@@ -673,6 +673,7 @@ pkg openrails/billing, const CodeMerchantNotFound untyped string = "merchant_not
 pkg openrails/billing, const CodeMerchantSelectorInvalid untyped string = "merchant_selector_invalid"
 pkg openrails/billing, const CodeMerchantUnresolved untyped string = "merchant_unresolved"
 pkg openrails/billing, const CodeMethodNotAllowed untyped string = "method_not_allowed"
+pkg openrails/billing, const CodeModelUnavailable untyped string = "model_unavailable"
 pkg openrails/billing, const CodePaymentDuplicateRefused untyped string = "payment_duplicate_refused"
 pkg openrails/billing, const CodePaymentFailed untyped string = "payment_failed"
 pkg openrails/billing, const CodePaymentMethodPSPMismatch untyped string = "payment_method_psp_mismatch"
@@ -1239,6 +1240,8 @@ pkg openrails/billing, type ArchivedPurchase struct, PaymentID PaymentID `json:"
 pkg openrails/billing, type ArchivedPurchase struct, PurchasedAt time.Time `json:"purchased_at"`
 pkg openrails/billing, type ArchivedPurchase struct, RefundID *PaymentID `json:"refund_id,omitempty"`
 pkg openrails/billing, type ArchivedPurchase struct, ReviewID string `json:"review_id,omitempty"`
+pkg openrails/billing, type AskCatalogParams struct
+pkg openrails/billing, type AskCatalogParams struct, Question string `json:"question"`
 pkg openrails/billing, type AskMetricsRequest struct
 pkg openrails/billing, type AskMetricsRequest struct, Question string `json:"question"`
 pkg openrails/billing, type Balance struct
@@ -1329,6 +1332,10 @@ pkg openrails/billing, type Catalog struct, CreatedAt time.Time `json:"created_a
 pkg openrails/billing, type Catalog struct, ID CatalogID `json:"id"`
 pkg openrails/billing, type Catalog struct, OwnerSubject *string `json:"owner_subject"`
 pkg openrails/billing, type Catalog struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type CatalogAnswer struct
+pkg openrails/billing, type CatalogAnswer struct, Answer string `json:"answer"`
+pkg openrails/billing, type CatalogAnswer struct, Drafts []CatalogDraft `json:"drafts"`
+pkg openrails/billing, type CatalogAnswer struct, Evidence []CatalogEvidence `json:"evidence"`
 pkg openrails/billing, type CatalogApplicationReceipt struct
 pkg openrails/billing, type CatalogApplicationReceipt struct, ApplicationID string `json:"application_id"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, AppliedRevision int64 `json:"applied_revision"`
@@ -1337,6 +1344,16 @@ pkg openrails/billing, type CatalogApplicationReceipt struct, CatalogID CatalogI
 pkg openrails/billing, type CatalogApplicationReceipt struct, PricesChanged int `json:"prices_changed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, ProductsChanged int `json:"products_changed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, Replayed bool `json:"replayed"`
+pkg openrails/billing, type CatalogDraft struct
+pkg openrails/billing, type CatalogDraft struct, Kind CatalogDraftKind `json:"kind"`
+pkg openrails/billing, type CatalogDraft struct, NewPrice *NewPriceDraft `json:"new_price"`
+pkg openrails/billing, type CatalogDraft struct, PriceChange *PriceChangeDraft `json:"price_change"`
+pkg openrails/billing, type CatalogDraft struct, Refusal *CatalogDraftRefusal `json:"refusal"`
+pkg openrails/billing, type CatalogDraftKind string
+pkg openrails/billing, type CatalogDraftRefusal struct
+pkg openrails/billing, type CatalogDraftRefusal struct, Code string `json:"code"`
+pkg openrails/billing, type CatalogDraftRefusal struct, Reason string `json:"reason"`
+pkg openrails/billing, type CatalogDraftRefusal struct, Workaround string `json:"workaround"`
 pkg openrails/billing, type CatalogDrift struct
 pkg openrails/billing, type CatalogDrift struct, DetectedAt time.Time `json:"detected_at"`
 pkg openrails/billing, type CatalogDrift struct, ExternalResourceID string `json:"external_resource_id"`
@@ -1363,6 +1380,10 @@ pkg openrails/billing, type CatalogDriftListParams struct, Kind string
 pkg openrails/billing, type CatalogDriftListParams struct, Rail string
 pkg openrails/billing, type CatalogDriftListParams struct, ResourceType string
 pkg openrails/billing, type CatalogDriftListParams struct, embedded PageRequest
+pkg openrails/billing, type CatalogEvidence struct
+pkg openrails/billing, type CatalogEvidence struct, Args string `json:"args"`
+pkg openrails/billing, type CatalogEvidence struct, Summary string `json:"summary"`
+pkg openrails/billing, type CatalogEvidence struct, Tool string `json:"tool"`
 pkg openrails/billing, type CatalogID [16]byte
 pkg openrails/billing, type CatalogListParams struct
 pkg openrails/billing, type CatalogListParams struct, OwnerSubject string
@@ -2073,7 +2094,6 @@ pkg openrails/billing, type MerchantBillingImportResult struct, Digest string `j
 pkg openrails/billing, type MerchantBillingImportResult struct, MerchantID MerchantID `json:"merchant_id"`
 pkg openrails/billing, type MerchantBillingImportResult struct, Rows int64 `json:"rows,string"`
 pkg openrails/billing, type MerchantConfigurationApplyParams struct
-pkg openrails/billing, type MerchantConfigurationApplyParams struct, APIHost *string `json:"api_host,omitempty"`
 pkg openrails/billing, type MerchantConfigurationApplyParams struct, ApplicationID string `json:"application_id"`
 pkg openrails/billing, type MerchantConfigurationApplyParams struct, DisplayName *string `json:"display_name,omitempty"`
 pkg openrails/billing, type MerchantConfigurationApplyParams struct, ExpectedRevision *string `json:"expected_revision"`
@@ -2232,6 +2252,10 @@ pkg openrails/billing, type MetricsSchema struct, Grains []string `json:"grains"
 pkg openrails/billing, type MetricsSchema struct, Limits MetricsLimits `json:"limits"`
 pkg openrails/billing, type MetricsSchema struct, Measures []MetricsMeasure `json:"measures"`
 pkg openrails/billing, type MetricsSchema struct, QueryShape string `json:"query_shape"`
+pkg openrails/billing, type NewPriceDraft struct
+pkg openrails/billing, type NewPriceDraft struct, CreatePrice CreatePriceParams `json:"create_price"`
+pkg openrails/billing, type NewPriceDraft struct, ProductKey string `json:"product_key"`
+pkg openrails/billing, type NewPriceDraft struct, ReviewText string `json:"review_text"`
 pkg openrails/billing, type NextAction struct
 pkg openrails/billing, type NextAction struct, Transactions []string `json:"transactions"`
 pkg openrails/billing, type NextAction struct, Type string `json:"type"`
@@ -2574,6 +2598,15 @@ pkg openrails/billing, type Price struct, TrialDurationHours *int `json:"trial_d
 pkg openrails/billing, type Price struct, TrialUnitAmount *int64 `json:"trial_unit_amount,string"`
 pkg openrails/billing, type Price struct, UnitAmount int64 `json:"unit_amount,string"`
 pkg openrails/billing, type Price struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type PriceChangeDraft struct
+pkg openrails/billing, type PriceChangeDraft struct, AffectedCount int `json:"affected_count"`
+pkg openrails/billing, type PriceChangeDraft struct, CreatePrice CreatePriceParams `json:"create_price"`
+pkg openrails/billing, type PriceChangeDraft struct, Currency string `json:"currency"`
+pkg openrails/billing, type PriceChangeDraft struct, CurrentAmount int64 `json:"current_amount,string"`
+pkg openrails/billing, type PriceChangeDraft struct, NewAmount int64 `json:"new_amount,string"`
+pkg openrails/billing, type PriceChangeDraft struct, PriceKey string `json:"price_key"`
+pkg openrails/billing, type PriceChangeDraft struct, Reprice *CreateRepriceBatchParams `json:"reprice"`
+pkg openrails/billing, type PriceChangeDraft struct, ReviewText string `json:"review_text"`
 pkg openrails/billing, type PriceID [16]byte
 pkg openrails/billing, type PriceKeyMovement struct
 pkg openrails/billing, type PriceKeyMovement struct, Archived bool `json:"archived"`
@@ -2696,6 +2729,7 @@ pkg openrails/billing, type ProviderBillingRecord struct, BucketStart time.Time 
 pkg openrails/billing, type ProviderBillingRecord struct, ProviderResourceID string `json:"provider_resource_id"`
 pkg openrails/billing, type ProviderBillingRecord struct, TimeBilledMS int64 `json:"time_billed_ms,string"`
 pkg openrails/billing, type ProvisionMerchantRequest struct
+pkg openrails/billing, type ProvisionMerchantRequest struct, DisplayName string
 pkg openrails/billing, type ProvisionMerchantRequest struct, OwnerUserID string
 pkg openrails/billing, type ProvisionMerchantRequest struct, Slug string
 pkg openrails/billing, type ProvisionMerchantResult struct
@@ -2870,6 +2904,8 @@ pkg openrails/billing, type SetMeterRateCardParams struct, ProductID ProductID `
 pkg openrails/billing, type SetRateOverrideParams struct
 pkg openrails/billing, type SetRateOverrideParams struct, Allowance *catalog.Allowance `json:"allowance,omitempty"`
 pkg openrails/billing, type SetRateOverrideParams struct, Price catalog.RatePrice `json:"price"`
+pkg openrails/billing, type SetSubscriptionPaymentMethodParams struct
+pkg openrails/billing, type SetSubscriptionPaymentMethodParams struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 pkg openrails/billing, type SetTeamRoleRequest struct
 pkg openrails/billing, type SetTeamRoleRequest struct, Role string `json:"role"`
 pkg openrails/billing, type SolanaCheckoutConfig struct
@@ -3052,8 +3088,6 @@ pkg openrails/billing, type UpdateProductParams struct, DisplayName catalog.Fiel
 pkg openrails/billing, type UpdateProductParams struct, EntitlementsSpec catalog.Field[map[string]*int] `json:"entitlements_spec,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, TierGroup catalog.Field[string] `json:"tier_group,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, TierRank catalog.Field[int] `json:"tier_rank,omitzero"`
-pkg openrails/billing, type UpdateSubscriptionPaymentMethodParams struct
-pkg openrails/billing, type UpdateSubscriptionPaymentMethodParams struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 pkg openrails/billing, type Usage struct
 pkg openrails/billing, type Usage struct, Currency string `json:"currency"`
 pkg openrails/billing, type Usage struct, CustomerID CustomerID `json:"customer_id"`

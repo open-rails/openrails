@@ -62,3 +62,14 @@ func (c *Client) CheckCatalogDrift(ctx context.Context, requestOptions ...Reques
 	}
 	return &out, nil
 }
+
+// AskCatalog answers a question about the catalog with a model that reads it
+// and may draft price changes for a person to review; it changes nothing. The
+// deployment must enable it.
+func (c *Client) AskCatalog(ctx context.Context, params billing.AskCatalogParams, requestOptions ...RequestOption) (*billing.CatalogAnswer, error) {
+	var out billing.CatalogAnswer
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/ask", params, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

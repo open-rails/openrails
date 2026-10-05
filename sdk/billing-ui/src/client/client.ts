@@ -363,7 +363,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "PUT",
           body: {
             payment_method_id: paymentMethodId,
-          } satisfies wire.UpdateSubscriptionPaymentMethodParams,
+          } satisfies wire.SetSubscriptionPaymentMethodParams,
         }
       )
     },

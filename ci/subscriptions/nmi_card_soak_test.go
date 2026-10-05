@@ -63,7 +63,7 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 
 			id, err := billing.ParsePaymentMethodID(method)
 			require.NoError(t, err)
-			_, err = w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), e.sub, billing.UpdateSubscriptionPaymentMethodParams{PaymentMethodID: id})
+			_, err = w.client[tp].SetSubscriptionPaymentMethod(t.Context(), e.sub, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: id})
 			require.NoError(t, err)
 			sales := len(w.nmi.ledger(""))
 			end := e.periodEnd()

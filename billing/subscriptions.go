@@ -140,7 +140,7 @@ type CancelSubscriptionParams struct {
 	AccountDeletion bool `json:"account_deletion,omitempty"`
 }
 
-type UpdateSubscriptionPaymentMethodParams struct {
+type SetSubscriptionPaymentMethodParams struct {
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
 

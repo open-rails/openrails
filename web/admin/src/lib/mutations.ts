@@ -1,12 +1,11 @@
 import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
-import type { UpdateProductParams } from "@/lib/api/generated/wire"
+import type {
+  CreatePriceParams,
+  UpdateProductParams,
+} from "@/lib/api/generated/wire"
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
-import {
-  askCatalogCopilot,
-  confirmCopilotDraft,
-  type CreatePriceDraft,
-} from "@/lib/api/copilot"
+import { askCatalog } from "@/lib/api/copilot"
 import {
   cancelReprice,
   cancelRepriceBatch,
@@ -60,7 +59,6 @@ import {
   type DefaultUsageRateCardRequest,
   type CustomerUsageRateOverrideRequest,
   type PaymentFilters,
-  type PriceRequest,
   type ProductRequest,
   type UsageMeterRequest,
   type SubscriptionFilters,
@@ -519,7 +517,7 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "copilot", "ask"],
-      mutationFn: (question: string) => askCatalogCopilot(question),
+      mutationFn: (question: string) => askCatalog(question),
     })
   },
   loadCatalogPriceDraft: () => {
@@ -537,19 +535,7 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "copilot", "create-price"],
-      mutationFn: async ({
-        draftId,
-        price,
-      }: {
-        draftId: string
-        price: CreatePriceDraft
-      }) => {
-        const created = await createPrice(price)
-        void confirmCopilotDraft(draftId, "catalog_diff", price.key).catch(
-          () => {}
-        )
-        return created
-      },
+      mutationFn: (price: CreatePriceParams) => createPrice(price),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
@@ -604,7 +590,7 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "prices", "create"],
-      mutationFn: (price: PriceRequest) => createPrice(price),
+      mutationFn: (price: CreatePriceParams) => createPrice(price),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
@@ -739,22 +725,13 @@ export const adminMutations = {
       mutationFn: async ({
         price,
         migration,
-        copilotDraftId,
       }: {
-        price: PriceRequest
+        price: CreatePriceParams
         migration?: { priceKey: string; effectiveAt: string }
-        copilotDraftId?: string
       }) => {
         const created = await createPrice(price)
         if (migration) {
           await createRepriceBatch(migration.priceKey, migration.effectiveAt)
-        }
-        if (copilotDraftId) {
-          void confirmCopilotDraft(
-            copilotDraftId,
-            "price_change",
-            price.key
-          ).catch(() => {})
         }
         return created
       },

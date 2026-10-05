@@ -230,7 +230,7 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 				}
 				id, err := billing.ParsePaymentMethodID(method)
 				require.NoError(t, err)
-				_, err = w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), l.sub, billing.UpdateSubscriptionPaymentMethodParams{PaymentMethodID: id})
+				_, err = w.client[tp].SetSubscriptionPaymentMethod(t.Context(), l.sub, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: id})
 				return err
 			}
 			updates := func() []providerCall {

@@ -362,11 +362,11 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"effective tier customer":    func() error { _, err := c.GetEffectiveTier(ctx, billing.CustomerID{}, "group"); return err },
 		"list entitlements empty":    func() error { _, err := c.ListEntitlements(ctx, billing.EntitlementListParams{}); return err },
 		"subscription payment method": func() error {
-			_, err := c.UpdateSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.UpdateSubscriptionPaymentMethodParams{PaymentMethodID: method})
+			_, err := c.SetSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: method})
 			return err
 		},
 		"payment method for subscription": func() error {
-			_, err := c.UpdateSubscriptionPaymentMethod(ctx, subscription, billing.UpdateSubscriptionPaymentMethodParams{})
+			_, err := c.SetSubscriptionPaymentMethod(ctx, subscription, billing.SetSubscriptionPaymentMethodParams{})
 			return err
 		},
 		"tier preview subscription": func() error {

@@ -21,14 +21,14 @@ import (
 
 // untypedBudget is how many routes still accept or answer a body no Go type
 // declares. It only goes down: a lane that types a route lowers it.
-const untypedBudget = 4
+const untypedBudget = 2
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 238)
+	require.Len(t, Catalog(), 237)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()
@@ -138,7 +138,6 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	// A bare runtime has no merchant directory and no LLM.
 	require.Equal(t, []string{
 		"catalog_copilot POST /v1/merchant/catalog/ask",
-		"catalog_copilot POST /v1/merchant/catalog/copilot/confirm",
 		"dashboard_generation POST /v1/merchant/dashboard/widgets/generate",
 		"merchant_directory GET /v1/merchant/api-host",
 		"merchant_directory POST /v1/merchant/api-host/verify",

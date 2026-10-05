@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -150,23 +149,8 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing
 				return err
 			}
 		}
-		directory := gen.ApplyMerchantConfigurationDirectoryParams{MerchantID: mid.UUID()}
 		if params.DisplayName != nil {
-			directory.SetDisplayName = true
-			directory.DisplayName = strings.TrimSpace(*params.DisplayName)
-		}
-		if params.APIHost != nil {
-			// A new host must be claimed and proven (#1107); the document may
-			// only keep or clear the proven one.
-			host := merchants.NormalizeAPIHost(*params.APIHost)
-			if host != "" && host != current.APIHost {
-				return apperr.New(409, "api_host_requires_proof", "claim a new api_host at PUT /v1/merchant/api-host and prove it; the configuration document only keeps or clears the proven host")
-			}
-			directory.SetApiHost = true
-			directory.ApiHost = host
-		}
-		if directory.SetDisplayName || directory.SetApiHost {
-			if err := q.ApplyMerchantConfigurationDirectory(ctx, directory); err != nil {
+			if err := q.SetMerchantConfigurationDisplayName(ctx, gen.SetMerchantConfigurationDisplayNameParams{MerchantID: mid.UUID(), DisplayName: strings.TrimSpace(*params.DisplayName)}); err != nil {
 				return err
 			}
 		}

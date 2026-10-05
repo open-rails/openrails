@@ -44,6 +44,8 @@ var (
 type ProvisionMerchantRequest struct {
 	// Slug is the merchant name to claim.
 	Slug string
+	// DisplayName, when set, becomes the merchant's display name.
+	DisplayName string
 	// OwnerUserID becomes the new merchant group's owner, only when this call
 	// creates the merchant; an existing merchant's roles are never touched. A
 	// user claim answers to the declared creation policy.

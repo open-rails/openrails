@@ -44,11 +44,12 @@ func TestMerchantCreationRoute(t *testing.T) {
 	require.Equal(t, http.StatusCreated, status)
 	var created billing.UserMerchant
 	require.NoError(t, body.Decode(&created))
-	mine, err := cp.ListUserMerchants(t.Context(), owner)
-	require.NoError(t, err)
-	require.Equal(t, []billing.UserMerchant{{ID: mine[0].ID, Slug: shop, DisplayName: "Shop One", Role: "owner"}}, mine)
-	require.Equal(t, mine[0], created, "the answer is the user's new merchant")
-	w := call(t, handler, ownerToken, http.MethodGet, "/v1/merchant/team", shop, nil)
+	w := call(t, handler, ownerToken, http.MethodGet, "/v1/merchants", "", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var mine billing.ListPage[billing.UserMerchant]
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&mine))
+	require.Equal(t, []billing.UserMerchant{{ID: created.ID, Slug: shop, DisplayName: "Shop One", Role: "owner"}}, mine.Items, "the answer is the user's new merchant")
+	w = call(t, handler, ownerToken, http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"role":"owner"`)
 

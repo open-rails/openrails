@@ -45,6 +45,13 @@ func (f *fixture) attachControlPlane(t *testing.T, edit func(*openrails.Config, 
 	return client
 }
 
+// operatorRename renames a merchant as the operator: no rename interval, no
+// reserved-name check.
+func operatorRename(ctx context.Context, cp *openrails.Client, id billing.MerchantID, name string) error {
+	_, err := operator.Get(engine.Graph(cp)).RenameMerchant(ctx, id, name, "", true)
+	return err
+}
+
 // standaloneHandler is the standalone server's full HTTP surface.
 func standaloneHandler(client *openrails.Client) (http.Handler, error) {
 	server, err := operator.StandaloneServer(engine.Graph(client))
@@ -138,7 +145,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	require.True(t, platform.Created)
 
 	renamed := uniqueName("acme")
-	require.NoError(t, cp.RenameMerchant(ctx, created.MerchantID, renamed))
+	require.NoError(t, operatorRename(ctx, cp, created.MerchantID, renamed))
 	for _, ref := range []string{acme, renamed} {
 		mid, current, err := cp.ResolveMerchantForGroup(ctx, ref)
 		require.NoError(t, err, ref)
@@ -152,8 +159,8 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	_, err = f.pool.Exec(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1)", acme)
 	require.ErrorAs(t, err, &pgErr, "the database guards the namespace for every writer")
 	require.Equal(t, "merchant_slug_aliases_pkey", pgErr.ConstraintName)
-	require.ErrorIs(t, cp.RenameMerchant(ctx, platform.MerchantID, acme), billing.ErrMerchantNameTaken)
-	require.NoError(t, cp.RenameMerchant(ctx, created.MerchantID, acme), "a merchant takes its own former name back")
+	require.ErrorIs(t, operatorRename(ctx, cp, platform.MerchantID, acme), billing.ErrMerchantNameTaken)
+	require.NoError(t, operatorRename(ctx, cp, created.MerchantID, acme), "a merchant takes its own former name back")
 	mid, current, err := cp.ResolveMerchantForGroup(ctx, renamed)
 	require.NoError(t, err)
 	require.Equal(t, []any{created.MerchantID, acme}, []any{mid, current})

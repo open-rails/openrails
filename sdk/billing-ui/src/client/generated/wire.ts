@@ -66,9 +66,9 @@ export type CheckoutAttemptPaymentResponse = {
 
 export type CheckoutConfig = {
   object: string
-  psps: CheckoutPSPConfig[] | null
+  psps: CheckoutPSPConfig[]
   solana?: SolanaCheckoutConfig
-  options: CheckoutOption[] | null
+  options: CheckoutOption[]
 }
 
 export type CheckoutOption = {
@@ -100,11 +100,11 @@ export type CheckoutSession = {
   status: string
   merchant: CheckoutSessionMerchant
   plan: CheckoutSessionPlan
-  line_items: CheckoutSessionLineItem[] | null
+  line_items: CheckoutSessionLineItem[]
   tax: string | null
   due_today: string | null
-  options: CheckoutSessionOption[] | null
-  saved_methods: CheckoutSessionSavedMethod[] | null
+  options: CheckoutSessionOption[]
+  saved_methods: CheckoutSessionSavedMethod[]
   next_action: NextAction | null
   operation: PaymentOperation | null
   payment_id: string | null
@@ -219,7 +219,7 @@ export type CreditTransaction = {
 
 export type CurrencyRegistry = {
   object: string
-  currencies: CurrencyUnits[] | null
+  currencies: CurrencyUnits[]
 }
 
 export type CurrencyUnits = {
@@ -278,11 +278,11 @@ export type Invoice = {
   total_amount: string
   amount_paid: string
   amount_due: string
-  line_items: InvoiceLineItem[] | null
+  line_items: InvoiceLineItem[]
   money_movements: Record<string, string> | null
   po_number: string | null
   tax: Record<string, unknown> | null
-  billing_contacts: InvoiceContact[] | null
+  billing_contacts: InvoiceContact[]
   memo: string | null
   status: "draft" | "open" | "paid" | "past_due" | "uncollectible" | "voided"
   collection_method: "charge_automatically" | "send_invoice"
@@ -298,7 +298,7 @@ export type Invoice = {
   next_collection_attempt_at: string | null
   last_collection_failure_code: string | null
   recovery: PaymentRecovery | null
-  available_actions: ("mark_uncollectible" | "record_payment" | "retry_collection" | "void")[] | null
+  available_actions: ("mark_uncollectible" | "record_payment" | "retry_collection" | "void")[]
   created_at: string
 }
 
@@ -339,7 +339,7 @@ export type InvoicePayment = {
 export type NextAction = {
   type: string
   url: string | null
-  transactions: string[] | null
+  transactions: string[]
 }
 
 export type Notification = {
@@ -404,7 +404,7 @@ export type PSPLinkState = {
   ids: Record<string, string> | null
   lookup_key: string
   sync_status: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
-  drift: DriftField[] | null
+  drift: DriftField[]
   message: string
 }
 
@@ -432,7 +432,7 @@ export type Payment = {
   failure: PaymentFailure | null
   refunded_payment_id: string | null
   reason: string | null
-  refunds: Payment[] | null
+  refunds: Payment[]
   created_at: string
 }
 
@@ -450,8 +450,8 @@ export type PaymentMethod = {
   card: CardDetails | null
   billing_details: BillingDetails | null
   health: PaymentMethodHealth
-  subscriptions: PaymentMethodSubscription[] | null
-  collection_currencies: string[] | null
+  subscriptions: PaymentMethodSubscription[]
+  collection_currencies: string[]
   created_at: string
 }
 
@@ -516,7 +516,7 @@ export type Price = {
   trial_unit_amount: string | null
   trial_duration_hours: number | null
   psps: Record<string, PSPLinkState> | null
-  pending_manual_actions: PendingAction[] | null
+  pending_manual_actions: PendingAction[]
   created_at: string
   updated_at: string
 }
@@ -531,7 +531,7 @@ export type Product = {
   tier_group: string | null
   tier_rank: number
   archived: boolean
-  prices: Price[] | null
+  prices: Price[]
   created_at: string
   updated_at: string
 }
@@ -556,11 +556,15 @@ export type RetrySubscriptionNowRequest = {
   payment_method_id?: string
 }
 
+export type SetSubscriptionPaymentMethodParams = {
+  payment_method_id?: string
+}
+
 export type SolanaCheckoutConfig = {
   network: string
   chain: string
   preferred_token: string
-  tokens: SolanaCheckoutToken[] | null
+  tokens: SolanaCheckoutToken[]
 }
 
 export type SolanaCheckoutToken = {
@@ -589,7 +593,7 @@ export type SolanaPayPostResponse = {
 export type SpendLimits = {
   currency: string
   invoker: string
-  windows: SpendWindow[] | null
+  windows: SpendWindow[]
 }
 
 export type SpendWindow = {
@@ -670,7 +674,7 @@ export type SubscriptionRetryNowResult = {
 }
 
 export type SupportedTokensResponse = {
-  tokens: TokenInfo[] | null
+  tokens: TokenInfo[]
 }
 
 export type TierChange = {
@@ -739,17 +743,13 @@ export type UnreadCount = {
   unread_count: number
 }
 
-export type UpdateSubscriptionPaymentMethodParams = {
-  payment_method_id?: string
-}
-
 export type Usage = {
   customer_id: string
   currency: string
   from: string
   to: string
   group_by: "event_type" | "function" | "invoker" | "resource" | "tier"
-  rows: UsageRow[] | null
+  rows: UsageRow[]
 }
 
 export type UsageRow = {

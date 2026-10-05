@@ -19,8 +19,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import type {
-  CatalogDiffDraft,
-  CopilotDraft,
+  CatalogDraft,
+  NewPriceDraft,
   PriceChangeDraft,
 } from "@/lib/api/copilot"
 import { ApiError } from "@/lib/api/client"
@@ -173,7 +173,7 @@ export function CatalogCopilotPanel({
   )
 }
 
-function DraftCard({ draft }: { draft: CopilotDraft }) {
+function DraftCard({ draft }: { draft: CatalogDraft }) {
   if (draft.kind === "refused" && draft.refusal) {
     return (
       <div className="rounded-lg border border-dashed p-3 text-xs">
@@ -188,8 +188,8 @@ function DraftCard({ draft }: { draft: CopilotDraft }) {
   if (draft.kind === "price_change" && draft.price_change) {
     return <PriceChangeDraftCard draft={draft.price_change} />
   }
-  if (draft.kind === "catalog_diff" && draft.catalog_diff) {
-    return <CatalogDiffDraftCard draft={draft.catalog_diff} />
+  if (draft.kind === "new_price" && draft.new_price) {
+    return <NewPriceDraftCard draft={draft.new_price} />
   }
   return null
 }
@@ -219,7 +219,11 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
         <span className="text-xs font-medium text-muted-foreground uppercase">
           Draft: price change
         </span>
-        <Badge variant="secondary">{draft.direction}</Badge>
+        <Badge variant="secondary">
+          {BigInt(draft.new_amount) > BigInt(draft.current_amount)
+            ? "increase"
+            : "decrease"}
+        </Badge>
       </div>
       <p>{draft.review_text}</p>
       <p className="mt-1 text-xs text-muted-foreground">
@@ -249,10 +253,10 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
   )
 }
 
-// CatalogDiffDraftCard: "Create this price" calls the SAME createPrice the
+// NewPriceDraftCard: "Create this price" calls the SAME createPrice the
 // New Price form uses — a plain, explicit human confirm, never triggered by
 // the tool layer itself.
-function CatalogDiffDraftCard({ draft }: { draft: CatalogDiffDraft }) {
+function NewPriceDraftCard({ draft }: { draft: NewPriceDraft }) {
   const queryClient = useQueryClient()
   const createDraftPrice = useMutation(
     adminMutations.createCatalogDraftPrice(queryClient)
@@ -260,10 +264,7 @@ function CatalogDiffDraftCard({ draft }: { draft: CatalogDiffDraft }) {
 
   const confirm = async () => {
     try {
-      await createDraftPrice.mutateAsync({
-        draftId: draft.draft_id,
-        price: draft.create_price,
-      })
+      await createDraftPrice.mutateAsync(draft.create_price)
     } catch (err) {
       toastApiError(err, "Create drafted price")
     }

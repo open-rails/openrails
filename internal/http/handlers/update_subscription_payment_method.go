@@ -19,9 +19,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type UpdateSubscriptionPaymentMethodBody = billing.UpdateSubscriptionPaymentMethodParams
+type UpdateSubscriptionPaymentMethodBody = billing.SetSubscriptionPaymentMethodParams
 
-func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
+func SetSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
 		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")

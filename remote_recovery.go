@@ -83,10 +83,10 @@ func (c *Client) ResumeSubscription(ctx context.Context, id billing.Subscription
 	return c.subscriptionAction(ctx, http.MethodPost, id, "/resume", nil, requestOptions...)
 }
 
-// UpdateSubscriptionPaymentMethod charges a subscription's renewals to
+// SetSubscriptionPaymentMethod charges a subscription's renewals to
 // another of the customer's saved payment methods and returns the
 // subscription.
-func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.UpdateSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
+func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.SetSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	if params.PaymentMethodID.IsZero() {
 		return nil, invalidErr("payment_method_id is required")
 	}

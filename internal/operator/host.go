@@ -33,21 +33,3 @@ func SetMerchantAPIHost(ctx context.Context, a *app.App, id billing.MerchantID, 
 	}
 	return nil
 }
-
-// GetMerchantAPIHost returns id's current #734 API host (empty when unset)
-// through the attached control plane.
-func GetMerchantAPIHost(ctx context.Context, a *app.App, id billing.MerchantID) (string, error) {
-	cp := Get(a)
-	if cp == nil {
-		return "", fmt.Errorf("control plane get host: no control plane attached (call Attach first)")
-	}
-	dir, err := merchants.NewDirectoryService(cp.Pool())
-	if err != nil {
-		return "", fmt.Errorf("control plane get host: build merchant directory service: %w", err)
-	}
-	cfg, err := dir.GetHostConfig(ctx, id)
-	if err != nil {
-		return "", fmt.Errorf("control plane get host: %w", err)
-	}
-	return cfg.APIHost, nil
-}

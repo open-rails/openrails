@@ -14,7 +14,7 @@ var merchantRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/configuration", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead, NoConn: true,
 		Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Handler: h(handlers.GetMerchantConfiguration)},
 	{Method: POST, Path: "/v1/merchant/configuration/applications", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsUpdate, NoConn: true,
-		Request: billing.MerchantConfigurationApplyParams{}, Responses: []Reply{{200, billing.MerchantConfigurationReceipt{}}}, Errors: codes("api_host_requires_proof", "invalid_param", "merchant_configuration_application_conflict", "merchant_configuration_revision_conflict"), Handler: h(handlers.ApplyMerchantConfiguration)},
+		Request: billing.MerchantConfigurationApplyParams{}, Responses: []Reply{{200, billing.MerchantConfigurationReceipt{}}}, Errors: codes("invalid_param", "merchant_configuration_application_conflict", "merchant_configuration_revision_conflict"), Handler: h(handlers.ApplyMerchantConfiguration)},
 
 	// A merchant's own API host (#734): claimed, proven by DNS, then served.
 	{Method: GET, Path: "/v1/merchant/api-host", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSettingsRead, When: FeatureMerchantDirectory, NoConn: true,

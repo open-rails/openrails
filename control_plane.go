@@ -67,6 +67,8 @@ func (c *Client) AuthenticateUser(r *http.Request) (Identity, error) {
 // ProvisionMerchant returns the merchant a name resolves to, or creates one
 // claiming it, bound to a new merchant permission group owned by
 // req.OwnerUserID. A user claim answers to Config.ControlPlane.MerchantCreation.
+// A merchant's own changes afterwards (its name, display name, API host) go
+// through its routes.
 func (c *Client) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantRequest) (*billing.ProvisionMerchantResult, error) {
 	a, _, err := c.controlPlane()
 	if err != nil {
@@ -75,52 +77,15 @@ func (c *Client) ProvisionMerchant(ctx context.Context, req billing.ProvisionMer
 	return operator.ProvisionMerchant(ctx, a, req)
 }
 
-// RenameMerchant renames a merchant as the operator. The former name keeps
-// forwarding to it and stays unclaimable by others under the naming policy.
-func (c *Client) RenameMerchant(ctx context.Context, id billing.MerchantID, name string) error {
-	a, _, err := c.controlPlane()
-	if err != nil {
-		return err
-	}
-	return operator.RenameMerchant(ctx, a, id, name)
-}
-
-// SetMerchantDisplayName sets a live merchant's human-readable name.
-func (c *Client) SetMerchantDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error {
-	a, _, err := c.controlPlane()
-	if err != nil {
-		return err
-	}
-	return operator.SetMerchantDisplayName(ctx, a, id, displayName)
-}
-
-// SetMerchantAPIHost sets the host name requests resolve to this merchant
-// from; empty clears it.
+// SetMerchantAPIHost binds the host name requests resolve to this merchant
+// from, as the operator and without the DNS proof SetAPIHost asks of a
+// merchant: a host of the deployment's own. Empty clears it.
 func (c *Client) SetMerchantAPIHost(ctx context.Context, id billing.MerchantID, apiHost string) error {
 	a, _, err := c.controlPlane()
 	if err != nil {
 		return err
 	}
 	return operator.SetMerchantAPIHost(ctx, a, id, apiHost)
-}
-
-// GetMerchantAPIHost returns the merchant's API host, empty when unset.
-func (c *Client) GetMerchantAPIHost(ctx context.Context, id billing.MerchantID) (string, error) {
-	a, _, err := c.controlPlane()
-	if err != nil {
-		return "", err
-	}
-	return operator.GetMerchantAPIHost(ctx, a, id)
-}
-
-// ListUserMerchants returns the live merchants userID holds a role in, by
-// name, with the user's highest role in each.
-func (c *Client) ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error) {
-	a, _, err := c.controlPlane()
-	if err != nil {
-		return nil, err
-	}
-	return operator.ListUserMerchants(ctx, a, userID)
 }
 
 // ListMerchantsForSubject returns the live merchants where subject is a

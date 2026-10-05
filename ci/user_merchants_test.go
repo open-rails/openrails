@@ -27,9 +27,8 @@ func TestUserMerchantsListing(t *testing.T) {
 	require.NoError(t, err)
 
 	own := uniqueName("a-own")
-	mine, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: own, OwnerUserID: member})
+	mine, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: own, DisplayName: "Own Shop", OwnerUserID: member})
 	require.NoError(t, err)
-	require.NoError(t, cp.SetMerchantDisplayName(ctx, mine.MerchantID, "Own Shop"))
 	viewed := uniqueName("b-viewed")
 	theirs, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: viewed, OwnerUserID: owner})
 	require.NoError(t, err)
@@ -52,7 +51,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	}, list(memberToken))
 
 	renamed := uniqueName("a-renamed")
-	require.NoError(t, cp.RenameMerchant(ctx, mine.MerchantID, renamed))
+	require.NoError(t, operatorRename(ctx, cp, mine.MerchantID, renamed))
 	require.Equal(t, renamed, list(memberToken)[0].Slug, "the list carries current names")
 	result, err := cp.RetireUnusedMerchant(ctx, mine.MerchantID, mine.GroupID)
 	require.NoError(t, err)

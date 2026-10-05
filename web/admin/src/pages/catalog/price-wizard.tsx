@@ -52,7 +52,7 @@ const priceChangeFormValues = (
     draft?.new_amount ?? price.unit_amount,
     price.currency
   ),
-  mode: (draft?.migration_mode ?? "grandfather") as MigrationMode,
+  mode: (draft?.reprice ? "migrate" : "grandfather") as MigrationMode,
   effectiveAt: draft?.reprice
     ? toDateInputValue(new Date(draft.reprice.effective_at))
     : "",
@@ -67,9 +67,8 @@ const priceChangeFormValues = (
 // draft (#779): when the catalog copilot proposed this change, the dialog
 // opens PRE-FILLED straight at Step 3 (review) — the affected count already
 // rode in the draft, so no extra preview call is needed. Confirm behaves
-// EXACTLY as a hand-typed change (same createPrice/repriceAllPriorVersions
-// calls); the only addition is a best-effort audit-provenance log after
-// success, never before, never blocking the real confirm.
+// EXACTLY as a hand-typed change (the same create-price and reprice-batch
+// calls).
 export function PriceChangeWizard({
   price,
   productName,
@@ -123,7 +122,6 @@ export function PriceChangeWizard({
                   effectiveAt: new Date(value.effectiveAt).toISOString(),
                 }
               : undefined,
-          copilotDraftId: draft?.draft_id,
         })
         if (created.pending_manual_actions?.length) {
           toast.warning(

@@ -184,7 +184,7 @@ describe("collection defaults", () => {
     await load()
 
     expect(queries.getQueryData(profile.queryKey)!.payment_methods![0].collection_currencies).toEqual([])
-    expect(queries.getQueryData(saved.queryKey)!.map((m) => [m.id, m.collection_currencies])).toEqual([["pm_a", []], ["pm_b", null]])
+    expect(queries.getQueryData(saved.queryKey)!.map((m) => [m.id, m.collection_currencies])).toEqual([["pm_a", []], ["pm_b", []]])
     expect(requests.filter((r) => r.path.endsWith("/payment-methods")).map((r) => r.query)).toEqual([
       "limit=100", "limit=100&cursor=1", "limit=100", "limit=100&cursor=1",
     ])

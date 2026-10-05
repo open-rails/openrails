@@ -7,7 +7,6 @@ export type OpenRailsErrorCode =
   | "allowance_source_in_use"
   | "allowance_source_invalid"
   | "api_host_claim_missing"
-  | "api_host_requires_proof"
   | "api_host_reserved"
   | "api_host_taken"
   | "api_host_unproven"
@@ -123,6 +122,7 @@ export type OpenRailsErrorCode =
   | "meter_rate_card_conflict"
   | "method_not_allowed"
   | "metrics_query_invalid"
+  | "model_unavailable"
   | "name_reserved"
   | "name_taken"
   | "operation_authorization_conflict"
@@ -238,7 +238,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   allowance_source_in_use: { status: 409, type: "invalid_request_error", meaning: "The allowance source is in use." },
   allowance_source_invalid: { status: 409, type: "invalid_request_error", meaning: "The allowance source cannot back this rate card." },
   api_host_claim_missing: { status: 409, type: "invalid_request_error", meaning: "No api_host has been claimed." },
-  api_host_requires_proof: { status: 409, type: "invalid_request_error", meaning: "A new api_host must be claimed and proven before configuration names it." },
   api_host_reserved: { status: 400, type: "invalid_request_error", meaning: "The api_host serves this deployment." },
   api_host_taken: { status: 409, type: "invalid_request_error", meaning: "The api_host is assigned to another merchant." },
   api_host_unproven: { status: 409, type: "invalid_request_error", meaning: "The api_host's DNS proof was not found." },
@@ -354,6 +353,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   meter_rate_card_conflict: { status: 409, type: "invalid_request_error", meaning: "The meter and its rate card disagree." },
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },
   metrics_query_invalid: { status: 400, type: "invalid_request_error", meaning: "The metrics query is invalid; metadata.errors lists why." },
+  model_unavailable: { status: 502, type: "api_error", meaning: "The language model did not answer; retry, or ask a narrower question." },
   name_reserved: { status: 409, type: "invalid_request_error", meaning: "The merchant name is reserved." },
   name_taken: { status: 409, type: "invalid_request_error", meaning: "The merchant name is taken." },
   operation_authorization_conflict: { status: 409, type: "invalid_request_error", meaning: "The operation id was reused with a changed term; param names it." },

@@ -3,83 +3,57 @@ package handlers
 import (
 	"errors"
 	"math"
-	"net/http"
 	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 )
 
-// CatalogCopilotAsk handles POST /v1/merchant/catalog/ask (#779): the
-// console catalog copilot. Phase 1 (read-only Q&A over catalog/pricing/
-// reprice data) always runs when configured; Phase 2's draft_price_change /
-// draft_catalog_diff tools are additionally present ONLY when
-// llm.catalog_drafting_enabled is set (flag-off = absent from the tool list,
-// never present-but-erroring). The model never mutates — its only
-// write-shaped output is a DRAFT for human review in the console.
-func CatalogCopilotAsk(r *httprequest.Request) {
+// AskCatalog handles POST /v1/merchant/catalog/ask: a model answers a
+// question about the catalog from read-only lookups and, when drafting is
+// enabled, proposes price changes for a person to review. It changes nothing.
+func AskCatalog(r *httprequest.Request) {
 	svc := r.State.CopilotService
 	if !svc.Configured() {
-		r.ErrorJSON(http.StatusServiceUnavailable, "catalog copilot service unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "catalog Q&A unavailable")
 		return
 	}
-	var body struct {
-		Question string `json:"question"`
-	}
-	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.Question) == "" {
-		r.ErrorJSON(http.StatusBadRequest, `body must be {"question":"<what you want to know>"}`)
+	var body billing.AskCatalogParams
+	if !r.BindJSON(&body) {
 		return
 	}
-	res, err := svc.Ask(r.Request.Context(), strings.TrimSpace(body.Question))
+	question := strings.TrimSpace(body.Question)
+	if question == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "question is required").WithParam("question"))
+		return
+	}
+	res, err := svc.Ask(r.Request.Context(), question)
 	if err != nil {
 		var limited *copilot.RateLimitedError
-		var noAnswer *copilot.NoAnswerError
-		switch {
-		case errors.As(err, &limited):
+		if errors.As(err, &limited) {
 			r.SetHeader("Retry-After", strconv.Itoa(int(math.Ceil(limited.RetryAfter.Seconds()))))
-			r.ErrorJSON(http.StatusTooManyRequests, "catalog copilot rate limit exceeded — try again later")
-		case errors.As(err, &noAnswer):
-			r.ErrorJSON(http.StatusBadGateway, "the model did not produce an answer within the query budget — try a narrower question")
-		default:
-			r.ErrorJSON(http.StatusBadGateway, "catalog copilot failed: the LLM request did not complete")
+			r.ErrorCode(billing.CodeRateLimitExceeded, "ask rate limit exceeded; try again later")
+			return
 		}
+		var noAnswer *copilot.NoAnswerError
+		modelFailure(r, err, errors.As(err, &noAnswer))
 		return
 	}
-	r.JSON(http.StatusOK, res)
+	r.SuccessJSON(res)
 }
 
-// CatalogCopilotConfirmDraft handles POST /v1/merchant/catalog/copilot/confirm
-// (#779): the console calls this immediately after a human confirms a
-// copilot-drafted price change / catalog diff through the normal wizard/
-// create-price flow — a pure audit-provenance log entry (drafted-by-copilot
-// marker), never a mutation itself (the confirm already happened via the
-// normal catalog/reprice endpoints). Best-effort: logging failure never
-// blocks the console (the mutation already succeeded by the time this is
-// called).
-func CatalogCopilotConfirmDraft(r *httprequest.Request) {
-	var body struct {
-		DraftID  string `json:"draft_id"`
-		Kind     string `json:"kind"`
-		PriceKey string `json:"price_key,omitempty"`
+// modelFailure answers a question or prompt the language model did not
+// complete; noAnswer is a model that spent its lookups without answering.
+func modelFailure(r *httprequest.Request, err error, noAnswer bool) {
+	message := "the model request did not complete"
+	if noAnswer {
+		message = "the model did not answer within its lookup budget; ask a narrower question"
 	}
-	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.DraftID) == "" || strings.TrimSpace(body.Kind) == "" {
-		r.ErrorJSON(http.StatusBadRequest, `body must be {"draft_id":"...","kind":"price_change"|"catalog_diff","price_key":"..."}`)
-		return
-	}
-	ctx := r.Request.Context()
-	fields := log.Fields{
-		"draft_id":   body.DraftID,
-		"kind":       body.Kind,
-		"price_key":  body.PriceKey,
-		"drafted_by": copilot.DraftedBy,
-	}
-	if mid, err := merchant.Require(ctx); err == nil {
-		fields["merchant_id"] = mid.String()
-	}
-	log.WithContext(ctx).WithFields(fields).Info("copilot draft confirmed by human")
-	r.SuccessJSONMessage("draft confirmation logged")
+	log.WithContext(r.Request.Context()).WithError(err).Warn("model request failed")
+	r.ErrorCode(billing.CodeModelUnavailable, message)
 }
