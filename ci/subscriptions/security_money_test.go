@@ -35,7 +35,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			request := func(priceID billing.PriceID, entitlement string) billing.CreateCheckoutAttemptParams {
 				return billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: priceID,
-					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
@@ -58,7 +58,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 
 			// The caller cannot name an amount, a currency or a quantity.
 			status, body := w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{
-				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "payment": map[string]any{"rail": rail}, "amount": "1", "currency": "JPY", "quantity": 0,
+				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "payment": map[string]any{"psp": rail}, "amount": "1", "currency": "JPY", "quantity": 0,
 			})
 			require.Equal(t, http.StatusBadRequest, status, "%v", body)
 			code, _ := errorOf(body)
@@ -97,7 +97,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			buy := func(client *openrails.Client) error {
 				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
-					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				})
 				return err

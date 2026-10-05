@@ -58,6 +58,8 @@ type CheckoutRequest struct {
 	FirstName         string            `json:"first_name,omitempty"`
 	LastName          string            `json:"last_name,omitempty"`
 	Address1          string            `json:"address1,omitempty"`
+	Address2          string            `json:"address2,omitempty"`
+	Phone             string            `json:"phone,omitempty"`
 	City              string            `json:"city,omitempty"`
 	State             string            `json:"state,omitempty"`
 	Zip               string            `json:"zip,omitempty"`

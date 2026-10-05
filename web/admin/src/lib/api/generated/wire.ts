@@ -426,9 +426,9 @@ export type CheckoutCustomerIdentity = {
 }
 
 export type CheckoutOption = {
-  selector: string
+  psp: string
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   mode: string
   driver?: string
   public_config?: Record<string, string>
@@ -450,23 +450,13 @@ export type CheckoutPSPConfig = {
 }
 
 export type CheckoutPaymentOptions = {
-  psp_id?: string
-  rail?: string
+  psp?: string
   payment_method_id?: string
   payment_token?: string
+  billing_details?: BillingDetails
   token_symbol?: string
   flow?: string
   wallet?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
 }
 
 export type CheckoutRoutingMatch = {
@@ -1564,20 +1554,11 @@ export type PathPageOfPlatformMerchantItem = {
 
 export type PayCheckoutSessionParams = {
   option_id?: string
-  payment_token?: string
   payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
+  payment_token?: string
   card?: CardEntry
+  billing_details?: BillingDetails
+  token_symbol?: string
 }
 
 export type PayInvoiceParams = {

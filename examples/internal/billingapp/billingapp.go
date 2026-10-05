@@ -159,7 +159,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		Customer:       billing.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
 		PriceKey:       in.CheckoutPriceKey,
 		IdempotencyKey: in.Run + ":checkout",
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID.String(), NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID, BillingDetails: &billing.BillingDetails{Name: new("Example Buyer"), Address: &billing.BillingAddress{PostalCode: new("90210"), Country: new("US")}}},
 	}
 	session, err := client.CreateCheckoutAttempt(ctx, request)
 	if err != nil {

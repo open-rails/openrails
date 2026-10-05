@@ -15890,14 +15890,20 @@
       "CheckoutOption": {
         "type": "object",
         "properties": {
-          "selector": {
+          "psp": {
             "type": "string"
           },
           "psp_id": {
             "type": "string"
           },
           "rail": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
           },
           "mode": {
             "type": "string"
@@ -15919,7 +15925,7 @@
           }
         },
         "required": [
-          "selector",
+          "psp",
           "psp_id",
           "rail",
           "mode"
@@ -15975,10 +15981,7 @@
       "CheckoutPaymentOptions": {
         "type": "object",
         "properties": {
-          "psp_id": {
-            "type": "string"
-          },
-          "rail": {
+          "psp": {
             "type": "string"
           },
           "payment_method_id": {
@@ -15987,6 +15990,9 @@
           "payment_token": {
             "type": "string"
           },
+          "billing_details": {
+            "$ref": "#/components/schemas/BillingDetails"
+          },
           "token_symbol": {
             "type": "string"
           },
@@ -15994,36 +16000,6 @@
             "type": "string"
           },
           "wallet": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "name_on_card": {
-            "type": "string"
-          },
-          "address1": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "zip": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "last_four": {
-            "type": "string"
-          },
-          "card_type": {
-            "type": "string"
-          },
-          "expiry_date": {
             "type": "string"
           }
         }
@@ -20810,47 +20786,20 @@
           "option_id": {
             "type": "string"
           },
-          "payment_token": {
-            "type": "string"
-          },
           "payment_method_id": {
             "type": "string"
           },
-          "email": {
-            "type": "string"
-          },
-          "name_on_card": {
-            "type": "string"
-          },
-          "address1": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "zip": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "token_symbol": {
-            "type": "string"
-          },
-          "last_four": {
-            "type": "string"
-          },
-          "card_type": {
-            "type": "string"
-          },
-          "expiry_date": {
+          "payment_token": {
             "type": "string"
           },
           "card": {
             "$ref": "#/components/schemas/CardEntry"
+          },
+          "billing_details": {
+            "$ref": "#/components/schemas/BillingDetails"
+          },
+          "token_symbol": {
+            "type": "string"
           }
         }
       },

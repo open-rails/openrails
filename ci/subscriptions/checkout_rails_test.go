@@ -50,7 +50,7 @@ func (w *world) options(priceKey string) map[string]billing.CheckoutOption {
 	require.NoError(w.t, err)
 	out := map[string]billing.CheckoutOption{}
 	for _, option := range config.Options {
-		out[option.Rail] = option
+		out[string(option.Rail)] = option
 	}
 	return out
 }
@@ -131,7 +131,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(priceID(t, w, key+"-monthly")),
 		IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: solana.Selector, PSPID: solana.PSPID, TokenSymbol: solana.PublicConfig["token_symbol"]},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: solana.PSP, TokenSymbol: solana.PublicConfig["token_symbol"]},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -189,7 +189,7 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id), VerifiedEmail: "buyer@e2e.test"}, PriceID: pid(priceID(t, w, key+"-monthly")),
 		IdempotencyKey: "ccbill-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "E2E Payer", Zip: "10001", Country: "US"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "ccbill", BillingDetails: &billing.BillingDetails{Name: new("E2E Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.Error(t, err, "a named CCBill PSP still cannot enroll")

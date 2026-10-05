@@ -23,7 +23,7 @@ func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	create := func(tp topology, success, cancel string) error {
 		_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
-			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
+			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)},
 			SuccessURL: success, CancelURL: cancel,
 		})
 		return err

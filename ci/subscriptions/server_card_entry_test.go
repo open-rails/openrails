@@ -61,7 +61,7 @@ func (w *world) relayPay(c *customer, price billing.PriceID, payment map[string]
 	w.t.Helper()
 	session := w.handOver(c, price)
 	payment["option_id"] = session.option("nmi")
-	payment["name_on_card"], payment["zip"], payment["country"] = "Hosted Payer", "10001", "US"
+	payment["billing_details"] = map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}
 	return session.pay(payment)
 }
 
@@ -196,7 +196,7 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 
 	// The merchant API takes no card at all: cards are entered on a session.
 	status, out = w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{"customer": map[string]any{"id": c.id}, "price_id": price.ID,
-		"payment": map[string]any{"psp_id": w.psp["nmi"], "rail": "nmi", "card": entryCard(entryVisa)}})
+		"payment": map[string]any{"psp": "nmi", "card": entryCard(entryVisa)}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	code, _ := errorOf(out)
 	require.Equal(t, billing.CodeUnknownField, code)
@@ -426,7 +426,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	// The signed-in customer's own session pays the same way.
 	another := w.newCustomer()
 	own := another.session(map[string]any{"price_id": w.permanent("content:other").ID})
-	status, sold := own.pay(map[string]any{"option_id": own.option("nmi"), "card": entryCard(entryVisa), "name_on_card": "Own Payer", "zip": "10001", "country": "US"})
+	status, sold := own.pay(map[string]any{"option_id": own.option("nmi"), "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Own Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
 	require.Equal(t, http.StatusOK, status, "%v", sold)
 	require.Equal(t, "succeeded", sold["status"], "%v", sold)
 	w.settle()

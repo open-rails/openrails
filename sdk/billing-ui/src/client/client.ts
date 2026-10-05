@@ -604,7 +604,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           try {
             return await json(payResultSchema, `${path}/pay`, {
               method: "POST",
-              body: request satisfies wire.PayCheckoutSessionParams,
+              body: request satisfies Omit<wire.PayCheckoutSessionParams, "billing_details">,
               anonymous: true,
             })
           } catch (err) {

@@ -483,6 +483,10 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		}
 		return nil, err
 	}
+	// payment.psp names a PSP by its key; a rail kind names none.
+	if rail != "" && !strings.EqualFold(rail, decision.Target.PSP) {
+		return nil, fmt.Errorf("%w: psp %q is not a PSP key; name one of the checkout options' psp", ErrCheckoutAttemptValidation, rail)
+	}
 	rail = decision.Target.Rail
 	pspSelector := decision.Target.PSP
 	routingReason := decision.Reason()
@@ -1150,6 +1154,8 @@ func rejectCheckoutAttemptPAN(req *CheckoutAttemptCreateRequest) error {
 		FirstName:       payment.FirstName,
 		LastName:        payment.LastName,
 		Address1:        payment.Address1,
+		Address2:        payment.Address2,
+		Phone:           payment.Phone,
 		City:            payment.City,
 		State:           payment.State,
 		Zip:             payment.Zip,
@@ -1767,6 +1773,8 @@ func (s *CheckoutAttemptService) initializeCheckoutAttempt(ctx context.Context, 
 		FirstName:         payment.FirstName,
 		LastName:          payment.LastName,
 		Address1:          payment.Address1,
+		Address2:          payment.Address2,
+		Phone:             payment.Phone,
 		City:              payment.City,
 		State:             payment.State,
 		Zip:               payment.Zip,

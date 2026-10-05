@@ -211,6 +211,12 @@ var (
 	ErrForbidden = billingauth.ErrForbidden
 )
 
+// ParseMerchantDeclaration reads Config.Merchant from one YAML document,
+// refusing unknown fields; the slug comes from the caller, not the document.
+func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
+	return config.ParseMerchantDeclaration(raw)
+}
+
 // PSPFromEnv declares one PSP from conventionally named variables, so enabling
 // a provider is configuration only. With P = upper(key)+"_": P+"RAIL"
 // (default: key), P+"ACCOUNT_ID", then P+upper(name) for each of the rail's

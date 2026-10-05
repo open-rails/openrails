@@ -34,13 +34,17 @@ type CheckoutAttemptPaymentRequest struct {
 	FirstName       string
 	LastName        string
 	Address1        string
-	City            string
-	State           string
-	Zip             string
-	Country         string
-	LastFour        string
-	CardType        string
-	ExpiryDate      string
+	// Address2 and Phone are left out of the request fingerprint when empty,
+	// so a replay recorded before they existed still matches.
+	Address2   string `json:",omitempty"`
+	Phone      string `json:",omitempty"`
+	City       string
+	State      string
+	Zip        string
+	Country    string
+	LastFour   string
+	CardType   string
+	ExpiryDate string
 
 	// Card is a new card for a PSP whose card_entry is server (#1129). It is
 	// never encoded: it is no part of a request fingerprint or a stored row.

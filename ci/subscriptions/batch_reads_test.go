@@ -138,7 +138,7 @@ func (c *customer) purchase(kind billing.OfferKind, priceID, entitlement, method
 	c.w.t.Helper()
 	attempt, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: kind, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
-		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
+		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)

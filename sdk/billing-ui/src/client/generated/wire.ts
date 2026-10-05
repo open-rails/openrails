@@ -72,9 +72,9 @@ export type CheckoutConfig = {
 }
 
 export type CheckoutOption = {
-  selector: string
+  psp: string
   psp_id: string
-  rail: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
   mode: string
   driver?: string
   public_config?: Record<string, string>
@@ -392,20 +392,11 @@ export type PSPLinkState = {
 
 export type PayCheckoutSessionParams = {
   option_id?: string
-  payment_token?: string
   payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
+  payment_token?: string
   card?: CardEntry
+  billing_details?: BillingDetails
+  token_symbol?: string
 }
 
 export type PayInvoiceParams = {

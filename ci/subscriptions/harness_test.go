@@ -712,7 +712,7 @@ func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method st
 	c.w.t.Helper()
 	attempt, err := c.w.client[tp].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
-		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
+		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)
@@ -729,6 +729,14 @@ func (c *customer) identity() billing.CheckoutCustomerIdentity {
 
 // cid and pid read test ids as their typed form.
 func cid(id string) billing.CustomerID { return billing.CustomerID(uuid.MustParse(id)) }
+
+func pmid(id string) billing.PaymentMethodID {
+	parsed, err := billing.ParsePaymentMethodID(id)
+	if err != nil {
+		panic(err)
+	}
+	return parsed
+}
 
 func pid(id string) billing.PriceID {
 	parsed, err := billing.ParsePriceID(id)

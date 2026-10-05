@@ -121,7 +121,7 @@ func (p *solanaPay) checkoutIn(buyer *customer, token string) transferRequest {
 	t := p.w.t
 	session, err := p.w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: token, Flow: "transfer_request"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: token, Flow: "transfer_request"},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestSolanaPayOffersOneTransactionPerAttempt(t *testing.T) {
 	buyer := p.w.newCustomer()
 	session, err := p.w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: "DUSD", Flow: "transaction_request"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: "DUSD", Flow: "transaction_request"},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -469,7 +469,7 @@ func (p *solanaPay) transactionRequest(buyer *customer, token string, wallet sol
 	t := p.w.t
 	session, err := p.w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: token, Flow: "transaction_request"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: token, Flow: "transaction_request"},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -805,7 +805,7 @@ func TestSolanaPayRefusesTransferHookForTransactionRequest(t *testing.T) {
 	p.fake.SetTransferHook(solanafake.DevnetPYUSDMint, solanago.NewWallet().PublicKey())
 	_, err := p.w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(p.w.newCustomer().id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: "PYUSD", Flow: "transaction_request"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: "PYUSD", Flow: "transaction_request"},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.ErrorContains(t, err, "transfer hook")

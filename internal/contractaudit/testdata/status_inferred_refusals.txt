@@ -21,7 +21,7 @@ internal/http/handlers/platform_merchants.go 15
 internal/http/handlers/portal.go 3
 internal/http/handlers/product_access.go 5
 internal/http/handlers/self_account.go 2
-internal/http/handlers/service_commerce.go 4
+internal/http/handlers/service_commerce.go 2
 internal/http/handlers/solana_pay.go 13
 internal/http/handlers/solana_recurring.go 4
 internal/http/handlers/solana_supported_tokens.go 2

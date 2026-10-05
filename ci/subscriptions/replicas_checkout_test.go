@@ -39,7 +39,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			request := func(c *customer, method, key string) billing.CreateCheckoutAttemptParams {
 				return billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
-					IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
+					IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
@@ -163,7 +163,7 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	request := func(c *customer, key, token string) billing.CreateCheckoutAttemptParams {
 		return billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: key,
-			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: token, NameOnCard: "Pass Payer", Zip: "10001", Country: "US"},
+			PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: token, BillingDetails: &billing.BillingDetails{Name: new("Pass Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
 		}
 	}
 	firstSessionStatus := func(c *customer) string {
@@ -260,7 +260,7 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	request := func(c *customer, key string) billing.CreateCheckoutAttemptParams {
 		return billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: key,
-			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
+			PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), BillingDetails: &billing.BillingDetails{Name: new("Member Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
 		}
 	}
 	c := a.newCustomer()

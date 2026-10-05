@@ -52,11 +52,11 @@ func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
 	// OpenRails advertises the browser driver per option (#1078); an option
 	// no browser can drive carries none.
 	psp := billing.PSPID(uuid.MustParse("0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e"))
-	option := billing.CheckoutOption{Selector: "solana", PSPID: psp, Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
+	option := billing.CheckoutOption{PSP: "solana", PSPID: psp, Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
 	raw, err = json.Marshal(option)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"selector":"solana","psp_id":"psp_0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
-	raw, err = json.Marshal(billing.CheckoutOption{Selector: "stripe", PSPID: psp, Rail: "stripe", Mode: "subscription"})
+	require.JSONEq(t, `{"psp":"solana","psp_id":"psp_0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
+	raw, err = json.Marshal(billing.CheckoutOption{PSP: "stripe", PSPID: psp, Rail: "stripe", Mode: "subscription"})
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "driver")
 }
@@ -193,8 +193,6 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 		_, err := billing.ParseMerchantConfigurationYAML([]byte(document))
 		require.Error(t, err, document)
 	}
-	_, err = billing.ParseMerchantConfigurationJSON([]byte(`{"application_id":"a","application_id":"b","expected_revision":"r"}`))
-	require.Error(t, err)
 }
 
 // Explicit empty lists mean "clear"; absent lists mean "unchanged".
@@ -207,7 +205,7 @@ func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	body, err := json.Marshal(params)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"collection_threshold":"9007199254740993"`)
-	decoded, err := billing.ParseMerchantConfigurationJSON(body)
+	decoded, err := billing.ParseMerchantConfigurationYAML(body)
 	require.NoError(t, err)
 	require.Equal(t, amount, *decoded.Settings.InvoiceCollectionThreshold)
 	require.NotNil(t, decoded.Settings.BillingPolicies)
@@ -217,7 +215,7 @@ func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	params.Settings = &billing.MerchantSettings{}
 	body, err = json.Marshal(params)
 	require.NoError(t, err)
-	decoded, err = billing.ParseMerchantConfigurationJSON(body)
+	decoded, err = billing.ParseMerchantConfigurationYAML(body)
 	require.NoError(t, err)
 	require.Nil(t, decoded.Settings.BillingPolicies)
 }

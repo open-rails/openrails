@@ -251,7 +251,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 		PriceKey:       price.Key,
 		Entitlement:    "content:premium",
 		OfferKind:      billing.OfferPermanent,
-		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
+		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"},
 		IdempotencyKey: "checkout-" + uuid.NewString(),
 		SuccessURL:     "https://e2e.test/success",
 		CancelURL:      "https://e2e.test/cancel",

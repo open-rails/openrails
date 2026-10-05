@@ -64,7 +64,7 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 			for _, tp := range []topology{embedded, remote} {
 				_, err := r.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
-					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: r.psp["nmi"], Rail: "nmi"},
+					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi"},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 				})
 				require.Error(t, err, "%s checkout for a blocked customer", tp)
@@ -121,7 +121,7 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	pay := func(w *world, tp topology, price string, c *customer, ip string, cd card) error {
 		_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id), ClientIP: ip}, PriceID: pid(price), IdempotencyKey: "host-" + uuid.NewString(),
-			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(cd), NameOnCard: "Host Payer", Zip: "10001", Country: "US"},
+			PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(cd), BillingDetails: &billing.BillingDetails{Name: new("Host Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
 		})
 		return err
 	}

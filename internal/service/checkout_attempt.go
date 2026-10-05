@@ -42,7 +42,7 @@ func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.Price
 	}
 	out := make([]billing.CheckoutOption, 0, len(options))
 	for _, option := range options {
-		item := billing.CheckoutOption{Selector: option.Selector, Rail: option.Rail, Mode: option.Mode}
+		item := billing.CheckoutOption{PSP: option.Selector, Rail: billing.Rail(option.Rail), Mode: option.Mode}
 		item.PSPID = billing.PSPID(option.PSPID)
 		if option.Token != "" {
 			item.PublicConfig = map[string]string{"token_symbol": option.Token}
@@ -249,13 +249,6 @@ func checkoutUserIdentity(customer billing.CheckoutCustomerIdentity) (*checkout.
 }
 
 func checkoutCreateRequest(req billing.CreateCheckoutAttemptParams, card *cardguard.Card) (*checkout.CheckoutAttemptCreateRequest, error) {
-	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
-		id, err := billing.ParsePaymentMethodID(raw)
-		if err != nil || id.IsZero() {
-			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutAttemptValidation)
-		}
-	}
-	pspID := req.PaymentOptions.PSPID.UUID()
 	priceID := ""
 	if !req.PriceID.IsZero() {
 		priceID = req.PriceID.String()
@@ -270,13 +263,34 @@ func checkoutCreateRequest(req billing.CreateCheckoutAttemptParams, card *cardgu
 		IdempotencyKey: req.IdempotencyKey,
 		SuccessURL:     req.SuccessURL,
 		CancelURL:      req.CancelURL,
-		Payment: checkout.CheckoutAttemptPaymentRequest{
-			PSPID: pspID, Rail: payment.Rail, PaymentMethodID: payment.PaymentMethodID, PaymentToken: payment.PaymentToken, Card: card,
-			TokenSymbol: payment.TokenSymbol, Flow: payment.Flow, Wallet: payment.Wallet,
-			Email: payment.Email, NameOnCard: payment.NameOnCard, Address1: payment.Address1, City: payment.City, State: payment.State, Zip: payment.Zip, Country: payment.Country,
-			LastFour: payment.LastFour, CardType: payment.CardType, ExpiryDate: payment.ExpiryDate,
-		},
+		Payment:        checkoutAttemptPayment(payment, card),
 	}, nil
+}
+
+// checkoutAttemptPayment is the engine's flat payment request: a PSP named by
+// its key, and the billing details as the providers take them.
+func checkoutAttemptPayment(payment billing.CheckoutPaymentOptions, card *cardguard.Card) checkout.CheckoutAttemptPaymentRequest {
+	out := checkout.CheckoutAttemptPaymentRequest{
+		Rail: payment.PSP, PaymentToken: payment.PaymentToken, Card: card,
+		TokenSymbol: payment.TokenSymbol, Flow: payment.Flow, Wallet: payment.Wallet,
+	}
+	if !payment.PaymentMethodID.IsZero() {
+		out.PaymentMethodID = payment.PaymentMethodID.String()
+	}
+	text := func(v *string) string {
+		if v == nil {
+			return ""
+		}
+		return strings.TrimSpace(*v)
+	}
+	if d := payment.BillingDetails; d != nil {
+		out.NameOnCard, out.Email, out.Phone = text(d.Name), text(d.Email), text(d.Phone)
+		if a := d.Address; a != nil {
+			out.Address1, out.Address2, out.City, out.State = text(a.Line1), text(a.Line2), text(a.City), text(a.State)
+			out.Zip, out.Country = text(a.PostalCode), strings.ToUpper(text(a.Country))
+		}
+	}
+	return out
 }
 
 // checkoutAttemptFromResponse is the merchant's view of an engine answer: rail
