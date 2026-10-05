@@ -9,7 +9,7 @@ Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); 
 `ccbill`, `solana` are their own PSP names). Money amounts are **integers in the
 currency's native units** (micros for USD: `20_000_000` = $20.00; the scale per
 currency is `GET /v1/currencies`). YAML underscore separators are
-just readability — there are no dollar-string amounts in the catalog manifest.
+just readability — there are no dollar-string amounts in the catalog document.
 
 ### The mental model
 
@@ -67,8 +67,8 @@ inside the authenticated merchant and caller's authority; pruning never implicit
 includes other creator catalogs. Meter/rate-card dependency checks still apply;
 prune does not delete historical billing definitions or customer rate overrides.
 
-For bootstrap, the trusted local operator path (`openrails apply-catalog`) uses the same private engine
-with trusted local authority. Runtime has no catalog business methods.
+For bootstrap, the trusted local operator path (`openrails apply-catalog`) applies
+the same document with local authority.
 
 ### Authoring the catalog
 
@@ -101,7 +101,7 @@ Price fields worth knowing:
 
 | Field | Meaning |
 |---|---|
-| `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON application (`POST /merchant/catalog/applications`) spells it as a decimal string |
+| `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON application (`POST /v1/merchant/catalog/applications`) spells it as a decimal string |
 | `access_duration_hours` | positive hour count, or null for indefinite access |
 | `auto_renew` | charge again and extend at each period end; requires a finite access duration |
 | `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together and enable renewal |
@@ -126,7 +126,7 @@ access; null `access_duration_hours` gives indefinite access:
 ```
 
 Prepaid balances are not catalog products: fund them with
-`POST /v1/merchant/customers/{id}/credit-grants` (`Client.CreateCreditGrant`),
+`POST /v1/merchant/customers/{customer_id}/credit-grants` (`Client.CreateCreditGrant`),
 whose grants carry their own expiry.
 
 **Charge models** (for metered rate cards):
@@ -143,8 +143,8 @@ group_by) and attach `rate_cards:` to a product: each card binds one meter to a 
 model, with optional `allowance` (included usage netted off first, poolable and
 accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Usage
 products declare no billing cadence — the invoice period is the window: the daily
-period finalize rates reported usage through the cards and invoices every payer with
-ledger or metered activity, including a payer whose only activity is metered usage.
+period finalize rates reported usage through the cards and invoices every customer with
+ledger or metered activity, including a customer whose only activity is metered usage.
 See the metering API documentation for complete rate-card contracts.
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.
@@ -198,14 +198,14 @@ in later.
 Each entitlement is a **timeline per user** — the host app asks "does user X have
 entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timeline.md`.
 
-- Windows are appended at the tail (`PushNewEntitlement`) or revoked immediately
-  (`RevokeExistingEntitlement`); `end_at` is immutable — renewals append new windows.
-- Every window carries a source: `subscription`, `one_off`, `admin`, or `grace`.
-- **Grace** is bounded, revocable generosity: paid windows stay truthful, and access
-  beyond payment is a separate grace window that lapses by its own `end_at` if truth
-  never arrives (fail-closed). Renewal grace is pre-appended so a late webhook never
-  gates a paying user; a deliberate cancel deletes scheduled grace — access ends at
-  the period end the user expects.
+- Windows are appended or revoked, never edited: a window's end is immutable, and a
+  renewal appends a new window.
+- Every window derives from a grant and carries its source: `purchase`,
+  `subscription`, `admin`, or `grace`.
+- An auto-renew subscription's access is **standing**: it ends on a proven event (a
+  confirmed cancellation, a terminal decline, exhausted dunning), never by the clock
+  alone, so a late webhook never gates a paying user. A deliberate cancel ends access
+  at the period end the user expects.
 - Tier changes go through `POST /v1/me/subscriptions/{id}/change-tier` (target price
   must share the tier group). Stripe and NMI upgrade immediately with proration;
   downgrades are scheduled for period end (`delayed_start`, `effective:
@@ -216,7 +216,7 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   changed in place and keeps its billing date: an upgrade charges the prorated
   difference now, a downgrade takes effect at the next NMI renewal; only prices of
   the same billing cycle qualify. CCBill upgrades redirect
-  to a FlexForm; Solana does not support tier changes.
+  to a FlexForm; a Solana tier change is signed in the customer's wallet.
 - **Upgrade proration** resets the period: the customer pays `new price − credit`
   now for a fresh period of the new price's cycle, where `credit = old price ×
   time left / current period length`, measured on the subscription's actual current
@@ -233,30 +233,30 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 All merchant-admin operations live under `/v1/merchant/*` (same public port; each
 route gated by a `merchant:*` permission). Auth is a merchant API key
 (`Bearer openrails_st_...`), a first-party service JWT, or a user session. Full
-reference: `docs/api/endpoints.md`.
+reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
 |---|---|---|
-| Look up a customer (profile, balances, entitlements, history) | `GET /v1/merchant/customers/{id}/billing-profile` | Customers → search |
-| Grant / revoke an entitlement manually | `POST` / `DELETE /v1/merchant/customers/{id}/entitlements[/{grant_id}]` | Customers → profile |
-| Grant / revoke product access manually | `POST` / `DELETE /v1/merchant/customers/{id}/product-access[/{grant_id}]` | Customers → profile |
-| Record an off-channel/manual purchase | `POST /v1/merchant/customers/{id}/payments/off-channel` | Customers → profile |
+| Look up a customer (profile, balances, entitlements, history) | `GET /v1/merchant/customers/{customer_id}/billing-profile` | Customers → search |
+| Grant / revoke an entitlement manually | `POST /v1/merchant/customers/{customer_id}/entitlements`, `DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}` | Customers → profile |
+| Grant / revoke product access manually | `POST /v1/merchant/customers/{customer_id}/product-access`, `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}` | Customers → profile |
+| Record an off-channel/manual purchase | `POST /v1/merchant/customers/{customer_id}/payments/off-channel` | Customers → profile |
 | List / inspect payments | `GET /v1/merchant/payments[/{id}]` | Payments |
 | Refund (with explicit `revoke_access` choice) | `POST /v1/merchant/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
 | List / inspect subscriptions | `GET /v1/merchant/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
 | Cancel / resume a subscription | `POST /v1/merchant/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/merchant/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Grant / revoke credit | `POST /v1/merchant/customers/{id}/credit-grants`, `POST .../credit-grants/{grant_id}/revoke` | Customers → profile |
-| Ask what a grant key did | `GET /v1/merchant/customers/{id}/credit-grants?source_id=` | — |
-| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[/{scope}/{scope_key}]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
-| Credit limit / trust level | `PUT /v1/merchant/customers/{id}/credit-limit`, `PUT /v1/merchant/customers/{id}/trust-level` | Settings |
-| Catalog over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` (archive with `{"archived": true}`) | Catalog |
+| Grant / revoke credit | `POST /v1/merchant/customers/{customer_id}/credit-grants`, `POST .../credit-grants/{id}/revoke` | Customers → profile |
+| Ask what a grant key did | `GET /v1/merchant/customers/{customer_id}/credit-grants?source_id=` | — |
+| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{customer_id}/spend-delegations[/{scope}/{scope_key}]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
+| Credit limit / trust level | `PUT /v1/merchant/customers/{customer_id}/credit-limit`, `PUT /v1/merchant/customers/{customer_id}/trust-level` | Settings |
+| Catalog over HTTP | `POST /v1/merchant/catalog/products`, `PATCH /v1/merchant/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
-| Repair alerts / drift findings | `GET /v1/merchant/repair-alerts` | Ops |
+| Operational alerts / findings | `GET /v1/merchant/notifications`, `GET /v1/merchant/findings` | Ops |
 
 A user session needs a recent sign-in for every write here (403
 `step_up_required` otherwise); API keys and service JWTs do not. A manual grant
-with no end (no `hours`, `end_at` or `ends_at`) also needs
+with no end (no `hours` or `ends_at`) also needs
 `merchant:access:grant-permanent`, owner-level by default; `hours` is at most
 2562047.
 
@@ -293,7 +293,8 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 `Client.ArchiveProduct` (`POST /v1/merchant/catalog/product-archives`, catalog
 update plus payment refund permission) archives a product — never deletes it —
 and applies the host's policy to its one-time purchases at or after
-`PurchasedSince` (or within `Window` of first acceptance):
+`PurchasedSince` (or within `WindowSeconds` of first acceptance), chosen by
+`PurchaseAction`:
 
 - `none`: archive only.
 - `refund`: refund each purchase in full and end the access it granted. Purchases
@@ -304,10 +305,10 @@ The idempotency key fixes the product, action, resolved window and reason;
 replays report the current outcome of every purchase and never refund twice.
 A response with `complete: false` stopped at its per-request provider budget;
 replay it to continue. Subscription payments are excluded (subscriptions stay
-grandfathered). Reviews are listed with `Client.ListPurchaseReviews` and
-resolved with `Client.ResolvePurchaseReview`: `refund` returns the remaining
-amount and ends access, `dismiss` keeps both. They also appear in the findings
-queue as `life.product_archived_purchase`.
+grandfathered). A purchase under review is a finding
+(`life.product_archived_purchase`; the archive names it as `finding_id`),
+resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
+and ends access, `ignore` keeps both.
 
 Granting credits is money-in and carries its own permission,
 `merchant:credits:grant` — owner-level by default (`merchant:*`), NOT part of the
@@ -328,8 +329,8 @@ Pages: **Customers** (search → profile with grant/revoke and off-channel payme
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
 (products/prices CRUD, archive/restore, durable catalog batch application, drift
-view), **Ops** (findings queue, repair alerts, worker health), **Settings** (profile,
-team, payment providers, API keys, credit limit, trust level), **Dashboard**.
+view), **Ops** (findings queue, the merchant inbox, worker health), **Settings** (profile,
+team, PSPs, API keys, credit limit, trust level), **Dashboard**.
 
 - **API keys** (Settings): mint scoped Bearer keys with fixed roles — `viewer`
   (read-only; the role to mint for LLM agents), `support` (+ customer operations),
@@ -341,7 +342,7 @@ team, payment providers, API keys, credit limit, trust level), **Dashboard**.
   server-side LLM from natural language ("count of cancels per day, past 7 days") —
   requires `llm.api_key`; without it everything else still works and the add-widget
   button explains the fix.
-- **Decline metrics** (#1116), all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
+- **Decline metrics**, all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
   (`psp`):
   - `attempt_failure_rate`: the new-card decline rate is `kind` in (`verify`, `initial`)
     with `card_entry=new`. It can also be grouped by `reason`, `category`, `response_code`,
@@ -350,7 +351,7 @@ team, payment providers, API keys, credit limit, trust level), **Dashboard**.
   - `rebill_first_failure_rate` and `rebill_missed_rate`: rebills that failed on the first
     attempt, and rebills that never happened.
   - `dunning_recovered` by `recovery_attempt` or `days_to_recover`: the recovery curve.
-- **NMI history** (#1120): `nmi_history_authorizations`, `nmi_history_approved`,
+- **NMI history**: `nmi_history_authorizations`, `nmi_history_approved`,
   `nmi_history_refused` and `nmi_history_refusal_rate` by month (`time`), `nmi_kind`
   (`verification`, `one_off_sale`, `scheduled_rebill`), PSP, `category` and `reason`. They
   are NMI's own transaction history, read daily and kept 25 months, including the months

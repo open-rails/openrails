@@ -6,7 +6,7 @@ the rest, deliberately:
 
 | | Owner |
 |---|---|
-| Deciding a payer is delinquent, and when | **OpenRails** |
+| Deciding a customer is delinquent, and when | **OpenRails** |
 | Refusing new spend (admission) | **OpenRails** |
 | Telling you about it, durably | **OpenRails** |
 | Shutting off VMs, seats, storage, jobs, whatever you run | **you** |
@@ -20,24 +20,24 @@ revocation is exactly how a billing system costs a paying customer their access.
 
 A charge failing and a debt ageing are different questions with different
 answers, and conflating them is the classic arrears bug. (A third question —
-*how much may this payer owe, or spend, at all* — is the billing policy:
+*how much may this customer owe, or spend, at all* — is the billing policy:
 [billing-policies.md](billing-policies.md).)
 
 - **Decline bucket** — *why did this charge fail* ⇒ what to do about the **card**.
-  Time-independent. Retry, ask them to fix the card, or stop. See
-  `internal/modules/collection`.
+  Time-independent. Retry, ask them to fix the card, or stop
+  ([dunning](operations.md#dunning)).
 - **Delinquency** — *how long has this debt gone unpaid* ⇒ what to do about
   **service**. Amount- and time-based, independent of why any single charge
   failed.
 
 An expired card is "fix the card" whether it expired today or in March, *and*
-becomes delinquent if the bill stays unpaid past grace. A payer with no card on
+becomes delinquent if the bill stays unpaid past grace. A customer with no card on
 file at all can be delinquent without a single decline. Neither state implies the
 other.
 
 ## The state machine
 
-Per `(merchant, payer, currency)`:
+Per `(merchant, customer, currency)`:
 
 ```
 current ──overdue──► grace ──past the grace window, over the floor──► delinquent
@@ -52,7 +52,7 @@ current ──overdue──► grace ──past the grace window, over the floor
 - **delinquent** — past grace and over the floor. New spend is refused and you
   are signalled.
 
-Every state is **derived** from the payer's overdue open receivables
+Every state is **derived** from the customer's overdue open receivables
 (`min(due_at)`, `sum(amount_due)` over `open`/`past_due` invoices) against the
 merchant's policy. The stored row exists only to remember when a state started
 and whether its transition has already been announced — recompute it any time
@@ -70,7 +70,7 @@ same names in both:
 ```yaml
 settings:
   monthly_floor: 1000000              # don't bother collecting below this
-  arrears_grace_days: 7               # or#878: days past due_at before delinquent
+  arrears_grace_days: 7               # days past due_at before delinquent
   arrears_delinquency_floor: 5000000  # optional; defaults to monthly_floor
 ```
 
@@ -83,7 +83,7 @@ Amounts are integers in the currency's native units (micros for USD).
 
 ## What OpenRails enforces: admission
 
-A delinquent payer is refused at `/v1/merchant/admissions` with its **own** deny
+A delinquent customer is refused at `/v1/merchant/admissions` with its **own** deny
 code:
 
 ```json
@@ -98,7 +98,7 @@ For usage billing this **is** the meaningful cutoff — refusing new spend is wh
 stops the bill growing. It revokes nothing and cancels nothing.
 
 The gate fails open by construction. It refuses only when the recorded state says
-delinquent **and** a live re-read of the invoices still agrees, so a payer who has
+delinquent **and** a live re-read of the invoices still agrees, so a customer who has
 just settled is never held out by our evaluation lag.
 
 ## What you enforce: the signal
@@ -127,13 +127,15 @@ for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyEntered,
     billing.HostEventDelinquencyCleared,
 } {
-    events, err := client.ListHostEvents(ctx, billing.HostEventListOptions{Type: kind, Limit: 100})
+    page, err := client.ListHostEvents(ctx, billing.HostEventListParams{
+        Type: kind, PageRequest: billing.PageRequest{Limit: 100},
+    })
     if err != nil { return err }
-    for _, event := range events {
+    for _, event := range page.Items {
         if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
             return err // leave the event pending for replay
         }
-        if err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
+        if _, err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
     }
 }
 ```
@@ -147,25 +149,27 @@ dedupe key, so a re-run never instructs you to shut the same customer off twice.
 
 ## Reading the state
 
-- `GET /v1/merchant/delinquency` — the overdue roster (grace + delinquent, oldest
-  debt first) plus the effective policy it was judged against. `?state=delinquent`
-  filters. Payers in good standing are never returned: it is an exception list,
-  not a customer directory.
-- `GET /v1/merchant/customers/:customer_id/delinquency` — one payer, per currency.
-  An empty list means the payer has never been overdue.
+- `GET /v1/merchant/delinquency` (`Client.ListDelinquency`): the overdue roster
+  (grace + delinquent, oldest debt first), a cursor page. `?state=delinquent`
+  filters. Customers in good standing are never returned: it is an exception list,
+  not a customer directory. The policy it is judged against is in the merchant's
+  settings (`arrears_grace_days`, `arrears_delinquency_floor`).
+- `GET /v1/merchant/customers/{customer_id}/delinquency`
+  (`Client.ListCustomerDelinquency`): one customer, per currency. An empty list
+  means the customer has never been overdue.
 
 Both are read-only. The state is a reading of invoice truth, so it is settled by
 paying the invoice, never by an API call.
 
 ## Also notified
 
-The payer gets an in-app notification on the two rungs it can act on:
+The customer gets an in-app notification on the two rungs it can act on:
 `account_delinquent` and `account_delinquency_cleared`. Entering grace is silent —
 the collection ladder has already told them the charge failed.
 
 ## Cadence
 
-The evaluator runs every 15 minutes, driven by indexed due work (payers with an
-overdue receivable, plus payers already parked non-current). It never enumerates
+The evaluator runs every 15 minutes, driven by indexed due work (customers with an
+overdue receivable, plus customers already parked non-current). It never enumerates
 customers, and it runs in limited/readonly mode and with no charger armed,
 because it moves no money.

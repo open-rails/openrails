@@ -48,7 +48,7 @@ there is no separate private/service listener.
 
 **Configuration** is a `config.yaml` (see `config.example.yaml` for the full
 surface: listener, db, redis, auth issuer, encryption, vault, rate limits,
-trusted proxies, captcha, admin console) plus a koanf env overlay — an env var
+trusted proxies, captcha, admin console) plus an environment overlay: an env var
 maps onto the config tree by prefix, e.g. `DB_URL` → `db.url`,
 `PROVIDER_WRITE_MODE` → `provider_write_mode`, `SECRET_BACKEND` →
 `secret_backend`. For the two operating dials there are also CLI flags.
@@ -162,7 +162,7 @@ embedded mode:
 ```go
 client, err := openrails.NewRemote("https://openrails.example",
     openrails.WithAPIKey(os.Getenv("OPENRAILS_API_KEY")), // or WithTokenProvider for minted JWTs
-    openrails.WithMerchantID(merchantID),                 // immutable merchant binding
+    openrails.WithMerchantID(merchantID),                 // the merchant its calls act on
     openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
 )
 if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
@@ -179,17 +179,17 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
+receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
 // or client.ReleaseAdmission(ctx, requestID) if the work failed
 ```
 
 Options: `WithAPIKey`, `WithTokenProvider` (per-call minted bearer),
-`WithMerchantID` ([client-merchant-binding.md](client-merchant-binding.md)),
+`WithMerchantID` ([choosing the merchant](client-merchant-selection.md)),
 `WithTimeout`, `WithHTTPClient`. Every request carries its own currency. The
-constructor validates
-static configuration without I/O; `Verify` is the live check.
+constructor validates static configuration without I/O; `Ready` checks
+reachability, and any authenticated call proves the credential.
 
 **Errors** are canonical sentinels (`errors.Is` works identically against a
 remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
@@ -224,7 +224,7 @@ curl -X POST https://openrails.example/v1/merchant/admissions \
 # Settle at real cost…
 curl -X POST https://openrails.example/v1/merchant/admissions/req-789/capture \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"amount":"43000","event_type":"chat.completion"}'
+  -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
 
 # …or release the hold when the work failed
 curl -X POST https://openrails.example/v1/merchant/admissions/req-789/release \
@@ -233,14 +233,14 @@ curl -X POST https://openrails.example/v1/merchant/admissions/req-789/release \
 
 The `/v1/merchant/*` surface (admissions, credits, entitlements, usage,
 settings, customers, payments, subscriptions) is permission-gated per route —
-see [api/endpoints.md](api/endpoints.md) for the full reference and the
-permission table. Keys are bound to their merchant and can never act on
+see [api/routes.md](api/routes.md) for every route with its permission and
+[api/endpoints.md](api/endpoints.md) for the conventions. Keys are bound to their merchant and can never act on
 another merchant's data.
 
 ### Frontend integration
 
 Your users' browsers call OpenRails' self-service surface (`/v1/me/*`:
-status, subscriptions, payment methods, checkout, invoices) **directly**, using
+entitlements, subscriptions, payment methods, checkout sessions, invoices) **directly**, using
 a short-lived delegated token your backend mints with its registered issuer
 key — your session tokens never leave your trust domain. The token contract,
 exchange-endpoint pattern, and checkout flows are in
@@ -253,25 +253,25 @@ two-token model is in [auth.md](auth.md). CORS requires zero configuration
 Point each rail's webhook directly at OpenRails — not through your app:
 
 ```
-POST https://openrails.example/v1/webhooks/{rail}[/{account_id}]
+POST https://openrails.example/v1/webhooks/{rail}/{account_id}
 ```
 
-OpenRails resolves the merchant from the payload's (or the path's) PSP account
-identity, verifies the rail's signature
+OpenRails resolves the merchant from the PSP account in the path, verifies the
+rail's signature
 with that merchant's own signing secret, and updates
 subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
-**Per-merchant API hosts (#734).** A multi-merchant deployment can give each
+**Per-merchant API hosts.** A multi-merchant deployment can give each
 merchant a canonical hostname (the owner claims it with `PUT /v1/merchant/api-host`
 and proves control of the domain with a TXT record, then
 `POST /v1/merchant/api-host/verify`; operators bind directly with
-`cp.SetMerchantAPIHost`). It resolves live on the next request, no restart. Host resolution then routes `/v1/webhooks/{rail}`
-without the path slug, and enforces Host-merchant == issuer-merchant on every
-merchant-scoped route: a token minted for merchant A is rejected on merchant
-B's host even though it verifies.
+`Client.SetMerchantAPIHost`). It resolves live on the next request, no restart.
+The public routes then resolve the merchant from the Host header, and every
+merchant-scoped route enforces Host-merchant == issuer-merchant: a token minted
+for merchant A is rejected on merchant B's host even though it verifies.
 
-**CORS (#765)** is a fixed, engine-wide policy — not configurable, no origin
+**CORS** is a fixed, engine-wide policy — not configurable, no origin
 registration: browser-facing tiers (checkout, `/v1/me/*`)
 answer `Access-Control-Allow-Origin: *` (never with credentials — OpenRails
 issues no cookies; every browser call is an explicit bearer token), and every

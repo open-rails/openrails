@@ -47,16 +47,16 @@ purchase history. Use `ListProductAccess` with its cursor only when displaying
 purchase history itself.
 
 ```go
-access, err := client.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{
+access, err := client.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{
     ProductIDs: pageProductIDs,
 })
 if err != nil { return err }
 _ = access[productID]
 
-attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
     Customer: billing.CheckoutCustomerIdentity{ID: customerID},
     PriceID: price.ID,
-    PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe", PaymentMethodID: methodID},
+    PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: methodID},
     IdempotencyKey: checkoutAttemptKey,
     SuccessURL: successURL,
     CancelURL: cancelURL,
@@ -64,16 +64,14 @@ attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptR
 ```
 
 The server derives one-off or recurring checkout from the selected price.
-`PaymentOptions` selects the payment rail and carries its applicable collection
-inputs. It does not set the price's product or merchant. Browser return URLs
+`PaymentOptions` names the PSP by its key and carries its applicable collection
+inputs; left empty, the merchant's routing picks one. It does not set the price's product or merchant. Browser return URLs
 provide navigation; verified provider events establish payment and access.
 
-The typed ID utilities remain available for advanced declared billing imports,
-provider-obligation and host-transaction contracts. They are not required to
-pass ordinary customer, product or price references between SDK resources.
+## What a host declares
 
-## Runtime ownership
-
-Declare the merchant in `Config`, and a host whose `catalog.yaml` is the truth in
-`Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else, creator
-scoping through `client.ForCatalogOwner(subject)` included, is a Client method.
+Declare the merchant in `Config.Merchant`, and a host whose `catalog.yaml` is the
+truth in `Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else,
+creator scoping through `client.ForCatalogOwner(subject)` included, is a Client
+method. See [embedding](embedded-integration.md) and the
+[merchant guide](merchant-guide.md).

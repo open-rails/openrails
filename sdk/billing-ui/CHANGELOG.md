@@ -1,28 +1,60 @@
 # Changelog
 
-## Checkout sessions are the only browser purchase (openrails#1130)
+## 1.0.0
 
-- `createCheckoutSession()` mints at `/me/checkout-sessions` and returns a
-  `CheckoutSessionLink` (`url` null without a payment page).
+Ships with OpenRails v1.0.0; use the two at the same version. Everything a host
+changes is in [Migrating to v1](../../docs/migrating-to-v1.md).
+
+Checkout
+
+- A checkout session is the only browser purchase. `createCheckoutSession()`
+  mints at `/me/checkout-sessions` and returns a `CheckoutSessionLink` (`url`
+  null without a payment page); `client.checkoutSource(id)` is the source of
+  `<Checkout>`, `<CheckoutModal>` and `<CheckoutPage>`.
 - The session document's `rails` is `options` (`PaymentOption`, with the
-  option's `psp_id`); its `transaction_url` and the pay result's
-  `redirect_url`/`transaction_url` are one `next_action`
-  (`redirect_to_url` | `solana_pay`); the pay result's `operation_id` is
-  `operation`. Fields OpenRails sends as null read as `undefined`.
+  option's `psp_id`). A rail's own step is one `next_action`
+  (`redirect_to_url`, `solana_pay`); a card challenge is `operation`. Saved
+  methods carry `card` (`brand`, `last4`, `exp_month`, `exp_year`) and no
+  `default`. Fields OpenRails sends as null read as `undefined`.
+- `PayRequest` carries one `billing_details` (`name`, `email`, `phone`,
+  `address` with `postal_code` and `country`) in place of the flat
+  `name_on_card`, `zip`, `country`, `last_four`, `card_type` and `expiry_date`.
 - Stripe Elements runs on a session inside a `BillingProvider`: the card is
   saved through the customer's client and the session pays it by id.
-- `getSolanaConfig()` is `getCheckoutConfig()` (`GET /checkout-config`; the
-  network is `solana.network`). `listSolanaTokens` drops `checkoutSessionId`.
 - Removed: `createHttpSource`, `CheckoutSourceError`, `checkoutRails`,
-  `CheckoutRailOffer` (hosts no longer serve sessions).
+  `CheckoutRailOffer`, `PaymentRailOption`.
 
-## v1 credits, usage and customers (openrails#1130)
+Client
 
-- `client.getStatus()` and `BillingStatus` are removed with `/v1/me/status`.
-  Read access from `/v1/me/entitlements/active` and the subscription from
+- Lists are cursor pages: `listSubscriptions`, `listPaymentMethods`,
+  `listPayments` and `listInvoices` take `cursor` and answer `next_cursor`;
+  there is no `total`. The hooks page with `nextCursor`.
+- `cancelSubscription`, `resumeSubscription` and
+  `setSubscriptionPaymentMethod` resolve to the `Subscription`. A Solana cancel
+  or tier change answers `next_action` (`solana_sign_transactions`); sign it
+  with `signWalletAction` and repeat the call with `signature`. The separate
+  Solana cancel and tier-change methods are removed.
+- `addPaymentMethod` takes `NewCard` with `psp_id`, a `payment_token` or
+  `card`, and `billing_details`.
+- There is no default card: `setDefaultPaymentMethod` is
+  `setCollectionPaymentMethod`, the hook's `setDefault` is `setCollection`, the
+  change event is `payment_method.collection_changed`, and the
+  `AccountBilling` / `PaymentMethodsPanel` prop `defaultCurrency` is
+  `collectionCurrency`. `PaymentMethod` lists `collection_currencies`.
+- `getSolanaConfig()` is `getCheckoutConfig()` (the network is
+  `solana.network`); `listSolanaTokens` takes `{ priceId, wallet }`.
+- `getStatus()` and `BillingStatus` are removed: read `/me/entitlements` and
   `listSubscriptions()`.
+- `listPrices` filters by `productId` and `autoRenew`. A `Price` has
+  `product_id`, `archived`, `access_duration_hours` (null: for good) and
+  `auto_renew`; `type`, `recurring.interval` and `active` are gone.
+- `Payment` has `kind`, a typed `status` and the `price` it bought; a
+  subscription's status is `canceled`.
+- A `TierChange` has no `mode`, `url` or `payment`: a redirect is
+  `next_action.url`. Generated list fields are `T[]`, never `null`.
+- A subscription's `access` windows are `starts_at` and `ends_at`.
 
-## Hosted checkout sessions (openrails#1124)
+## Hosted checkout sessions
 
 - OpenRails serves the checkout session; hosts no longer write
   `/api/v1/checkout/sessions` routes. `client.createCheckoutSession()` mints
@@ -36,7 +68,7 @@
 - `<Checkout onRedirect>` replaces the top-window navigation of redirect rails.
 - The session document gains `embed_origin`.
 
-## Server card entry (openrails#1129)
+## Server card entry
 
 - Driver `card` (a PSP declared `card_entry: server`, flow `card`): `<Checkout>`
   and `SavePaymentMethod` render plain card inputs with the Collect.js form's
@@ -48,7 +80,7 @@
 - `cardSetupDriver` may return `"card"`; `NewCard` takes `payment_token` or
   `card`, never both.
 
-## Catalog and plan-change client (openrails#1128)
+## Catalog and plan-change client
 
 - `@openrails/billing-ui/client` gains the public catalog (`listProducts`,
   `listPrices`, `listCurrencies`), plan change (`previewTierChange`,
@@ -62,7 +94,7 @@
   `"change_tier"`, `onChange` `subscription.tier_changed`), which resolves to
   the `TierChange` or a `BillingError`.
 
-## Explicit payment method, fail-fast errors (openrails#1087, #1088)
+## Explicit payment method, fail-fast errors
 
 - The checkout pre-selects the customer's default card (`PaymentMethod.default`,
   `SavedPaymentMethod.default`) and always sends the chosen card's id.
@@ -77,13 +109,13 @@
   (2 s). New `isServerError`; a 5xx without an error envelope has code
   `server_error`.
 
-## One-click card subscriptions (openrails#1085)
+## One-click card subscriptions
 
 - A checkout host relays a card subscription's pay request with OpenRails'
   `CreateCheckoutSessionRequest.Confirm`; a new Collect.js token subscribes in
   one call. No package API change.
 
-## Advertised checkout rails (openrails#1078)
+## Advertised checkout rails
 
 - Breaking: `checkoutRails(offers)` takes OpenRails' checkout options alone.
   Each option carries the `driver` and `public_config` OpenRails derived from
@@ -102,7 +134,7 @@ generated contract.
 ## 0.9.0
 
 One embedded card panel for one-time purchases and subscriptions, on every
-card PSP (openrails#1064). Requires OpenRails v0.164.0.
+card PSP. Requires OpenRails v0.164.0.
 
 - Stripe Elements checkout rail (`driver: "stripe_elements"`, from a PSP with
   `flow: "elements"`): saved Stripe cards or a new card in the page, 3-D
@@ -149,8 +181,7 @@ and never branches on Stripe, NMI or any other provider.
   `getPaymentAuthentication`, `confirmPaymentAuthentication`.
 - Breaking: `AccountBilling`/`PaymentMethodsPanel` take `psps` (and optional
   `cardSetupReturnURL`) instead of `cardSetup`; `CardSetupConfig` is removed.
-  Stripe card setup needs OpenRails serving Stripe's `publishable_key`
-  (openrails#1062).
+  Stripe card setup needs OpenRails serving Stripe's `publishable_key`.
 
 ## 0.7.0
 

@@ -49,7 +49,7 @@ A host imports four kinds of package; everything else is `internal/`:
 |---|---|
 | `openrails` | `New`, `NewRemote`, `Migrate`, the `*Client`, `Config`, `Deps` |
 | `billing` | request/response types, IDs (`billing.MerchantID`, `billing.ParseMerchantID`), errors and codes, permission names (`billing.MerchantAll`) |
-| `catalog` | catalog-as-code manifests and charge models (rate cards, meters, prices) |
+| `catalog` | the catalog document (`catalog.Application`) and its charge models (rate cards, meters, prices) |
 | `adapters/http`, `adapters/gin`, `adapters/fiber` | mount `client.Routes()` on your router |
 
 OpenRails owns its migrations and applies them through your pool; the pool's
@@ -103,7 +103,7 @@ explicit:
 |---|---|
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
 | `Redis`, `Cache` | Shared rate limits and cache; in memory without them. |
-| `Vault`, `ProviderCredentials` | A borrowed Vault client; snapshot credentials for existing PSPs. |
+| `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
 | `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
 | `ConsoleAssets` | A host-built admin console (section 6). |
@@ -116,10 +116,11 @@ Under `Sandbox` every rail routes to its test environment and live credentials
 refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
 live gateway. See [operations.md](operations.md).
 
-**Rate limiting is on by default** (#742): nil `RateLimits`/`Captcha` get the
-curated defaults the standalone loader applies (tight on checkout to deter
-card-testing; Redis-backed with `Deps.Redis`). Override them, or set
-`RateLimitsDisabled` if your own gateway fronts billing. See
+**Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
+on checkout, card and subscription writes and webhooks (tight on checkout to
+deter card testing; shared across replicas with `Deps.Redis`). Other routes are
+not limited: a per-address ceiling belongs to your proxy. Override the limits,
+or set `RateLimitsDisabled` if your own gateway fronts billing. See
 [rate-limiting.md](rate-limiting.md).
 
 ### 4. Boot, lifecycle and River
@@ -170,7 +171,7 @@ stalled.
 
 **Inserting an engine job.** The one job a host inserts itself is the invoice
 sweep: `workers.Insert(ctx, openrails.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
-finalizes every payer's previous period now; `Collect: true` runs the
+finalizes every customer's previous period now; `Collect: true` runs the
 collection pass. Runs are idempotent.
 
 **No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'
@@ -192,15 +193,16 @@ cfg.Merchant = openrails.MerchantDeclaration{
     Slug:        "myapp",
     DisplayName: "My App",
     Settings: billing.MerchantSettings{
-        Profile:                &billing.MerchantProfileInput{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
+        Profile:                &billing.MerchantProfile{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
         InvoiceBillingBoundary: "calendar_month",
     },
-    PSPs: map[string]openrails.PSPConfig{ // PSP key -> rail -> account
-        "my-nmi-sandbox": {"nmi": {
+    PSPs: map[string]openrails.PSPConfig{ // PSP key -> account
+        "my-nmi-sandbox": {
+            Rail:      billing.RailNMI,
             AccountID: "000000", // NMI dashboard "Gateway ID"
             Settings:  map[string]any{"tokenization_key": "placeholder-tokenization-key"},
             Secrets:   map[string]string{"security_key": "placeholder-security-key", "webhook_signing_secret": "placeholder-webhook-secret"},
-        }},
+        },
     },
 }
 ```
@@ -246,7 +248,7 @@ in the background, with `Ready` failing until it commits. While declared, writes
 to the merchant's catalog (products, prices, meters, rate cards,
 `ApplyCatalog`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
 from every caller, the host included: the next boot would overwrite them.
-Creator-owned catalogs and negotiated payer rates stay writable.
+Creator-owned catalogs and negotiated customer rates stay writable.
 
 **Catalog authoring** (no `Config.Catalog`): storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
@@ -364,7 +366,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | (always) | Capability discovery and signature-checked provider callbacks |
 | `Checkout` | Products, prices, checkout config and reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page. The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
 | `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`) |
-| `Merchant` | The merchant API (`/v1/merchant/*`, `/v1/import/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
+| `Merchant` | The merchant API (`/v1/merchant/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
 slug). An advanced, delegated audience mounts a profile under its own `Prefix`
@@ -372,14 +374,14 @@ with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
 returning an explicit merchant and paying subject. It confers no permissions
 by default and keeps verified credential
 class and invoker restrictions. An invoker-scoped principal may read only its
-own `/v1/me/spend-limits`.
+own `/v1/me/spend-limits`. See [hosted customer audiences](architecture/customer-http-exposures.md).
 
 Each adapter registers ordinary method and path routes, so route inspection
 sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
 Original request URLs and bodies reach authentication and webhook verification
 unchanged. Routes are materialized once, so remounting never resets rate limits.
 
-**Admin console** (optional, #754): with `Config.AdminConsole.Enabled`,
+**Admin console** (optional): with `Config.AdminConsole.Enabled`,
 `client.AdminConsole()` is the console's handler for the host to mount at
 `Config.AdminConsole.Path` (`/admin` by default; e.g. `/billing/admin` when the
 host owns `/admin`) on its root router. The console is `Deps.ConsoleAssets` when the host
@@ -402,11 +404,11 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `HasEntitlement`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `CheckCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
 | Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig` |
-| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
-| Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPurchaseReviews`, `ResolvePurchaseReview`, `ListPaymentMethods`, `DeletePaymentMethod` |
-| Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetCustomerInvoiceProfile`, `SetCustomerInvoiceProfile` (`IfAbsent` to only create) |
+| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
+| Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
+| Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetInvoiceProfile`, `SetInvoiceProfile` (`IfAbsent` to only create) |
 | Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
 
@@ -420,7 +422,7 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
+receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
 ents, err := client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}})
@@ -470,9 +472,9 @@ sender (`Config.SendGrid` or `Deps.EmailSender`), rendered; text goes through
 (`RoutesRequireRoot`); `HTTP.CustomerRoutes` may add delegated customer
 profiles. Its workers join the same fleet through `RiverJobs`.
 
-The control plane's operations are Client methods: `ProvisionMerchant`,
-`RenameMerchant`, `SetMerchantDisplayName`, `Set`/`GetMerchantAPIHost`,
-`ListUserMerchants`, `ListMerchantsForSubject`, `ListActiveMerchantIDs`,
+The operations a hosted product runs as the operator are Client methods of the
+in-process engine only (a remote Client refuses them): `ProvisionMerchant`,
+`SetMerchantAPIHost`, `ListMerchantsForSubject`, `ListActiveMerchantIDs`,
 `ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`,
 `EnsureCustomerPermissionGroup`, `FleetAnalytics`, `FleetTimeseries`,
 `ListMerchantRetirementCandidates`, `RetireUnusedMerchant`,
@@ -483,7 +485,7 @@ The control plane's operations are Client methods: `ProvisionMerchant`,
 
 ### 9. Acting on delinquency
 
-For arrears billing, OpenRails decides when a payer's unpaid debt has outlived
+For arrears billing, OpenRails decides when a customer's unpaid debt has outlived
 the merchant's grace window and refuses their new spend at admission — but only
 your app can shut off what your app runs. Transitions land on a durable,
 acknowledged feed you drain:
@@ -495,13 +497,15 @@ for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyEntered,
     billing.HostEventDelinquencyCleared,
 } {
-    events, err := client.ListHostEvents(ctx, billing.HostEventListOptions{Type: kind, Limit: 100})
+    page, err := client.ListHostEvents(ctx, billing.HostEventListParams{
+        Type: kind, PageRequest: billing.PageRequest{Limit: 100},
+    })
     if err != nil { return err }
-    for _, event := range events {
+    for _, event := range page.Items {
         if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
             return err // leave the event pending for replay
         }
-        if err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
+        if _, err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
     }
 }
 ```
@@ -513,7 +517,7 @@ never revokes an entitlement for an unpaid arrears bill. Full boundary and polic
 ### 10. Webhooks and ops
 
 Point each rail's webhook at the webhook routes on **your** server, under your mount
-prefix (paths in [api/endpoints.md](api/endpoints.md)). OpenRails verifies rail
+prefix (`/v1/webhooks/{rail}/{account_id}`; see [the API guide](api/endpoints.md#provider-webhooks)). OpenRails verifies rail
 signatures and updates subscriptions/entitlements; your app just reads the results.
 Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md).
 
@@ -534,8 +538,6 @@ management endpoints.
 
 ### Merchant checkout authority
 
-`Client.CreateCheckoutAttempt` uses the privileged merchant checkout endpoint. The host supplies the customer identity and is trusted to invoke this command for a real customer action. A merchant API key authorizes the host; it does not itself establish that a customer is interacting. Do not use merchant checkout as an unattended way to establish an initial customer-initiated stored-card agreement. Customer-facing self routes retain their authenticated payer boundary.
+`Client.CreateCheckoutAttempt` uses the privileged merchant checkout endpoint. The host supplies the customer identity and is trusted to invoke this command for a real customer action. A merchant API key authorizes the host; it does not itself establish that a customer is interacting. Do not use merchant checkout as an unattended way to establish an initial customer-initiated stored-card agreement. Customer-facing self routes retain their authenticated customer boundary.
 
-Set `CheckoutCustomerIdentity.ClientIP` on `CreateCheckoutAttempt` to the customer request's client address, resolved behind the host's trusted proxies. Declined cards then count per address as well as per customer, as on the customer routes, and a card-testing wave through the host can reach attack mode (`docs/rate-limiting.md`). An invalid address is refused with `400`.
-
-This receipt/completion cut preserves that existing host contract. The product and authority review before v1 must decide whether merchant checkout should keep this explicit host trust or require verified per-customer interaction credentials. No request boolean can manufacture that verification.
+Set `CheckoutCustomerIdentity.ClientIP` on `CreateCheckoutAttempt` to the customer request's client address, resolved behind the host's trusted proxies. Declined cards then count per address as well as per customer, as on the customer routes, and a card-testing wave through the host can reach attack mode ([rate-limiting.md](rate-limiting.md)). An invalid address is refused with `400`.

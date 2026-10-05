@@ -41,7 +41,7 @@ with another instrument in a new checkout session. The code says what happened,
 
 Classification uses only provider facts (response and localization codes), never
 provider text. The same codes are returned by payment-method creation and tier
-changes. `insufficient_credits` (402) remains the payer-balance denial.
+changes. `insufficient_credits` (402) remains the customer-balance denial.
 Refusals the transport answers before a handler runs use the same envelope:
 a request body over the deployment's cap (1 MiB in every deployment, the
 in-process embedded Client included) is `413` with code `request_body_too_large`

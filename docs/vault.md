@@ -1,6 +1,6 @@
 # HashiCorp Vault + OpenRails
 
-OpenRails uses Vault for two **independent** capabilities (#661). Grant only what you need.
+OpenRails uses Vault for two **independent** capabilities. Grant only what you need.
 
 | Capability | What it's for | Vault paths |
 |---|---|---|
@@ -70,12 +70,12 @@ vault:
 ```
 
 The minted token is held in memory only. Login never blocks startup: a background supervisor logs
-in, renews up to Vault's max TTL and **re-authenticates** when renewal is no longer possible (#751),
+in, renews up to Vault's max TTL and **re-authenticates** when renewal is no longer possible,
 retrying with capped full-jitter backoff forever. Until it succeeds, Transit/KV operations fail fast
 with `vault.ErrUnavailable` (Solana signing answers 503) and readiness stays green. A Transit signer
 whose PSP is already stored keeps its identity while Vault is down; on a first boot only that PSP
 waits and is provisioned once Vault answers. Embedded hosts register the `openrails_vault` probe
-from `Runtime.Probes()`.
+from `Client.Probes()`.
 
 ## Minimal policies
 
@@ -156,15 +156,16 @@ webhook routes return 503 so the provider redelivers; workers retry rather than 
 - **Managed publication/rotation:** use `Client.UpdatePSP` locally
   or remotely with explicit operation identity and revision. Webhook rotations
   retain required overlap; another rotation cannot discard an unretired prior key.
-- **Custody transition:** the local operator supplies source and target runtimes
-  to `TransitionProviderCredentials`. It copies and validates active/overlap
-  credentials, then publishes target custody with revision checks. A backend flag
-  flip alone refuses existing references. Source secrets are retained; do not
-  delete historical material or old databases as part of the transition.
-- **Managed to snapshot:** preload the target runtime using
-  `Options.ProviderCredentials` and a stable `CredentialSnapshotID`. The label is
-  an operator assertion; the host must supply the same snapshot on restart. The
-  transition verifies the supplied credentials before publishing target custody.
+- **Custody is fixed at publication.** A PSP's published credentials are bound
+  to the backend they were published under. Flipping `secret_backend` does not
+  move them: reads and writes of those credentials answer 409
+  `credential_custody_transition_required` until the original backend is
+  selected again. Choose the backend before publishing credentials, and keep the
+  old backend's material while any PSP still references it.
+- **Snapshot identity:** a host that supplies credentials itself (the PSP
+  secrets of `Config.Merchant`, or a standalone manifest) labels the snapshot
+  with `Config.CredentialSnapshotID`. The label is an operator assertion; supply the
+  same snapshot on every restart.
 - **Solana local keypair:** changing the signer changes the on-chain identity.
   Existing authorizations remain bound to the old key. Prefer Transit custody and
   handle signer changes as explicit operations, not an incidental secret refresh.

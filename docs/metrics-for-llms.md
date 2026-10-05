@@ -1,7 +1,7 @@
 # Metrics for LLMs — wiring any agent to the OpenRails query API
 
 Any LLM agent or dashboard with a merchant API key can answer analytics questions against
-OpenRails directly (#733): the schema endpoint IS the machine-readable documentation,
+OpenRails directly: the schema endpoint IS the machine-readable documentation,
 validation errors are corrective instructions returned all at once, and results are
 token-lean tables. No SDK.
 
@@ -19,7 +19,7 @@ token-lean tables. No SDK.
 |---|---|
 | `GET /v1/merchant/metrics/schema` | The registry dump — the LLM context document |
 | `POST /v1/merchant/metrics/query` | Run one composable query |
-| `POST /v1/merchant/metrics/ask` | Hosted Q&A (#756): `{"question":"..."}`, LLM runs `/query` server-side |
+| `POST /v1/merchant/metrics/ask` | Hosted Q&A: `{"question":"..."}`, LLM runs `/query` server-side |
 
 **Schema first.** The `/schema` JSON is designed to ride in a system prompt: every measure
 carries description + formula + allowed dims; dimensions carry enum values; `query_shape`
@@ -44,7 +44,7 @@ Valid body keys (anything else is a 400): `measures` (required), `by`, `grain`, 
 - `filters`: `{dimension: [values...]}` — OR within a dimension, AND across.
   `product_id` / `price_id` values (and the `product_id` / `price_id` cells a
   group-by returns) are the catalog's typed ids (`prod_…`, `price_…`); a bare
-  UUID is an `invalid_filter_value`. `payer` is the customer's plain UUID.
+  UUID is an `invalid_filter_value`. `customer` is the customer's plain UUID.
 - `order`: `[{"measure"|"dimension": name, "dir":"asc"|"desc"}]`.
 - `compare`: `"previous_period"` — same query over the immediately preceding period.
 

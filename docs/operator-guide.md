@@ -14,8 +14,8 @@ territory. The primary deep manual is [operations.md](operations.md).
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
 (file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
-`AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` / `AUTHKIT_PUBLIC_KEYS` envs — the same names
-the authkit binary reads (ak#266/or#917); the old unprefixed names refuse boot.
+`AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` / `AUTHKIT_PUBLIC_KEYS` envs, the same names
+the authkit binary reads.
 The same directory holds `totp.key`, the key for authenticator-app secrets.
 The root owner always needs a second factor, so boot refuses a control plane
 with neither `totp.key` nor an email or SMS sender.
@@ -34,14 +34,16 @@ Postgres specifics worth knowing:
   Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is
   retired and refuses loading rather than silently selecting a weaker posture.
 - Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
-  migrations (`internal/migrate/postgres/`, baseline `0001_schema.up.sql`, new ones
-  start at `0002`). The server validates at boot and refuses to start behind.
+  migrations. The server validates at boot and refuses to start behind.
   `openrails migrate status` reports the ledger against the embedded chain.
+  Every v1.x release upgrades a database of any earlier v1 release in place
+  ([compatibility](compatibility.md#database-schema)); a pre-v1 database is not
+  upgraded ([migrating to v1](migrating-to-v1.md)).
+- Two apps sharing one billing schema: set `schema_owner` to the role both
+  logins inherit, and `migrate` hands every object to it.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on
   `:3053`), `task docker-down` to tear down, `task docker-reset` to recreate the
-  database from empty (the baseline was re-squashed prelaunch, so a database
-  created before that must be dropped rather than migrated forward — see the
-  [contributor guide](dev/README.md#migrations)).
+  database from empty.
 
 ### The safety levers
 
@@ -84,11 +86,11 @@ OpenRails' workers converge state around that:
 | Provider-intent verifier | 5 min | resolves `unknown_needs_verify` outcomes by *reading* the provider before any retry |
 | Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, lapsed periods, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
-| Dunning | 4 h | retries `past_due` per the derived no-knobs schedule; cancels past the staleness window instead of charging ([operations.md → Dunning](operations.md#dunning-359)) |
+| Dunning | 4 h | retries `past_due` per the derived no-knobs schedule; cancels past the staleness window instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
-| Worker health check | 5 min | seeds `billing.worker_state`, raises repair alerts when a kind stops completing |
+| Worker health check | 5 min | seeds `billing.worker_state`, raises a critical notification in the merchant inbox when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; the failing dependency is logged, never answered). Readiness requires only
@@ -100,9 +102,9 @@ local job consumer. It still binds its request-side River producers before HTTP
 starts; a separate `run-worker` process contributes both billing and AuthKit
 lifecycle workers using the same database, issuer and manifest configuration.
 Embedded hosts wire the dependency checks into their own
-handler via `rt.Ready(ctx)` and register `rt.Probes()` as optional
-dependencies with their supervisor; a host-owned shared River client is checked
-separately with `CheckJobProgress` because its process state is outside
+handler with `client.Ready(ctx)` and register `client.Probes()` as optional
+dependencies with their supervisor; a host-owned River fleet is watched by the
+`openrails_job_progress` probe because its process state is outside
 OpenRails.
 
 The standalone server serves `GET /metrics` with one gauge per dependency,
@@ -110,8 +112,7 @@ The standalone server serves `GET /metrics` with one gauge per dependency,
 alert on optional ones at 0 as degraded. Beyond that there is no runtime
 telemetry endpoint.
 `/v1/merchant/metrics`, `/query`, and `/schema` are authenticated merchant
-business analytics, not process/runtime metrics; adding runtime observability
-remains parked in tracker issue #701.
+business analytics, not process/runtime metrics.
 
 **Healthy looks like**: `openrails intents` shows a near-empty active set (the
 sweep flags `pending` older than 24h and `in_flight`/`unknown` older than 2h as
@@ -129,7 +130,7 @@ missing, `--overwrite` updates existing, `--prune` removes extras
 |---|---|
 | `openrails pull-provider --merchant=<slug>` | pull provider-observed truth, diff against the local mirror, write nothing. Add `--insert/--overwrite/--prune` to converge local state; the remote rails are **never** mutated. Filters: `--rail`, `--psp`, `--since/--until`, `--format table\|json`. |
 | `openrails pull-provider report --merchant=<slug> [--run=ID]` | render a run's summary, standing open findings, and the dunning-forensics report |
-| `openrails nmi decline-report --merchant=<slug> --since=<date> [--until] [--psp] [--format table\|json]` | read-only decline baseline from an NMI account's history: approval and refusal rates of card verifications, one-off sales and NMI-scheduled rebills by month, and each refusal's reason and category from OpenRails' classifier. Writes nothing. History cannot say who sent a one-off sale, so rebill retries are not separated. The history job stores the same numbers daily for Payments → Health (#1120). |
+| `openrails nmi decline-report --merchant=<slug> --since=<date> [--until] [--psp] [--format table\|json]` | read-only decline baseline from an NMI account's history: approval and refusal rates of card verifications, one-off sales and NMI-scheduled rebills by month, and each refusal's reason and category from OpenRails' classifier. Writes nothing. History cannot say who sent a one-off sale, so rebill retries are not separated. The history job stores the same numbers daily for Payments → Health. |
 | `openrails intents [--status=…] [--rail=…] [--type=…] [--merchant=…]` | list the provider-intent ledger: queued outbound mutations, each row's `executes_under` mode, and the drain forecast |
 | `openrails intents-log [--rail=…] [--intent=…] [--phase=…]` | append-only log of actual provider mutation attempts/results (the executor's audit trail) |
 | `openrails intents resolve --merchant=… --intent=… [--step=…] (--receipt=<provider id> \| --not-executed) --actor=… --reason=…` | close an `unknown_needs_verify` operation from an exact provider receipt (read back and matched) or provider-supported non-execution (an empty submitted NMI invoice search is insufficient); `--not-executed` also releases a `pending` invoice collection that never crossed its submission fence; never resends ([provider uncertainty](provider-uncertainty.md)) |
@@ -139,7 +140,7 @@ missing, `--overwrite` updates existing, `--prune` removes extras
 `pull-provider` is manual-only by design — never scheduled. Routine catch-up is
 Provider Refresh's job; `pull-provider` is the full-surface investigation tool
 with the findings ledger and forensics
-([operations.md → Provider Pull](operations.md#provider-pull-107-511)).
+([operations.md → Provider Pull](operations.md#provider-pull)).
 
 **The findings queue doctrine**: findings that require judgment (remote
 mutations, ambiguous identity matches) land in the admin queue and **never
@@ -181,8 +182,9 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 - **Naming**: addressed as `(merchant_id, name)` in code; Vault path
   `secret/openrails/merchants/<merchant-uuid>/<name>`. Published references select exact validated versions. Direct backend edits do
   not publish a new active credential. Managed publication does not require restarting the runtime.
-- **Rotation within the same PSP** uses the Client payment-provider publication
-  operation with a stable operation ID and expected revision. A candidate is
+- **Rotation within the same PSP** uses `Client.UpdatePSP`
+  (`PATCH /v1/merchant/psps/{id}`) with a stable operation ID and the
+  expected revision. A candidate is
   staged and account/environment validated before its exact version is published.
   Retry the same operation to recover a lost response. A failed publication leaves
   the previous published credentials active; an unpublished candidate is not read
@@ -198,12 +200,12 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 ### Processor routing
 
 Checkout is one processor at a time, chosen **before** the session exists. A request that
-names a PSP gets that PSP; a request that omits `payment.rail` is routed.
+names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is routed.
 
 - **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
   serve the price.
 - **Policy**: the `checkout_routing` merchant setting, declared under `settings:`
-  (mode 1) or applied through a configuration application (mode 2). Ordered
+  in the merchant's YAML or applied through a configuration application. Ordered
   rules, first match wins; each rule's `prefer` list is both the ranking and the
   whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
   `price`, `mode`, `country` — all optional, all AND-ed; a rule with no conditions is the
@@ -211,7 +213,7 @@ names a PSP gets that PSP; a request that omits `payment.rail` is routed.
 
 ```yaml
 checkout_routing:
-  - match: { currency: eur, mode: subscription }
+  - match: { currency: EUR, mode: subscription }
     prefer: [ccbill, mobius]
   - prefer: [mobius, ccbill, solana]
 ```
@@ -239,7 +241,7 @@ checkout_routing:
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.
 - **Worker health**: `billing.worker_state` rows per job kind; the 5-minute
-  checker raises durable repair alerts when a periodic kind stops completing.
+  checker raises a critical merchant notification when a periodic kind stops completing.
 - **Notifications**: reconciliation findings raise deduplicated console
   notifications and, by severity, outbound webhooks / the alert email
   ([merchant-notifications.md](merchant-notifications.md)).

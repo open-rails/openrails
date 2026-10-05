@@ -31,7 +31,7 @@ Identity/contact attributes do not confer authorization.
 ## Browser and native delegation
 
 The browser first authenticates to its merchant application. It then calls
-that issuer's AuthKit `POST /delegated/token`, using its local access credential
+that issuer's AuthKit `POST /api/v1/delegated/token`, using its local access credential
 and a non-extractable WebCrypto key. The host authorizer selects the grant.
 OpenRails accepts the resulting `Authorization: DPoP <token>` only with a fresh
 ES256 proof covering that token, HTTP method and external URL. Replay, wrong
@@ -85,8 +85,9 @@ verified identity and sender proof. Permission checks are not memoized.
 Configure `trusted_proxies` with actual proxy CIDRs or set
 `auth.direct_peer_ip: true` for direct client connections. Cloudflare-specific
 headers are trusted only from declared `cloudflare_proxies`; generic proxy
-trust does not confer that authority. Embedded `AttachOptions` forward the
-same settings. Direct-peer and proxy declarations are mutually exclusive.
+trust does not confer that authority. Embedded hosts set the same on
+`Config.TrustedProxies` and `Config.CloudflareProxies`. Direct-peer and proxy
+declarations are mutually exclusive.
 
 Development signing keys persist under `auth.keys_path`; production supplies
 its managed keys. AuthKit reads a signing application's registration on every

@@ -10,8 +10,6 @@ Price bindings are stored in `price_psp_bindings`, with a composite merchant/PSP
 
 Saved-method and stored-credential references also require PSP identity. Custody import manifests carry `source_psp_id` so the same source vault reference at a sibling gateway cannot be adopted. Webhook deduplication namespaces include the captured PSP or custodian UUID.
 
-Operations resume through `PSPScopeByID`, retaining the selected account's credentials after a key rename or archive. Fresh checkout still resolves active admission separately. The NMI adoption path verifies customer and price identity before completing a pre-existing local subscription.
+Operations resume through the PSP they captured, retaining the selected account's credentials after a key rename or archive. Fresh checkout still resolves active admission separately. The NMI adoption path verifies customer and price identity before completing a pre-existing local subscription.
 
 Custodian-held instruments capture a same-merchant `custodian_id` independently of their PSP. Token references, network-token updates, account-updater selection and job completion use that captured account. PSP configuration changes cannot move an existing instrument to a different vault. An updater result can unpark and rotate the selected account's instrument without touching a sibling account with the same token.
-
-The fresh v1 schema is a hard cut: the `prices.psp_links` storage column is removed. Existing pre-v1 databases are not upgraded by this change.

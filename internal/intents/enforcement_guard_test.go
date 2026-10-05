@@ -29,7 +29,7 @@ import (
 // COMPILE error would be to move the write client under internal/intents/
 // internal/…, which the legitimate non-intent callers below (reactive
 // user/admin cancels, decline cleanup, the checkout upgrade saga) make a large
-// refactor. Recorded in docs/invariants.md as strong-T, not S.
+// refactor. A test, not a structural guarantee.
 //
 // What the AST form does close, versus the previous textual grep:
 //   - METHOD VALUES. `f := client.RunSale` has no "(" after the name; the

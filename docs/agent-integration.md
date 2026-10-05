@@ -55,8 +55,9 @@ milestone order, each verifiable before the next:
    the sandbox probe passes.
 4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
-5. **Mount routes.** Implement `Deps.Authenticate` (and `Authorize` for staff routes)
-   over the host's existing auth, select route groups in `Config.HTTP`, and mount with
+5. **Mount routes.** Pass the host's AuthKit client as `Deps.AuthKit`, or implement
+   `Deps.Authenticate` (and `Authorize` for staff routes) over other auth; select
+   route groups in `Config.HTTP`, and mount with
    `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify: an authenticated request to
    `GET <prefix>/v1/me/subscriptions` answers for the caller's own subject.
 6. **Backend calls.** Use the Client where the host needs admission/holds, usage,
@@ -77,7 +78,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    Mint an API key. Verify: key works via `client.GetMerchantConfiguration(ctx)` (Go) or an
    authenticated `GET /v1/merchant/configuration` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithAPIKey`. Other stacks:
-   plain HTTP per [api/endpoints.md](api/endpoints.md).
+   plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).
 4. **Frontend.** Delegated tokens: add ONE token-exchange endpoint to the host API,
    mint per [frontend-integration.md](frontend-integration.md) /
    [auth.md](auth.md). Never send the host's own session tokens to OpenRails.
@@ -94,7 +95,9 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 | Why the auth model is shaped this way | [auth.md](auth.md) |
 | Per-rail credentials/webhooks/sandbox | [rails/nmi.md](rails/nmi.md), [rails/stripe.md](rails/stripe.md), [rails/ccbill.md](rails/ccbill.md), [rails/solana.md](rails/solana.md) |
 | Catalog authoring (products/prices/entitlements) | [merchant-guide.md](merchant-guide.md) |
-| Every HTTP route | [api/endpoints.md](api/endpoints.md) |
+| API conventions and behavior | [api/endpoints.md](api/endpoints.md) |
+| Every HTTP route | [api/routes.md](api/routes.md), `api/openapi.json` |
+| Moving from v0 | [migrating-to-v1.md](migrating-to-v1.md) |
 | Migrating an existing subscriber base in | [batch-import.md](batch-import.md) |
 | Admin console on/off + usage | [admin-console.md](admin-console.md) |
 | Day-2 ops, safety levers, cutover | [operator-guide.md](operator-guide.md), [operations.md](operations.md) |
@@ -110,7 +113,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
   browser-direct with delegated tokens.
 - Checkout endpoints are tightly rate-limited by design; retry loops in tests will
   hit 429 — back off, don't raise limits.
-- Embedded config is programmatic: `config.Load` never runs, so nothing is defaulted
-  for you; unset `TestMode` refusing to boot is the designed behavior.
+- Embedded config is programmatic: no file or environment is read, so nothing is
+  defaulted for you; unset `TestMode` refusing to boot is the designed behavior.
 - Catalog amounts are integers in native units (`12_000_000` = $12). No dollar
-  strings in the catalog manifest.
+  strings in the catalog document.

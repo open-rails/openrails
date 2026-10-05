@@ -2,8 +2,8 @@
 
 How to move an existing site's subscribers, payment history, and provider-side
 subscription/vault records from a legacy billing system onto OpenRails
-(embedded or standalone). The import surface here is the #737 DeclaredBilling
-seam; the cutover doctrine it feeds into lives in
+(embedded or standalone). The import surface is `Client.ImportBilling` with a
+`billing.DeclaredBilling` document; the cutover doctrine it feeds into lives in
 [operations.md](operations.md).
 
 ### The mental model
@@ -14,7 +14,7 @@ for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
 provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
 mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh-574-and-the-unknown-cohort-632664665),
+scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort),
 and manual `pull-provider` runs converge the mirror against provider truth.
 
 You hand over **facts, not classifications**: who, which price, which rail,
@@ -44,7 +44,7 @@ What import does **not** do:
 **Client**: `client.ImportBilling(ctx, billing.DeclaredBilling{...})` on the
 merchant-bound Client, in every deployment (`openrails.New` in process, or
 `openrails.NewRemote`). Resolve a public name once and bind the Client to
-the captured UUID. **HTTP**: `POST /v1/import/billing`
+the captured UUID. **HTTP**: `POST /v1/merchant/billing-import`
 with the identical JSON body — merchant from the authenticated credential,
 gated on the owner-level `merchant:billing:import` permission. The HTTP body
 cap (1 MiB) forces large books to batch.
@@ -53,16 +53,16 @@ The book (`DeclaredBilling`) carries four record kinds:
 
 | Kind | Idempotency key | Notes |
 |---|---|---|
-| `customers` | customer UUID (upsert) | the host's stable subject id = `customers.id` |
-| `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + card metadata (last four, type, expiry); `psp` attributes the vault entry |
+| `customers` | customer UUID (upsert) | the host's stable subject id = `customers.id`; an optional `email` |
+| `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + the `card` (`brand`, `last4`, `exp_month`, `exp_year`); `psp` attributes the vault entry |
 | `subscriptions` | (rail, rail_subscription_id) | `source_id` (host's stable id) keys per-row results; `psp` binds the row to the PSP that owns it at the provider; optional `payment_method` ref, `cancel` / `dunning` evidence, raw `evidence` JSON stored verbatim on `gateway_response` |
-| `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount_cents` is provider-wire cents, converted to ledger micros inside OpenRails |
+| `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount` is a decimal string in the currency's native units (micros for USD) |
 
-**Attribution is required (or#893).** Every provider-bound row an import writes
+**Attribution is required.** Every provider-bound row an import writes
 carries the PSP it came from — the same `psp_id` a pull stamps — because the
 same prune, rollback and uniqueness rules apply to an imported row as to a
 pulled one. State it once for the whole book with `default_psp`, or per row
-with `psp`; either form names a PSP by `{"id": "<uuid>"}` or by its manifest
+with `psp`; either form names a PSP by `{"id": "psp_…"}` or by its key
 `{"key": "mobius"}`. A row that resolves to neither REFUSES the import, naming
 the row and listing the merchant's known PSPs. There is no unattributed lane.
 
@@ -119,7 +119,7 @@ imported members are entitled immediately (a replay re-derives). Operator/manual
 comps — access with no payment behind it — ride the same book as
 `admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
 derives the windows. `Client.ImportBilling` posts the same book over
-`POST /v1/import/billing`.
+`POST /v1/merchant/billing-import`.
 
 ### The migration playbook
 
@@ -161,12 +161,12 @@ billing data over this seam:
 
 Steps 6–8 in depth:
 [Cutover: booting against production credentials](operations.md#cutover-booting-against-production-credentials)
-and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited-366).
+and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited).
 
 ### Gotchas
 
 - **Stale `past_due` is canceled, never charged.** Anything past the
-  [dunning staleness window](operations.md#dunning-359) (derived from the
+  [dunning staleness window](operations.md#dunning) (derived from the
   billing cycle; 14 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
 - **`unverified` is healthy.** Evidence-starved rows park as `unverified` and keep
@@ -227,7 +227,7 @@ OpenRails.
    vault or pause changed at NMI), `pull.payment_method.mismatch` (vault card removed)
    and blocked import rows. Fix the book and re-import rather than editing rows.
 3. **Arm the destructive switch** for the merchant
-   ([operations.md](operations.md#arming-a-merchant-the-835-first-enforce-gate)).
+   ([operations.md](operations.md#arming-a-merchant-the-first-enforce-gate)).
    Until then a member's cancel of an NMI-owned membership is refused with
    `provider_cancel_held` and raises `life.provider_cancel.held`: OpenRails
    will not cancel locally while NMI would keep charging. Account deletion
@@ -237,7 +237,7 @@ OpenRails.
    schedule once; card updates repoint the schedule to the new vault; refunds
    go to NMI, and a refund with `revoke_access` also ends the membership and
    deletes its NMI schedule (refused with `provider_cancel_held` while
-   disarmed). `Client.RefreshProviders` (`POST /v1/merchant/provider-refresh`)
+   disarmed). `Client.RefreshPSPs` (`POST /v1/merchant/psps/refresh`)
    runs the merchant's provider refresh now, from embedded or remote hosts;
    otherwise it runs every four hours, and NMI's own subscription webhooks
    converge the schedule they name at once. Tier changes (same tier group,

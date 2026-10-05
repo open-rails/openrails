@@ -20,9 +20,9 @@ writes require a writable managed backend.
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`, `allow_catalog_updates`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
-| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server and worker boot, every boot; embedded hosts pass the same shape to `Options.Merchant.Config` |
-| catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `Config.Catalog`, applied by `openrails.New` (embedded hosts) |
+| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`, `allow_catalog_updates`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
+| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, settings, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchant` |
+| catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `Config.Catalog`, applied by `openrails.New` (embedded hosts) |
 
 Manifest anatomy and field semantics:
 [merchant-provisioning.md](merchant-provisioning.md).
@@ -67,11 +67,10 @@ accept `--merchant-manifest`. Each process must receive the same configured
 manifest and secret files before it can use those providers.
 
 1. The manifest and its overlays parse strictly. Unknown fields and retired
-   key names (the old `accounts:` key — renamed to `psps:`) refuse boot — never
-   a silent drop.
+   key names refuse boot, never a silent drop.
 2. Missing merchant/provider identities and metadata initialize in PostgreSQL.
    Existing names, profile, routing, policy and archive decisions are preserved.
-3. Secrets are seeded **into memory** (the runtime manifest secret plane) and
+3. Secrets are seeded **into memory** and
    served through the same store interface every consumer reads — checkout,
    webhook verification, provider pulls, rebill charging. Nothing is written
    to `billing.merchant_secrets` or Vault KV.
@@ -104,7 +103,7 @@ manifest and secret files before it can use those providers.
 ## Managed credentials
 
 Choose `secret_backend: vault` or encrypted `db` for managed credentials. Publish
-validated candidates through the Client payment-provider operation. Actual backend
+validated candidates through `Client.CreatePSP` and `Client.UpdatePSP`. Actual backend
 permissions determine write capability. External HTTP publication remains a
 separate choice. Custody changes require an explicit transition preserving active
 credentials and existing provider obligations.

@@ -5,12 +5,12 @@ merchant billing snapshot between embedded, standalone, and hosted OpenRails
 deployments. Both commands use the same `openrails.Client` methods as Go hosts:
 
 ```go
-err := client.ExportMerchantBilling(ctx, archiveWriter)
-result, err := client.ImportMerchantBilling(ctx, archiveReader)
+err := client.ExportBillingArchive(ctx, archiveWriter)
+result, err := client.ImportBillingArchive(ctx, archiveReader)
 ```
 
-For HTTP, construct the client with `openrails.NewRemote`; for an in-process
-engine, use `rt.Client`. Bind either client with
+For HTTP, construct the client with `openrails.NewRemote`; in process, use the
+client `openrails.New` returned. Bind either client with
 `openrails.WithMerchantID(sourceMerchantID)`. Archive operations can take longer
 than the SDK's default request deadline: use `openrails.WithTimeout(0)` with a
 caller-controlled context, or choose an explicit deadline. The CLI defaults to
@@ -105,15 +105,14 @@ openrails --config destination.yaml --provider-write-mode readonly \
   --unbound-merchants --slug shop
 ```
 
-Go hosts can perform the same explicit preparation before binding their client:
-`openrails billing prepare-target --unbound-merchants` for an unbound engine, or
-`cp.ProvisionMerchantForRestore(ctx, controlplane.ProvisionMerchantForRestoreRequest{MerchantID: merchantID, Slug: slug, ExistingGroupID: groupID, OwnerUserID: ownerID})`
-for an attached control plane. Neither method imports billing data or provider
-credentials. Repeating the same identity preparation is safe; conflicting
+Go hosts run the same preparation before binding their client:
+`openrails billing prepare-target --unbound-merchants` for an engine without a
+control plane, or `--authkit-group-id` and `--owner-user-id` for one with it.
+Preparation imports no billing data and no provider credentials. Repeating the same identity preparation is safe; conflicting
 identity or group bindings are refused.
 
-For a hosted destination where you do not operate its database, its operator must
-perform this preparation through the control-plane method. Remote billing import
+For a hosted destination where you do not operate its database, its operator
+runs this preparation. Remote billing import
 never provisions or rebinds the target implicitly.
 
 ## Final export and restore

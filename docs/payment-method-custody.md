@@ -17,7 +17,7 @@ of the gateway, so it does not belong in the rail value.
 value `psp`, not an absence — a DB CHECK enforces the vocabulary.
 
 `psp_id` is set exactly when `custodian = 'psp'` (CHECK
-`payment_methods_psp_custody`). A card a third-party custodian holds belongs
+`payment_methods_psp_custody_check`). A card a third-party custodian holds belongs
 to no PSP: each charge routes to the one live PSP of the card's rail that
 reaches the custodian (`charge.RoutePSP`); none, or two, is `ErrNoRoute`. An
 obligation that names its PSP (a subscription, a frozen checkout instrument)
@@ -120,7 +120,7 @@ Consequences, all enforced rather than documented:
 * Secrets are scoped by custodian IDENTITY, not by the merchant's nickname for
   it: `custodians/<kind>/<environment>/<account_id>/<key>`, the exact shape
   `psps/<rail>/<environment>/<account_id>/<key>` already has — and they are read
-  through the same or#812 version floor (`custodians.credential_versions`), so a
+  through the same rotation version floor (`custodians.credential_versions`), so a
   rotated custodial key cuts over on every node at once.
 * `account_updater` arms the **batch account updater**: a periodic worker that,
   ahead of each renewal, asks the custodian to refresh the cards backing
@@ -137,24 +137,14 @@ Consequences, all enforced rather than documented:
   (`gateway_account`, `nt_charges`) fail the push with a move/rename error.
   There are no aliases.
 
-### Why custody is not a PSP setting (or#880 phase 3)
+### Why custody is not a PSP setting
 
-Phase 2 parked the arrangement in the settings of the PSP whose gateway the
-charges land on. That was right about where custody *hangs* and wrong about
-whose credentials those are. One vault routinely backs several gateways — a
-live acquirer and a sandbox, or two acquirers fronting the same card file — and
-copied per PSP the tenant id and the application key drift, so the *same*
-custodian silently becomes two. The reference model states it once.
-
-### Why `vaulted_card` was not a rail (or#879)
-
-Until or#879 a Basis-Theory-held card also carried `rail = 'vaulted_card'`,
-even though the gateway charging it was NMI — the charge path literally built
-an NMI client, and the "rail"'s own `gateway_account` setting pointed at an NMI
-PSP. It was a second, weaker encoding of `custodian = 'basis_theory'`, and it
-forced every rail-dispatching switch to alias `vaulted_card` back to NMI.
-Forgetting the alias was silent and landed on money paths. The value is gone;
-`custodian` is the field to read.
+One vault routinely backs several gateways: a live acquirer and a sandbox, or
+two acquirers fronting the same card file. Copied per PSP, the tenant id and the
+application key drift, and the same custodian silently becomes two. Declaring it
+once and referencing it states it once. A custodian is never a rail: the gateway
+that charges a Basis-Theory-held card is still NMI, and `custodian` is the field
+that says who holds it.
 
 ## Adding a custodian
 

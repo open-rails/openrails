@@ -2,7 +2,7 @@
 
 OpenRails is embedded into your Golang-webserver, or run as a stand-alone self-hosted application, and it owns your consumer's full billing state:
 
-- The operator (you) creates a catalog of produces + prices, and what they grant when owned (access to digital content usually).
+- The operator (you) creates a catalog of products + prices, and what they grant when owned (access to digital content usually).
 - Create a checkout session for each purchase
 - Tokenize the user's card (browser -> vault, so that your webserver never sees sensitive card details)
 - Charge the vaulted-card initially
@@ -13,7 +13,7 @@ OpenRails replaces most of Stripe and every other payment processor. OpenRails i
 
 OpenRails acts as the source of truth for your user's purchases (what items have they bought, what membership tier do they hold?) so your application doesn't need to track that.
 
-OpenRails can also do usage-based metering and rate-limiting; for exmaple, allocate premium-tier users to only 100-AI-gen credits per week, and OpenRails handles the state + rate limiting. As another exmaple, you can meter a user's API-usage for the month, produce an invoice, and then charge their stored payment method on file.
+OpenRails can also do usage-based metering and rate-limiting; for example, allocate premium-tier users to only 100-AI-gen credits per week, and OpenRails handles the state + rate limiting. As another example, you can meter a user's API-usage for the month, produce an invoice, and then charge their stored payment method on file.
 
 ### Example Apps:
 
@@ -33,7 +33,7 @@ OpenRails integrates with several payment-processors:
 
 ### How to Install (Embedded)
 
-You'll need a Go webserve, and Postgres (v18 or higher).
+You'll need a Go webserver, and Postgres (v18 or higher).
 
 Here we build a members-only video site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy a monthly "premium" plan with a card, and only premium members can watch.
 
@@ -79,6 +79,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/riverqueue/river"
 )
@@ -178,7 +179,7 @@ func run(ctx context.Context) error {
 	}
 
 	r := gin.Default()
-	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in (AuthKit's HTTP.APIPath, e.g. /auth/v1)
+	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in under /api/v1
 		return err
 	}
 	if err := openrailsgin.Mount(r.Group("/billing"), bill); err != nil { // billing under /billing/v1
@@ -209,7 +210,7 @@ func run(ctx context.Context) error {
 }
 ```
 
-That's the whole integration, and it is the program in [`examples/embedded`](examples/embedded). Your server never touches a card number: the browser hands the card to the processor's tokenization iframe, and OpenRails charges the stored token, rebills it every 30 days, retries failed renewals, emails the customer, and keeps `HasEntitlement` up to date.
+That's the whole integration, and it is the program in [`examples/embedded`](examples/embedded). Your server never touches a card number: the browser hands the card to the processor's tokenization iframe, and OpenRails charges the stored token, rebills it every 30 days, retries failed renewals, and keeps `HasEntitlement` up to date.
 
 Mounting gives your users these routes under `/billing`:
 
@@ -221,45 +222,67 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?auto_renew=`, `?limit=`, `?cursor=`) |
 | `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
 | `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
-| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price, as the signed-in user |
-| `GET /billing/v1/checkout-sessions/{id}`, `POST …/{id}/pay` | read and pay that checkout; the session id is the credential, so a payment page on another host can use it |
-| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs |
+| `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
+| `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
+| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
 | `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
-| `GET /billing/v1/capabilities` | which of these route groups are mounted, for your UI |
+| `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
+| `GET /billing/v1/capabilities` | which route groups and features are mounted, for your UI (always mounted) |
 
 **Your customers' own billing** (`HTTP.CustomerRoutes`, signed in, always as the caller)
 
 | Route | What it does |
 |---|---|
+| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
 | `GET /billing/v1/me/entitlements` | everything they currently have access to |
-| `GET /billing/v1/me/subscriptions`, `/me/subscriptions/{id}` | their subscriptions |
+| `GET /billing/v1/me/subscriptions` | their subscriptions |
+| `GET /billing/v1/me/subscriptions/{id}` | one subscription |
 | `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
 | `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier`, `/change-tier/preview` | upgrade or downgrade, with a proration preview |
+| `POST /billing/v1/me/subscriptions/{id}/change-tier` | upgrade or downgrade |
+| `POST /billing/v1/me/subscriptions/{id}/change-tier/preview` | what that change would cost |
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
 | `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
 | `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
 | `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
+| `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
+| `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
+| `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |
 | `PUT /billing/v1/me/collection-payment-method` | choose the card that pays one currency's invoices |
-| `POST /billing/v1/me/payment-method-setups` | save a card through Stripe (plus `GET` and `/confirm`) |
-| `GET /billing/v1/me/payment-operations/{id}/authentication` | finish a 3-D Secure challenge (plus `/confirm`) |
+| `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
+| `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
 | `POST /billing/v1/me/billing-portal` | open Stripe's billing portal (when a Stripe PSP is declared) |
 | `GET /billing/v1/me/payments` | payment and refund history |
-| `GET /billing/v1/me/invoices`, `/me/invoices/{id}` | invoices |
+| `GET /billing/v1/me/invoices` | invoices |
+| `GET /billing/v1/me/invoices/{id}` | one invoice |
 | `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
-| `GET /billing/v1/me/balance`, `/me/transactions`, `/me/usage`, `/me/spend-limits` | prepaid balance, its ledger, metered usage and spending limits |
-| `PUT /billing/v1/me/collection-payment-method` | the card invoices are charged to |
-| `GET /billing/v1/me/notifications`, `/me/notifications/unread-count` | billing notices ("your card was declined") |
+| `GET /billing/v1/me/balance` | prepaid balance |
+| `GET /billing/v1/me/transactions` | its ledger |
+| `GET /billing/v1/me/usage` | metered usage |
+| `GET /billing/v1/me/spend-limits` | spending limits |
+| `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
+| `GET /billing/v1/me/notifications/unread-count` | how many are unread |
 | `POST /billing/v1/me/notifications/{id}/read` | mark one read |
 
 **Payment processors** (always mounted)
 
 | Route | What it does |
 |---|---|
-| `POST /billing/v1/webhooks/{provider}/{account_id}` | processor notifications (Stripe, NMI, CCBill), signature-checked per account |
+| `POST /billing/v1/webhooks/{rail}/{account_id}` | processor notifications (Stripe, NMI, CCBill), verified per account |
 
-`HTTP.Merchant` publishes the merchant API for your staff and machines rather than your users (customers, refunds, catalog, settings, PSPs, outbound webhooks), each route gated by its merchant permission. Every route, request and response is in the [API reference](docs/api/endpoints.md).
+`HTTP.Merchant: true` publishes the merchant API (`/billing/v1/merchant/*`) for your staff and machines rather than your users: customers, refunds, catalog, settings, PSPs, alerts. Each route is gated by its merchant permission, and each has one method on the Go `Client`. Every route is in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
+
+What you will set next:
+
+| To | Set |
+|---|---|
+| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.EmailSender`; without one OpenRails sends no email |
+| Publish the merchant API | `Config.HTTP.Merchant` |
+| Serve the admin console | `Config.AdminConsole` ([admin console](docs/admin-console.md)) |
+| Share one billing schema between two apps | `Config.SchemaOwner`: `Migrate` hands the schema to that role |
+| Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
+| Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
 
 #### The frontend
 
@@ -317,7 +340,7 @@ function UpgradeButton() {
 }
 ```
 
-Once the checkout succeeds, `HasEntitlement(user, "premium")` is true on your server and `/videos/:id` starts streaming. When the card is declined at renewal, OpenRails retries on a schedule, emails the user, and `AccountBilling` shows them a "fix your card" prompt; the entitlement stays until the subscription actually ends.
+Once the checkout succeeds, `HasEntitlement(user, "premium")` is true on your server and `/videos/:id` starts streaming. When the card is declined at renewal, OpenRails retries on a schedule, emails the user (with an email sender configured), and `AccountBilling` shows them a "fix your card" prompt; the entitlement stays until the subscription actually ends.
 
 Several sites selling for one merchant can share one payment page instead: set `HTTP.Checkout.PageURL` (where the page is served) and `EmbedOrigins` (the sites allowed to frame it). The payment host serves billing-ui's `<CheckoutPage>`; each site creates its session as above and shows `<CheckoutFrame url={session.url} />`. See [billing-ui's README](sdk/billing-ui/README.md).
 
@@ -326,8 +349,8 @@ Several sites selling for one merchant can share one payment page instead: set `
 ### How It Works
 
 Operator side (you, the merchant):
-- Declare your merchant and payment-processor accounts (a YAML manifest, or the API).
-- Declare your catalog: products, the entitlements they grant, and prices. OpenRails pushes it to the processors.
+- Declare your merchant and payment-processor accounts (in `Config`, a YAML manifest, or the API).
+- Declare your catalog: products, the entitlements they grant, and prices. OpenRails charges its own price terms; a processor-side copy is linked only where a rail needs one.
 - Call one API for admissions, credits, entitlement checks, subscriptions and invoices: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
 Customer side (your users):
@@ -352,21 +375,20 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | `HasEntitlement` / `ListEntitlements` | Exact grant-backed access; `ListEntitlements` reads up to 500 customers at once |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `GetCheckoutConfig` | `CheckoutConfigQuery`: a `PriceID` or `PriceKey` lists the options that can sell it |
-| `checkout-config` HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
-| Catalog retrieval | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
-| Accepted attempts, payments, subscriptions and imports | Immutable IDs |
-| Recurring change-tier/preview and Solana tier-change | Existing ID contract; key selectors tracked separately |
+| `GetCheckoutConfig` | `GetCheckoutConfigParams`: a `PriceID` or `PriceKey` lists the options that can sell it |
+| `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
+| Catalog reads | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
+| Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |
 
-Keys are opaque, including UUID-shaped keys. Move any key previously sent in
-`PriceID` to `PriceKey`; there is no ID/key auto-detection. Accepted retries keep
-the original price and benefit snapshot after a key moves or an offer is
-archived. See the [checkout admission contract](docs/architecture/catalog-checkout-admission.md).
+Keys are opaque, including UUID-shaped keys: a field that takes an ID never
+accepts a key, and there is no auto-detection. An accepted attempt keeps its
+original price and benefit snapshot after a key moves or an offer is archived.
+More in [products and prices through the Client](docs/catalog-client.md).
 
 ### Features
 
-- **Checkout sessions** — one unified session model across every rail: provider-hosted
-  redirect (Stripe, CCBill), tokenized-vault card entry (NMI Collect.js), and Solana Pay.
+- **Checkout sessions** — one session model across every rail: tokenized card entry
+  (NMI Collect.js, Stripe Elements), a provider-hosted redirect, and Solana Pay.
 - **Catalog as source of truth** — declare your products, prices, rate cards, and tiers
   once; OpenRails pushes them to providers (find-or-create) and watches for drift.
 - **Entitlements & product ownership** — your webserver asks one question ("does user X
@@ -478,11 +500,11 @@ build yourself, badly, under deadline:
   becomes a classified finding on one of four planes (provider-observed truth, derived
   effects, lifecycle clocks, internal consistency); safe repairs apply automatically,
   judgment calls queue for a human and never auto-fire.
-- **Rebilling, both ways.** Leave recurring billing to the provider's native engine
-  (NMI/CCBill/Stripe plans — OpenRails observes and converges), or let OpenRails drive
-  the renewal itself: engine-initiated stored-credential charges where *we* decide the
-  amount and timing (scheduled reprices, vaulted-card rails), and the on-chain crank for
-  Solana. Same subscription model either way.
+- **Rebilling, both ways.** New subscriptions are collected by OpenRails itself:
+  stored-credential charges where *we* decide the amount and timing (scheduled reprices,
+  vaulted-card rails), and the on-chain crank for Solana. Subscriptions a provider
+  already schedules (an imported NMI, Stripe or CCBill book) stay with the provider,
+  observed and converged. Same subscription model either way.
 - **Double-entry money, twice over.** Every money movement is a balanced double-entry
   ledger transaction — value is never created or destroyed, only moved. A separate grant
   ledger tracks credit lots (who was granted what, from which source), and the
@@ -556,7 +578,7 @@ OpenRails does not receive or store your user's credit card details; only your p
 - **Redirect flow**: Browser -> payment provider's checkout page (ex. Stripe) -> user enters credit card details -> payment provider redirects back to your frontend. Behind the scenes Stripe webhook -> Your OpenRails server -> updates entitlements in your database.
 - **Tokenized-vault flow**: Browser -> sends credit card details directly to your payment provider -> browser receives a token in response -> browser sends the token to OpenRails -> OpenRails sends the charge + token to the payment provider -> payment provider charges the card and returns the result to OpenRails -> OpenRails updates entitlements in your database.
 
-Your webserver + OpenRails only need PCI-compliance SAQ-A, which is a self-assessment + annual questionnaire; if you're handlnig or storing credit-card information that would make you SQ-D, which requires a lot of work.
+Your webserver + OpenRails only need PCI-compliance SAQ-A, which is a self-assessment + annual questionnaire; if you're handling or storing credit-card information that would make you SAQ-D, which requires a lot of work.
 
 ---
 
@@ -688,41 +710,48 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 
 - [Embedded integration (Go library)](docs/embedded-integration.md) — run the engine in-process: boot, migrations, declaring your merchant, mounting the billing routes on your server, calling the in-process client.
 - [Standalone integration (service)](docs/standalone-integration.md) — deploy OpenRails as its own service: production config, first-run provisioning, API keys, the Go SDK and plain-HTTP integration.
-- [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout flows (redirect, tokenized-vault, Solana), payment methods, tokens, and error handling.
+- [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout sessions, payment methods, tokens, and error handling.
 - [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses delegated tokens.
+- [Products and prices through the Client](docs/catalog-client.md) and [choosing the merchant a call acts on](docs/client-merchant-selection.md).
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
-- [HTTP API reference](docs/api/endpoints.md) — every route, grouped by caller class.
-- [Errors](docs/api/errors.md) and [money on the wire](docs/money-wire.md) — the error envelope, coded 402 refusals, decimal-string amounts, RFC3339 times, `GET /v1/currencies`.
+
+**API** — the contract:
+
+- [API guide](docs/api/endpoints.md) — conventions and behavior; [every route](docs/api/routes.md); [every error code](docs/api/error-codes.md); [`api/openapi.json`](api/openapi.json).
+- [Checkout](docs/api/commerce.md), [errors](docs/api/errors.md) and [money, ids and times on the wire](docs/money-wire.md).
+- [Compatibility](docs/compatibility.md) — what v1 freezes and what counts as additive.
+- [Migrating to v1](docs/migrating-to-v1.md) — everything a v0 host changes.
 
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 
-- [Certification matrix](docs/rails/certification-matrix.md) — which flows each rail supports, and what evidence backs each one
+- [Rail matrix](docs/rails/certification-matrix.md) — what each rail does, and what evidence backs a verification claim
 - [NMI](docs/rails/nmi.md) (MobiusPay, PaymentCloud, PayKings, and other NMI-backed ISOs)
 - [Stripe](docs/rails/stripe.md)
 - [CCBill](docs/rails/ccbill.md)
 - [Solana](docs/rails/solana.md) (USDC, self-custody, on-chain recurring subscriptions)
-- [Payment-method custody](docs/payment-method-custody.md) — who *holds* a stored card vs who *charges* it, and the combinations that are real today
+- [Payment-method custody](docs/payment-method-custody.md) — who *holds* a stored card vs who *charges* it
+- [Sandbox posture](docs/sandbox-posture.md) — how a sandbox deployment proves its credentials are test credentials
 
 **Run your business** — for the merchant defining plans and managing customers:
 
-- [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), pushing it, and day-to-day customer management.
+- [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
 - [Admin console](docs/admin-console.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
+- Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [invoice administration](docs/invoice-administration.md), [provider obligations](docs/architecture/provider-obligation-contract.md).
 
 **Operate the deployment** — for whoever keeps it running:
 
 - [Operator guide](docs/operator-guide.md) — infrastructure requirements (Postgres, Redis/Garnet, Vault), what runs by itself, and the drift toolbox.
-- [Operations manual](docs/operations.md) — the deep reference: operating modes and safety levers, dunning, reconciliation, the provider intent ledger, cutovers.
-- [Merchant provisioning](docs/merchant-provisioning.md) — manifests, credentials, secrets, and API keys.
-- [Self-hosting mode 1](docs/self-hosting-mode1.md) — the manifest-is-truth deployment shape.
-- [Vault](docs/vault.md) — HashiCorp Vault setup and secret operations.
-- [Rate limiting](docs/rate-limiting.md) — the built-in per-IP/per-user limits and captcha escalation.
+- [Operations manual](docs/operations.md) — the deep reference: operating modes and safety levers, dunning, reconciliation, the provider intent ledger, data retention, cutovers.
+- [Merchant provisioning](docs/merchant-provisioning.md) — manifests, credentials, secrets, and API keys; [merchant names](docs/merchant-name-authority.md); [settings](docs/api/merchant-settings.md) and [configuration applications](docs/merchant-configuration-applications.md).
+- [Self-hosting with host-owned credentials](docs/self-hosting-mode1.md), [runtime configuration](docs/runtime-configuration.md) and [Vault](docs/vault.md).
+- [Backup and recovery](docs/backup-and-recovery.md), [moving a merchant](docs/merchant-portability.md) and [provider uncertainty](docs/provider-uncertainty.md).
+- [Rate limiting](docs/rate-limiting.md) — the built-in limits on checkout, card and subscription writes, and captcha escalation.
 
 **Reference**
 
-- [Glossary](docs/glossary.md) — rails, PSPs, merchants, payers, and the rest of the vocabulary.
-- Contracts — [durable admission](docs/admission-operations.md), [client merchant binding](docs/client-merchant-binding.md), [merchant name authority](docs/merchant-name-authority.md), [provider obligations](docs/architecture/provider-obligation-contract.md), [provider object identity](docs/architecture/provider-object-identity.md), [schema baseline](docs/schema-baseline.md).
+- [Glossary](docs/glossary.md) — rails, PSPs, merchants, customers, and the rest of the vocabulary.
 - [Metrics & query API](docs/metrics-for-llms.md) — analytics access for dashboards and LLM agents.
 - [Contributing / hacking on OpenRails](docs/dev/README.md) — dev workflow, testing, local webhooks.
 - [Injected-code scan](docs/injection-scan.md) — the supply-chain gate every clone runs; rules, exclusions, and what to do when it fires.

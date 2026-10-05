@@ -7,7 +7,7 @@ error falls back to a per-process in-memory counter for that check. One net/http
 (`RateLimitHTTP`, `internal/http/middleware/ratelimit_neutral.go`) serves both surfaces —
 embedded `/billing/v1/...` paths are normalized to `/v1/...` before classification.
 
-**On by default** (#742): the standalone loader and `openrails.New` both seed the curated
+**On by default**: the standalone loader and `openrails.New` both seed the curated
 defaults below whenever `rate_limits`/`captcha` are left nil. To opt out (your own gateway fronts
 billing), set `rate_limits_disabled: true` (env `RATE_LIMITS_DISABLED`) — the middleware becomes
 a pure passthrough. Host-facing summaries: [frontend-integration.md](frontend-integration.md),
@@ -20,7 +20,7 @@ a pure passthrough. Host-facing summaries: [frontend-integration.md](frontend-in
 | IP | `ip:<addr>` | all requests |
 | User | `user:<user_id>` | authenticated requests (mount auth before the limiter) |
 
-The IP is the proxy-aware resolved client (#746): with `trusted_proxies` empty (default) it is
+The IP is the proxy-aware resolved client: with `trusted_proxies` empty (default) it is
 the raw socket peer — a spoofed `X-Forwarded-For` has zero effect; with your LB's CIDRs
 configured, `X-Forwarded-For` (every header line, joined in order) is walked right-to-left past
 trusted hops to the real client. Set
@@ -82,7 +82,7 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
   `captcha_required` (metadata carries provider, site key, bucket) until a valid token is sent in
   the `X-Captcha-Token` header. A successful solve clears the challenge and resets the
   challenged buckets' counters.
-- Card-testing attack mode (#371) is per merchant and decided by the ledger below. While it
+- Card-testing attack mode is per merchant and decided by the ledger below. While it
   holds, every subject on that merchant's captcha buckets must solve a captcha; each decline
   seen in attack mode keeps it up for another hour, so it lapses an hour after the declines stop
   or the ledger's window drops below the threshold. It applies where the merchant is known
@@ -96,7 +96,7 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 
 Cards the provider refused are counted in PostgreSQL
 (`billing.card_attempt_failures`), so blocks hold on every replica without
-Redis or captcha (SEC-30). A request refused before any provider call (a
+Redis or captcha. A request refused before any provider call (a
 missing field, an unconfigured PSP) is not a decline. Card saves, checkout
 creation and confirmation (browser routes and the embedded or remote Client)
 check it before any provider call and answer `429` `card_attempts_blocked`

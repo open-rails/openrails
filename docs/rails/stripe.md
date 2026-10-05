@@ -23,7 +23,7 @@ Key health is validated with a read-only `GET /v1/balance` — no charge is made
 
 ### PSP manifest entry
 
-Declare the account under `merchants.<slug>.psps.<key>.stripe`:
+Declare the account under `merchants.<slug>.psps.<key>` with `rail: stripe`:
 
 ```yaml
 merchants:
@@ -37,8 +37,7 @@ merchants:
           webhook_signing_secret: whsec_...      # required in manifest mode; see Webhooks
 ```
 
-`account_id` is your Stripe account id (`acct_…`). Stripe is the one rail where it
-is discoverable from the key itself — copy it from the Dashboard, or run
+`account_id` is your Stripe account id (`acct_…`). Copy it from the Dashboard, or run
 `curl https://api.stripe.com/v1/account -u "sk_live_...:"`. OpenRails stores it as
 declared; it does not derive it at runtime.
 
@@ -82,12 +81,12 @@ endpoint still verifies — for at most 7 days (`webhook_overlap_expires_at`), a
 which the old secret is refused. Both endpoints deliver during the overlap; duplicate events
 are deduplicated by event id. Nothing is deleted by the bump.
 
-**Rotating a signing secret** (SEC-29, Stripe and NMI). Publishing a new
+**Rotating a signing secret** (Stripe and NMI). Publishing a new
 `webhook_signing_secret` keeps the outgoing one verifying only for the
 `webhook_secret_overlap` window (default 24h, at most 168h), then refuses it.
-Rotate a leaked secret with `retire_webhook_overlap: true` on the provider
-upsert to refuse the old one at once; the same flag alone retires a running
-overlap. A host-declared `webhook_signing_secret_previous` must carry the
+Rotate a leaked secret with `retire_webhook_overlap: true` on the PSP update
+(`Client.UpdatePSP`) to refuse the old one at once; the same flag alone retires
+a running overlap. A host-declared `webhook_signing_secret_previous` must carry the
 setting `webhook_overlap_expires_at` (RFC 3339); without it the previous
 secret never verifies.
 
@@ -204,16 +203,15 @@ abandoned intent raises `life.provider_intent.abandoned`.
 ### Sandbox testing
 
 Set `test_mode: sandbox` and declare the PSP with a test key (`sk_test_…` /
-`rk_test_…`); the PSP's environment follows `test_mode` and is not declarable
-(#882). The live-key-under-sandbox boot refusal guarantees a sandbox deployment
+`rk_test_…`); the PSP's environment follows `test_mode` and is not declarable.
+The live-key-under-sandbox boot refusal guarantees a sandbox deployment
 can never hold a credential that moves real money. Use Stripe's standard test
-cards. `test_mode` is orthogonal to `env` — a fully gated production-style
-deployment can legitimately run sandbox rails.
+cards. A production-style deployment can legitimately run sandbox rails.
 
 ### Read-only safety gate
 
 Every outbound Stripe byte flows through one choke-point HTTP client. With
-`mode: readonly`, any mutating request (anything but GET/HEAD) fails locally —
+`provider_write_mode: readonly`, any mutating request (anything but GET/HEAD) fails locally —
 before reaching the network — while reads (verification, reconciliation, webhook
 hydration) pass through. This makes read-only mode a transport-level guarantee, not
 a convention: no code path can write to Stripe around it.

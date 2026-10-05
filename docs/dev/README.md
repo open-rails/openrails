@@ -3,7 +3,8 @@
 Docs for people hacking on OpenRails itself. Audience-facing docs (integrators,
 operators, merchants) live one level up in `docs/`.
 
-- [testing.md](testing.md) — e2e contracts, ordinary checks, business time / test clocks
+- [testing.md](testing.md) — package tests, the end-to-end suite, business time / test clocks
+- [compatibility](../compatibility.md) — the three frozen contracts and their snapshots
 - [local-webhooks.md](local-webhooks.md) — deterministic public webhook URLs for local dev (cloudflared)
 
 ## Task targets
@@ -61,18 +62,35 @@ rule PREPAREs every query) need a live Postgres whose schema matches
   tables and migrations are outside this query catalog.
 
 So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
-commit the regenerated `internal/db/gen`. Run `task sqlc-check` locally to
-check generated code, query plans, and SQL discipline; the compact CI workflow
-does not currently run that task.
+commit the regenerated `internal/db/gen`. `task sqlc-check` checks generated
+code, query plans and SQL discipline locally; CI's `End-to-end` job regenerates
+the bindings and runs the query audit (`TestQueryAudit`).
+
+## Frozen contracts
+
+The Go API, the HTTP API and the database schema are frozen from v1.0.0
+([compatibility](../compatibility.md)). Each has a generated snapshot under
+`api/`; a change to one regenerates its snapshot in the same pull request:
+
+```sh
+OPENRAILS_E2E_DSN=postgres://postgres:postgres@127.0.0.1:5432/postgres \
+  go run ./scripts/contracts -write
+```
+
+That rewrites `api/go.txt`, `api/openapi.json` with the generated TypeScript
+wire types and the tables under `docs/api`, and `api/schema.txt` (read from the
+PostgreSQL 18 the DSN names). Never hand-merge a generated file: regenerate it.
 
 ## Migrations
 
-`internal/migrate/postgres/0001_schema.up.sql` is a single squashed baseline
-for fresh PostgreSQL 18 databases, including extensions and creator catalogs.
-All prerelease databases are disposable; no old-schema upgrade is supported.
-A database built by an earlier chain must be wiped: `migrate up` refuses it
-(migratekit strict integrity: the applied `0001` changed and the schema is not
-a fresh build of the new one).
+`internal/migrate/postgres/0001_schema.up.sql` is the v1 baseline and does not
+change. A schema change is a new numbered migration (`0002_…`) that upgrades
+any v1 database in place, with its `api/schema.txt` diff in the same pull
+request.
+
+A database built before v1.0.0 is not upgraded: `migrate up` refuses it
+(migratekit strict integrity: the applied `0001` differs and the schema is not
+a fresh build of it). Wipe it:
 
 | Database | How |
 |---|---|
@@ -85,13 +103,14 @@ a fresh build of the new one).
 
 - `client.go`, `remote.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `New` over the in-process transport); `Config`/`Deps` named from `internal/config`
 - `billing/` — the API vocabulary: request/response types, IDs, errors and codes, permission names
-- `catalog/` — catalog-as-code manifests and the charge-model pricing engine
+- `catalog/` — the catalog document (`catalog.Application`) and its charge-model types
 - `adapters/{http,gin,fiber}/` — router adapters for `client.Routes()`
 - `internal/engine/` — the in-process engine behind `openrails.New` (lifecycle, routes, River, the opt-in control plane)
 - `cmd/openrails/` — the binary: server + CLI (catalog/merchant-config/bootstrap apply, reconcile)
-- `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/`, `controlplane/`
+- `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/` (the route catalog in `http/routes`), `controlplane/`
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
-- `ci/` — focused public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
+- `api/` — the frozen-contract snapshots: `go.txt`, `openapi.json`, `schema.txt`
+- `ci/` — the end-to-end suite: public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
 - `scripts/` — Task-target implementations
 - `web/admin/` — admin console SPA source; `embed.go` embeds its `dist/` build
 
@@ -102,7 +121,7 @@ fails on any other.
 ## Releases
 
 ```sh
-gh workflow run cut-release.yaml -f bump=minor   # or bump=patch
+gh workflow run cut-release.yaml -f bump=minor   # or bump=patch, bump=major
 ```
 
 This tags master's head with the next version; the tag runs `release.yaml`
