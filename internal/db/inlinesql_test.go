@@ -28,6 +28,7 @@ var inlineSQLAllowed = map[string]string{
 	"internal/river/job_liveness.go":      "River table, runtime schema",
 	"internal/river/job_rescue.go":        "River table, runtime schema",
 	"internal/river/progress.go":          "River table, runtime schema",
+	"internal/schemasnapshot/":            "schema list introspects pg_catalog",
 	"sdk/":                                "e2e harness, separate module",
 }
 
