@@ -125,7 +125,7 @@ func CreateCreditGrant(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be positive").WithParam("amount"))
 		return
 	}
-	if strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > 255 {
+	if strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > maxSourceIDBytes {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "source_id must contain 1 to 255 bytes").WithParam("source_id"))
 		return
 	}

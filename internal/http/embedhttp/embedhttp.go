@@ -259,7 +259,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			// credentials, nothing on merchant-admin/catalog/psps/
 			// merchant-API/webhooks.
 			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }),
-			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
 			middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
 			// #734: Host-based multi-merchant resolution (a no-op when HostResolve is

@@ -363,7 +363,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		// anywhere else (admin/platform/merchant-API/webhooks/auth), so a
 		// browser refuses cross-origin script access to those by default.
 		middleware.PermissiveCORSHTTP(browser),
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 		s.billingCredentialsHTTP,
 		// Resolve the merchant / billing namespace before authorization and before any
 		// merchant-owned DB access (issue #223). Resolved PER REQUEST off the Runtime

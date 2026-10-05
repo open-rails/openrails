@@ -3,6 +3,7 @@
 package ci_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,11 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, event.Replayed)
+	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{
+		CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference",
+		Amount: 1, Source: "worker", SourceID: strings.Repeat("k", 256),
+	})
+	require.ErrorIs(t, err, billing.ErrInvalid, "a key longer than the table holds is invalid input")
 
 	ledger, err := client.ListCreditTransactions(ctx, customer, billing.CreditTransactionListParams{Currency: "USD"})
 	require.NoError(t, err)

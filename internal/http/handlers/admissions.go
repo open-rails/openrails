@@ -20,6 +20,9 @@ import (
 // maxAdmitBatchItems bounds one admission batch.
 const maxAdmitBatchItems = 1000
 
+// maxSourceIDBytes bounds a caller's source_id, as the tables holding it do.
+const maxSourceIDBytes = 255
+
 func admitInput(p billing.AdmitParams) billingservice.AdmitInput {
 	in := billingservice.AdmitInput{
 		CustomerID:              p.CustomerID,
@@ -275,8 +278,8 @@ func ReportWastedSpend(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
 		return
 	}
-	if strings.TrimSpace(params.Source) == "" || strings.TrimSpace(params.SourceID) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "source and source_id required").WithParam("source_id"))
+	if strings.TrimSpace(params.Source) == "" || strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > maxSourceIDBytes {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "source and source_id (at most 255 bytes) required").WithParam("source_id"))
 		return
 	}
 	if !requireServiceCustomerScope(r, params.CustomerID) {
@@ -309,6 +312,10 @@ func RecordUsageEvent(r *httprequest.Request) {
 	}
 	if params.CustomerID.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
+		return
+	}
+	if len(params.SourceID) > maxSourceIDBytes {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "source_id must be at most 255 bytes").WithParam("source_id"))
 		return
 	}
 	if !requireServiceCustomerScope(r, params.CustomerID) {

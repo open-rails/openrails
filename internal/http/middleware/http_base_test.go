@@ -36,7 +36,7 @@ func TestBodyLimitHTTP(t *testing.T) {
 	} {
 		var got []byte
 		calls := 0
-		h := BodyLimitHTTP(8)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := RequestLimitsHTTP(8)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
 			got, _ = io.ReadAll(r.Body)
 		}))
@@ -67,13 +67,13 @@ func (r unreadable) Read([]byte) (int, error) {
 // The billing-archive import alone gets the large archive cap, streamed
 // unread to its authenticated handler; lookalike paths keep the ordinary cap.
 func TestArchiveBodyLimit(t *testing.T) {
-	h := BodyLimitHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
+	h := RequestLimitsHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/host/billing/v1/merchant/billing-archive", unreadable{t}))
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 
 	body := bytes.Repeat([]byte("x"), 2<<20)
-	h = BodyLimitHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h = RequestLimitsHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n, err := io.Copy(io.Discard, r.Body)
 		require.NoError(t, err)
 		require.EqualValues(t, len(body), n)
@@ -99,7 +99,7 @@ func TestArchiveBodyLimit(t *testing.T) {
 	}
 
 	called := false
-	h = BodyLimitHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	h = RequestLimitsHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	req := httptest.NewRequest(http.MethodPost, "/v1/merchant/billing-archive", strings.NewReader("unused"))
 	req.ContentLength = archivewire.MaxBytes + 1
 	w = httptest.NewRecorder()

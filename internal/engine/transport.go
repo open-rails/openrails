@@ -53,7 +53,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	})
 	// The same body cap the HTTP mounts apply: an oversized request gets the
 	// same 413 envelope in every deployment.
-	return withVerificationMemo(middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux.Handler()))
+	return withVerificationMemo(middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)(mux.Handler()))
 }
 
 func withVerificationMemo(next http.Handler) http.Handler {

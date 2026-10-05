@@ -123,8 +123,14 @@ func (c Coord) Validate() error {
 	if strings.TrimSpace(c.Source) == "" || strings.TrimSpace(c.SourceID) == "" {
 		return fmt.Errorf("ledger: source and source_id required on the idempotency coordinate")
 	}
+	if len(c.Operation) > MaxCoordBytes || len(c.Source) > MaxCoordBytes || len(c.SourceID) > MaxCoordBytes {
+		return fmt.Errorf("ledger: each part of the idempotency coordinate is at most %d bytes", MaxCoordBytes)
+	}
 	return nil
 }
+
+// MaxCoordBytes bounds each part of a coordinate; ledger_transfers checks it.
+const MaxCoordBytes = 512
 
 func (c Coord) String() string {
 	return string(c.Operation) + "/" + c.Source + "/" + c.SourceID
