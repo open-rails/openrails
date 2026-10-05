@@ -68,7 +68,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err != nil {
 			return err
 		}
-		out = &billing.SubscriptionRetryNowResult{Subscription: sub.View(), Operation: billing.PaymentOperation{ID: result.ID, Status: result.Status}, Replayed: replayed}
+		out = &billing.SubscriptionRetryNowResult{Subscription: sub.View(), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.ID), Status: result.Status}, Replayed: replayed}
 		return nil
 	})
 	return out, err
@@ -97,7 +97,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	}
 	row, err := s.rt.DB.Gen(ctx).GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: mid.UUID(), SubscriptionID: id})
 	if err == nil {
-		out.Operation = &billing.PaymentOperation{ID: row.ID, Status: row.Status}
+		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(row.ID), Status: row.Status}
 		out.BlockedReason = "payment_in_progress"
 		return out, nil
 	}

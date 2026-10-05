@@ -57,8 +57,12 @@ func (c *Client) AuthenticateUser(r *http.Request) (Identity, error) {
 	if err != nil {
 		return Identity{}, err
 	}
+	customer, err := billing.ParseCustomerID(user.UserID)
+	if err != nil {
+		return Identity{}, ErrUnauthenticated
+	}
 	return Identity{
-		Kind: billingauth.User, Issuer: a.Config.ControlPlane.Auth.Issuer, SubjectID: user.UserID, CustomerID: user.UserID,
+		Kind: billingauth.User, Issuer: a.Config.ControlPlane.Auth.Issuer, SubjectID: user.UserID, CustomerID: customer,
 		CredentialClass: billingauth.CredentialClassUserSession, Email: user.Email, EmailVerified: user.EmailVerified,
 		Username: user.Username, SessionID: user.SessionID,
 	}, nil

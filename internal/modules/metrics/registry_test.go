@@ -58,7 +58,7 @@ func TestPublicMeasureVocabulary(t *testing.T) {
 		"gross_revenue", "net_revenue", "refunds", "chargebacks", "credits_sold", "usage_revenue",
 		"payment_count", "new_subscriptions", "cancellations", "chargeback_count",
 		"refund_count", "usage_units", "admission_denials",
-		"unique_rebilled_customers", "active_payers",
+		"unique_rebilled_customers", "active_customers",
 		"churn_rate", "chargeback_rate", "credit_utilization",
 		"attempts", "approved_attempts", "failed_attempts", "attempt_failure_rate",
 		"checkouts", "failed_checkouts", "checkout_failure_rate", "attempts_per_checkout", "checkout_recovery_rate",
@@ -66,7 +66,7 @@ func TestPublicMeasureVocabulary(t *testing.T) {
 		"rebill_missed_rate", "dunning_recovered", "dunning_recovery_rate", "rebill_collection_rate", "rebill_loss_rate",
 		"repeat_topup_rate", "realized_revenue_per_customer", "avg_membership_duration_days",
 		"mrr", "subscriptions", "billable_subscriptions", "entitled_customers",
-		"payers_at_depletion_risk", "outstanding_credit_liability", "outstanding_owed",
+		"customers_at_depletion_risk", "outstanding_credit_liability", "outstanding_owed",
 		"webhook_silence_age_seconds", "webhook_rejects", "webhook_drift_events",
 		"nmi_history_authorizations", "nmi_history_approved", "nmi_history_refused", "nmi_history_refusal_rate",
 	}, PublicMeasureNames())

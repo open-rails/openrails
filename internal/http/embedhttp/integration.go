@@ -25,10 +25,10 @@ func (a integrationAuthenticator) Authenticate(ctx context.Context, r *http.Requ
 	if err != nil {
 		return billingauth.UserContext{}, err
 	}
-	if identity.Kind != billingauth.User || identity.CustomerID == "" || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
+	if identity.Kind != billingauth.User || identity.CustomerID.IsZero() || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	return billingauth.UserContext{UserID: identity.CustomerID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, SessionID: identity.SessionID}, nil
+	return billingauth.UserContext{UserID: identity.CustomerID.String(), Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, SessionID: identity.SessionID}, nil
 }
 
 type integrationGate struct {
@@ -77,12 +77,12 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 
 	subject := identity.SubjectID
 	if identity.Kind == billingauth.User && (permission == billing.MerchantCatalogOwnRead || permission == billing.MerchantCatalogOwnUpdate) {
-		if identity.CustomerID == "" && r.Header.Get("OpenRails-Catalog-Owner") == "" {
+		if identity.CustomerID.IsZero() && r.Header.Get("OpenRails-Catalog-Owner") == "" {
 			return billingauth.Principal{}, billingauth.Refusal(billing.CodeCatalogOwnerRequired, "canonical personal identity required")
 		}
 		// With an explicit owner and no personal mapping, leave the actor key
 		// empty so ownerCatalogScopeMW must perform its live administrator check.
-		subject = identity.CustomerID
+		subject = identity.CustomerID.String()
 	}
 	required := billingauth.Requirement{Permission: permission, Scope: scope, Target: target}
 	if err := g.auth.Authorization.Authorize(ctx, r, identity, required); err != nil {
@@ -94,7 +94,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	}
 	principal := billingauth.Principal{MerchantID: target.MerchantID, Kind: identity.Kind, Subject: subject}
 	if identity.Kind == billingauth.User {
-		principal.UserContext = billingauth.UserContext{UserID: identity.CustomerID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
+		principal.UserContext = billingauth.UserContext{UserID: identity.CustomerID.String(), Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
 	} else {
 		principal.Permissions = append([]string(nil), identity.Permissions...)
 	}
@@ -120,7 +120,7 @@ func nativeCustomer(auth *billingauth.Integration, target billingauth.Target) bi
 		if err != nil {
 			return nil, err
 		}
-		if identity.Kind != billingauth.User || identity.CustomerID == "" || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
+		if identity.Kind != billingauth.User || identity.CustomerID.IsZero() || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
 			return nil, billingauth.ErrUnauthenticated
 		}
 		requestTarget := target
@@ -136,7 +136,7 @@ func nativeCustomer(auth *billingauth.Integration, target billingauth.Target) bi
 			return nil, err
 		}
 		*r = *r.WithContext(merchanttarget.WithResolved(r.Context(), requestTarget))
-		return &billingauth.DelegatedPrincipal{MerchantID: requestTarget.MerchantID.String(), MerchantSlug: requestTarget.MerchantSlug, SubjectID: identity.CustomerID, Issuer: identity.Issuer, CredentialClass: identity.CredentialClass, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username}, nil
+		return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(requestTarget.MerchantID), MerchantSlug: requestTarget.MerchantSlug, SubjectID: identity.CustomerID.String(), Issuer: identity.Issuer, CredentialClass: identity.CredentialClass, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username}, nil
 	})
 }
 
@@ -168,8 +168,8 @@ func authenticateIntegration(ctx context.Context, r *http.Request, auth *billing
 		}
 		switch identity.Kind {
 		case billingauth.User:
-			id, err := uuid.Parse(identity.CustomerID)
-			if (identity.CustomerID != "" && (err != nil || id == uuid.Nil || id.String() != identity.CustomerID)) || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
+			id, err := uuid.Parse(identity.CustomerID.String())
+			if (!identity.CustomerID.IsZero() && (err != nil || id == uuid.Nil || id.String() != identity.CustomerID.String())) || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
 				return billingauth.Identity{}, billingauth.ErrUnauthenticated
 			}
 		case billingauth.Machine, billingauth.Delegated:

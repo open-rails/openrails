@@ -159,12 +159,12 @@ func TestPSPResolution(t *testing.T) {
 	}{
 		{name: "book default", fallback: PSPRef{Key: "mobius"}, rail: "nmi", want: mobius.ID},
 		{name: "per-row key wins", fallback: PSPRef{Key: "mobius"}, ref: PSPRef{Key: " PayKings "}, rail: "NMI", want: paykings.ID},
-		{name: "per-row id wins", fallback: PSPRef{Key: "mobius"}, ref: PSPRef{ID: &paykings.ID}, rail: "nmi", want: paykings.ID},
-		{name: "nil id is no ref", fallback: PSPRef{Key: "mobius"}, ref: PSPRef{ID: &nilID}, rail: "nmi", want: mobius.ID},
+		{name: "per-row id wins", fallback: PSPRef{Key: "mobius"}, ref: PSPRef{ID: new(billing.PSPID(paykings.ID))}, rail: "nmi", want: paykings.ID},
+		{name: "nil id is no ref", fallback: PSPRef{Key: "mobius"}, ref: PSPRef{ID: new(billing.PSPID(nilID))}, rail: "nmi", want: mobius.ID},
 		{name: "unattributed", rail: "nmi", errHas: []string{"subscription legacy-1", "default_psp", "nmi/mobius"}},
-		{name: "foreign id", ref: PSPRef{ID: &foreign}, rail: "nmi", errHas: []string{"does not own"}},
+		{name: "foreign id", ref: PSPRef{ID: new(billing.PSPID(foreign))}, rail: "nmi", errHas: []string{"does not own"}},
 		{name: "unknown key", ref: PSPRef{Key: "nope"}, rail: "nmi", errHas: []string{"does not own"}},
-		{name: "cross-rail id", ref: PSPRef{ID: &stripe.ID}, rail: "nmi", errHas: []string{"rail"}},
+		{name: "cross-rail id", ref: PSPRef{ID: new(billing.PSPID(stripe.ID))}, rail: "nmi", errHas: []string{"rail"}},
 		{name: "cross-rail key", ref: PSPRef{Key: "main"}, rail: "nmi", errHas: []string{"does not own"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

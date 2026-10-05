@@ -153,11 +153,11 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
 			subject := p.Identity().Subject
 			if _, err := uuid.Parse(subject); err == nil {
-				return billingauth.CustomerIdentity{ID: subject, CredentialClass: billingauth.CredentialClassUserSession}, nil
+				return billingauth.CustomerIdentity{ID: cid(subject), CredentialClass: billingauth.CredentialClassUserSession}, nil
 			}
 			if id, ok := strings.CutPrefix(subject, "auto-"); ok {
 				if _, err := uuid.Parse(id); err == nil {
-					return billingauth.CustomerIdentity{ID: id, CredentialClass: billingauth.CredentialClassAutomation}, nil
+					return billingauth.CustomerIdentity{ID: cid(id), CredentialClass: billingauth.CredentialClassAutomation}, nil
 				}
 			}
 			return billingauth.CustomerIdentity{}, nil

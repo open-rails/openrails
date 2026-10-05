@@ -760,10 +760,10 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 	subID := billing.SubscriptionID(p.SubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: (billing.PriceID(p.PriceID)).String(),
+		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: billing.PriceID(p.PriceID),
 		Payment: CheckoutAttemptPaymentResponse{Rail: string(models.RailStripe)}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
-		OperationID: in.ID.String(), Effective: effectiveOf(p.Action),
+		OperationID: billing.PaymentOperationID(in.ID), Effective: effectiveOf(p.Action),
 	}
 	switch in.Status {
 	case intents.StatusSucceeded:

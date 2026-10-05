@@ -70,7 +70,7 @@ func TestCustomerActionRequiresInteractiveSession(t *testing.T) {
 				require.Equal(t, http.StatusForbidden, rec.Code)
 				require.Contains(t, rec.Body.String(), "customer_action_required")
 			}
-			require.Equal(t, billingauth.DelegatedPrincipal{CredentialClass: class, Invoker: invoker, SubjectID: payer, MerchantID: mid.String()}, checkoutVerifiedPrincipal(r))
+			require.Equal(t, billingauth.DelegatedPrincipal{CredentialClass: class, Invoker: invoker, SubjectID: payer, MerchantID: mid}, checkoutVerifiedPrincipal(r))
 		}
 	}
 	r, rec := newTestRequest(http.MethodPost, "/", nil, nil)

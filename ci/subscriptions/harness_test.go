@@ -246,7 +246,7 @@ func (w *world) start() {
 		Verifier: w.auth,
 		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
 			if _, err := uuid.Parse(p.Identity().Subject); err == nil {
-				return billingauth.CustomerIdentity{ID: p.Identity().Subject, CredentialClass: billingauth.CredentialClassUserSession}, nil
+				return billingauth.CustomerIdentity{ID: cid(p.Identity().Subject), CredentialClass: billingauth.CredentialClassUserSession}, nil
 			}
 			return billingauth.CustomerIdentity{}, nil
 		},

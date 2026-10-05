@@ -14229,8 +14229,8 @@
           "invoker_type": {
             "type": "string",
             "enum": [
-              "delegated",
-              "payer"
+              "customer",
+              "delegated"
             ]
           },
           "trust_level": {
@@ -22897,8 +22897,8 @@
           "invoker_type": {
             "type": "string",
             "enum": [
-              "delegated",
-              "payer"
+              "customer",
+              "delegated"
             ]
           },
           "currency": {

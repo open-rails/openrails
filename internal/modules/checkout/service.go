@@ -1481,7 +1481,7 @@ func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChange
 	now := s.now()
 	resp := &TierChangePreviewResponse{
 		Object:           "tier_change_preview",
-		PriceID:          (billing.PriceID(newPrice.ID)).String(),
+		PriceID:          billing.PriceID(newPrice.ID),
 		Rail:             rail,
 		Currency:         newPrice.Currency,
 		NextChargeAmount: newPrice.Amount,
@@ -1643,7 +1643,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	if existingSub.ScheduledPriceID != nil {
 		return &TierChangeResponse{
 			Object: "tier_change", Status: "blocked", Mode: "tier_change", Action: action,
-			PriceID: (billing.PriceID(newPrice.ID)).String(), Payment: CheckoutAttemptPaymentResponse{Rail: "stripe"},
+			PriceID: billing.PriceID(newPrice.ID), Payment: CheckoutAttemptPaymentResponse{Rail: "stripe"},
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
@@ -1772,7 +1772,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Status:  "blocked",
 			Mode:    "tier_change",
 			Action:  action,
-			PriceID: (billing.PriceID(newPrice.ID)).String(),
+			PriceID: billing.PriceID(newPrice.ID),
 			Payment: CheckoutAttemptPaymentResponse{Rail: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
@@ -1791,7 +1791,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        (billing.PriceID(newPrice.ID)).String(),
+		PriceID:        billing.PriceID(newPrice.ID),
 		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
 		Payment: CheckoutAttemptPaymentResponse{

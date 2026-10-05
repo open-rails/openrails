@@ -854,7 +854,7 @@ func readInitialMembershipQuote(session *models.CheckoutAttempt) (subscriptions.
 
 func validateInitialMembershipPrincipal(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.DelegatedPrincipal) error {
 	mid, err := merchant.Require(ctx)
-	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != session.CustomerID.String() {
+	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != session.CustomerID.String() {
 		return ErrCheckoutAttemptForbidden
 	}
 	return nil
@@ -933,7 +933,7 @@ func (s *CheckoutAttemptService) initialMembershipSessionResponse(ctx context.Co
 		return nil, true, fmt.Errorf("unrecognized initial membership operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
-	response.Operation = &billing.PaymentOperation{ID: operation.ID, Status: operation.Status}
+	response.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(operation.ID), Status: operation.Status}
 	response.NextAction = nil
 	if operation.Status == intents.StatusFailedTerminal {
 		response.Failure = operationFailure(operation)

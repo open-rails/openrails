@@ -13,9 +13,9 @@ import (
 type InvokerType string
 
 const (
-	// InvokerTypePayer is the paying customer's own credential: wasted spend
+	// InvokerTypeCustomer is the paying customer's own credential: wasted spend
 	// draws the customer's grace, then is charged.
-	InvokerTypePayer InvokerType = "payer"
+	InvokerTypeCustomer InvokerType = "customer"
 	// InvokerTypeDelegated spends the customer's balance under a spend
 	// delegation: flat wasted-spend cutoffs apply.
 	InvokerTypeDelegated InvokerType = "delegated"

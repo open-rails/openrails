@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/requestauth"
@@ -30,12 +31,12 @@ func TestHasPermissionWildcards(t *testing.T) {
 }
 
 func TestDelegatedGateAndExplicitMapping(t *testing.T) {
-	for _, p := range []*DelegatedPrincipal{nil, {SubjectID: "s"}, {MerchantID: " ", SubjectID: "s"}, {MerchantID: "m", SubjectID: " "}, {MerchantID: "m", SubjectID: "s", CredentialClass: "admin"}} {
+	for _, p := range []*DelegatedPrincipal{nil, {SubjectID: "s"}, {MerchantID: billing.MerchantID{1}, SubjectID: " "}, {MerchantID: billing.MerchantID{1}, SubjectID: "s", CredentialClass: "admin"}} {
 		require.ErrorIs(t, ValidateDelegatedPrincipal(p), ErrDelegatedPrincipalInvalid)
 	}
-	require.NoError(t, ValidateDelegatedPrincipal(&DelegatedPrincipal{MerchantID: "m", SubjectID: "s", CredentialClass: CredentialClassAutomation}))
+	require.NoError(t, ValidateDelegatedPrincipal(&DelegatedPrincipal{MerchantID: billing.MerchantID{1}, SubjectID: "s", CredentialClass: CredentialClassAutomation}))
 
-	base := DelegatedPrincipal{MerchantID: "00000000-0000-0000-0000-000000000001", MerchantSlug: "host-one", SubjectID: "user-1", Permissions: []string{"billing:*"}, Email: "u@example.com", Username: "u"}
+	base := DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.MustParse("00000000-0000-0000-0000-000000000001")), MerchantSlug: "host-one", SubjectID: "user-1", Permissions: []string{"billing:*"}, Email: "u@example.com", Username: "u"}
 	gate := func(mutate func(*DelegatedPrincipal), err error) DelegatedGate {
 		return NewDelegatedGate(DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*DelegatedPrincipal, error) {
 			p := base
@@ -53,14 +54,14 @@ func TestDelegatedGateAndExplicitMapping(t *testing.T) {
 		{NewDelegatedGate(nil), GateError{Status: 500, Code: billing.CodeInternalError, Message: "authorization unavailable"}},
 		{gate(nil, ErrUnauthenticated), Refusal(billing.CodeAuthenticationRequired, "authentication required")},
 		{gate(func(p *DelegatedPrincipal) { p.Permissions = []string{"catalog:read"} }, nil), Refusal(billing.CodePermissionRequired)},
-		{gate(func(p *DelegatedPrincipal) { p.MerchantID = "not-a-merchant-id" }, nil), Refusal(billing.CodeDelegatedPrincipalInvalid)},
+		{gate(func(p *DelegatedPrincipal) { p.MerchantID = billing.MerchantID{} }, nil), Refusal(billing.CodeDelegatedPrincipalInvalid)},
 	} {
 		_, err := tc.gate.Authorize(context.Background(), req, "billing:read")
 		require.Equal(t, tc.want, err)
 	}
 	got, err := gate(nil, nil).Authorize(context.Background(), req, "billing:read")
 	require.NoError(t, err)
-	require.Equal(t, base.MerchantID, got.MerchantID.String())
+	require.Equal(t, base.MerchantID, got.MerchantID)
 	require.Equal(t, []string{"billing:*"}, got.Permissions)
 	require.Equal(t, UserContext{UserID: "user-1", Email: "u@example.com", Username: "u", Merchant: "host-one"}, got.UserContext)
 }
@@ -128,11 +129,13 @@ func TestIntegrationVerifiesOncePerRequestAndChecksAuthorityLive(t *testing.T) {
 	verifier := &fakeVerifier{principal: principal}
 	integration, r, identity, err := authenticate(t, IntegrationOptions{Verifier: verifier, Customer: SubjectCustomerID, Authority: fixedAuthority("g")})
 	require.NoError(t, err)
-	require.Equal(t, Identity{Kind: User, SubjectID: testCustomer, CustomerID: testCustomer, Issuer: testIssuer, CredentialClass: CredentialClassUserSession}, identity)
+	require.Equal(t, Identity{Kind: User, SubjectID: testCustomer, CustomerID: billing.CustomerID(uuid.MustParse(testCustomer)), Issuer: testIssuer, CredentialClass: CredentialClassUserSession}, identity)
 
 	need := Requirement{Permission: "merchant:payments:refund"}
 	for _, mutate := range []func(*Identity){
-		func(i *Identity) { i.CustomerID = "22222222-2222-4222-8222-222222222222" },
+		func(i *Identity) {
+			i.CustomerID = billing.CustomerID(uuid.MustParse("22222222-2222-4222-8222-222222222222"))
+		},
 		func(i *Identity) { i.Issuer = "another" },
 		func(i *Identity) { i.SubjectID = "another" },
 		func(i *Identity) { i.Kind = Machine },
@@ -158,7 +161,7 @@ func TestIntegrationIdentityMapping(t *testing.T) {
 	require.Nil(t, noAuthz.Authorization, "no authority resolver publishes no privileged routes")
 
 	claimSession := func(context.Context, auth.Principal) (CustomerIdentity, error) {
-		return CustomerIdentity{ID: testCustomer, CredentialClass: CredentialClassUserSession}, nil
+		return CustomerIdentity{ID: billing.CustomerID(uuid.MustParse(testCustomer)), CredentialClass: CredentialClassUserSession}, nil
 	}
 	id := func(kind auth.Kind, subject, issuer string) auth.Identity {
 		return auth.Identity{Kind: kind, Subject: subject, Issuer: issuer}

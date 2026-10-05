@@ -62,11 +62,12 @@ type PaymentAttemptListParams struct {
 	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
 	Source, ObservedVia, AVSResult, CVVResult              []string
 	PSPID                                                  PSPID
-	// CustomerID and CheckoutID are plain UUIDs.
-	CustomerID, CheckoutID string
-	SubscriptionID         SubscriptionID
-	CycleID                RebillCycleID
-	Since, Until           time.Time
+	CustomerID                                             CustomerID
+	// CheckoutID is the grouping id of one buyer's attempts on one target.
+	CheckoutID     string
+	SubscriptionID SubscriptionID
+	CycleID        RebillCycleID
+	Since, Until   time.Time
 }
 
 // RebillCycle is one paid period that came due (#1111) and what its attempts

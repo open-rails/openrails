@@ -203,7 +203,7 @@ func (s *CheckoutService) processEngineDowngrade(ctx context.Context, newPrice *
 	subID := billing.SubscriptionID(existingSub.ID)
 	return &TierChangeResponse{
 		Object: "tier_change", Status: "succeeded", Mode: "tier_change", Action: "downgrade", Effective: "period_end",
-		PriceID: billing.PriceID(newPrice.ID).String(), Payment: CheckoutAttemptPaymentResponse{Rail: string(existingSub.Rail)}, SubscriptionID: &subID,
+		PriceID: billing.PriceID(newPrice.ID), Payment: CheckoutAttemptPaymentResponse{Rail: string(existingSub.Rail)}, SubscriptionID: &subID,
 		Message:      fmt.Sprintf("Downgrade to %s scheduled. Your current plan stays active until the period ends.", newProduct.DisplayName),
 		DelayedStart: &end, Currency: newPrice.Currency, NextChargeAmount: newPrice.Amount, NextChargeDate: &end,
 	}, nil
@@ -264,10 +264,10 @@ func engineUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeR
 	replaced := billing.SubscriptionID(p.Terms.Replaces.SubscriptionID)
 	end := p.Terms.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: "upgrade", Effective: "now", PriceID: billing.PriceID(p.Terms.PriceID).String(),
+		Object: "tier_change", Mode: "tier_change", Action: "upgrade", Effective: "now", PriceID: billing.PriceID(p.Terms.PriceID),
 		Payment: CheckoutAttemptPaymentResponse{Rail: in.Rail}, SubscriptionID: &replaced,
 		Currency: p.Terms.Currency, AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
-		OperationID: in.ID.String(),
+		OperationID: billing.PaymentOperationID(in.ID),
 	}
 	switch in.Status {
 	case intents.StatusSucceeded:

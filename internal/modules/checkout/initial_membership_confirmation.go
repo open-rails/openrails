@@ -46,7 +46,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if err != nil {
 		return nil, err
 	}
-	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != accepted.CustomerID.String() {
+	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != accepted.CustomerID.String() {
 		return nil, apperr.New(403, "customer_session_required", "initial membership requires its interactive customer session")
 	}
 	if accepted.CollectionPolicy != models.CollectionPolicyEngine || accepted.Amount <= 0 || accepted.Amount != accepted.RecurringAmount || accepted.Pending {

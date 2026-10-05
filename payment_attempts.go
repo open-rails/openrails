@@ -17,7 +17,7 @@ func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.Payment
 	setQuery(q, map[string]string{"kind": commaList(filter.Kind), "owner": commaList(filter.Owner), "category": commaList(filter.Category), "reason": commaList(filter.Reason),
 		"response_code": commaList(filter.ResponseCode), "card_entry": commaList(filter.CardEntry), "source": commaList(filter.Source),
 		"observed_via": commaList(filter.ObservedVia), "avs_result": commaList(filter.AVSResult), "cvv_result": commaList(filter.CVVResult),
-		"psp_id": filter.PSPID.String(), "customer_id": filter.CustomerID,
+		"psp_id": filter.PSPID.String(), "customer_id": filter.CustomerID.String(),
 		"checkout_id": filter.CheckoutID, "subscription_id": filter.SubscriptionID.String(), "cycle_id": filter.CycleID.String(),
 		"since": timeQuery(filter.Since), "until": timeQuery(filter.Until)})
 	var out billing.ListPage[billing.PaymentAttempt]

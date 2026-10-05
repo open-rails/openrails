@@ -63,7 +63,7 @@ export type AdmitParams = {
   request_id?: string
   customer_id?: string
   invoker?: string
-  invoker_type?: "delegated" | "payer"
+  invoker_type?: "customer" | "delegated"
   trust_level?: string
   resource?: string
   currency?: string
@@ -2015,7 +2015,7 @@ export type ReplacePaymentMethodCardParams = {
 export type ReportWastedSpendParams = {
   customer_id?: string
   invoker?: string
-  invoker_type?: "delegated" | "payer"
+  invoker_type?: "customer" | "delegated"
   currency?: string
   amount?: string
   source?: string

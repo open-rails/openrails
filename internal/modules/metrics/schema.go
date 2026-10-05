@@ -88,10 +88,10 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "top 10 payers by usage revenue",
+			Intent: "top 10 customers by usage revenue",
 			Query: Query{
 				Measures: []string{"usage_revenue"},
-				By:       []string{"payer"},
+				By:       []string{"customer"},
 				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
 				Order:    []OrderTerm{{Measure: "usage_revenue", Dir: "desc"}},
 				Limit:    intp(10),

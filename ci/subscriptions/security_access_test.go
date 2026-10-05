@@ -233,7 +233,7 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 		if id, ok := strings.CutPrefix(subject, "auto-"); ok {
 			subject, class = id, billingauth.CredentialClassAutomation
 		}
-		return &billingauth.DelegatedPrincipal{MerchantID: merchantID, MerchantSlug: w.slug, SubjectID: subject, CredentialClass: class, Issuer: issuer}, nil
+		return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.MustParse(merchantID)), MerchantSlug: w.slug, SubjectID: subject, CredentialClass: class, Issuer: issuer}, nil
 	}
 	self := w.peer(w.slug, openrails.CustomerSelfService, w.auth, w.declaredPSPs(), hostAuth)
 	group := "g" + uuid.NewString()[:8]

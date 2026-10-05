@@ -334,7 +334,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 				number = *inv.InvoiceNumber
 			}
 			amountDue := inv.AmountDue
-			data, err := json.Marshal(billing.NotificationData{InvoiceID: inv.ID, InvoiceNumber: number, AmountDue: &amountDue, Currency: inv.Currency, DueAt: inv.DueAt})
+			data, err := json.Marshal(billing.NotificationData{InvoiceID: billing.InvoiceID(inv.ID), InvoiceNumber: number, AmountDue: &amountDue, Currency: inv.Currency, DueAt: inv.DueAt})
 			if err != nil {
 				return err
 			}

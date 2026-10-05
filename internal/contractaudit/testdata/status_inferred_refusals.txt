@@ -25,7 +25,6 @@ internal/http/handlers/service_commerce.go 2
 internal/http/handlers/solana_pay.go 13
 internal/http/handlers/solana_recurring.go 4
 internal/http/handlers/solana_supported_tokens.go 2
-internal/http/handlers/stripe_engine_authentication.go 5
 internal/http/handlers/stripe_method_setup.go 3
 internal/http/handlers/subscription_lifecycle.go 11
 internal/http/handlers/update_subscription_payment_method.go 19

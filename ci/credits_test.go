@@ -66,7 +66,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	requestID := "job-" + uuid.NewString()
 	deadline := time.Now().Add(time.Hour)
 	verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
-		RequestID: requestID, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypePayer,
+		RequestID: requestID, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer,
 		Currency: "USD", EstimatedAmount: 300_000, ExpiresAt: &deadline,
 	}})
 	require.NoError(t, err)

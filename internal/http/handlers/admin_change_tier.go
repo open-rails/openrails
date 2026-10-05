@@ -172,8 +172,8 @@ func logAdminTierChange(
 		fields["action"] = resp.Action
 		fields["rail"] = resp.Payment.Rail
 		fields["status"] = resp.Status
-		if resp.OperationID != "" {
-			fields["operation_id"] = resp.OperationID
+		if !resp.OperationID.IsZero() {
+			fields["operation_id"] = resp.OperationID.String()
 		}
 	}
 	if err != nil {

@@ -70,7 +70,7 @@ func (s *CheckoutAttemptService) acceptedOperationSessionResponse(ctx context.Co
 		return nil, true, fmt.Errorf("unrecognized sale operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
-	response.Operation = &billing.PaymentOperation{ID: operation.ID, Status: operation.Status}
+	response.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(operation.ID), Status: operation.Status}
 	response.NextAction = nil
 	if operation.Status == intents.StatusFailedTerminal {
 		response.Failure = operationFailure(operation)

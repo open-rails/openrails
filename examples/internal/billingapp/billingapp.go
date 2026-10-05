@@ -110,7 +110,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	expires := time.Now().Add(time.Hour)
 	job := in.Run + ":job"
 	admitted, err := client.Admit(ctx, []billing.AdmitParams{{
-		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypePayer, Currency: in.Currency,
+		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypeCustomer, Currency: in.Currency,
 		EstimatedAmount: 10_000, ExpiresAt: &expires, RequestID: job, Source: "billingapp",
 	}})
 	if err != nil {
@@ -125,7 +125,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.Captured = receipt.Amount
 	denied, err := client.Admit(ctx, []billing.AdmitParams{{
-		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypePayer, Currency: in.Currency,
+		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypeCustomer, Currency: in.Currency,
 		EstimatedAmount: 10_000_000, ExpiresAt: &expires, RequestID: in.Run + ":too-large", Source: "billingapp",
 	}})
 	if err != nil {

@@ -41,7 +41,7 @@ type Deps struct {
 	// CustomerFor maps an AuthKit caller to the customer who pays (a canonical
 	// UUID; "" for none). Default: a user pays for themselves, so the customer
 	// is the AuthKit user ID.
-	CustomerFor func(ctx context.Context, caller billingauth.Identity) (customerID string, err error)
+	CustomerFor func(ctx context.Context, caller billingauth.Identity) (billing.CustomerID, error)
 	// AuthorityFor names the AuthKit group and permission that authorize a
 	// staff operation. Required, with AuthKit, for the staff and machine route
 	// groups: only the host knows which group holds its billing staff.

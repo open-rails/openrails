@@ -608,9 +608,9 @@ func (s *RepriceService) emitPlanChangeNotification(ctx context.Context, sub *mo
 		EventType:  models.NotificationSubscriptionPlanChangeScheduled,
 		Data: billing.NotificationData{
 			SubscriptionID: billing.SubscriptionID(sub.ID),
-			FromPriceID:    (billing.PriceID(from.ID)).String(),
-			ToPriceID:      (billing.PriceID(to.ID)).String(),
-			ToProductID:    (billing.ProductID(toProduct.ID)).String(),
+			FromPriceID:    billing.PriceID(from.ID),
+			ToPriceID:      billing.PriceID(to.ID),
+			ToProductID:    billing.ProductID(toProduct.ID),
 			ToProductName:  toProduct.DisplayName,
 			OldAmount:      &from.Amount,
 			NewAmount:      &to.Amount,

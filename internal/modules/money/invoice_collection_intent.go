@@ -714,7 +714,7 @@ func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail st
 func queueInvoiceCollectionOutcome(ctx context.Context, database *db.DB, invoice *models.Invoice, action collection.Action, failureCode string, now time.Time) error {
 	amountDue := invoice.AmountDue
 	data := billing.NotificationData{
-		InvoiceID: invoice.ID, Currency: invoice.Currency, AmountDue: &amountDue,
+		InvoiceID: billing.InvoiceID(invoice.ID), Currency: invoice.Currency, AmountDue: &amountDue,
 		FailureCode: failureCode, DeclineOutcome: action.Decline.Action.String(),
 	}
 	eventType := models.NotificationPaymentMethodFailed

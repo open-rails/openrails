@@ -6,12 +6,12 @@ import "time"
 // processing, requires_action or blocked; NextAction names the customer's
 // step when it is requires_action.
 type TierChange struct {
-	Object         string                         `json:"object"`                    // "tier_change"
-	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
-	Mode           string                         `json:"mode"`                      // "tier_change"
-	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	Effective      string                         `json:"effective,omitempty"`       // now (upgrade) | period_end (downgrade)
-	PriceID        string                         `json:"price_id"`                  // Target price ID
+	Object         string                         `json:"object"`              // "tier_change"
+	Status         string                         `json:"status"`              // succeeded, processing, requires_action, blocked
+	Mode           string                         `json:"mode"`                // "tier_change"
+	Action         string                         `json:"action,omitempty"`    // upgrade, downgrade
+	Effective      string                         `json:"effective,omitempty"` // now (upgrade) | period_end (downgrade)
+	PriceID        PriceID                        `json:"price_id"`
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutAttemptPaymentResponse `json:"payment"`                   // Rail info
 	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
@@ -32,7 +32,7 @@ type TierChange struct {
 	// outcome is unresolved, and a "requires_action" answer names the payment
 	// the customer must authenticate (GET /v1/me/payment-operations/{id}/
 	// authentication); the same Idempotency-Key replays the stored result.
-	OperationID string `json:"operation_id,omitempty"`
+	OperationID PaymentOperationID `json:"operation_id,omitzero"`
 }
 
 // Tier-change refusals carry these StatusError.Code values.
@@ -78,7 +78,7 @@ const (
 type TierChangePreview struct {
 	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
-	PriceID          string     `json:"price_id"`
+	PriceID          PriceID    `json:"price_id"`
 	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
 	AmountDueNow     int64      `json:"amount_due_now,string"`     // native units charged immediately (0 for downgrade)

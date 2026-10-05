@@ -38,7 +38,7 @@ const (
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
 	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over entitlements
 	FamBalance        Family = "balance"         // cumulative sums over ledger_transfers
-	FamDepletion      Family = "depletion"       // per-payer balance vs trailing-7d burn
+	FamDepletion      Family = "depletion"       // per-customer balance vs trailing-7d burn
 	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks (#786)
 	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets (#786)
 	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at, #1116)
@@ -137,7 +137,7 @@ var Dimensions = []Dimension{
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
-	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
+	{Name: "customer", Description: "the customer id (usage and admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
@@ -253,7 +253,7 @@ var families = map[Family]familySpec{
 		DimExprs: map[string]string{
 			"currency":   `g.currency`,
 			"product_id": `COALESCE('prod_' || g.product_id::text, '')`,
-			"payer":      `g.customer_id::text`,
+			"customer":   `g.customer_id::text`,
 		},
 		BaseWhere: `g.kind = 'credit' AND g.event = 'grant' AND g.source_type = 'purchase'`,
 	},
@@ -263,7 +263,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `ue.occurred_at`,
 		DimExprs: map[string]string{
 			"currency":  `ue.currency`,
-			"payer":     `ue.customer_id::text`,
+			"customer":  `ue.customer_id::text`,
 			"sku":       `COALESCE(ue.resource, '')`,
 			"rate_card": `ue.event_type`,
 		},
@@ -282,7 +282,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `ad.hour_at`,
 		DimExprs: map[string]string{
 			"denial_reason": `ad.denial_reason`,
-			"payer":         `ad.customer_id::text`,
+			"customer":      `ad.customer_id::text`,
 		},
 	},
 	FamSubsSnapshot: {
@@ -482,7 +482,7 @@ var (
 // units of the row's currency (the registry scale, not always millionths).
 const UnitMoney = "money"
 
-// depletionRiskDays: a payer is at depletion risk when their prepaid balance
+// depletionRiskDays: a customer is at depletion risk when their prepaid balance
 // covers <= this many days of their trailing-7d average burn.
 const depletionRiskDays = 7
 
@@ -719,10 +719,10 @@ var Measures = []Measure{
 		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
 		Formula:     "SUM(grant lot amounts) over purchased credit grants",
 		Expr:        `COALESCE(SUM(g.amount), 0)::bigint`,
-		Dims:        []string{"currency", "product_id", "payer"}},
+		Dims:        []string{"currency", "product_id", "customer"}},
 	{Name: "credit_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COUNT(*)`,
-		Dims: []string{"currency", "product_id", "payer"}},
+		Dims: []string{"currency", "product_id", "customer"}},
 	{Name: "repeat_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COALESCE(SUM(CASE WHEN EXISTS (
 			SELECT 1 FROM billing.grants g2
@@ -730,7 +730,7 @@ var Measures = []Measure{
 			  AND g2.kind = 'credit' AND g2.event = 'grant' AND g2.source_type = 'purchase'
 			  AND g2.created_at < g.created_at
 		) THEN 1 ELSE 0 END), 0)::bigint`,
-		Dims: []string{"currency", "product_id", "payer"}},
+		Dims: []string{"currency", "product_id", "customer"}},
 	{Name: "repeat_topup_rate", Class: ClassRatio, Unit: "ratio", Num: "repeat_topups", Den: "credit_topups",
 		Description: "share of credit purchases in the bucket made by customers with an earlier credit purchase",
 		Formula:     "repeat top-ups / all top-ups",
@@ -739,14 +739,14 @@ var Measures = []Measure{
 		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold",
 		Formula:     "SUM(amount) of usage events",
 		Expr:        `COALESCE(SUM(ue.amount), 0)::bigint`,
-		Dims:        []string{"currency", "payer", "sku", "rate_card"}},
+		Dims:        []string{"currency", "customer", "sku", "rate_card"}},
 	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count",
 		Description: "count of metered usage events (raw volume; per-dimension token counts live host-side)",
 		Formula:     "COUNT(usage events)",
 		Expr:        `COUNT(*)`,
-		Dims:        []string{"currency", "payer", "sku", "rate_card"}},
-	{Name: "active_payers", Class: ClassDistinct, Family: FamUsage, Unit: "count",
-		Description: "distinct payers with any usage in the bucket (the API platform's WAU/MAU)",
+		Dims:        []string{"currency", "customer", "sku", "rate_card"}},
+	{Name: "active_customers", Class: ClassDistinct, Family: FamUsage, Unit: "count",
+		Description: "distinct customers with any usage in the bucket (the API platform's WAU/MAU)",
 		Formula:     "COUNT(DISTINCT customers) over usage events",
 		Expr:        `COUNT(DISTINCT ue.customer_id)`,
 		Dims:        []string{"currency", "sku", "rate_card"}},
@@ -758,7 +758,7 @@ var Measures = []Measure{
 		Description: "admission denials (hourly aggregates flushed from the Redis hot path; current hour may lag one flush cycle)",
 		Formula:     "SUM(hourly denial counters)",
 		Expr:        `COALESCE(SUM(ad.denials), 0)::bigint`,
-		Dims:        []string{"denial_reason", "payer"}},
+		Dims:        []string{"denial_reason", "customer"}},
 	// --- snapshots ------------------------------------------------------------------
 	{Name: "subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
 		Description: "subscriptions existing at t (interval reconstruction); filter/group by status for active/past_due/pending views",
@@ -794,9 +794,9 @@ var Measures = []Measure{
 			CASE WHEN da.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END
 			- CASE WHEN ca.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
-	{Name: "payers_at_depletion_risk", Class: ClassSnapshot, Family: FamDepletion, Unit: "count",
-		Description: "payers whose prepaid balance at t covers <= 7 days of their trailing-7d burn (in any currency)",
-		Formula:     "COUNT(payers with balance / (7d burn / 7) <= 7 days)",
+	{Name: "customers_at_depletion_risk", Class: ClassSnapshot, Family: FamDepletion, Unit: "count",
+		Description: "customers whose prepaid balance at t covers <= 7 days of their trailing-7d burn (in any currency)",
+		Formula:     "COUNT(customers with balance / (7d burn / 7) <= 7 days)",
 		Dims:        []string{}},
 	// --- webhook health (#786) --------------------------------------------------------
 	{Name: "webhook_silence_age_seconds", Class: ClassSnapshot, Family: FamWebhookHealth, Unit: "seconds",

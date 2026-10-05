@@ -33,7 +33,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		if p.Renewal.CustomerID != sub.CustomerID || p.Renewal.SubscriptionID != sub.ID {
 			return nil, errors.New("engine recovery operation scope mismatch")
 		}
-		out.Operation = &billing.PaymentOperation{ID: current.ID, Status: current.Status}
+		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(current.ID), Status: current.Status}
 		out.BlockedReason = "payment_in_progress"
 		if intents.EvidenceString(current, "stripe_payment_intent_id") != "" {
 			out.BlockedReason = "authentication_required"
@@ -65,7 +65,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	}
 	if latest.Status != intents.StatusFailedTerminal {
 		out.BlockedReason = "payment_in_progress"
-		out.Operation = &billing.PaymentOperation{ID: latest.ID, Status: latest.Status}
+		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(latest.ID), Status: latest.Status}
 		return out, nil
 	}
 	if err := intents.ValidateSubscriptionCollectionTerminal(latest); err != nil {

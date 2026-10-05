@@ -35,8 +35,8 @@ func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permissio
 	if !HasPermission(principal.Permissions, permission) {
 		return Principal{}, Refusal(billing.CodePermissionRequired)
 	}
-	mid, err := billing.ParseMerchantID(principal.MerchantID)
-	if err != nil {
+	mid := principal.MerchantID
+	if mid.IsZero() {
 		return Principal{}, Refusal(billing.CodeDelegatedPrincipalInvalid)
 	}
 	return Principal{

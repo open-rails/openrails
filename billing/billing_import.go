@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // DeclaredBilling is one merchant's declared billing facts: what a host knows
@@ -44,17 +42,17 @@ type DeclaredCustomer struct {
 // PSPRef names the PSP a declared row belongs to: the psps row id, or the
 // merchant's manifest PSP key. Exactly one form is set.
 type PSPRef struct {
-	ID  *uuid.UUID `json:"id,omitempty"`
-	Key string     `json:"key,omitempty"`
+	ID  *PSPID `json:"id,omitempty"`
+	Key string `json:"key,omitempty"`
 }
 
 // IsZero reports whether the ref names nothing.
 func (r PSPRef) IsZero() bool {
-	return (r.ID == nil || *r.ID == uuid.Nil) && strings.TrimSpace(r.Key) == ""
+	return (r.ID == nil || r.ID.IsZero()) && strings.TrimSpace(r.Key) == ""
 }
 
 func (r PSPRef) String() string {
-	if r.ID != nil && *r.ID != uuid.Nil {
+	if r.ID != nil && !r.ID.IsZero() {
 		return r.ID.String()
 	}
 	return strings.TrimSpace(r.Key)

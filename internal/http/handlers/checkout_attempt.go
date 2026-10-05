@@ -25,7 +25,7 @@ func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.DelegatedPrin
 	if !ok {
 		return billingauth.DelegatedPrincipal{}
 	}
-	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: principal.Subject, Invoker: principal.Invoker}
+	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: billing.MerchantID(principal.MerchantID), SubjectID: principal.Subject, Invoker: principal.Invoker}
 }
 
 // checkoutAttemptErrorContext carries per-request context threaded into
