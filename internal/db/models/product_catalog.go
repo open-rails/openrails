@@ -82,7 +82,7 @@ type Price struct {
 	// grants, in HOURS (supports sub-day windows, e.g. a 12h rental). nil =
 	// indefinite/durable (perpetual ownership); a positive value = a finite window
 	// (rental, one-off, or the billing period when AutoRenew). Drives BOTH
-	// product_access_grants.ends_at and the derived entitlement end_at.
+	// product_access_grants.ends_at and the derived entitlement ends_at.
 	AccessDurationHours *int `json:"access_duration_hours"`
 
 	// AutoRenew (#622) reports whether the price charges again and extends the

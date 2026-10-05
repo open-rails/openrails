@@ -17,8 +17,8 @@ SELECT candidate.entitlement::text AS entitlement, EXISTS (
  SELECT 1 FROM billing.entitlements e
  WHERE e.merchant_id=$1::uuid
    AND e.customer_id=$2::uuid AND e.entitlement=candidate.entitlement
-   AND e.start_at<=$3::timestamptz
-   AND (e.end_at IS NULL OR e.end_at>$3::timestamptz)
+   AND e.starts_at<=$3::timestamptz
+   AND (e.ends_at IS NULL OR e.ends_at>$3::timestamptz)
    AND e.revoked_at IS NULL AND e.deleted_at IS NULL
 ) AS has_access
 FROM unnest($4::text[]) AS candidate(entitlement)
@@ -165,7 +165,7 @@ SELECT cardinality($1::text[])>0 AND NOT EXISTS (
  WHERE NOT EXISTS (
    SELECT 1 FROM billing.entitlements e
    WHERE e.merchant_id=$2::uuid AND e.customer_id=$3::uuid
-     AND e.entitlement=wanted.key AND e.end_at IS NULL AND e.start_at<=$4::timestamptz
+     AND e.entitlement=wanted.key AND e.ends_at IS NULL AND e.starts_at<=$4::timestamptz
      AND e.revoked_at IS NULL AND e.deleted_at IS NULL
  ) AND NOT ($5::boolean AND (
    EXISTS (SELECT 1 FROM billing.checkout_attempts s

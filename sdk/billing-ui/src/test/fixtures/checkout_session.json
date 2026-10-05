@@ -29,7 +29,7 @@
   "options": [
     {
       "id": "option_card",
-      "psp_id": "55555555-5555-5555-5555-555555555555",
+      "psp_id": "psp_55555555-5555-5555-5555-555555555555",
       "rail": "nmi",
       "mode": "subscription",
       "driver": "collect_js",

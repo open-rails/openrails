@@ -53,7 +53,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 					return nil, fmt.Errorf("grant period %s: %w", sub.ID, err)
 				}
 				start, end := e.Start, e.End
-				if _, err := ents.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
+				if _, err := ents.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndsAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
 					return nil, fmt.Errorf("grant period %s %s: %w", sub.ID, name, err)
 				}
 			}

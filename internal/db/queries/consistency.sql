@@ -17,8 +17,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
   AND ent.deleted_at IS NULL
   AND sub.id IS NULL
   AND NOT (ent.revoked_at IS NULL
-           AND ent.start_at <= sqlc.arg(now)::timestamptz
-           AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(now)::timestamptz))
+           AND ent.starts_at <= sqlc.arg(now)::timestamptz
+           AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(now)::timestamptz))
   AND (sqlc.narg(customer_id)::uuid IS NULL OR ent.customer_id = sqlc.narg(customer_id)::uuid);
 
 -- name: ConOrphanEntitlementPaymentSource :many

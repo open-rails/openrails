@@ -169,7 +169,7 @@ func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlemen
 	err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		gl := grants.New(gen.New(tx), tid.UUID())
 		gl.SetClock(w.now)
-		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.Entitlements, a.StartAt, a.EndAt)
+		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.Entitlements, a.StartsAt, a.EndsAt)
 		return err
 	})
 	return granted, err
@@ -232,8 +232,8 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 				SubscriptionID: res.SubscriptionID,
 				CustomerID:     a.CustomerID,
 				Entitlements:   names,
-				StartAt:        start,
-				EndAt:          a.PeriodEndsAt,
+				StartsAt:       start,
+				EndsAt:         a.PeriodEndsAt,
 			})
 			if err != nil {
 				return res, err

@@ -1146,8 +1146,8 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				SubscriptionID: sub.ID,
 				CustomerID:     sub.CustomerID,
 				Entitlements:   sub.EntitlementNames,
-				StartAt:        start,
-				EndAt:          sub.CurrentPeriodEndsAt,
+				StartsAt:       start,
+				EndsAt:         sub.CurrentPeriodEndsAt,
 			}
 			f.RecommendedAction += "; the charge's period is current, so missing subscription entitlements are granted too"
 		}

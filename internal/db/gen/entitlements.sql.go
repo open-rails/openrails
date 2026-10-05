@@ -25,7 +25,7 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 
 const endActiveEntitlementsBySubscription = `-- name: EndActiveEntitlementsBySubscription :exec
 UPDATE billing.entitlements ent SET
-    end_at = $2::timestamptz,
+    ends_at = $2::timestamptz,
     updated_at = $3::timestamptz,
     revoked_at = CASE WHEN $4::boolean THEN $3::timestamptz ELSE ent.revoked_at END,
     revoke_reason = CASE WHEN $4::boolean THEN $5 ELSE ent.revoke_reason END
@@ -33,13 +33,13 @@ WHERE ent.merchant_id = $6::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at < $2::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
+  AND ent.starts_at < $2::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $2::timestamptz)
 `
 
 type EndActiveEntitlementsBySubscriptionParams struct {
 	SourceID     uuid.UUID
-	EndAt        time.Time
+	EndsAt       time.Time
 	Now          time.Time
 	SetRevoked   bool
 	RevokeReason *string
@@ -48,13 +48,13 @@ type EndActiveEntitlementsBySubscriptionParams struct {
 
 // #691 closure write: bound a subscription's live windows to a PROVEN end
 // (user cancel at period end, terminal resolution). Advance-written on disk —
-// a dead system cannot extend a canceled sub. start_at < end_at keeps the
+// a dead system cannot extend a canceled sub. starts_at < ends_at keeps the
 // generated period range valid; future-start windows are handled by
 // SoftDeleteFutureEntitlementsBySubscription.
 func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg EndActiveEntitlementsBySubscriptionParams) error {
 	_, err := q.db.Exec(ctx, endActiveEntitlementsBySubscription,
 		arg.SourceID,
-		arg.EndAt,
+		arg.EndsAt,
 		arg.Now,
 		arg.SetRevoked,
 		arg.RevokeReason,
@@ -64,16 +64,16 @@ func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg E
 }
 
 const entitlementCoverage = `-- name: EntitlementCoverage :one
-SELECT COALESCE(bool_or(ent.end_at IS NULL), false)::boolean AS indefinite,
-       COALESCE(max(ent.end_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
+SELECT COALESCE(bool_or(ent.ends_at IS NULL), false)::boolean AS indefinite,
+       COALESCE(max(ent.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
 FROM billing.entitlements ent
 WHERE ent.merchant_id = $1::uuid
   AND ent.customer_id = $2::uuid
   AND ent.entitlement = ANY($3::text[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= $4::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
+  AND ent.starts_at <= $4::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $4::timestamptz)
 `
 
 type EntitlementCoverageParams struct {
@@ -109,8 +109,8 @@ SELECT EXISTS (
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
-      AND ent.start_at <= $4::timestamptz
-      AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
+      AND ent.starts_at <= $4::timestamptz
+      AND (ent.ends_at IS NULL OR ent.ends_at > $4::timestamptz)
       AND ent.revoked_at IS NULL
       AND ent.deleted_at IS NULL
 )
@@ -173,8 +173,8 @@ SELECT EXISTS (
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
-      AND ent.revoked_at IS NULL AND ent.end_at IS NULL
-      AND ent.start_at <= $4::timestamptz
+      AND ent.revoked_at IS NULL AND ent.ends_at IS NULL
+      AND ent.starts_at <= $4::timestamptz
       AND ent.deleted_at IS NULL
 )
 `
@@ -199,7 +199,7 @@ func (q *Queries) EntitlementHasActiveIndefinite(ctx context.Context, arg Entitl
 }
 
 const getEntitlementByGrant = `-- name: GetEntitlementByGrant :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
 WHERE merchant_id = $1::uuid
   AND grant_id = $2::uuid
   AND entitlement = $3::text
@@ -222,8 +222,8 @@ func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementB
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.SourceID,
 		&i.SourceType,
 		&i.RevokedAt,
@@ -241,7 +241,7 @@ func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementB
 }
 
 const getEntitlementByID = `-- name: GetEntitlementByID :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1
@@ -258,8 +258,8 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByID
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.SourceID,
 		&i.SourceType,
 		&i.RevokedAt,
@@ -277,7 +277,7 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByID
 }
 
 const getEntitlementByIDForUpdate = `-- name: GetEntitlementByIDForUpdate :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id=$1::uuid AND ent.id=$2::uuid
   AND ent.deleted_at IS NULL
 FOR UPDATE
@@ -295,8 +295,8 @@ func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitl
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.SourceID,
 		&i.SourceType,
 		&i.RevokedAt,
@@ -314,13 +314,13 @@ func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitl
 }
 
 const getLatestEntitlementBySource = `-- name: GetLatestEntitlementBySource :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND entitlement = $3::text
   AND source_type = $4::text AND source_id = $5::uuid
   AND deleted_at IS NULL
-ORDER BY (revoked_at IS NULL) DESC, end_at DESC NULLS FIRST, start_at ASC, id ASC
+ORDER BY (revoked_at IS NULL) DESC, ends_at DESC NULLS FIRST, starts_at ASC, id ASC
 LIMIT 1
 `
 
@@ -344,8 +344,8 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.SourceID,
 		&i.SourceType,
 		&i.RevokedAt,
@@ -363,14 +363,14 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 }
 
 const getTimelineCoveringWindow = `-- name: GetTimelineCoveringWindow :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at < $4::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at >= $4::timestamptz)
-ORDER BY ent.end_at DESC NULLS LAST
+  AND ent.starts_at < $4::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at >= $4::timestamptz)
+ORDER BY ent.ends_at DESC NULLS LAST
 LIMIT 1
 `
 
@@ -381,7 +381,7 @@ type GetTimelineCoveringWindowParams struct {
 	At          time.Time
 }
 
-// The window covering instant `at` (for already-covered EndAt requests).
+// The window covering instant `at` (for already-covered EndsAt requests).
 func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getTimelineCoveringWindow,
 		arg.CustomerID,
@@ -393,8 +393,8 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.SourceID,
 		&i.SourceType,
 		&i.RevokedAt,
@@ -412,13 +412,13 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 }
 
 const getTimelineIndefinite = `-- name: GetTimelineIndefinite :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NULL
-ORDER BY ent.start_at ASC
+  AND ent.ends_at IS NULL
+ORDER BY ent.starts_at ASC
 LIMIT 1
 `
 
@@ -434,8 +434,8 @@ func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineInde
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.SourceID,
 		&i.SourceType,
 		&i.RevokedAt,
@@ -453,13 +453,13 @@ func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineInde
 }
 
 const getTimelineTailEnd = `-- name: GetTimelineTailEnd :one
-SELECT ent.end_at FROM billing.entitlements ent
+SELECT ent.ends_at FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL
-ORDER BY ent.end_at DESC
+  AND ent.ends_at IS NOT NULL
+ORDER BY ent.ends_at DESC
 LIMIT 1
 `
 
@@ -472,16 +472,16 @@ type GetTimelineTailEndParams struct {
 // The latest finite end on the timeline (the tail a new window starts after).
 func (q *Queries) GetTimelineTailEnd(ctx context.Context, arg GetTimelineTailEndParams) (*time.Time, error) {
 	row := q.db.QueryRow(ctx, getTimelineTailEnd, arg.CustomerID, arg.Entitlement, arg.MerchantID)
-	var end_at *time.Time
-	err := row.Scan(&end_at)
-	return end_at, err
+	var ends_at *time.Time
+	err := row.Scan(&ends_at)
+	return ends_at, err
 }
 
 const listActiveEntitlementNames = `-- name: ListActiveEntitlementNames :many
 SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.customer_id = $1
-  AND ent.start_at <= $3::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
+  AND ent.starts_at <= $3::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $3::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
 `
@@ -517,8 +517,8 @@ const listActiveEntitlementNamesMerchant = `-- name: ListActiveEntitlementNamesM
 SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
-  AND ent.start_at <= $3::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
+  AND ent.starts_at <= $3::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $3::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
 `
@@ -550,14 +550,14 @@ func (q *Queries) ListActiveEntitlementNamesMerchant(ctx context.Context, arg Li
 }
 
 const listActiveEntitlementRecordsByCustomerIDs = `-- name: ListActiveEntitlementRecordsByCustomerIDs :many
-SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id, ent.destructive_run_class FROM billing.entitlements ent
+SELECT ent.id, ent.entitlement, ent.starts_at, ent.ends_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id, ent.destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = ANY($2::uuid[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= $3::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
-ORDER BY ent.customer_id, ent.start_at ASC
+  AND ent.starts_at <= $3::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $3::timestamptz)
+ORDER BY ent.customer_id, ent.starts_at ASC
 `
 
 type ListActiveEntitlementRecordsByCustomerIDsParams struct {
@@ -583,8 +583,8 @@ func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context,
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
-			&i.StartAt,
-			&i.EndAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.SourceID,
 			&i.SourceType,
 			&i.RevokedAt,
@@ -609,14 +609,14 @@ func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context,
 }
 
 const listActiveEntitlementRecordsMerchant = `-- name: ListActiveEntitlementRecordsMerchant :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= $3::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
-ORDER BY ent.start_at ASC
+  AND ent.starts_at <= $3::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $3::timestamptz)
+ORDER BY ent.starts_at ASC
 `
 
 type ListActiveEntitlementRecordsMerchantParams struct {
@@ -637,8 +637,8 @@ func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg 
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
-			&i.StartAt,
-			&i.EndAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.SourceID,
 			&i.SourceType,
 			&i.RevokedAt,
@@ -665,8 +665,8 @@ func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg 
 const listCustomersWithEntitlement = `-- name: ListCustomersWithEntitlement :many
 SELECT DISTINCT ent.customer_id FROM billing.entitlements ent
 WHERE ent.merchant_id = $1::uuid AND ent.entitlement = $2::text
-  AND ent.start_at <= $3::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
+  AND ent.starts_at <= $3::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $3::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.customer_id > $4::uuid
@@ -747,10 +747,10 @@ func (q *Queries) ListDistinctEntitlementNamesBySource(ctx context.Context, arg 
 }
 
 const listEntitlementsByCustomer = `-- name: ListEntitlementsByCustomer :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
-ORDER BY ent.start_at DESC
+ORDER BY ent.starts_at DESC
 `
 
 type ListEntitlementsByCustomerParams struct {
@@ -770,8 +770,8 @@ func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitl
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
-			&i.StartAt,
-			&i.EndAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.SourceID,
 			&i.SourceType,
 			&i.RevokedAt,
@@ -796,22 +796,22 @@ func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitl
 }
 
 const listExtendableSubscriptionEntitlements = `-- name: ListExtendableSubscriptionEntitlements :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
+SELECT id, entitlement, starts_at, ends_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL AND ent.end_at < $3::timestamptz
+  AND ent.ends_at IS NOT NULL AND ent.ends_at < $3::timestamptz
 `
 
 type ListExtendableSubscriptionEntitlementsParams struct {
 	SourceID   uuid.UUID
 	MerchantID uuid.UUID
-	EndAt      time.Time
+	EndsAt     time.Time
 }
 
 func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, arg ListExtendableSubscriptionEntitlementsParams) ([]BillingEntitlement, error) {
-	rows, err := q.db.Query(ctx, listExtendableSubscriptionEntitlements, arg.SourceID, arg.MerchantID, arg.EndAt)
+	rows, err := q.db.Query(ctx, listExtendableSubscriptionEntitlements, arg.SourceID, arg.MerchantID, arg.EndsAt)
 	if err != nil {
 		return nil, err
 	}
@@ -822,8 +822,8 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
-			&i.StartAt,
-			&i.EndAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.SourceID,
 			&i.SourceType,
 			&i.RevokedAt,
@@ -849,7 +849,7 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 
 const materializeEntitlement = `-- name: MaterializeEntitlement :exec
 INSERT INTO billing.entitlements (
-    merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
+    merchant_id, customer_id, entitlement, starts_at, ends_at, source_type, source_id, grant_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::text,
     $4::timestamptz, $5::timestamptz,
@@ -862,8 +862,8 @@ type MaterializeEntitlementParams struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	Entitlement string
-	StartAt     time.Time
-	EndAt       *time.Time
+	StartsAt    time.Time
+	EndsAt      *time.Time
 	SourceType  string
 	SourceID    *uuid.UUID
 	GrantID     uuid.UUID
@@ -875,8 +875,8 @@ func (q *Queries) MaterializeEntitlement(ctx context.Context, arg MaterializeEnt
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Entitlement,
-		arg.StartAt,
-		arg.EndAt,
+		arg.StartsAt,
+		arg.EndsAt,
 		arg.SourceType,
 		arg.SourceID,
 		arg.GrantID,
@@ -898,8 +898,8 @@ WHERE p.merchant_id = $1
   AND ent.customer_id = $2
   AND p.tier_group = $3::text
   AND p.archived = false
-  AND ent.start_at <= $4::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
+  AND ent.starts_at <= $4::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $4::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
 ORDER BY p.tier_rank DESC, p.key ASC, ent.entitlement ASC
@@ -948,7 +948,7 @@ func (q *Queries) ResolveEffectiveTier(ctx context.Context, arg ResolveEffective
 
 const resumeEntitlementsBySubscription = `-- name: ResumeEntitlementsBySubscription :exec
 UPDATE billing.entitlements ent SET
-    end_at = NULL,
+    ends_at = NULL,
     updated_at = $2::timestamptz
 WHERE ent.merchant_id = $3::uuid AND ent.deleted_at IS NULL
   AND ent.id IN (
@@ -958,8 +958,8 @@ WHERE ent.merchant_id = $3::uuid AND ent.deleted_at IS NULL
       AND e.source_id = $1
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
-      AND e.end_at IS NOT NULL
-    ORDER BY e.customer_id, e.entitlement, e.end_at DESC
+      AND e.ends_at IS NOT NULL
+    ORDER BY e.customer_id, e.entitlement, e.ends_at DESC
 )
 `
 
@@ -970,7 +970,7 @@ type ResumeEntitlementsBySubscriptionParams struct {
 }
 
 // #691 resume: re-open the LATEST live window per (customer, entitlement) of a
-// resumed auto-renew subscription (end_at = NULL), undoing an advance-written
+// resumed auto-renew subscription (ends_at = NULL), undoing an advance-written
 // cancel closure. This also repairs the historical split-commit case after the
 // bounded window has elapsed. Older bounded windows remain historical. Other
 // sources may overlap and cannot prevent this source from resuming.
@@ -981,7 +981,7 @@ func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg Resu
 
 const revokeActiveOneOffEntitlements = `-- name: RevokeActiveOneOffEntitlements :exec
 UPDATE billing.entitlements ent SET
-    end_at = $2::timestamptz,
+    ends_at = $2::timestamptz,
     revoked_at = $3::timestamptz,
     revoke_reason = $4,
     updated_at = $3::timestamptz
@@ -989,13 +989,13 @@ WHERE ent.merchant_id = $5::uuid AND ent.source_type = 'purchase'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at < $2::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
+  AND ent.starts_at < $2::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $2::timestamptz)
 `
 
 type RevokeActiveOneOffEntitlementsParams struct {
 	SourceID     uuid.UUID
-	EndAt        time.Time
+	EndsAt       time.Time
 	Now          time.Time
 	RevokeReason *string
 	MerchantID   uuid.UUID
@@ -1004,7 +1004,7 @@ type RevokeActiveOneOffEntitlementsParams struct {
 func (q *Queries) RevokeActiveOneOffEntitlements(ctx context.Context, arg RevokeActiveOneOffEntitlementsParams) error {
 	_, err := q.db.Exec(ctx, revokeActiveOneOffEntitlements,
 		arg.SourceID,
-		arg.EndAt,
+		arg.EndsAt,
 		arg.Now,
 		arg.RevokeReason,
 		arg.MerchantID,
@@ -1021,8 +1021,8 @@ WHERE ent.merchant_id = $5::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= $3::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
+  AND ent.starts_at <= $3::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > $3::timestamptz)
   AND ($6::text IS NULL OR ent.source_type = $6::text)
   AND ($7::uuid IS NULL OR ent.source_id = $7::uuid)
 `
@@ -1084,15 +1084,15 @@ func (q *Queries) RevokeEntitlementByID(ctx context.Context, arg RevokeEntitleme
 
 const shiftEntitlementTimelineWindows = `-- name: ShiftEntitlementTimelineWindows :exec
 UPDATE billing.entitlements ent SET
-    start_at = ent.start_at + ($3::bigint * interval '1 second'),
-    end_at = CASE WHEN ent.end_at IS NULL THEN NULL
-             ELSE ent.end_at + ($3::bigint * interval '1 second') END,
+    starts_at = ent.starts_at + ($3::bigint * interval '1 second'),
+    ends_at = CASE WHEN ent.ends_at IS NULL THEN NULL
+             ELSE ent.ends_at + ($3::bigint * interval '1 second') END,
     updated_at = $4::timestamptz
 WHERE ent.merchant_id = $5::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= $6::timestamptz
+  AND ent.starts_at >= $6::timestamptz
   AND NOT (ent.id = ANY($7::uuid[]))
 `
 
@@ -1163,14 +1163,14 @@ WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= $4::timestamptz
+  AND ent.starts_at >= $4::timestamptz
 `
 
 type SoftDeleteFutureEntitlementsBySubscriptionParams struct {
 	SourceID   uuid.UUID
 	Now        time.Time
 	MerchantID uuid.UUID
-	EndAt      time.Time
+	EndsAt     time.Time
 }
 
 // #691 closure companion: scheduled windows starting at/after the proven end
@@ -1180,7 +1180,7 @@ func (q *Queries) SoftDeleteFutureEntitlementsBySubscription(ctx context.Context
 		arg.SourceID,
 		arg.Now,
 		arg.MerchantID,
-		arg.EndAt,
+		arg.EndsAt,
 	)
 	return err
 }
@@ -1194,7 +1194,7 @@ WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'purchase'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= $4::timestamptz
+  AND ent.starts_at >= $4::timestamptz
     RETURNING ent.grant_id
 )
 INSERT INTO billing.grants (
@@ -1216,7 +1216,7 @@ type SoftDeleteFutureOneOffEntitlementsParams struct {
 	SourceID   uuid.UUID
 	Now        time.Time
 	MerchantID uuid.UUID
-	EndAt      time.Time
+	EndsAt     time.Time
 }
 
 func (q *Queries) SoftDeleteFutureOneOffEntitlements(ctx context.Context, arg SoftDeleteFutureOneOffEntitlementsParams) error {
@@ -1224,7 +1224,7 @@ func (q *Queries) SoftDeleteFutureOneOffEntitlements(ctx context.Context, arg So
 		arg.SourceID,
 		arg.Now,
 		arg.MerchantID,
-		arg.EndAt,
+		arg.EndsAt,
 	)
 	return err
 }
@@ -1238,7 +1238,7 @@ WHERE ent.merchant_id = $4::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at > $3::timestamptz
+  AND ent.starts_at > $3::timestamptz
   AND ($5::text IS NULL OR ent.source_type = $5::text)
   AND ($6::uuid IS NULL OR ent.source_id = $6::uuid)
     RETURNING ent.grant_id
@@ -1289,7 +1289,7 @@ SELECT EXISTS (
       AND e.entitlement = $3::text
       AND e.source_type = 'subscription'
       AND e.source_id = $4::uuid
-      AND e.end_at IS NULL
+      AND e.ends_at IS NULL
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
 ) AS standing
@@ -1302,7 +1302,7 @@ type StandingSubscriptionEntitlementExistsParams struct {
 	SourceID    uuid.UUID
 }
 
-// #691: is there a live STANDING (end_at IS NULL) window for this subscription
+// #691: is there a live STANDING (ends_at IS NULL) window for this subscription
 // source? One standing window satisfies every per-period grant of the sub —
 // the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
 func (q *Queries) StandingSubscriptionEntitlementExists(ctx context.Context, arg StandingSubscriptionEntitlementExistsParams) (bool, error) {
@@ -1324,7 +1324,7 @@ SELECT EXISTS (
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
       AND ent.deleted_at IS NULL
-      AND ent.end_at IS NULL
+      AND ent.ends_at IS NULL
 )
 `
 
@@ -1343,12 +1343,12 @@ func (q *Queries) TimelineHasIndefinite(ctx context.Context, arg TimelineHasInde
 
 const updateEntitlementEndAtIfMatch = `-- name: UpdateEntitlementEndAtIfMatch :exec
 UPDATE billing.entitlements ent SET
-    end_at = $2::timestamptz,
+    ends_at = $2::timestamptz,
     updated_at = $3::timestamptz
 WHERE ent.merchant_id = $4::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at = $5::timestamptz
+  AND ent.ends_at = $5::timestamptz
 `
 
 type UpdateEntitlementEndAtIfMatchParams struct {

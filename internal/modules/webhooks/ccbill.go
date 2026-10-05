@@ -1020,7 +1020,7 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 					UserID:      subscription.CustomerID.String(),
 					Entitlement: newEnt,
 					NotBefore:   &notBefore,
-					EndAt:       &endAt,
+					EndsAt:      &endAt,
 					SourceType:  models.EntitlementSourceSubscription,
 					SourceID:    subscription.ID,
 				}

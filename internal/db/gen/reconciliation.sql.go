@@ -387,9 +387,9 @@ func (q *Queries) ClaimReconciliationFindingNotification(ctx context.Context, ar
 
 const countErrorEpisodeTotals = `-- name: CountErrorEpisodeTotals :one
 WITH win AS (
-    SELECT e.entitlement, e.source_type, e.start_at,
+    SELECT e.entitlement, e.source_type, e.starts_at,
            LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                 COALESCE(e.end_at, 'infinity'::timestamptz)) AS window_end,
+                 COALESCE(e.ends_at, 'infinity'::timestamptz)) AS window_end,
            s.status AS sub_status, s.next_retry_at,
            GREATEST(s.current_period_ends_at, s.ended_at) AS paid_through,
            p.status AS payment_status,
@@ -422,7 +422,7 @@ WITH win AS (
            f.unpaid_from, f.unpaid_until
       FROM win w
       CROSS JOIN LATERAL (
-          SELECT GREATEST(w.start_at,
+          SELECT GREATEST(w.starts_at,
                      CASE WHEN w.source_type = 'subscription' THEN COALESCE(w.paid_through, '-infinity'::timestamptz)
                           WHEN w.payment_status = 'completed' THEN 'infinity'::timestamptz
                           WHEN w.payment_status = 'refunded' THEN w.refund_effective_at
@@ -456,10 +456,10 @@ WITH win AS (
     SELECT c.cov_end > now() AS open,
            GREATEST(c.cov_start, COALESCE((
                SELECT max(LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                                COALESCE(e.end_at, 'infinity'::timestamptz)))
+                                COALESCE(e.ends_at, 'infinity'::timestamptz)))
                  FROM billing.entitlements e
                 WHERE e.merchant_id = c.merchant_id AND e.customer_id = c.customer_id
-                  AND e.source_type = c.source_type AND e.source_id = c.source_id AND e.start_at <= now()),
+                  AND e.source_type = c.source_type AND e.source_id = c.source_id AND e.starts_at <= now()),
                '-infinity'::timestamptz)) AS uncovered_from,
            LEAST(c.cov_end, now()) AS uncovered_until
       FROM coverage c
@@ -1054,8 +1054,8 @@ WHERE s.merchant_id = $1::uuid
         AND expired.source_id = s.id
         AND expired.revoked_at IS NULL
         AND expired.deleted_at IS NULL
-        AND expired.end_at IS NOT NULL
-        AND expired.end_at <= $3::timestamptz
+        AND expired.ends_at IS NOT NULL
+        AND expired.ends_at <= $3::timestamptz
   )
   AND NOT EXISTS (
       SELECT 1 FROM billing.entitlements live
@@ -1064,7 +1064,7 @@ WHERE s.merchant_id = $1::uuid
         AND live.source_id = s.id
         AND live.revoked_at IS NULL
         AND live.deleted_at IS NULL
-        AND (live.end_at IS NULL OR live.end_at > $3::timestamptz)
+        AND (live.ends_at IS NULL OR live.ends_at > $3::timestamptz)
   )
 ORDER BY s.id
 LIMIT $4
@@ -1154,8 +1154,8 @@ CROSS JOIN LATERAL (
           AND e.source_type = 'subscription' AND e.source_id = s.id
           AND e.entitlement = feat
           AND e.deleted_at IS NULL
-          AND e.start_at < s.current_period_ends_at
-          AND (e.end_at IS NULL OR e.end_at > COALESCE(s.current_period_starts_at, s.started_at))
+          AND e.starts_at < s.current_period_ends_at
+          AND (e.ends_at IS NULL OR e.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
     )
 
 ) missing
@@ -1247,11 +1247,11 @@ WHERE s.merchant_id = $1::uuid
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
         AND (
-            e.end_at IS NULL
+            e.ends_at IS NULL
             OR (
-                e.end_at > $3::timestamptz
+                e.ends_at > $3::timestamptz
                 AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
-                     OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
+                     OR e.ends_at > GREATEST(s.current_period_ends_at, s.ended_at))
             )
         )
   )
@@ -1564,23 +1564,23 @@ func (q *Queries) ListPaidPendingSubscriptions(ctx context.Context, arg ListPaid
 const listRecentlyClosedLastEntitlementWindows = `-- name: ListRecentlyClosedLastEntitlementWindows :many
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.entitlement,
-       LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
+       LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
        e.source_type, e.source_id
 FROM billing.entitlements e
 WHERE e.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
   AND e.deleted_at IS NULL
-  AND (e.end_at IS NOT NULL OR e.revoked_at IS NOT NULL)
-  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > $3::timestamptz
-  AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= $4::timestamptz
+  AND (e.ends_at IS NOT NULL OR e.revoked_at IS NOT NULL)
+  AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > $3::timestamptz
+  AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= $4::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM billing.entitlements live
       WHERE live.merchant_id = e.merchant_id
         AND live.customer_id = e.customer_id
         AND live.entitlement = e.entitlement
         AND live.deleted_at IS NULL AND live.revoked_at IS NULL
-        AND live.start_at <= $4::timestamptz
-        AND (live.end_at IS NULL OR live.end_at > $4::timestamptz)
+        AND live.starts_at <= $4::timestamptz
+        AND (live.ends_at IS NULL OR live.ends_at > $4::timestamptz)
   )
   -- A tier change supersedes the replaced tier's window while the customer
   -- holds the new tier's access: that is not access ending.
@@ -1589,10 +1589,10 @@ WHERE e.merchant_id = $1::uuid
       WHERE nw.merchant_id = e.merchant_id
         AND nw.customer_id = e.customer_id
         AND nw.deleted_at IS NULL AND nw.revoked_at IS NULL
-        AND (nw.end_at IS NULL OR nw.end_at > $4::timestamptz)
+        AND (nw.ends_at IS NULL OR nw.ends_at > $4::timestamptz)
   ))
 ORDER BY e.customer_id,
-         LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC
+         LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC
 `
 
 type ListRecentlyClosedLastEntitlementWindowsParams struct {
@@ -1613,7 +1613,7 @@ type ListRecentlyClosedLastEntitlementWindowsRow struct {
 
 // #789 NOTIFY `notify.access_ended` detector: customers whose LAST entitlement
 // window closed inside (closed_after, now] — the close instant is
-// LEAST(end_at, revoked_at) (NULL = infinity; matches idx_entitlements_closed_at)
+// LEAST(ends_at, revoked_at) (NULL = infinity; matches idx_entitlements_closed_at)
 // — with NO other live window for the same (customer, entitlement). One row per
 // customer (latest close) — one email per customer, whatever ended the access
 // (dunning, reconcile-driven cancel, grant lapse). customer_id nullable:
@@ -1934,7 +1934,7 @@ func (q *Queries) ListSubscriptionVaultRefs(ctx context.Context, arg ListSubscri
 
 const listUnjustifiedEntitlementWindows = `-- name: ListUnjustifiedEntitlementWindows :many
 SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
-       e.source_type, e.source_id, e.start_at, e.end_at,
+       e.source_type, e.source_id, e.starts_at, e.ends_at,
        pay.id AS payment_id,
        pr.product_id AS payment_product_id,
        CASE
@@ -1951,8 +1951,8 @@ LEFT JOIN billing.prices pr
 WHERE e.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-  AND e.start_at <= $3::timestamptz
-  AND (e.end_at IS NULL OR e.end_at > $3::timestamptz)
+  AND e.starts_at <= $3::timestamptz
+  AND (e.ends_at IS NULL OR e.ends_at > $3::timestamptz)
   AND e.source_type IN ('subscription', 'purchase')
   -- no live un-terminated entitlement grant covering now justifies the window
   AND NOT EXISTS (
@@ -1982,7 +1982,7 @@ WHERE e.merchant_id = $1::uuid
       (e.source_type = 'subscription' AND s.id IS NULL)
       OR (e.source_type = 'purchase' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
-ORDER BY e.start_at, e.id
+ORDER BY e.starts_at, e.id
 LIMIT $4::int
 `
 
@@ -1999,8 +1999,8 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 	Entitlement      string
 	SourceType       string
 	SourceID         uuid.UUID
-	StartAt          time.Time
-	EndAt            *time.Time
+	StartsAt         time.Time
+	EndsAt           *time.Time
 	PaymentID        *uuid.UUID
 	PaymentProductID *uuid.UUID
 	Cause            string
@@ -2031,7 +2031,7 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 // re-import): (1) grant-justification by source — live windows LEFT JOIN live
 // grants on (customer, source) counting NULLs per source_type; (2)
 // window-vs-paid-through by status — live windows joined to subscriptions
-// grouped by status comparing end_at against GREATEST(current_period_ends_at,
+// grouped by status comparing ends_at against GREATEST(current_period_ends_at,
 // ended_at). This query is the union of both, restricted to proven-dead
 // sources. customer_id nullable: NULL = merchant-wide sweep.
 // or#837: oldest window first, capped. Surface-only findings, so truncation
@@ -2056,8 +2056,8 @@ func (q *Queries) ListUnjustifiedEntitlementWindows(ctx context.Context, arg Lis
 			&i.Entitlement,
 			&i.SourceType,
 			&i.SourceID,
-			&i.StartAt,
-			&i.EndAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.PaymentID,
 			&i.PaymentProductID,
 			&i.Cause,

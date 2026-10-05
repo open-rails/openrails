@@ -2952,13 +2952,13 @@ pkg openrails/billing, type Subscription struct, StartedAt time.Time `json:"star
 pkg openrails/billing, type Subscription struct, Status SubscriptionStatus `json:"status"`
 pkg openrails/billing, type Subscription struct, UpdatedAt time.Time `json:"updated_at"`
 pkg openrails/billing, type SubscriptionAccess struct
-pkg openrails/billing, type SubscriptionAccess struct, EndAt *time.Time `json:"end_at,omitempty"`
+pkg openrails/billing, type SubscriptionAccess struct, EndsAt *time.Time `json:"ends_at,omitempty"`
 pkg openrails/billing, type SubscriptionAccess struct, Entitlement string `json:"entitlement"`
 pkg openrails/billing, type SubscriptionAccess struct, Kind string `json:"kind"`
 pkg openrails/billing, type SubscriptionAccess struct, Rail string `json:"rail,omitempty"`
 pkg openrails/billing, type SubscriptionAccess struct, SourceID string `json:"source_id,omitempty"`
 pkg openrails/billing, type SubscriptionAccess struct, SourceType string `json:"source_type,omitempty"`
-pkg openrails/billing, type SubscriptionAccess struct, StartAt time.Time `json:"start_at"`
+pkg openrails/billing, type SubscriptionAccess struct, StartsAt time.Time `json:"starts_at"`
 pkg openrails/billing, type SubscriptionAccess struct, SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
 pkg openrails/billing, type SubscriptionID [16]byte
 pkg openrails/billing, type SubscriptionListParams struct

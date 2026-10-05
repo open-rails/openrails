@@ -393,13 +393,13 @@ func accessFromSubscription(sub *models.Subscription) *billing.SubscriptionAcces
 		Entitlement:    "premium",
 		Rail:           string(sub.Rail),
 		SubscriptionID: billing.SubscriptionID(sub.ID),
-		StartAt:        sub.StartedAt,
+		StartsAt:       sub.StartedAt,
 	}
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
-		grant.StartAt = *sub.CurrentPeriodStartsAt
+		grant.StartsAt = *sub.CurrentPeriodStartsAt
 	}
 	if sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero() {
-		grant.EndAt = sub.CurrentPeriodEndsAt
+		grant.EndsAt = sub.CurrentPeriodEndsAt
 	}
 	return grant
 }
@@ -438,8 +438,8 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 			Kind:        "entitlement",
 			Entitlement: ent.Entitlement,
 			SourceType:  string(ent.SourceType),
-			StartAt:     ent.StartAt,
-			EndAt:       ent.EndAt,
+			StartsAt:    ent.StartsAt,
+			EndsAt:      ent.EndsAt,
 		}
 		if ent.SourceID != nil {
 			grant.SourceID = billing.SourceRef(string(ent.SourceType), ent.SourceID.String())

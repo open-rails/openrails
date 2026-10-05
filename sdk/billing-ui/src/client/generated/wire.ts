@@ -644,8 +644,8 @@ export type SubscriptionAccess = {
   source_id?: string
   subscription_id?: string
   rail?: string
-  start_at: string
-  end_at?: string
+  starts_at: string
+  ends_at?: string
 }
 
 export type SubscriptionRetryNowResult = {

@@ -7,8 +7,8 @@ SELECT EXISTS (
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
-      AND ent.start_at <= sqlc.arg(at)::timestamptz
-      AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+      AND ent.starts_at <= sqlc.arg(at)::timestamptz
+      AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
       AND ent.revoked_at IS NULL
       AND ent.deleted_at IS NULL
 );
@@ -19,31 +19,31 @@ SELECT EXISTS (
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
-      AND ent.revoked_at IS NULL AND ent.end_at IS NULL
-      AND ent.start_at <= sqlc.arg(at)::timestamptz
+      AND ent.revoked_at IS NULL AND ent.ends_at IS NULL
+      AND ent.starts_at <= sqlc.arg(at)::timestamptz
       AND ent.deleted_at IS NULL
 );
 
 -- Coverage across a product's keys: any indefinite grant, else the latest
 -- finite end (zero time when none) among grants active at the given time.
 -- name: EntitlementCoverage :one
-SELECT COALESCE(bool_or(ent.end_at IS NULL), false)::boolean AS indefinite,
-       COALESCE(max(ent.end_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
+SELECT COALESCE(bool_or(ent.ends_at IS NULL), false)::boolean AS indefinite,
+       COALESCE(max(ent.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
 FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ent.customer_id = sqlc.arg(customer_id)::uuid
   AND ent.entitlement = ANY(sqlc.arg(entitlements)::text[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz);
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz);
 
 -- name: ListActiveEntitlementNames :many
 -- No merchant_id predicate: matches the bun-era user-keyed variant exactly.
 SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
@@ -51,8 +51,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
 SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
@@ -77,8 +77,8 @@ WHERE p.merchant_id = $1
   AND ent.customer_id = $2
   AND p.tier_group = sqlc.arg(tier_group)::text
   AND p.archived = false
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
 ORDER BY p.tier_rank DESC, p.key ASC, ent.entitlement ASC
@@ -91,8 +91,8 @@ LIMIT 1;
 -- ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
 SELECT DISTINCT ent.customer_id FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.entitlement = sqlc.arg(entitlement)::text
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.customer_id > sqlc.arg(after_id)::uuid
@@ -105,9 +105,9 @@ WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
-ORDER BY ent.start_at ASC;
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
+ORDER BY ent.starts_at ASC;
 
 -- name: ListDistinctEntitlementNamesBySource :many
 SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
@@ -119,11 +119,11 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
 -- name: EndActiveEntitlementsBySubscription :exec
 -- #691 closure write: bound a subscription's live windows to a PROVEN end
 -- (user cancel at period end, terminal resolution). Advance-written on disk —
--- a dead system cannot extend a canceled sub. start_at < end_at keeps the
+-- a dead system cannot extend a canceled sub. starts_at < ends_at keeps the
 -- generated period range valid; future-start windows are handled by
 -- SoftDeleteFutureEntitlementsBySubscription.
 UPDATE billing.entitlements ent SET
-    end_at = sqlc.arg(end_at)::timestamptz,
+    ends_at = sqlc.arg(ends_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz,
     revoked_at = CASE WHEN sqlc.arg(set_revoked)::boolean THEN sqlc.arg(now)::timestamptz ELSE ent.revoked_at END,
     revoke_reason = CASE WHEN sqlc.arg(set_revoked)::boolean THEN sqlc.narg(revoke_reason) ELSE ent.revoke_reason END
@@ -131,8 +131,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at < sqlc.arg(end_at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(end_at)::timestamptz);
+  AND ent.starts_at < sqlc.arg(ends_at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(ends_at)::timestamptz);
 
 -- name: SoftDeleteFutureEntitlementsBySubscription :exec
 -- #691 closure companion: scheduled windows starting at/after the proven end
@@ -144,7 +144,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
+  AND ent.starts_at >= sqlc.arg(ends_at)::timestamptz;
 
 -- name: ListExtendableSubscriptionEntitlements :many
 SELECT * FROM billing.entitlements ent
@@ -152,25 +152,25 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL AND ent.end_at < sqlc.arg(end_at)::timestamptz;
+  AND ent.ends_at IS NOT NULL AND ent.ends_at < sqlc.arg(ends_at)::timestamptz;
 
 -- name: UpdateEntitlementEndAtIfMatch :exec
 UPDATE billing.entitlements ent SET
-    end_at = sqlc.arg(new_end_at)::timestamptz,
+    ends_at = sqlc.arg(new_end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at = sqlc.arg(old_end_at)::timestamptz;
+  AND ent.ends_at = sqlc.arg(old_end_at)::timestamptz;
 
 -- name: ResumeEntitlementsBySubscription :exec
 -- #691 resume: re-open the LATEST live window per (customer, entitlement) of a
--- resumed auto-renew subscription (end_at = NULL), undoing an advance-written
+-- resumed auto-renew subscription (ends_at = NULL), undoing an advance-written
 -- cancel closure. This also repairs the historical split-commit case after the
 -- bounded window has elapsed. Older bounded windows remain historical. Other
 -- sources may overlap and cannot prevent this source from resuming.
 UPDATE billing.entitlements ent SET
-    end_at = NULL,
+    ends_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
   AND ent.id IN (
@@ -180,8 +180,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
       AND e.source_id = $1
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
-      AND e.end_at IS NOT NULL
-    ORDER BY e.customer_id, e.entitlement, e.end_at DESC
+      AND e.ends_at IS NOT NULL
+    ORDER BY e.customer_id, e.entitlement, e.ends_at DESC
 );
 
 -- name: SoftDeleteFutureOneOffEntitlements :exec
@@ -193,7 +193,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'purch
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= sqlc.arg(end_at)::timestamptz
+  AND ent.starts_at >= sqlc.arg(ends_at)::timestamptz
     RETURNING ent.grant_id
 )
 INSERT INTO billing.grants (
@@ -212,7 +212,7 @@ DO NOTHING;
 
 -- name: RevokeActiveOneOffEntitlements :exec
 UPDATE billing.entitlements ent SET
-    end_at = sqlc.arg(end_at)::timestamptz,
+    ends_at = sqlc.arg(ends_at)::timestamptz,
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.narg(revoke_reason),
     updated_at = sqlc.arg(now)::timestamptz
@@ -220,8 +220,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'purch
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at < sqlc.arg(end_at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(end_at)::timestamptz);
+  AND ent.starts_at < sqlc.arg(ends_at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(ends_at)::timestamptz);
 
 -- name: EntitlementExistsBySource :one
 SELECT EXISTS (
@@ -237,7 +237,7 @@ SELECT EXISTS (
 SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
-ORDER BY ent.start_at DESC;
+ORDER BY ent.starts_at DESC;
 
 -- name: GetEntitlementByID :one
 SELECT * FROM billing.entitlements ent
@@ -261,15 +261,15 @@ SELECT pg_advisory_xact_lock(sqlc.arg(key)::bigint);
 
 -- name: ShiftEntitlementTimelineWindows :exec
 UPDATE billing.entitlements ent SET
-    start_at = ent.start_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second'),
-    end_at = CASE WHEN ent.end_at IS NULL THEN NULL
-             ELSE ent.end_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second') END,
+    starts_at = ent.starts_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second'),
+    ends_at = CASE WHEN ent.ends_at IS NULL THEN NULL
+             ELSE ent.ends_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second') END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= sqlc.arg(from_at)::timestamptz
+  AND ent.starts_at >= sqlc.arg(from_at)::timestamptz
   AND NOT (ent.id = ANY(sqlc.arg(exclude_ids)::uuid[]));
 
 -- name: TimelineHasIndefinite :one
@@ -279,7 +279,7 @@ SELECT EXISTS (
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
       AND ent.deleted_at IS NULL
-      AND ent.end_at IS NULL
+      AND ent.ends_at IS NULL
 );
 
 -- name: GetTimelineIndefinite :one
@@ -288,31 +288,31 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NULL
-ORDER BY ent.start_at ASC
+  AND ent.ends_at IS NULL
+ORDER BY ent.starts_at ASC
 LIMIT 1;
 
 -- name: GetTimelineTailEnd :one
 -- The latest finite end on the timeline (the tail a new window starts after).
-SELECT ent.end_at FROM billing.entitlements ent
+SELECT ent.ends_at FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL
-ORDER BY ent.end_at DESC
+  AND ent.ends_at IS NOT NULL
+ORDER BY ent.ends_at DESC
 LIMIT 1;
 
 -- name: GetTimelineCoveringWindow :one
--- The window covering instant `at` (for already-covered EndAt requests).
+-- The window covering instant `at` (for already-covered EndsAt requests).
 SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at < sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at >= sqlc.arg(at)::timestamptz)
-ORDER BY ent.end_at DESC NULLS LAST
+  AND ent.starts_at < sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at >= sqlc.arg(at)::timestamptz)
+ORDER BY ent.ends_at DESC NULLS LAST
 LIMIT 1;
 
 -- name: SoftDeleteEntitlementByID :exec
@@ -350,8 +350,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= sqlc.arg(now)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(now)::timestamptz)
+  AND ent.starts_at <= sqlc.arg(now)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(now)::timestamptz)
   AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
   AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid);
 
@@ -366,7 +366,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at > sqlc.arg(now)::timestamptz
+  AND ent.starts_at > sqlc.arg(now)::timestamptz
   AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
   AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid)
     RETURNING ent.grant_id
@@ -396,9 +396,9 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)
   AND ent.customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
-ORDER BY ent.customer_id, ent.start_at ASC;
+  AND ent.starts_at <= sqlc.arg(at)::timestamptz
+  AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(at)::timestamptz)
+ORDER BY ent.customer_id, ent.starts_at ASC;
 
 -- name: GetEntitlementByGrant :one
 -- #511 fetch-back: the entitlement window MaterializeGrant projected for a given
@@ -412,7 +412,7 @@ ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: StandingSubscriptionEntitlementExists :one
--- #691: is there a live STANDING (end_at IS NULL) window for this subscription
+-- #691: is there a live STANDING (ends_at IS NULL) window for this subscription
 -- source? One standing window satisfies every per-period grant of the sub —
 -- the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
 SELECT EXISTS (
@@ -422,7 +422,7 @@ SELECT EXISTS (
       AND e.entitlement = sqlc.arg(entitlement)::text
       AND e.source_type = 'subscription'
       AND e.source_id = sqlc.arg(source_id)::uuid
-      AND e.end_at IS NULL
+      AND e.ends_at IS NULL
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
 ) AS standing;
@@ -430,10 +430,10 @@ SELECT EXISTS (
 -- name: MaterializeEntitlement :exec
 -- Concurrent replay of one immutable grant cannot duplicate its projection.
 INSERT INTO billing.entitlements (
-    merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
+    merchant_id, customer_id, entitlement, starts_at, ends_at, source_type, source_id, grant_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(entitlement)::text,
-    sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
+    sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
     sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.arg(grant_id)::uuid
 )
 ON CONFLICT (merchant_id, grant_id, entitlement) WHERE deleted_at IS NULL DO NOTHING;
@@ -445,7 +445,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND entitlement = sqlc.arg(entitlement)::text
   AND source_type = sqlc.arg(source_type)::text AND source_id = sqlc.arg(source_id)::uuid
   AND deleted_at IS NULL
-ORDER BY (revoked_at IS NULL) DESC, end_at DESC NULLS FIRST, start_at ASC, id ASC
+ORDER BY (revoked_at IS NULL) DESC, ends_at DESC NULLS FIRST, starts_at ASC, id ASC
 LIMIT 1;
 
 -- name: GetEntitlementByIDForUpdate :one

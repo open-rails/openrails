@@ -238,7 +238,7 @@ func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 		return
 	}
 	// #511: a manual grant is an admin-sourced ledger fact whose SourceID is
-	// the grant's own identity. Hours extends the finite timeline; EndAt fixes
+	// the grant's own identity. Hours extends the finite timeline; EndsAt fixes
 	// this grant's own end; neither is indefinite.
 	params := entitlements.PushNewEntitlementParams{UserID: customerID.String(), Entitlement: req.Entitlement, SourceType: models.EntitlementSourceAdmin, SourceID: uuidutil.NewV7()}
 	switch {
@@ -258,7 +258,7 @@ func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 			return
 		}
 		endAt := req.EndsAt.UTC()
-		params.EndAt = &endAt
+		params.EndsAt = &endAt
 	default:
 		if !permitPermanentGrant(r, gate) {
 			return
@@ -303,7 +303,7 @@ func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
 func entitlementRecord(e *models.Entitlement) billing.EntitlementRecord {
 	rec := billing.EntitlementRecord{
 		ID: billing.EntitlementID(e.ID), CustomerID: billing.CustomerID(e.CustomerID), Entitlement: e.Entitlement,
-		StartsAt: e.StartAt, EndsAt: e.EndAt, SourceType: billing.EntitlementSourceType(e.SourceType),
+		StartsAt: e.StartsAt, EndsAt: e.EndsAt, SourceType: billing.EntitlementSourceType(e.SourceType),
 		RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
 	}
 	if e.SourceID != nil {

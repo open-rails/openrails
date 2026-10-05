@@ -41,7 +41,7 @@ export function paymentMethod(overrides: Partial<Row> = {}): Row {
     id: "pm_1",
     customer_id: "22222222-2222-2222-2222-222222222222",
     rail: "nmi",
-    psp_id: "55555555-5555-5555-5555-555555555555",
+    psp_id: "psp_55555555-5555-5555-5555-555555555555",
     card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
     billing_details: null,
     health: {
@@ -71,7 +71,7 @@ export function payment(overrides: Partial<Row> = {}): Row {
     product: null,
     channel: "rail",
     rail: "nmi",
-    psp_id: "55555555-5555-5555-5555-555555555555",
+    psp_id: "psp_55555555-5555-5555-5555-555555555555",
     transaction_id: "txn_1",
     card: { brand: "visa", last4: "4242", exp_month: null, exp_year: null },
     failure: null,

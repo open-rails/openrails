@@ -386,8 +386,8 @@ type BillingDestructiveRunBeforeImage struct {
 type BillingEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
-	StartAt      time.Time
-	EndAt        *time.Time
+	StartsAt     time.Time
+	EndsAt       *time.Time
 	SourceID     uuid.UUID
 	SourceType   string
 	RevokedAt    *time.Time

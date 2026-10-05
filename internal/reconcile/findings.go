@@ -265,8 +265,8 @@ type GrantEntitlementsAction struct {
 	SubscriptionID uuid.UUID
 	CustomerID     uuid.UUID
 	Entitlements   []string
-	StartAt        time.Time
-	EndAt          *time.Time
+	StartsAt       time.Time
+	EndsAt         *time.Time
 }
 
 // stateRosterFindingTypes are the finding types whose subjects are fully

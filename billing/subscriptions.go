@@ -96,8 +96,8 @@ type SubscriptionAccess struct {
 	SourceID       string         `json:"source_id,omitempty"`
 	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
 	Rail           string         `json:"rail,omitempty"`
-	StartAt        time.Time      `json:"start_at"`
-	EndAt          *time.Time     `json:"end_at,omitempty"`
+	StartsAt       time.Time      `json:"starts_at"`
+	EndsAt         *time.Time     `json:"ends_at,omitempty"`
 }
 
 // ProductSummary names the product a subscription or payment is for. It is

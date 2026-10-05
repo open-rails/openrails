@@ -4,8 +4,8 @@ SELECT candidate.entitlement::text AS entitlement, EXISTS (
  SELECT 1 FROM billing.entitlements e
  WHERE e.merchant_id=sqlc.arg(merchant_id)::uuid
    AND e.customer_id=sqlc.arg(customer_id)::uuid AND e.entitlement=candidate.entitlement
-   AND e.start_at<=sqlc.arg(at_time)::timestamptz
-   AND (e.end_at IS NULL OR e.end_at>sqlc.arg(at_time)::timestamptz)
+   AND e.starts_at<=sqlc.arg(at_time)::timestamptz
+   AND (e.ends_at IS NULL OR e.ends_at>sqlc.arg(at_time)::timestamptz)
    AND e.revoked_at IS NULL AND e.deleted_at IS NULL
 ) AS has_access
 FROM unnest(sqlc.arg(entitlements)::text[]) AS candidate(entitlement);
@@ -49,7 +49,7 @@ SELECT cardinality(sqlc.arg(entitlements)::text[])>0 AND NOT EXISTS (
  WHERE NOT EXISTS (
    SELECT 1 FROM billing.entitlements e
    WHERE e.merchant_id=sqlc.arg(merchant_id)::uuid AND e.customer_id=sqlc.arg(customer_id)::uuid
-     AND e.entitlement=wanted.key AND e.end_at IS NULL AND e.start_at<=sqlc.arg(at_time)::timestamptz
+     AND e.entitlement=wanted.key AND e.ends_at IS NULL AND e.starts_at<=sqlc.arg(at_time)::timestamptz
      AND e.revoked_at IS NULL AND e.deleted_at IS NULL
  ) AND NOT (sqlc.arg(include_pending)::boolean AND (
    EXISTS (SELECT 1 FROM billing.checkout_attempts s

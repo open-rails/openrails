@@ -2680,8 +2680,8 @@ COMMENT ON INDEX billing.uq_grants_credit_deposit_once IS 'A deposit happens at 
 CREATE TABLE billing.entitlements (
     id uuid DEFAULT uuidv7() NOT NULL,
     entitlement text NOT NULL,
-    start_at timestamp with time zone NOT NULL,
-    end_at timestamp with time zone,
+    starts_at timestamp with time zone NOT NULL,
+    ends_at timestamp with time zone,
     source_id uuid NOT NULL,
     source_type text NOT NULL,
     revoked_at timestamp with time zone,
@@ -2696,7 +2696,7 @@ CREATE TABLE billing.entitlements (
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text]))),
     CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
-    CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at)))
+    CONSTRAINT chk_valid_time_window CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
 );
 COMMENT ON TABLE billing.entitlements IS 'Entitlement windows projected from grants and their sources. Windows may overlap; reads take their union.';
 COMMENT ON COLUMN billing.entitlements.customer_id IS 'The customer this entitlement window belongs to.';
@@ -2705,16 +2705,16 @@ COMMENT ON COLUMN billing.entitlements.customer_id IS 'The customer this entitle
 ALTER TABLE ONLY billing.entitlements
     ADD CONSTRAINT entitlements_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_entitlements_closed_at ON billing.entitlements USING btree (merchant_id, LEAST(COALESCE(end_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE ((end_at IS NOT NULL) OR (revoked_at IS NOT NULL));
-CREATE INDEX idx_entitlements_customer_active_window ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, start_at, end_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_closed_at ON billing.entitlements USING btree (merchant_id, LEAST(COALESCE(ends_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE ((ends_at IS NOT NULL) OR (revoked_at IS NOT NULL));
+CREATE INDEX idx_entitlements_customer_active_window ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_destructive_run ON billing.entitlements USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_entitlements_grace_by_subscription_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, start_at, end_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_grace_by_subscription_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, starts_at, ends_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_grant_id ON billing.entitlements USING btree (merchant_id, grant_id);
 CREATE INDEX idx_entitlements_live_by_id ON billing.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_purchase_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'purchase'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_reverse_active ON billing.entitlements USING btree (merchant_id, entitlement, customer_id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_source ON billing.entitlements USING btree (merchant_id, source_type, source_id);
-CREATE INDEX idx_entitlements_subscription_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_subscription_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, ends_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_entitlements_grant_feature ON billing.entitlements (merchant_id, grant_id, entitlement)
     WHERE deleted_at IS NULL;
 

@@ -75,9 +75,9 @@ func pushEngineRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub 
 	start := periodEnd.UTC()
 	end := start.Add(grace)
 	for _, name := range names {
-		p := entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}
+		p := entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndsAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}
 		if !policy.SuspendWhenHeld {
-			p.EndAt, p.Indefinite = nil, true
+			p.EndsAt, p.Indefinite = nil, true
 		}
 		if _, err := ent.PushNewEntitlement(ctx, p); err != nil {
 			return fmt.Errorf("grant engine renewal grace %s: %w", name, err)

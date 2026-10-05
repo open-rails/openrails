@@ -35,8 +35,8 @@ type accessWindow struct {
 // entitlement windows.
 func (w *world) subscriptionWindows(sub billing.SubscriptionID) []accessWindow {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT start_at, end_at FROM billing.entitlements
-		WHERE source_type = 'subscription' AND source_id = $1::uuid AND deleted_at IS NULL AND revoked_at IS NULL ORDER BY start_at`), sub.UUID().String())
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT starts_at, ends_at FROM billing.entitlements
+		WHERE source_type = 'subscription' AND source_id = $1::uuid AND deleted_at IS NULL AND revoked_at IS NULL ORDER BY starts_at`), sub.UUID().String())
 	require.NoError(w.t, err)
 	defer rows.Close()
 	var out []accessWindow

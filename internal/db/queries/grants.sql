@@ -253,7 +253,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
               AND e2.entitlement = feat
               AND e2.source_type = 'subscription'
               AND e2.source_id::text = g.source_id
-              AND e2.end_at IS NULL
+              AND e2.ends_at IS NULL
               AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))
     ))
 
