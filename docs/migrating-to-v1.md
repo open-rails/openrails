@@ -96,7 +96,8 @@ The Client is flat: no sub-clients (`client.Products`, `client.Prices`,
 `client.Catalog`, `client.ProductAccess`, `client.PaymentProviders`,
 `client.MerchantConfiguration`), no `Retrieve`. Lists return
 `billing.ListPage` and take a `billing.PageRequest` (`Cursor`, `Limit`); there is
-no offset and no total. Ids are typed: `billing.CustomerID`, `billing.ProductID`,
+no offset and no total; every list's params embed `billing.PageRequest`
+(`PaymentListParams.Page` and its siblings are gone). Ids are typed: `billing.CustomerID`, `billing.ProductID`,
 `billing.PriceID`, `billing.PSPID`, `billing.CheckoutAttemptID`.
 
 Every merchant route has exactly one Client method, named for it, and a
@@ -158,6 +159,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListSubscriptions(ctx, SubscriptionFilter)` with a total | `client.ListSubscriptions(` with `billing.SubscriptionListParams`, a cursor page, newest first |
 | `Subscription.CustomerID`, `ProductID`, `PriceID` as strings; `SubscriptionPrice` | Typed ids; `price` is the catalog `billing.Price` |
 | `models.StatusCancelled`, `cancelled_at` | `billing.SubscriptionCanceled`, `canceled_at` |
+| `SubscriptionAccess.StartAt`, `EndAt` (`start_at`, `end_at`) | `StartsAt`, `EndsAt` (`starts_at`, `ends_at`) |
 | `CutoverProvider`, `GetProviderCutover`, `PreviewProviderCutover`; engine takeover (`TakeOverBilling`, …) | Removed: a provider-owned subscription stays on its PSP until it ends |
 | `CancelPlanMigration`; reprice-all routes | `client.CreateRepriceBatch(`, `client.PreviewRepriceBatch(`, `client.ListRepriceBatches(`, `client.GetRepriceBatch(`, `client.CancelRepriceBatch(`; a plan migration is a `plan_change` batch |
 | `GetMyInvoice`, `GetMySubscription`, `PayInvoiceNow`, `RetrySubscriptionNow` | Removed from the Client: `/v1/me` is for browsers |
@@ -187,6 +189,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListInvoicePayments(`, `client.CreateInvoicePayment(` |
 | `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.SetInvoiceProfile(` with `IfAbsent`; `client.GetInvoiceProfile(` |
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
+| `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
 
 ### PSPs, configuration and operations
@@ -308,6 +311,12 @@ fields (`400 unknown_field`), and every error code is in
 
 ### New limits
 
+- An `Idempotency-Key`, or a usage event's `source_id`, over 255 bytes is
+  `400 invalid_param`.
+- The period invoice pass issues a statement only for customers with ledger
+  movement or metered usage in the period; a dormant customer gets no empty
+  statement.
+
 Usage and admissions are stored in monthly partitions that are dropped by the
 calendar ([data retention](operations.md#data-retention)):
 
@@ -343,7 +352,9 @@ declares a `publishable_key`; without one, a one-off Stripe price redirects.
 ## 6. Reading the database
 
 A host that reads OpenRails' tables finds these renamed; the whole schema is in
-[`api/schema.txt`](../api/schema.txt).
+[`api/schema.txt`](../api/schema.txt). A host that names an index or constraint
+(an `ON CONFLICT ON CONSTRAINT`, a hint, a monitoring query) looks its new name
+up there.
 
 | Before | After |
 |---|---|
@@ -356,3 +367,6 @@ A host that reads OpenRails' tables finds these renamed; the whole schema is in
 | `payment_methods.is_default`, `initial_transaction_id`, `last_four`, `card_type`, `expiry_date` | `card_brand`, `card_last4`, `card_exp_month`, `card_exp_year`; `psp_id` is NULL for a card a custodian holds |
 | Unique payments and subscriptions by `(merchant_id, rail, psp_id, …)` | By `(merchant_id, psp_id, …)`; an `ON CONFLICT` naming the old columns no longer matches |
 | Postgres enums `payment_status`, `subscription_status` | `text` with a CHECK |
+| `payments.rail` holding `manual` or `admin` | `payments.channel` (`rail`, `manual`); `rail` is null off-channel |
+| `entitlements.start_at`, `end_at` | `starts_at`, `ends_at` |
+| Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |

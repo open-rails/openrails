@@ -52,6 +52,7 @@ Client
   subscription's status is `canceled`.
 - A `TierChange` has no `mode`, `url` or `payment`: a redirect is
   `next_action.url`. Generated list fields are `T[]`, never `null`.
+- A subscription's `access` windows are `starts_at` and `ends_at`.
 
 ## Hosted checkout sessions
 

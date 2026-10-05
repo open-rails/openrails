@@ -17,7 +17,7 @@ of the gateway, so it does not belong in the rail value.
 value `psp`, not an absence — a DB CHECK enforces the vocabulary.
 
 `psp_id` is set exactly when `custodian = 'psp'` (CHECK
-`payment_methods_psp_custody`). A card a third-party custodian holds belongs
+`payment_methods_psp_custody_check`). A card a third-party custodian holds belongs
 to no PSP: each charge routes to the one live PSP of the card's rail that
 reaches the custodian (`charge.RoutePSP`); none, or two, is `ErrNoRoute`. An
 obligation that names its PSP (a subscription, a frozen checkout instrument)

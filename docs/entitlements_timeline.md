@@ -6,16 +6,16 @@ windows per (customer, entitlement)**. The timeline is the single source of trut
 
 ## The row model
 
-`billing.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `start_at`,
-`end_at` (NULL = indefinite), `source_type` + `source_id`, `grant_id`, `revoked_at` +
-`revoke_reason`, `deleted_at`. Windows are half-open `[start_at, end_at)`; finite
-windows satisfy `start_at < end_at`. On the wire the bounds are `starts_at` and
-`ends_at` (`EntitlementRecord`).
+`billing.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `starts_at`,
+`ends_at` (NULL = indefinite), `source_type` + `source_id`, `grant_id`, `revoked_at` +
+`revoke_reason`, `deleted_at`. Windows are half-open `[starts_at, ends_at)`; finite
+windows satisfy `starts_at < ends_at`. The wire uses the same names
+(`EntitlementRecord`).
 
 A window is **active at T** iff:
 
 ```sql
-start_at <= T AND (end_at IS NULL OR end_at > T)
+starts_at <= T AND (ends_at IS NULL OR ends_at > T)
 AND revoked_at IS NULL AND deleted_at IS NULL
 ```
 

@@ -714,8 +714,8 @@ What is kept on purpose:
   or refused) are what grants, payments and invoices are checked against, and a
   card erasure is the proof the card is gone. Only the instruction-only types
   above age out. The list lives once in the baseline's
-  `idx_provider_intents_finished_outbox` and once in
-  `retention.OutboxIntentTypes`; a test keeps them equal.
+  `provider_intents_updated_at_idx` and once in the retention code; a test
+  keeps them equal.
 - **A checkout attempt that reached a provider is permanent**, expired or not:
   one with a payment, a subscription or a provider transaction, or that a
   provider intent or a Solana Pay reference or receipt names.
