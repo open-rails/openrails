@@ -71,17 +71,16 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// #367 liveness worker is retired), CCBill DataLink, and scoped
 	// convergence after refresh writes.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshWorker{
-		StripeClients:       r.StripeClients,
-		DB:                  r.DB,
-		Config:              r.Config,
-		Clock:               clock,
-		Merchants:           r.Merchants, // #699/#788: per-merchant store-armed pulls
-		DeferDelete:         r.DeferredDeletes,
-		NotificationService: r.NotificationService,
-		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
-		NMIClients:          r.NMIClients,
-		PullEndpoints:       reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
-		Verifier:            r.Verifier,
+		StripeClients: r.StripeClients,
+		DB:            r.DB,
+		Config:        r.Config,
+		Clock:         clock,
+		Merchants:     r.Merchants, // #699/#788: per-merchant store-armed pulls
+		DeferDelete:   r.DeferredDeletes,
+		Alerts:        r.AlertService, // #787: requires_review findings -> operator notifications
+		NMIClients:    r.NMIClients,
+		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
+		Verifier:      r.Verifier,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}
@@ -187,7 +186,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		SubscriptionLifecycleService: r.SubscriptionLifecycleService,
 		PaymentService:               r.PaymentService,
 		MoneyService:                 r.MoneyService,
-		NotificationService:          r.NotificationService,
 		RailCustomerService:          r.RailCustomerService,
 		CheckoutAttemptService:       r.CheckoutAttemptService,
 	}); err != nil {
@@ -289,9 +287,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Solana ledger reconciliation (#258): cross-checks confirmed on-chain pulls
 	// against billing.payments and raises operator repair alerts on drift.
 	if err := addTrackedWorker(r, workers, &riverjobs.SolanaReconcileWorker{
-		DB:                  r.DB,
-		NotificationService: r.NotificationService,
-		Clock:               clock,
+		DB:    r.DB,
+		Clock: clock,
 	}); err != nil {
 		return fmt.Errorf("add solana reconcile worker: %w", err)
 	}

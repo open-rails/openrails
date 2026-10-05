@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"io"
 	"strings"
 	"time"
@@ -41,7 +42,6 @@ type StripeWebhookService struct {
 	ProductService               *catalog.ProductService
 	SubscriptionService          *subscriptions.SubscriptionService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	NotificationService          *subscriptions.NotificationService
 	PurchaseRegistrar            stripePurchaseRegistrar
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
@@ -1043,11 +1043,11 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	}
 	if ledgerErr != nil {
 		originalID := original.ID
-		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+		if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 			Provider:          "stripe",
 			Operation:         "dispute_reversal",
 			TransactionID:     disputeID,
-			UserID:            original.CustomerID.String(),
+			CustomerID:        original.CustomerID.String(),
 			OriginalPaymentID: &originalID,
 			SubscriptionID:    original.SubscriptionID,
 			Err:               ledgerErr,

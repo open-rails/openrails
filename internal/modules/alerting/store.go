@@ -105,8 +105,13 @@ func (s *store) createNotification(ctx context.Context, n Notification) error {
 	if len(data) == 0 {
 		data = nil
 	}
+	var id *uuid.UUID
+	if n.ID != uuid.Nil {
+		id = &n.ID
+	}
 	_, err = s.db.Gen(ctx).CreateMerchantNotification(ctx, gen.CreateMerchantNotificationParams{
 		MerchantID: mid.UUID(),
+		ID:         id,
 		Severity:   string(n.Severity),
 		Title:      n.Title,
 		Body:       n.Body,

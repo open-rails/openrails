@@ -7,19 +7,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// ListRepairAlerts pages ledger repairs that need the merchant.
-func (c *Client) ListRepairAlerts(ctx context.Context, req billing.RepairAlertListParams, options ...RequestOption) (*billing.ListPage[billing.Notification], error) {
-	q := cursorQuery(req.PageRequest)
-	if req.Seen != nil {
-		q.Set("seen", map[bool]string{true: "true", false: "false"}[*req.Seen])
-	}
-	var out billing.ListPage[billing.Notification]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/repair-alerts?"+q.Encode(), nil, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ListWorkerHealth returns each background job kind's recent runs.
 func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error) {
 	var out billing.ListPage[billing.WorkerHealth]

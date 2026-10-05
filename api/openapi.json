@@ -12924,7 +12924,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:metrics:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "invalid_cursor",
           "service_unavailable"
@@ -12961,7 +12961,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:metrics:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "service_unavailable"
         ],
@@ -13006,7 +13006,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:metrics:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found",
@@ -13014,83 +13014,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/repair-alerts": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "seen",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Notification"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:repair-alerts:read",
-        "x-openrails-errors": [
-          "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
         ]
       }
     },
@@ -13138,7 +13061,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:repair-alerts:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -13226,7 +13149,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:repair-alerts:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "invalid_cursor",
           "service_unavailable"
@@ -13263,7 +13186,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:repair-alerts:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "service_unavailable"
         ],
@@ -13308,7 +13231,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:repair-alerts:read",
+        "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found",
@@ -20103,28 +20026,6 @@
           },
           "user_email": {
             "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "operation": {
-            "type": "string"
-          },
-          "affected_customer_id": {
-            "type": "string"
-          },
-          "original_payment_id": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
           }
         }
       },

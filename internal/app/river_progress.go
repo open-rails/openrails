@@ -29,12 +29,11 @@ func (r *Runtime) riverProgressMonitor() *riverjobs.ProgressMonitor {
 		}
 		pool := r.riverStatsPool()
 		r.progress = &riverjobs.ProgressMonitor{
-			DB:                  r.DB,
-			Pool:                pool,
-			RiverSchema:         r.riverSchemaOrDefault(),
-			Clock:               clock,
-			Registrations:       r.workerHealthRegistrations(),
-			NotificationService: r.NotificationService,
+			DB:            r.DB,
+			Pool:          pool,
+			RiverSchema:   r.riverSchemaOrDefault(),
+			Clock:         clock,
+			Registrations: r.workerHealthRegistrations(),
 		}
 	})
 	return r.progress

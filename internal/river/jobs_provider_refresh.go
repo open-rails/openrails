@@ -281,9 +281,8 @@ type ProviderRefreshWorker struct {
 	Clock  clockwork.Clock
 	// Merchants resolves per-merchant PSPs + scoped secrets
 	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
-	Merchants           *merchants.Service
-	DeferDelete         subscriptions.ProviderCancelScheduler
-	NotificationService *subscriptions.NotificationService
+	Merchants   *merchants.Service
+	DeferDelete subscriptions.ProviderCancelScheduler
 	// Alerts bridges requires_review findings into the #736 operator
 	// notification store (#787). nil = no-op (no alerting service wired).
 	Alerts *alerting.Service
@@ -463,10 +462,9 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 
 func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataLink *ccbill.DataLinkClient) error {
 	return CCBillReconciler{
-		Clock:               w.Clock,
-		DB:                  w.DB,
-		DataLink:            dataLink,
-		NotificationService: w.NotificationService,
+		Clock:    w.Clock,
+		DB:       w.DB,
+		DataLink: dataLink,
 	}.Run(ctx)
 }
 

@@ -33,7 +33,9 @@ const (
 	MerchantSubscriptionsUpdate = "merchant:subscriptions:update"
 	MerchantAdmissionsCreate    = "merchant:admissions:create"
 	MerchantUsageRead           = "merchant:usage:read"
-	MerchantRepairAlertsRead    = "merchant:repair-alerts:read"
+	// MerchantOperationsRead reads the merchant's inbox, findings and worker
+	// health.
+	MerchantOperationsRead = "merchant:operations:read"
 	// MerchantMetricsRead gates the #733 analytics query surface
 	// (/merchant/metrics/query + /schema) and reading the #741 dashboard
 	// (a dashboard is a saved view over metrics).
@@ -43,8 +45,8 @@ const (
 	MerchantDashboardUpdate = "merchant:dashboard:update"
 	// MerchantFindingsResolve gates POST /merchant/findings/{id}/resolve
 	// (#692): approving a finding executes its recommendation (cancel/refund/
-	// revoke/grant), so it is a distinct write grant; reads share
-	// merchant:repair-alerts:read (the operator repair surface).
+	// revoke/grant), so it is a distinct write grant; reads need
+	// merchant:operations:read.
 	MerchantFindingsResolve = "merchant:findings:resolve"
 	// MerchantBillingImport gates POST /v1/merchant/billing-import (#737): a bulk
 	// DeclaredBilling book import writes subscriptions/payments/payment methods

@@ -50,7 +50,6 @@ type StripeConvergeService struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
-	NotificationService          *subscriptions.NotificationService
 	RailCustomerService          *payments.RailCustomerService
 	CheckoutAttemptService       webhookCheckoutAttemptStore
 }

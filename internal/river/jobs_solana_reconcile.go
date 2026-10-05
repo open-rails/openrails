@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"context"
 	"fmt"
@@ -14,8 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -27,7 +26,7 @@ const (
 	// then stamps last_signature (AdvanceAfterPull) in two steps; a crash between
 	// them — or a RenewMembership idempotency skip that masked a real gap — leaves
 	// a confirmed pull with no payment row. This sweep surfaces that drift as an
-	// operator repair alert (same surface as the Stripe/NMI ledger reconcilers).
+	// ledger repair in the merchant inbox, like the Stripe/NMI reconcilers.
 	KindSolanaReconcile = "openrails.solana_reconcile"
 
 	solanaReconcileBatchSize = 500
@@ -40,14 +39,13 @@ func (SolanaReconcileArgs) Kind() string { return KindSolanaReconcile }
 
 // SolanaReconcileWorker verifies that every recorded on-chain pull
 // (solana_subscriptions.last_signature) has a matching billing.payments row.
-// Missing rows emit a billing_ledger_repair_required alert; it never mutates the
+// Missing rows put a ledger repair in the merchant inbox; it never mutates the
 // ledger itself (operator-led repair, like the other reconcilers).
 type SolanaReconcileWorker struct {
 	river.WorkerDefaults[SolanaReconcileArgs]
-	DB                  *db.DB
-	NotificationService *subscriptions.NotificationService
-	Clock               clockwork.Clock
-	BatchSize           int
+	DB        *db.DB
+	Clock     clockwork.Clock
+	BatchSize int
 }
 
 func (SolanaReconcileWorker) Kind() string { return KindSolanaReconcile }
@@ -115,7 +113,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 			// Confirmed pull with no payment row -> operator repair.
 			drift++
 			subID := row.SubscriptionID
-			if alertErr := webhooks.RecordLedgerRepairAlert(mctx, w.NotificationService, w.DB, w.now(), webhooks.LedgerRepairAlert{
+			if alertErr := alerting.RecordLedgerRepair(mctx, w.DB, w.now(), alerting.LedgerRepair{
 				Provider:       string(models.RailSolana),
 				Operation:      "solana_crank_unrecorded_pull",
 				TransactionID:  sig,

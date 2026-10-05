@@ -43,9 +43,6 @@ const (
 	NotificationInvoiceIssued  NotificationEventType = "invoice_issued"
 	NotificationInvoiceOverdue NotificationEventType = "invoice_overdue"
 
-	// System notifications (1 type)
-	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
-
 	// Translation notifications
 	NotificationTranslationCompleted              NotificationEventType = "translation_completed"                // Voted translation completed (rate-limited)
 	NotificationTranslationCompletedPendingDigest NotificationEventType = "translation_completed_pending_digest" // queued for weekly digest

@@ -170,7 +170,6 @@ type SubscriptionConvergeWorker struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
-	NotificationService          *subscriptions.NotificationService
 	RailCustomerService          *payments.RailCustomerService
 	CheckoutAttemptService       webhooks.CheckoutAttemptStore
 }
@@ -295,9 +294,9 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			SubscriptionLifecycleService: w.SubscriptionLifecycleService,
 			PaymentService:               w.PaymentService,
 			MoneyService:                 w.MoneyService,
-			NotificationService:          w.NotificationService,
-			RailCustomerService:          w.RailCustomerService,
-			CheckoutAttemptService:       w.CheckoutAttemptService,
+
+			RailCustomerService:    w.RailCustomerService,
+			CheckoutAttemptService: w.CheckoutAttemptService,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 
@@ -322,7 +321,6 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			SubscriptionLifecycleService: w.SubscriptionLifecycleService,
 			PaymentService:               w.PaymentService,
 			MoneyService:                 w.MoneyService,
-			NotificationService:          w.NotificationService,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 

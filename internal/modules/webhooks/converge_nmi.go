@@ -47,7 +47,6 @@ type NMIConvergeService struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
-	NotificationService          *subscriptions.NotificationService
 }
 
 func (s *NMIConvergeService) now() time.Time {

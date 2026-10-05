@@ -31,7 +31,6 @@ import {
   listPrices,
   listProducts,
   listRebillCycles,
-  listRepairAlerts,
   listRepriceBatches,
   listReprices,
   listSubscriptions,
@@ -391,12 +390,6 @@ export const adminQueries = {
       queryKey: [...queryKeys.ops(), "findings", "summary"],
       queryFn: ({ signal }) => getFindingSummary(signal),
       meta: { errorAction: "Load the findings summary" },
-    }),
-  repairAlerts: () =>
-    queryOptions({
-      queryKey: [...queryKeys.ops(), "repair-alerts", { limit: 50 }],
-      queryFn: ({ signal }) => listRepairAlerts(50, signal),
-      meta: { errorAction: "Load repair alerts" },
     }),
   workerHealth: () =>
     queryOptions({

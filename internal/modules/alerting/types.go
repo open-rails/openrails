@@ -71,8 +71,10 @@ func (w Webhook) API() billing.AlertWebhook {
 	}
 }
 
-// Notification is a merchant inbox entry being written.
+// Notification is a merchant inbox entry being written. A non-nil ID makes
+// the write idempotent.
 type Notification struct {
+	ID       uuid.UUID
 	Severity Severity
 	Title    string
 	Body     string

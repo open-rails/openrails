@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (235), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (234), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -227,14 +227,13 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/metrics/schema` | merchant | `merchant:metrics:read` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/merchant/dashboard` | merchant | `merchant:metrics:read` | — | 200 `Dashboard` |  |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:dashboard:update` | `SetDashboardParams` | 200 `Dashboard` |  |
-| GET | `/v1/merchant/notifications` | merchant | `merchant:metrics:read` | — | 200 `ListPage<MerchantNotification>` |  |
-| GET | `/v1/merchant/notifications/unread-count` | merchant | `merchant:metrics:read` | — | 200 `UnreadCount` |  |
-| POST | `/v1/merchant/notifications/{id}/read` | merchant | `merchant:metrics:read` | — | 200 `MerchantNotification` |  |
-| GET | `/v1/merchant/repair-alerts` | merchant | `merchant:repair-alerts:read` | — | 200 `ListPage<Notification>` |  |
-| GET | `/v1/merchant/worker-health` | merchant | `merchant:repair-alerts:read` | — | 200 `ListPage<WorkerHealth>` |  |
-| GET | `/v1/merchant/findings` | merchant | `merchant:repair-alerts:read` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/merchant/findings/summary` | merchant | `merchant:repair-alerts:read` | — | 200 `FindingSummary` |  |
-| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:repair-alerts:read` | — | 200 `Finding` |  |
+| GET | `/v1/merchant/notifications` | merchant | `merchant:operations:read` | — | 200 `ListPage<MerchantNotification>` |  |
+| GET | `/v1/merchant/notifications/unread-count` | merchant | `merchant:operations:read` | — | 200 `UnreadCount` |  |
+| POST | `/v1/merchant/notifications/{id}/read` | merchant | `merchant:operations:read` | — | 200 `MerchantNotification` |  |
+| GET | `/v1/merchant/worker-health` | merchant | `merchant:operations:read` | — | 200 `ListPage<WorkerHealth>` |  |
+| GET | `/v1/merchant/findings` | merchant | `merchant:operations:read` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/merchant/findings/summary` | merchant | `merchant:operations:read` | — | 200 `FindingSummary` |  |
+| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:operations:read` | — | 200 `Finding` |  |
 | POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:findings:resolve` | `ResolveFindingParams` | 200 `FindingResolution` |  |
 | POST | `/v1/merchant/metrics/ask` | merchant | `merchant:metrics:read` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
 | POST | `/v1/merchant/dashboard/widgets/generate` | merchant | `merchant:dashboard:update` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |

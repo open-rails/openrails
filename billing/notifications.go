@@ -4,9 +4,8 @@ import (
 	"time"
 )
 
-// Notification is one in-app billing notification (GET /v1/me/notifications
-// for the customer's own; GET /v1/merchant/repair-alerts for the merchant's
-// system_alert rows).
+// Notification is one of a customer's in-app billing notifications
+// (GET /v1/me/notifications).
 type Notification struct {
 	ID         NotificationID   `json:"id"`
 	CustomerID CustomerID       `json:"customer_id"`
@@ -82,13 +81,4 @@ type NotificationData struct {
 	ProductName   string `json:"product_name,omitempty"`
 	PaymentMethod string `json:"payment_method,omitempty"`
 	UserEmail     string `json:"user_email,omitempty"`
-
-	// Merchant repair alerts (system_alert): what needs an operator and why.
-	Kind               string         `json:"kind,omitempty"`
-	Provider           string         `json:"provider,omitempty"`
-	Operation          string         `json:"operation,omitempty"`
-	AffectedCustomerID CustomerID     `json:"affected_customer_id,omitzero"`
-	OriginalPaymentID  PaymentID      `json:"original_payment_id,omitzero"`
-	Error              string         `json:"error,omitempty"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
 }

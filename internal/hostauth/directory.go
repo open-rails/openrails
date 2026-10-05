@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-
 )
 
 // IdentityClient is the AuthKit directory surface this adapter needs;

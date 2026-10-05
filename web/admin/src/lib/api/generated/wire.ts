@@ -1408,13 +1408,6 @@ export type NotificationData = {
   product_name?: string
   payment_method?: string
   user_email?: string
-  kind?: string
-  provider?: string
-  operation?: string
-  affected_customer_id?: string
-  original_payment_id?: string
-  error?: string
-  metadata?: Record<string, unknown>
 }
 
 export type Offer = {

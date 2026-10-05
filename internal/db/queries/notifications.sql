@@ -104,16 +104,6 @@ UPDATE billing.notifications
 SET emailed_at = sqlc.arg(emailed_at)::timestamptz
 WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1 AND emailed_at IS NULL;
 
--- name: ListRepairAlerts :many
-SELECT * FROM billing.notifications nq
-WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = sqlc.arg(customer_id)::uuid
-  AND nq.event_type = sqlc.arg(event_type)::text
-  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
-  AND (sqlc.narg(seen)::boolean IS NULL OR (nq.read_at IS NOT NULL) = sqlc.narg(seen)::boolean)
-  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (nq.created_at, nq.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
-ORDER BY nq.created_at DESC, nq.id DESC
-LIMIT sqlc.arg(row_limit)::int;
-
 -- A customer's own notifications, newest first.
 -- name: ListCustomerNotifications :many
 SELECT * FROM billing.notifications nq

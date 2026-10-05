@@ -130,8 +130,4 @@ func TestCustomerIdentityIsUUIDOnly(t *testing.T) {
 	_, err = EnsureCustomerID(context.Background(), nil, uuid.Nil, uid.String())
 	require.Error(t, err, "a subject without an explicit or contextual merchant is refused")
 
-	a, b := uuid.MustParse("10000000-0000-4000-8000-000000000001"), uuid.MustParse("20000000-0000-4000-8000-000000000002")
-	require.Equal(t, SystemCustomerID(a), SystemCustomerID(a))
-	require.NotEqual(t, SystemCustomerID(a), SystemCustomerID(b))
-	require.Equal(t, uuid.Version(5), SystemCustomerID(a).Version())
 }

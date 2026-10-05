@@ -49,12 +49,6 @@ export function OpsPage() {
           Findings
         </TabsTrigger>
         <TabsTrigger
-          value="repair-alerts"
-          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
-        >
-          Repair alerts
-        </TabsTrigger>
-        <TabsTrigger
           value="worker-health"
           className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
         >
@@ -63,9 +57,6 @@ export function OpsPage() {
       </TabsList>
       <TabsContent value="findings">
         <FindingsTab />
-      </TabsContent>
-      <TabsContent value="repair-alerts">
-        <RepairAlertsTab />
       </TabsContent>
       <TabsContent value="worker-health">
         <WorkerHealthTab />
@@ -301,41 +292,6 @@ function ResolveFindingDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function RepairAlertsTab() {
-  const { data, isPending: loading } = useQuery(adminQueries.repairAlerts())
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!data?.data?.length)
-    return <p className="text-sm text-muted-foreground">No repair alerts.</p>
-  return (
-    <div className="overflow-x-auto rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className="text-muted-foreground">Event</TableHead>
-            <TableHead className="text-muted-foreground">Customer</TableHead>
-            <TableHead className="text-muted-foreground">Seen</TableHead>
-            <TableHead className="text-muted-foreground">Created</TableHead>
-            <TableHead className="text-muted-foreground">Data</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.data.map((a) => (
-            <TableRow key={a.id}>
-              <TableCell className="text-xs">{a.event_type}</TableCell>
-              <TableCell className="text-xs">{a.customer_id ?? "—"}</TableCell>
-              <TableCell>{a.seen ? "yes" : "no"}</TableCell>
-              <TableCell>{formatDate(a.created_at)}</TableCell>
-              <TableCell className="max-w-72 truncate text-xs">
-                {a.data ? JSON.stringify(a.data) : "—"}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
   )
 }
 

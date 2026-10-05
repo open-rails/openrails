@@ -46,14 +46,14 @@ var (
 		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
 		billing.MerchantInvoicesRead, billing.MerchantInvoicesCollect,
 		billing.MerchantSubscriptionsRead, billing.MerchantSubscriptionsUpdate,
-		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantRepairAlertsRead,
+		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantOperationsRead,
 		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate)
 	// MerchantViewer is read-only: finance, audit, analysts and LLM agents.
 	MerchantViewer = merchantRole("viewer",
 		billing.MerchantSettingsRead, billing.MerchantPSPsRead,
 		billing.MerchantCatalogRead, billing.MerchantCustomerSettingsRead,
 		billing.MerchantPaymentsRead, billing.MerchantInvoicesRead, billing.MerchantSubscriptionsRead,
-		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantRepairAlertsRead,
+		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantOperationsRead,
 		billing.MerchantMetricsRead)
 
 	// Bounded platform-operator roles (#721) for the cross-merchant directory.
@@ -85,7 +85,7 @@ var catalogPerms = func() map[string]iam.Perm {
 		billing.MerchantCheckoutCreate,
 		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
 		billing.MerchantSubscriptionsRead, billing.MerchantSubscriptionsUpdate,
-		billing.MerchantAdmissionsCreate, billing.MerchantUsageRead, billing.MerchantRepairAlertsRead,
+		billing.MerchantAdmissionsCreate, billing.MerchantUsageRead, billing.MerchantOperationsRead,
 		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate, billing.MerchantFindingsResolve,
 		billing.MerchantBillingImport, billing.MerchantBillingExport,
 		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantAccessGrantPermanent)

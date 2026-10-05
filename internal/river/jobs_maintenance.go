@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/alerting"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	log "github.com/sirupsen/logrus"
 )
@@ -24,10 +24,9 @@ import (
 // CCBillReconciler is the CCBill DataLink guarded-repair scan. It is NOT a River
 // job: ProviderRefreshWorker's CCBill lane calls Run directly.
 type CCBillReconciler struct {
-	Clock               clockwork.Clock
-	DB                  *db.DB
-	DataLink            *ccbill.DataLinkClient
-	NotificationService *subscriptions.NotificationService
+	Clock    clockwork.Clock
+	DB       *db.DB
+	DataLink *ccbill.DataLinkClient
 }
 
 func (w CCBillReconciler) now() time.Time {
@@ -172,11 +171,11 @@ func (w CCBillReconciler) recordDataLinkRepairAlert(ctx context.Context, operati
 		metadata["datalink_username"] = record.Username
 		metadata["datalink_email"] = record.Email
 	}
-	return webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, w.now(), webhooks.LedgerRepairAlert{
+	return alerting.RecordLedgerRepair(ctx, w.DB, w.now(), alerting.LedgerRepair{
 		Provider:       "ccbill",
 		Operation:      operation,
 		SubscriptionID: subscriptionID,
-		UserID:         userID,
+		CustomerID:     userID,
 		Err:            err,
 		Metadata:       metadata,
 	})
