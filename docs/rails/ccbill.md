@@ -3,7 +3,7 @@
 > Which flows are supported on this rail, and how well each one is verified:
 > [rail certification matrix](certification-matrix.md). Read it before relying on
 > CCBill operations. Automatic refunds are unavailable; see the
-> [refund qualification boundary](ccbill-refund-qualification.md).
+> [CCBill refunds](ccbill-refund-qualification.md).
 
 CCBill is a hosted-checkout payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
@@ -169,6 +169,6 @@ posture alone accepts nothing extra.
   partial requests; combined cancel-and-refund refuses before cancellation.
   Existing unresolved refund intents retain their reserved balance and evidence
   for operator verification. Confirmed inbound refunds and manual accounting
-  remain supported. See [qualification](ccbill-refund-qualification.md).
+  remain supported. See [CCBill refunds](ccbill-refund-qualification.md).
 - CCBill subscriptions cannot be reassigned to another payment method;
   payment-method changes go through a new checkout.

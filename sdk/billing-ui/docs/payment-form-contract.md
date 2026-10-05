@@ -41,9 +41,6 @@ show the same figures outside the component. An amount the engine cannot show
 exactly is refused with a visible notice, never rounded. `due_today`, when
 absent, is the exact sum of the line items and `tax`.
 
-Version 0.3.0 replaces `unit_amount_micros`, `amount_micros`, `tax_micros` and
-`due_today_micros` (JSON numbers, assumed six decimals) with this contract.
-
 ## NMI new cards
 
 The host collects only:
@@ -77,27 +74,14 @@ A new-card payment request includes the one-time `payment_token` plus canonical
 existing saved method sends only `payment_method_id`; it does not overwrite the
 stored billing identity with empty form values.
 
-## CCBill
-
-For CCBill credit-card hand-off, the browser supplies only the same single
-`name_on_card`, country, and postal code. OpenRails binds the authenticated
-account's verified email and derives the customer's IP server-side; the browser
-cannot override either value. CCBill's FlexForms Address Fields are
-configurable for credit-card forms, so OpenRails does not collect street, city,
-or state in this flow. The checkout package never exposes separate first- and
-last-name inputs. OpenRails performs any provider-specific name projection at
-the CCBill boundary.
-
-Version 0.2.4 requires a checkout host whose pay endpoint accepts
-`name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
-this package.
+The package never shows separate first- and last-name inputs; OpenRails
+projects the one name onto provider-specific fields at the rail boundary.
 
 ## Card subscriptions
 
-`Subscribe` is one action. The host's pay endpoint relays `payment_token` (or
-`payment_method_id`) to `CreateCheckoutSession` with `Confirm: true`; OpenRails
-saves a new card, accepts the displayed recurring terms and charges it. A
-decline answers `failed` and keeps no card; the next attempt uses a new key.
+`Subscribe` is one action: paying the session with a `payment_token` (or a
+`payment_method_id`) saves a new card, accepts the displayed recurring terms
+and charges it. A decline answers `failed` and keeps no card.
 
 ## Solana Pay
 
@@ -114,9 +98,6 @@ binds the token on the advertised option's `public_config` (hosts copy it):
   (“USD Coin (USDC) on Solana devnet”) so a test-network payment is never
   mistaken for a real one.
 
-Version 0.2.5 removes the former `USDC` default: a host that bound no token
-saw “USDC” before and sees no Solana option now.
-
 ## Pending payment outcomes
 
 `processing` means an accepted outcome is unresolved. Checkout polls the same
@@ -129,10 +110,8 @@ a fresh card token and payment. Tokenization/field validation errors before
 submission remain editable. Explicit `failed` results are definitive host
 responses; they must not represent an unknown provider result.
 
-A custom CheckoutSource may call an application-owned admission wrapper instead
-of the default hosted endpoints. It must retain its logical attempt identity
-and original request, use the same key for an authorized retry, and expose only
-the authorized buyer's state. `getSession` is a read, not another payment.
+`client.checkoutSource(id)` is the source of every checkout: it reads and pays
+the OpenRails session. `getSession` is a read, never another payment.
 
 ## Separate NMI card setup
 

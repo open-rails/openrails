@@ -4,7 +4,7 @@ Each important attack on an embedded, multi-replica OpenRails is a permanent
 test in the required `End-to-end` job (`scripts/e2e.sh`): real
 PostgreSQL, fake NMI/Stripe transports, mounted HTTP routes, and the embedded
 and remote Client. Tests live in `ci/subscriptions/security_*_test.go`
-unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
+unless noted.
 
 | Threat | Test | Control |
 | --- | --- | --- |
@@ -46,10 +46,7 @@ unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 | NMI chargeback of a one-time purchase leaves access granted; unmatched chargebacks vanish | `TestSecurityNMIChargebackRevokesOneTimePurchase` | Chargeback matching covers one-off charges and revokes entitlements and product access; unmatched entries raise a durable repair alert |
 | Late `charge.dispute.created` after a won dispute revokes; a won dispute revives an unrelated cancellation | `TestSecurityStripeDisputeOrdering` | Won outcome stored durably; reactivation only for the chargeback cancellation this dispute caused |
 | Unsigned CCBill post buys years of access (RenewalSuccess/BillingDateChange date, UserReactivation without payment) | `TestSecurityCCBillPeriodEndsAreBounded` | Period ends capped at one cycle + 72h past the paid anchor; reactivation never extends the paid end |
-| Solana transfer landing long after its quote settles at a stale price | `internal/modules/solana` `TestSolanaSettlementTooLate` (no Solana e2e harness) | 30-minute late window; later landings grant nothing and raise an operator repair alert |
-
-Known open items (not yet covered by a passing control) are listed in the
-tracker's SEC issues with their intended fix.
+| Solana transfer landing long after its quote settles at a stale price | `TestSettlementTooLate` (`internal/integrations/solana`) and `TestSolanaPayLatePaymentIsFlagged` | 30-minute late window; later landings grant nothing and raise an operator repair alert |
 
 ## Documented decisions
 

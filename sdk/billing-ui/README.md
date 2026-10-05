@@ -45,7 +45,7 @@ const session = await billing.createCheckoutSession({ priceKey: "pro-monthly" })
 
 `onComplete` is a hint: confirm access from your own authenticated API before
 granting anything. Pass `successUrl` to return the buyer from a redirect step
-(CCBill, Stripe hosted); it must be on one of your app's return origins. A
+(Stripe's hosted page); it must be on one of your app's return origins. A
 server that starts checkout itself mints the session with the Go
 `Client.CreateCheckoutSession` and hands the browser its `id` and `url`.
 
@@ -108,7 +108,7 @@ checkout routes.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts()`, `listPrices({ currency, product, type })`                                         | `GET /products`, `GET /prices`                                  |
+| `listProducts()`, `listPrices({ currency, productId, autoRenew })`                                  | `GET /products`, `GET /prices`                                  |
 | `listCurrencies()` (`client.currencies` is the pinned copy)                                         | `GET /currencies`                                               |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
 | `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |
@@ -145,10 +145,9 @@ through unchanged; the PSP's `flow` and public `config` pick the browser flow
 provider:
 
 - A session's `options` are exactly the armed PSPs whose rail can make this
-  sale (Solana when it is configured, never CCBill for a new subscription),
+  sale (Solana when it is configured, never CCBill),
   each with its `driver` and `public_config`; `saved_methods` are the buyer's
-  cards on them (the default first, pre-selected; paying sends the chosen
-  card's id explicitly).
+  cards on them, newest first (paying sends the chosen card's id explicitly).
   Card rails (`collect_js`, `card`, `stripe_elements`) render one panel: saved cards,
   an inline new card and one Pay/Subscribe button, which is the payer's
   confirmation of the displayed terms. No provider chooser with one rail.
@@ -176,8 +175,9 @@ provider:
 - `renderSubscriptionFooter={(s) => ...}` adds host content under a
   subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
-  `changeTier`, per-row `pending`), `usePaymentMethods` (`add`, `remove`,
-  `setDefault`), `usePayments` (offset pages), `useProducts` (the catalog).
+  `changeTier`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
+  `remove`, `setCollection`), `usePayments` (cursor pages), `useProducts` (the
+  catalog).
   Actions resolve to `null` or a `BillingError`; they never throw.
   `changeTier` resolves to the `TierChange` instead of `null`. Cancel, resume
   and the card change answer the subscription, which replaces the row.

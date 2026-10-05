@@ -1,14 +1,20 @@
 # Testing
 
-OpenRails' required database and provider behavior is tested by the compact
-e2e suite. It uses the public embedded API, one disposable PostgreSQL
-DSN, a random schema per test, and deterministic Stripe/NMI transports. It does
-not use the former integration harness, testcontainers, browser
-automation. Ordinary lifecycle setup uses the public client and HTTP routes;
-the subscription suite uses narrow SQL fixtures to simulate crash recovery and
-arm operator-controlled destructive-action policy.
+Two kinds of test gate a pull request.
 
-Run the focused suite locally:
+**Package tests** (`go test ./...`, the `Checks` job) need no database: unit
+tests, wire and contract guards, source guardrails. Among them are the freeze
+gates: `TestGoAPISurface`, `TestGeneratedContractIsFresh`,
+`TestSchemaSnapshotNamesTheMigrations` and the documentation checks
+(`TestDocsNameWhatExists`, `TestDocsLinksResolve`). See
+[compatibility](../compatibility.md).
+
+**The end-to-end suite** (`ci/`, the `End-to-end` job) is the only database and
+provider test lane. It drives the public Client and the mounted HTTP routes
+against a real PostgreSQL 18, with deterministic NMI and Stripe transports.
+Every test migrates its own random schema, so tests and shards never share
+state. It needs no browser and no real PSP credentials, and it fails when its
+database is missing.
 
 ```bash
 OPENRAILS_E2E_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
@@ -16,44 +22,53 @@ OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
   bash scripts/e2e.sh
 ```
 
-The suite runs with `-race`, `-count=1`, one package process, and serial tests.
-It covers migration replay, catalog and entitlement isolation, checkout
-idempotency, Stripe webhook convergence, provider-owned NMI subscriptions with
-dunning state, engine-owned NMI admission, and exact integer money/currency
-boundaries. The legacy engine-subscription workflow has been removed. The focused
-`ci/subscriptions` scenarios now cover engine- and provider-owned
-Stripe/NMI lifecycles, including confirmation, renewal, dunning, cancellation,
-refunds, and crash recovery. See the [coverage map](../e2e-coverage.md)
-for the precise scope and remaining gaps.
+`scripts/e2e.sh` builds each package under `./ci/...` once (tags
+`e2e,integration`, `-race`) and runs its tests in `OPENRAILS_E2E_SHARDS`
+concurrent processes. Redis is needed by the card-attack captcha test only.
 
-The ordinary CI checks run pure unit/contract tests, source guardrails, builds,
-frontend checks, and security scans. The e2e workflow is the only
-required database/provider integration job. Live PSP or blockchain qualification
-must be invoked explicitly and is not a merge check.
+- `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
+  catalog and merchant isolation, checkout sessions and attempts, signed
+  webhook replay, credits, usage and admissions, invoices, merchant
+  configuration, retention and partitioning, and exact integer money.
+- `ci/subscriptions` covers engine-owned and provider-owned subscriptions on
+  NMI and Stripe (confirmation, renewals, declines and dunning, card
+  replacement, cancel and resume, repricing, refunds, interrupted-operation
+  recovery), imported CCBill memberships, and the same operations through the
+  embedded and the HTTP client. `TestReplicas*` run two or three embedded
+  replicas over one database to prove exactly-once rebilling; a crash cuts the
+  replica's database link, so it records nothing afterwards.
+- Adversarial cases (IDOR, merchant isolation, webhook forgery, double-spend
+  races, revocation, credential class) are indexed in
+  [security tests](../security-tests.md).
+
+Fakes check provider request and receipt contracts. They are not live PSP or
+chain qualification, which is a separate operator activity
+([rail matrix](../rails/certification-matrix.md)).
 
 ## Business time and money
 
 Business time covers billing periods, entitlement validity, cancellation,
-renewal, dunning retries, checkout expiry, and credit/hold expiry. It uses the
-runtime `clockwork.Clock`; supply `Deps.Clock` before constructing a
-test runtime and advance the fake clock rather than sleeping. This seam is
-refused with live provider credentials. Infrastructure time (cache TTLs, rate
-limits, webhook signature tolerance, and transport retry backoff) may use wall
-time when elapsed wall time is the behavior under test.
+renewal, dunning retries, checkout expiry, and credit and hold expiry. It uses
+the engine's `clockwork.Clock`: supply `Deps.Clock` before constructing a test
+engine and advance the fake clock rather than sleeping. This seam is refused
+with live provider credentials. Infrastructure time (cache TTLs, rate limits,
+webhook signature tolerance, transport retry backoff) may use wall time when
+elapsed wall time is the behavior under test.
 
-`bash scripts/check_business_time.sh` scans domain paths for direct `time.Now()`,
-SQL `NOW()`/`CURRENT_TIMESTAMP`, and `clockwork.NewRealClock()` calls. Existing
-exceptions are classified in `scripts/business-time-allowlist.txt`; new billing
-logic should use the runtime clock instead of adding an exception.
+`bash scripts/check_business_time.sh` scans domain paths for direct
+`time.Now()`, SQL `NOW()`/`CURRENT_TIMESTAMP`, and `clockwork.NewRealClock()`
+calls. Existing exceptions are classified in
+`scripts/business-time-allowlist.txt`; new billing logic uses the engine clock
+instead of adding an exception.
 
-Currency amounts are integers at the registered native scale,
-with exact conversion at provider boundaries. The focused money contract pins
-rounding, overflow, unknown currencies, USD sub-cent rejection, and JPY's
-zero-decimal scale.
+Currency amounts are integers at the registered native scale, with exact
+conversion at provider boundaries. Every provider money boundary has a test
+that pins a known amount to its exact wire value.
 
 ## Adding a scenario
 
 Add a small public-client contract to `ci/`. Use a deterministic local
 transport for provider behavior, keep each test on a fresh schema, and assert
-the durable result and the negative safety case. Do not add a new broad test
-runner or reintroduce the deleted integration-package partition.
+the durable result and the negative safety case. A deliberate behavior change
+sweeps `ci/` for the codes, statuses, paths and fields it changed: green in one
+package is not green.

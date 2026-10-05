@@ -37,6 +37,7 @@ var (
 	proseTable  = regexp.MustCompile(`\bbilling\.([a-z][a-z0-9_]*)\b(\.?)`)
 	proseCode   = regexp.MustCompile("\\b([1-5]\\d\\d) `?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b")
 	prosePerm   = regexp.MustCompile(`\b((?:merchant|root)(?::[a-z0-9-]+){2,})`)
+	proseTest   = regexp.MustCompile(`\bTest[A-Z]\w*`)
 	// A private tracker id means nothing to a reader of the public docs.
 	proseIssue = regexp.MustCompile("(?:^|[^&\\w`])([a-z]{0,3}#\\d{2,4}\\b|SEC-\\d+)")
 	fileSuffix = []string{"yaml", "yml", "json", "jsonl", "ts", "tsx", "js", "go", "md", "sql", "css", "example"}
@@ -46,11 +47,14 @@ var (
 // route, Go identifier, table, permission and error code (with its status) a
 // document names is in the route catalog, api/go.txt, api/schema.txt or the
 // error-code registry. A rename or a removal fails here until its documents
-// follow. No document cites a tracker issue.
+// follow. A test a document names exists, and no document cites a tracker
+// issue.
 func TestDocsNameWhatExists(t *testing.T) {
 	root := filepath.Join("..", "..")
 	goAPI := readGoAPI(t, filepath.Join(root, "api", "go.txt"))
 	tables := readSchemaNames(t, filepath.Join(root, "api", "schema.txt"))
+
+	tests := readTestNames(t, root)
 
 	for _, rel := range proseDocs(t, root) {
 		if slices.Contains(proseSkipped, rel) {
@@ -95,6 +99,12 @@ func TestDocsNameWhatExists(t *testing.T) {
 			for _, m := range proseIssue.FindAllStringSubmatch(line, -1) {
 				t.Errorf("%s: %s cites a tracker issue", at, m[1])
 			}
+			for _, name := range proseTest.FindAllString(line, -1) {
+				// TestMode is the Config field; TestReplicas* names a family.
+				if name != "TestMode" && !slices.ContainsFunc(tests, func(test string) bool { return strings.HasPrefix(test, name) }) {
+					t.Errorf("%s: no test is named %s", at, name)
+				}
+			}
 			for _, m := range proseCode.FindAllStringSubmatch(line, -1) {
 				switch code, ok := billing.LookupErrorCode(m[2]); {
 				case !ok:
@@ -117,6 +127,27 @@ func TestDocsNameWhatExists(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestREADMEEmbeddedExample keeps the README's install example the program
+// in examples/embedded, which compiles: its catalog and its newBilling.
+func TestREADMEEmbeddedExample(t *testing.T) {
+	root := filepath.Join("..", "..")
+	read := func(rel string) string {
+		body, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoError(t, err)
+		return string(body)
+	}
+	readme, program := read("README.md"), read("examples/embedded/main.go")
+	_, catalog, ok := strings.Cut(readme, "```yaml\n")
+	require.True(t, ok)
+	catalog, _, _ = strings.Cut(catalog, "```")
+	require.Equal(t, read("examples/embedded/catalog.yaml"), catalog, "the README's catalog.yaml")
+
+	_, body, ok := strings.Cut(readme, "func newBilling(")
+	require.True(t, ok)
+	body, _, _ = strings.Cut(body, "\n}\n")
+	require.Contains(t, program, "func newBilling("+body+"\n}\n", "the README's newBilling")
 }
 
 // proseDocs lists the documents, relative to the repository root.
@@ -264,6 +295,35 @@ func readGoAPI(t *testing.T, file string) map[string]map[string]bool {
 		}
 	}
 	require.NotEmpty(t, out["openrails.Client"])
+	return out
+}
+
+// readTestNames is every Go test function in the repository.
+func readTestNames(t *testing.T, root string) []string {
+	t.Helper()
+	declared := regexp.MustCompile(`(?m)^func (Test\w+)\(`)
+	var out []string
+	require.NoError(t, filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if name := d.Name(); name == "node_modules" || (strings.HasPrefix(name, ".") && path != root) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, "_test.go") {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, m := range declared.FindAllSubmatch(body, -1) {
+				out = append(out, string(m[1]))
+			}
+		}
+		return nil
+	}))
 	return out
 }
 

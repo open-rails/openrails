@@ -319,7 +319,7 @@ Handle in the frontend:
 - When captcha escalation is enabled, an IP/user far past its limit must solve a
   challenge and send `X-Captcha-Token` until the challenge TTL expires.
 
-Full HTTP reference: [docs/api/endpoints.md](api/endpoints.md).
+API conventions: [api/endpoints.md](api/endpoints.md). Every route: [api/routes.md](api/routes.md).
 
 Cookie origins use canonical browser spelling: lowercase host, no wildcard,
 userinfo, path, query, fragment, or explicit default port. HTTPS is required;

@@ -233,7 +233,7 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 All merchant-admin operations live under `/v1/merchant/*` (same public port; each
 route gated by a `merchant:*` permission). Auth is a merchant API key
 (`Bearer openrails_st_...`), a first-party service JWT, or a user session. Full
-reference: `docs/api/endpoints.md`.
+reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
 |---|---|---|

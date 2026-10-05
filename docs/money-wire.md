@@ -1,60 +1,73 @@
-# Money on the HTTP wire
+# Money, ids and times on the wire
 
-Go uses signed int64 native currency units. Balance, checkout-attempt,
-capture, admission, usage-event and usage, wasted-spend, invoice, merchant
-settings/billing policy, spend delegation and self spend-window,
-credit-limit, credit grant and credit transaction, delinquency,
-Solana token base-unit, control-plane fleet analytics/timeseries, catalog
-price and copilot price draft, public price, payment and refund,
-subscription price/payment, tier-change and rate-card DTOs, and the checkout
-session document (`GET /v1/checkout-sessions/{id}`, with `plan.unit_decimals`
-stamped from the registry), encode monetary values
-as decimal JSON strings. Fleet values
-use `<thing>_amount` names (`settled_amount`, `monthly_amount`); the currency's
-registered scale is the unit. Rate cards keep the same representation in
-`catalog_rate_cards.price`. Invoice movement maps use the same representation.
-A JavaScript
-consumer must use BigInt or an exact decimal library for arithmetic; converting
-to Number before parsing loses values above 2^53.
+## Money
 
-Invoice responses include unit_decimals. For USD, "1234567" with scale 6 means
-1.234567 USD. JPY uses its declared scale, not an assumed cents/micros scale.
-Currency codes are the registry's uppercase ISO-4217 spelling on every wire
-surface, whatever case a request sent; requests are read case-insensitively.
-Identifiers are typed (`ids.go`): products, prices, subscriptions, payments,
-payment methods and checkout attempts travel as `prod_`, `price_`, `sub_`,
-`pay_`, `pm_` and `chk_` text on every DTO, path and query parameter that names
-them, and only that spelling is accepted — a bare UUID or another kind's prefix
-is `invalid_param`. Customer, merchant and PSP ids are plain UUIDs. Go callers
-hold `billing.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.
-The catalog `by-key` routes, checkout `price_id` on the public (browser)
-checkout route and `plan-migrations` price references still accept a price
-key; the shared Client's typed fields do not. The same spelling holds
-wherever a typed kind appears inside another document: the customer's own
-`/v1/me/subscriptions` and `/v1/me/notifications` (the shared
-`Subscription` and `Notification` shapes, so the ids
-they list are the ids their action routes take), metrics `product_id` /
-`price_id` dimensions and filters, findings evidence and recommendation
-params, the hosted checkout document's `payment_id` / `subscription_id` /
-`saved_methods[].id` / `payment_method_id`, and entitlement or grant
-`source_id` (the source resource's own id beside `source_type`: `sub_` for
-subscription and grace sources, `pay_` for one-off and purchase sources; an
-admin source is the host's declared id verbatim). Customer filters on the
-merchant list routes are `customer_id`.
-Counts and timestamps are not money: counts remain numbers. Every timestamp on the
-wire — response fields and request parameters alike (`created_at`, `expires_at`,
-`occurred_at`, `at`, rollup `from`/`to`) — is an RFC3339 instant, including the
-public product/price/payment objects and the admin credit grant's `expires_at`
-(no Stripe-style epoch seconds remain); the Go client sends
-`time.RFC3339Nano` and handlers accept any fractional precision. Durations stay
-integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
-`YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt
-fields use null. Handlers encode instants as `time.Time` (RFC3339 at full
-nanosecond precision), never through a hand-written second-precision format.
-A subscription's `payments[]` history is the same `Payment` shape
-`GET /v1/merchant/payments` serves (`created_at`, `status` `succeeded`,
-`amount`), not a second summary shape.
+In Go an amount is a signed `int64` in the currency's native units; on the wire
+it is a decimal string of the same integer, named `amount` (or `<thing>_amount`)
+beside a `currency`. No field name carries a currency.
 
+```json
+{"amount": "9990000", "currency": "USD"}
+```
+
+- **Native units** are the currency's registered scale: micros for USD and EUR
+  (`"1234567"` is 1.234567 USD), 10^4 per yen for JPY. `GET /v1/currencies`
+  lists each currency's `decimals` (the native scale) and `minor_decimals`
+  (what providers settle in); `billing.Currencies()` is the same table in Go.
+- **Every monetary value is a string**: prices, payments and refunds, balances,
+  holds and captures, credit grants and transactions, usage, invoices, limits
+  and spend windows, rate cards, tier-change amounts, and the checkout session
+  document. A JavaScript consumer uses `BigInt` or an exact decimal library;
+  converting to `Number` loses values above 2^53. A numeric amount in a request
+  is refused.
+- **Currency codes** are upper-case ISO 4217 spelling on every response,
+  whatever case a request sent.
+- **Rates are not money.** Provider rates (`/v1/solana/tokens` `price`,
+  `token_price_usd`, `fx_rate`) are decimal strings of the quoted float.
+- Counts are numbers. Durations are integer seconds (`window_seconds`,
+  `retry_after_seconds`); day buckets are `YYYY-MM-DD`.
+
+The checkout session document also carries `plan.unit_decimals`, the scale of
+its currency, so a payment page formats amounts without a second request.
+
+## Ids
+
+A resource's id is typed, prefixed text on every body, path and query
+parameter that names it, and only that spelling is accepted: a bare UUID or
+another kind's prefix is `400 invalid_param`.
+
+| Prefix | Resource | Prefix | Resource |
+|---|---|---|---|
+| `prod_` | product | `price_` | price |
+| `cat_` | catalog | `sub_` | subscription |
+| `pay_` | payment | `pm_` | payment method |
+| `inv_` | invoice | `psp_` | PSP |
+| `chk_` | checkout attempt | `ocs_` | checkout session |
+| `att_` | payment attempt | `cyc_` | rebill cycle |
+| `cgr_` | credit grant | `txn_` | credit transaction |
+| `ent_` | entitlement | `pa_` | product access |
+| `rep_` | reprice | `rpb_` | reprice batch |
+| `uev_` | usage event | `hev_` | host event |
+| `ntf_` | notification | `fnd_` | finding |
+| `awh_` | alert webhook | | |
+
+Customer and merchant ids are plain UUIDs. A price or product *key* is a
+separate, opaque handle (`price_key`, `product_key`, the `by-key` routes); a
+field that takes an id never accepts a key. In Go the ids are types
+(`billing.PriceID`, `billing.CustomerID`, …): the zero id marshals as `""`, and
+a Client refuses one before any request.
+
+An entitlement's or grant's `source_id` is the source resource's own id beside
+`source_type`: `sub_` for a subscription or grace source, `pay_` for a
+purchase; an `admin` source is the grant itself.
+
+## Times
+
+Every timestamp, in responses and requests alike, is an RFC 3339 instant in
+UTC (`created_at`, `expires_at`, `occurred_at`, `at`, `from`, `to`). Handlers
+accept any fractional precision. A timestamp with no value is `null`.
+
+## One registry
 
 The registry has one owner. Go consumers read it with `billing.Currencies()`
 / `billing.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
@@ -62,9 +75,8 @@ table from the public `GET /v1/currencies` route. The admin UI's
 `web/admin/src/lib/currency-units.json` is generated from it by
 `go run ./scripts/currency-units` and pinned by a Go test. It formats exact decimal strings with BigInt/Intl, including
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
-as out of range and rejected as input. No compatibility
-parser accepts numeric money on these finalized routes during the pre-v1 cut.
-Catalog application documents (`POST /merchant/catalog/applications` JSON; YAML files keep exact
+as out of range and rejected as input.
+Catalog application documents (`POST /v1/merchant/catalog/applications` JSON; YAML files keep exact
 integers), the admin customer billing profile balances and metrics money cells
 (unit `money`, exact int64 sums; a money-unit ratio such as
 `realized_revenue_per_customer` is the exact rational quotient rounded half

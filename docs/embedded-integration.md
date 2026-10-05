@@ -518,7 +518,7 @@ never revokes an entitlement for an unpaid arrears bill. Full boundary and polic
 ### 10. Webhooks and ops
 
 Point each rail's webhook at the webhook routes on **your** server, under your mount
-prefix (paths in [api/endpoints.md](api/endpoints.md)). OpenRails verifies rail
+prefix (`/v1/webhooks/{rail}/{account_id}`; see [the API guide](api/endpoints.md#provider-webhooks)). OpenRails verifies rail
 signatures and updates subscriptions/entitlements; your app just reads the results.
 Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md).
 

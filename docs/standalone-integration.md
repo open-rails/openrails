@@ -233,8 +233,8 @@ curl -X POST https://openrails.example/v1/merchant/admissions/req-789/release \
 
 The `/v1/merchant/*` surface (admissions, credits, entitlements, usage,
 settings, customers, payments, subscriptions) is permission-gated per route —
-see [api/endpoints.md](api/endpoints.md) for the full reference and the
-permission table. Keys are bound to their merchant and can never act on
+see [api/routes.md](api/routes.md) for every route with its permission and
+[api/endpoints.md](api/endpoints.md) for the conventions. Keys are bound to their merchant and can never act on
 another merchant's data.
 
 ### Frontend integration
