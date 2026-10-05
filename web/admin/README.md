@@ -1,25 +1,14 @@
-# React + TypeScript + Vite + shadcn/ui
+# Merchant admin console
 
-Browser support for exact money display (Intl decimal strings, BigInt) and the
-behaviour on older engines is documented in
+The React (Vite, shadcn/ui) console OpenRails serves at `admin_console.path`.
+How to turn it on, build it and mount it: [docs/admin-console.md](../../docs/admin-console.md).
+
+- `pnpm run dev` serves it against a local OpenRails on `localhost:3053`.
+- `bash scripts/build-admin-console.sh` (or `task admin-build`) builds `dist/`,
+  which `embed.go` embeds; `dist/` is not committed.
+- `src/lib/api/generated/` holds the wire types and route table generated from
+  the route catalog (`go run ./scripts/contracts -write`); never edit them.
+- Components are shadcn: `pnpm exec shadcn add <name>`.
+
+Browser support for exact money display (Intl decimal strings, BigInt) is in
 [docs/money-wire.md](../../docs/money-wire.md#admin-console-browser-support).
-
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
-
-## Adding components
-
-To add components to your app, run the following command:
-
-```bash
-pnpm exec shadcn add button
-```
-
-This will place the ui components in the `src/components` directory.
-
-## Using components
-
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button"
-```

@@ -223,6 +223,9 @@ Rules:
   move: keep (or restore) the old PSP's credentials until its queue drains,
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
+- **Identity is the PSP id, not its key.** Provider references (price links,
+  vault references, webhook dedup) belong to the PSP's id, so renaming or
+  archiving a PSP moves nothing ([provider object identity](architecture/provider-object-identity.md)).
 - **Subscribers on an archived PSP stay there.** OpenRails never moves or
   cancels a working provider-owned subscription. An archived PSP takes no new
   purchases; its live subscriptions keep renewing on it and stay monitored. A
@@ -571,7 +574,7 @@ above). By default the member keeps access until the renewal is attempted
 (`dunning_policy.access_while_renewal_held`: `keep`, or `suspend` to end access
 at the allowance). While any are held, `life.renewal.held` reports their count
 and the oldest held age; when collection resumes they are charged normally, a
-decline enters dunning, and the finding resolves. Issuer authentication a payer never completes is closed after one
+decline enters dunning, and the finding resolves. Issuer authentication a customer never completes is closed after one
 hour for a first payment and after the renewal period's allowance for a
 renewal. A
 renewal whose submission never reached the provider is re-sent under the same
@@ -1072,4 +1075,4 @@ route tier:
 
 ## Payment-method update notices
 
-A recoverable stored-card failure sends one `payment_method_update_required` payer notice and parks collection until the method is fixed; any follow-up is the host's. Retry/dunning, provider verification, stored-card account updates and paid-period access continue unchanged.
+A recoverable stored-card failure sends one `payment_method_update_required` customer notice and parks collection until the method is fixed; any follow-up is the host's. Retry/dunning, provider verification, stored-card account updates and paid-period access continue unchanged.

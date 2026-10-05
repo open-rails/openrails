@@ -21,7 +21,7 @@ subscriptions use the official on-chain Subscriptions Delegation Program
   - `vault_transit` — the key lives in HashiCorp Vault Transit under the named
     key; OpenRails sends the serialized transaction message to Vault for signing
     and the private key never leaves Vault.
-- **SOL in the signer wallet for gas.** The merchant signer is the fee payer on
+- **SOL in the signer wallet for gas.** The merchant signer is the fee customer on
   every pull (~5000 lamports each). A built-in monitor warns when the balance
   drops below ~0.05 SOL.
 - Optionally, a **Helius RPC API key** (the default RPC provider).

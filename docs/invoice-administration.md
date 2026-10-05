@@ -34,4 +34,4 @@ The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native man
 
 Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. Collection and delinquency discover work from invoices and account policy; hosts own onboarding and any further notification policy.
 
-Invoice collection charges only the payer's explicit `collection_payment_method_id` for that currency; there is no fallback instrument.
+Invoice collection charges only the customer's explicit `collection_payment_method_id` for that currency; there is no fallback instrument.

@@ -171,7 +171,7 @@ stalled.
 
 **Inserting an engine job.** The one job a host inserts itself is the invoice
 sweep: `workers.Insert(ctx, openrails.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
-finalizes every payer's previous period now; `Collect: true` runs the
+finalizes every customer's previous period now; `Collect: true` runs the
 collection pass. Runs are idempotent.
 
 **No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'
@@ -249,7 +249,7 @@ in the background, with `Ready` failing until it commits. While declared, writes
 to the merchant's catalog (products, prices, meters, rate cards,
 `ApplyCatalog`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
 from every caller, the host included: the next boot would overwrite them.
-Creator-owned catalogs and negotiated payer rates stay writable.
+Creator-owned catalogs and negotiated customer rates stay writable.
 
 **Catalog authoring** (no `Config.Catalog`): storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
@@ -375,7 +375,7 @@ with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
 returning an explicit merchant and paying subject. It confers no permissions
 by default and keeps verified credential
 class and invoker restrictions. An invoker-scoped principal may read only its
-own `/v1/me/spend-limits`.
+own `/v1/me/spend-limits`. See [hosted customer audiences](architecture/customer-http-exposures.md).
 
 Each adapter registers ordinary method and path routes, so route inspection
 sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
@@ -486,7 +486,7 @@ The control plane's operations are Client methods: `ProvisionMerchant`,
 
 ### 9. Acting on delinquency
 
-For arrears billing, OpenRails decides when a payer's unpaid debt has outlived
+For arrears billing, OpenRails decides when a customer's unpaid debt has outlived
 the merchant's grace window and refuses their new spend at admission — but only
 your app can shut off what your app runs. Transitions land on a durable,
 acknowledged feed you drain:
@@ -539,6 +539,6 @@ management endpoints.
 
 ### Merchant checkout authority
 
-`Client.CreateCheckoutAttempt` uses the privileged merchant checkout endpoint. The host supplies the customer identity and is trusted to invoke this command for a real customer action. A merchant API key authorizes the host; it does not itself establish that a customer is interacting. Do not use merchant checkout as an unattended way to establish an initial customer-initiated stored-card agreement. Customer-facing self routes retain their authenticated payer boundary.
+`Client.CreateCheckoutAttempt` uses the privileged merchant checkout endpoint. The host supplies the customer identity and is trusted to invoke this command for a real customer action. A merchant API key authorizes the host; it does not itself establish that a customer is interacting. Do not use merchant checkout as an unattended way to establish an initial customer-initiated stored-card agreement. Customer-facing self routes retain their authenticated customer boundary.
 
 Set `CheckoutCustomerIdentity.ClientIP` on `CreateCheckoutAttempt` to the customer request's client address, resolved behind the host's trusted proxies. Declined cards then count per address as well as per customer, as on the customer routes, and a card-testing wave through the host can reach attack mode ([rate-limiting.md](rate-limiting.md)). An invalid address is refused with `400`.

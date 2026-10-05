@@ -53,16 +53,16 @@ The book (`DeclaredBilling`) carries four record kinds:
 
 | Kind | Idempotency key | Notes |
 |---|---|---|
-| `customers` | customer UUID (upsert) | the host's stable subject id = `customers.id` |
-| `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + card metadata (last four, type, expiry); `psp` attributes the vault entry |
+| `customers` | customer UUID (upsert) | the host's stable subject id = `customers.id`; an optional `email` |
+| `payment_methods` | (rail, rail_customer_ref, rail_method_ref) | vault refs + the `card` (`brand`, `last4`, `exp_month`, `exp_year`); `psp` attributes the vault entry |
 | `subscriptions` | (rail, rail_subscription_id) | `source_id` (host's stable id) keys per-row results; `psp` binds the row to the PSP that owns it at the provider; optional `payment_method` ref, `cancel` / `dunning` evidence, raw `evidence` JSON stored verbatim on `gateway_response` |
-| `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount_cents` is provider-wire cents, converted to ledger micros inside OpenRails |
+| `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount` is a decimal string in the currency's native units (micros for USD) |
 
 **Attribution is required.** Every provider-bound row an import writes
 carries the PSP it came from — the same `psp_id` a pull stamps — because the
 same prune, rollback and uniqueness rules apply to an imported row as to a
 pulled one. State it once for the whole book with `default_psp`, or per row
-with `psp`; either form names a PSP by `{"id": "<uuid>"}` or by its manifest
+with `psp`; either form names a PSP by `{"id": "<uuid>"}` or by its key
 `{"key": "mobius"}`. A row that resolves to neither REFUSES the import, naming
 the row and listing the merchant's known PSPs. There is no unattributed lane.
 

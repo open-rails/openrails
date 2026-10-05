@@ -6,7 +6,7 @@ the rest, deliberately:
 
 | | Owner |
 |---|---|
-| Deciding a payer is delinquent, and when | **OpenRails** |
+| Deciding a customer is delinquent, and when | **OpenRails** |
 | Refusing new spend (admission) | **OpenRails** |
 | Telling you about it, durably | **OpenRails** |
 | Shutting off VMs, seats, storage, jobs, whatever you run | **you** |
@@ -20,24 +20,24 @@ revocation is exactly how a billing system costs a paying customer their access.
 
 A charge failing and a debt ageing are different questions with different
 answers, and conflating them is the classic arrears bug. (A third question —
-*how much may this payer owe, or spend, at all* — is the billing policy:
+*how much may this customer owe, or spend, at all* — is the billing policy:
 [billing-policies.md](billing-policies.md).)
 
 - **Decline bucket** — *why did this charge fail* ⇒ what to do about the **card**.
-  Time-independent. Retry, ask them to fix the card, or stop. See
-  `internal/modules/collection`.
+  Time-independent. Retry, ask them to fix the card, or stop
+  ([dunning](operations.md#dunning)).
 - **Delinquency** — *how long has this debt gone unpaid* ⇒ what to do about
   **service**. Amount- and time-based, independent of why any single charge
   failed.
 
 An expired card is "fix the card" whether it expired today or in March, *and*
-becomes delinquent if the bill stays unpaid past grace. A payer with no card on
+becomes delinquent if the bill stays unpaid past grace. A customer with no card on
 file at all can be delinquent without a single decline. Neither state implies the
 other.
 
 ## The state machine
 
-Per `(merchant, payer, currency)`:
+Per `(merchant, customer, currency)`:
 
 ```
 current ──overdue──► grace ──past the grace window, over the floor──► delinquent
@@ -52,7 +52,7 @@ current ──overdue──► grace ──past the grace window, over the floor
 - **delinquent** — past grace and over the floor. New spend is refused and you
   are signalled.
 
-Every state is **derived** from the payer's overdue open receivables
+Every state is **derived** from the customer's overdue open receivables
 (`min(due_at)`, `sum(amount_due)` over `open`/`past_due` invoices) against the
 merchant's policy. The stored row exists only to remember when a state started
 and whether its transition has already been announced — recompute it any time
@@ -83,7 +83,7 @@ Amounts are integers in the currency's native units (micros for USD).
 
 ## What OpenRails enforces: admission
 
-A delinquent payer is refused at `/v1/merchant/admissions` with its **own** deny
+A delinquent customer is refused at `/v1/merchant/admissions` with its **own** deny
 code:
 
 ```json
@@ -98,7 +98,7 @@ For usage billing this **is** the meaningful cutoff — refusing new spend is wh
 stops the bill growing. It revokes nothing and cancels nothing.
 
 The gate fails open by construction. It refuses only when the recorded state says
-delinquent **and** a live re-read of the invoices still agrees, so a payer who has
+delinquent **and** a live re-read of the invoices still agrees, so a customer who has
 just settled is never held out by our evaluation lag.
 
 ## What you enforce: the signal
@@ -163,13 +163,13 @@ paying the invoice, never by an API call.
 
 ## Also notified
 
-The payer gets an in-app notification on the two rungs it can act on:
+The customer gets an in-app notification on the two rungs it can act on:
 `account_delinquent` and `account_delinquency_cleared`. Entering grace is silent —
 the collection ladder has already told them the charge failed.
 
 ## Cadence
 
-The evaluator runs every 15 minutes, driven by indexed due work (payers with an
-overdue receivable, plus payers already parked non-current). It never enumerates
+The evaluator runs every 15 minutes, driven by indexed due work (customers with an
+overdue receivable, plus customers already parked non-current). It never enumerates
 customers, and it runs in limited/readonly mode and with no charger armed,
 because it moves no money.

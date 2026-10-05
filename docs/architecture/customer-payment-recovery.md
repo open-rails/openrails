@@ -1,18 +1,20 @@
 # Customer payment recovery
 
 A customer can pay an unpaid invoice or retry a past-due subscription from the
-existing self-service billing surface. These commands accept no payer identifier:
+existing self-service billing surface. These commands accept no customer identifier:
 the verified customer principal owns the addressed resource. `Idempotency-Key`
-is required, payer-scoped and bound to the accepted request. Same-key replay
+is required, customer-scoped and bound to the accepted request. Same-key replay
 returns the existing result after settlement; a different key cannot displace
 unresolved work. The existing invoice/subscription read exposes `recovery` and
 any unresolved operation, without a second operation API.
 
 These are customer HTTP routes; the Go Client carries merchant routes only.
-Embedded hosts verify customer credentials with `Deps.Authenticate`.
+Embedded hosts verify customer credentials with their AuthKit client or
+`Deps.Authenticate`.
 
 The authenticator must verify a customer's credential before mapping it to the
-payer and set `CredentialClassUserSession`. The host explicitly maps a verified
+customer and set `CredentialClass: openrails.CredentialUserSession` on the
+`openrails.Identity` it returns. The host explicitly maps a verified
 credential in `Deps.Authenticate`; device-key credentials are
 automation authority and do not establish customer interaction. It is never accepted from a request header/body. Unknown or
 automation classes retain their existing self reads but cannot initiate CIT. The host verifier owns verification and any explicit live admission policy. A merchant API key or service credential cannot
@@ -67,8 +69,7 @@ period. The NMI request remains `recurring=rebill_subscription`; preparation
 checks the supported fixed-day calendar against the actual provider record.
 The client command does not invent new calendar semantics or reset a lapsed
 period to the click time. Unsupported cadence or preparation stays refused or
-unresolved before a money write. Live NMI scheduling effects remain a separate
-provider qualification requirement.
+unresolved before a money write.
 
 Current customer-pay support is NMI with PSP-held cards. Unsupported rails or
 custody paths return `customer_payment_unsupported`; Stripe's administrative
@@ -90,7 +91,7 @@ original refusal even if a later attempt has recovered the account.
 A caller should retain its key through network uncertainty and read the existing
 resource before starting a different action.
 
-Fresh payer invoice/subscription reads include `recovery.last_failure_reason`
+Fresh customer invoice/subscription reads include `recovery.last_failure_reason`
 when the latest applicable collection failed. This is the same normalized machine
 category as a payment error's `decline_reason` metadata, never provider response
 text. The existing invoice collection failure count/next attempt and subscription

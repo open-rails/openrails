@@ -143,8 +143,8 @@ group_by) and attach `rate_cards:` to a product: each card binds one meter to a 
 model, with optional `allowance` (included usage netted off first, poolable and
 accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Usage
 products declare no billing cadence — the invoice period is the window: the daily
-period finalize rates reported usage through the cards and invoices every payer with
-ledger or metered activity, including a payer whose only activity is metered usage.
+period finalize rates reported usage through the cards and invoices every customer with
+ledger or metered activity, including a customer whose only activity is metered usage.
 See the metering API documentation for complete rate-card contracts.
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.

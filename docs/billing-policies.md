@@ -62,7 +62,7 @@ infer.
 
 ## Declaring
 
-Merchant settings, under the merchant's `settings:` in a manifest (mode 1):
+Merchant settings, under `settings:` in the merchant's YAML declaration:
 
 ```yaml
 settings:
@@ -84,7 +84,7 @@ settings:
       tier: cloud
 ```
 
-The same settings through the API (mode 2), as the `settings` of
+The same settings through the API, as the `settings` of
 `POST /v1/merchant/configuration/applications`:
 
 ```json
@@ -101,7 +101,7 @@ The same settings through the API (mode 2), as the `settings` of
 }
 ```
 
-Both paths run the **same** validator, so a manifest that boots cannot declare a
+Both paths run the **same** validator, so a declaration that boots cannot declare a
 policy the API would have refused. Each kind accepts only its own limit: putting
 `spend_windows` on an `outstanding_cap` policy is an error, not a silently
 ignored field.
@@ -110,8 +110,8 @@ A `spend_windows` entry (and a spend delegation's window) is at most 31 days
 (`window_seconds` ≤ 2678400): admitted requests are kept for the longest window
 plus 30 days, and a longer window would count requests already dropped.
 
-Customer assignments use a separate runtime resource in both manifest and API
-mode. They are not part of the merchant settings; changing the settings
+Customer assignments are a separate resource, not part of the merchant
+settings; changing the settings
 preserves them. Removing a policy that is still assigned to a
 customer is refused. `customer_id` is not accepted in a declaration binding.
 
@@ -121,9 +121,9 @@ The same Go Client operations work embedded and remotely:
 
 ```go
 name := "cloud_monthly"
-assignment, err := client.SetCustomerBillingPolicy(ctx, customerID, &name)
+assignment, err := client.SetCustomerBillingPolicy(ctx, customerID, billing.CustomerBillingPolicyParams{PolicyName: &name})
 assignment, err = client.GetCustomerBillingPolicy(ctx, customerID)
-assignment, err = client.SetCustomerBillingPolicy(ctx, customerID, nil) // inherit again
+assignment, err = client.SetCustomerBillingPolicy(ctx, customerID, billing.CustomerBillingPolicyParams{}) // inherit again
 ```
 
 HTTP uses `GET` and `PUT` on
@@ -149,7 +149,7 @@ Most specific wins, one lookup:
 per-customer binding  →  per-tier binding  →  merchant default  →  (none)
 ```
 
-With no binding at all, admission falls back to the payer's own arrears credit
+With no binding at all, admission falls back to the customer's own arrears credit
 limit under `outstanding_cap` semantics — the reading that can still refuse.
 
 Policy resolution reads PostgreSQL directly. A committed assignment changes the
@@ -159,19 +159,19 @@ next admission in every runtime, without waiting for a process-local cache TTL.
 
 | Field | Applies to | Meaning |
 |---|---|---|
-| `bad_spend_windows` | any kind | Per-payer wasted-spend grace: at most `limit` of host-reported failed spend forgiven per window; overage is charged at report time. |
-| `collection_threshold_amount` | any kind | When this payer's accrued arrears is invoiced. Overrides `invoice.collection_threshold` for payers bound here. |
-| `delinquency_grace_days` / `delinquency_amount_floor` | any kind | This payer's [delinquency](arrears-delinquency.md) policy. Overrides the merchant-wide `invoice.delinquency_*` values. |
+| `bad_spend_windows` | any kind | Per-customer wasted-spend grace: at most `limit` of host-reported failed spend forgiven per window; overage is charged at report time. |
+| `collection_threshold_amount` | any kind | When this customer's accrued arrears is invoiced. Overrides the merchant's `collection_threshold` for customers bound here. |
+| `delinquency_grace_days` / `delinquency_amount_floor` | any kind | This customer's [delinquency](arrears-delinquency.md) policy. Overrides the merchant's `arrears_grace_days` and `arrears_delinquency_floor`. |
 | `policy_currency` | any kind | Currency for checks whose window carries none. Blank means the request's currency. |
 
-Collection and delinquency ride on every kind because *what a payer may owe or
+Collection and delinquency ride on every kind because *what a customer may owe or
 spend* and *when its debt is chased* are separate questions — a cloud tenant's
 debt still ages even though it never gates admission.
 
-**`collection_cycle_boundary` is refused per-policy**, deliberately. A payer's
+**`collection_cycle_boundary` is refused per-policy**, deliberately. A customer's
 statement periods must tile its lifetime with no gap and no overlap, and
 rebinding is a live runtime lever, so a mid-cycle change would bill a stretch
-twice or never. It stays merchant-wide as `invoice.billing_period_boundary`.
+twice or never. It stays merchant-wide as `billing_period_boundary`.
 
 Amounts are integers in the currency's native units (micros for USD).
 

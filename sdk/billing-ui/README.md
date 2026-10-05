@@ -149,7 +149,7 @@ provider:
   each with its `driver` and `public_config`; `saved_methods` are the buyer's
   cards on them, newest first (paying sends the chosen card's id explicitly).
   Card rails (`collect_js`, `card`, `stripe_elements`) render one panel: saved cards,
-  an inline new card and one Pay/Subscribe button, which is the payer's
+  an inline new card and one Pay/Subscribe button, which is the customer's
   confirmation of the displayed terms. No provider chooser with one rail.
 - Inside a `BillingProvider`, a new card is always saved to the account first
   and the source is paid with `payment_method_id`; `requires_action` results
