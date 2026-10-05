@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 )
 
-// FleetTimeseries returns the weekly fleet trend series (openrails-saas #38)
+// FleetTimeseries returns the weekly fleet trend series
 // as aggregates only — the FleetAnalytics
 // snapshot's trend companion, under the same SearchMerchants (#226) doctrine: the CALLER
 // gates it behind platform-superadmin authority and audits every request.

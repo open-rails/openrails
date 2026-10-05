@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Fleet analytics (openrails-saas #28): cross-merchant operator aggregates over
+// Fleet analytics for the hosted product: cross-merchant operator aggregates over
 // the engine's truth tables. Like SearchMerchants (#226) this is a sensitive
 // cross-merchant read — no per-merchant scope could compute a fleet view —
 // and the CALLER is responsible for gating (platform superadmin) and auditing

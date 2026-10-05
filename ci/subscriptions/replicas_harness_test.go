@@ -36,7 +36,7 @@ import (
 )
 
 // A fleet is N host processes embedding OpenRails over one database and one
-// set of provider accounts, as Doujins and Hentai0 deploy: each replica has
+// set of provider accounts, as host-one and host-two deploy: each replica has
 // its own connections, River client (own leader election and liveness),
 // engine clock and HTTP server. A hard crash cuts the replica's database
 // link at once, so nothing it was doing afterwards is recorded.

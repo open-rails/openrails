@@ -254,7 +254,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 
 	// Operator-mounted secret files (filename = env-var name) load BELOW env,
-	// so env wins. This is the default non-SaaS secret path: Vault renders
+	// so env wins. This is the default self-hosted secret path: Vault renders
 	// files into the mounted dir; no live Vault connection needed.
 	secretFiles, err := billing.SecretFiles()
 	if err != nil {
@@ -418,7 +418,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("rails config was removed (#521): seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
 	}
 	if retiredControlPlaneLegacy {
-		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in openrails-saas; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
+		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
 	if retiredPrivatePort {
 		return nil, fmt.Errorf("private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var")

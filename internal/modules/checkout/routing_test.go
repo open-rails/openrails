@@ -77,7 +77,7 @@ func armedAll() railresolve.FixedSet {
 	return railresolve.FixedSet{
 		"stripe": {Rail: models.RailStripe, AccountID: "acct_stripe", Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"}},
 		"nmi":    {Rail: models.RailNMI, AccountID: "acct_nmi", NMI: &config.NMIRailConfig{SecurityKey: "security_test"}},
-		"ccbill": {Rail: models.RailCCBill, AccountID: "945280-0000", CCBill: &config.CCBillRailConfig{}},
+		"ccbill": {Rail: models.RailCCBill, AccountID: "999999-0000", CCBill: &config.CCBillRailConfig{}},
 	}
 }
 

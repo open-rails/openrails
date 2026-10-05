@@ -405,10 +405,10 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 		*cfg = *base
 	}
 	// #697: CCBill account_id is dash-joined (clientAccnum-clientSubacc, e.g.
-	// 945280-0000). Both parts are numeric, so the first dash is the separator.
+	// 999999-0000). Both parts are numeric, so the first dash is the separator.
 	acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
 	if !ok || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
-		return nil, errors.New("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
+		return nil, errors.New("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000")
 	}
 	cfg.ClientAccNum = strings.TrimSpace(acc)
 	cfg.ClientSubAcc = strings.TrimSpace(sub)

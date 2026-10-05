@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Operator-mounted secrets: the default non-SaaS secret path. The operator
+// Operator-mounted secrets: the default self-hosted secret path. The operator
 // renders secrets out of Vault (Vault Agent template, k8s secret volume, CSI)
 // into a directory mounted read-only in the container — one file per secret,
 // filename = the env-var name, content = the value. OpenRails needs no live

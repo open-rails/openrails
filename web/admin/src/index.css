@@ -58,7 +58,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Same token family as the product shell (openrails-saas/web/src/index.css).
+/* Same token family as the hosted product's shell.
    Structure carries hue 248 at a chroma between 0.003 and 0.018. It never reads
    as blue; it stops the greys going muddy beside the money states, which pure
    achromatic neutrals do. */

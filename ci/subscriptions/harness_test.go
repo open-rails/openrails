@@ -42,7 +42,7 @@ const (
 	mountPrefix = "/billing"
 	stripeAcct  = "acct_e2e"
 	nmiAcct     = "e2e-nmi"
-	ccbillAcct  = "945280-0000"
+	ccbillAcct  = "999999-0000"
 	whsecStripe = "whsec_e2e"
 	whsecNMI    = "nmi_webhook_e2e"
 	monthHours  = 720

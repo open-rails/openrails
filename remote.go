@@ -100,7 +100,7 @@ func WithTimeout(d time.Duration) ClientOption {
 	return func(r *Client) { r.timeout = d }
 }
 
-// NewRemote builds the client for standalone or SaaS HTTP. It validates static
+// NewRemote builds the client for standalone or hosted HTTP. It validates static
 // configuration without I/O; Ready checks reachability.
 func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	r := &Client{

@@ -10,7 +10,7 @@ import (
 )
 
 // SetMerchantAPIHost sets id's canonical #734 API host through the attached
-// control plane (openrails-saas #14: hosted products provision a merchant's
+// control plane (hosted products provision a merchant's
 // api_host right after ProvisionMerchant succeeds, using the MerchantID that
 // call already returned). apiHost empty clears the mapping. Mirrors
 // ProvisionMerchant's shape: resolve the attached control plane, build the

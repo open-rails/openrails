@@ -1,6 +1,6 @@
 package operator
 
-// or#914 item 3: the hosted-SaaS merchant creation cost gate, composed from
+// or#914 item 3: the hosted product's merchant creation cost gate, composed from
 // openrails' own state: verified email ALWAYS; a free allowance of owned
 // merchants; and beyond it, a VAULTED payment method on file (setup-intent
 // vault + Radar check, no charge — openrails holds the vault) unlocks more.

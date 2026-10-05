@@ -17,8 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
-// platformRoutes is the cross-merchant operator directory (#721;
-// openrails-saas #16): standalone only, human operator sessions only.
+// platformRoutes is the cross-merchant operator directory (#721):
+// standalone only, human operator sessions only.
 // Deliberately no platform create or patch, no hard delete, and nothing that
 // touches a merchant's customers, payments or subscriptions.
 var platformRoutes = []Route{

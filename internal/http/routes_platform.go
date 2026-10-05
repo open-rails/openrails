@@ -6,7 +6,7 @@ import (
 )
 
 // registerPlatformRoutes mounts the cross-merchant platform operator directory
-// at /v1/platform/merchants (#721; openrails-saas #16). STANDALONE ONLY: the
+// at /v1/platform/merchants (#721). STANDALONE ONLY: the
 // platform tier does not exist on the embedded surface (an embedded host
 // controls exactly one merchant, and the control plane the root-group check
 // needs only runs here).

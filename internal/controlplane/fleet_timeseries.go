@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Fleet timeseries (openrails-saas #38): the trend companion to FleetAnalytics
+// Fleet timeseries: the trend companion to FleetAnalytics
 // — weekly buckets over the same truth tables, aggregates only, under the
 // same SearchMerchants (#226) doctrine: the
 // CALLER gates (platform superadmin) and audits every request. Buckets are

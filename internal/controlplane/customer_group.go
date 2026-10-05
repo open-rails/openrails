@@ -16,7 +16,7 @@ func CustomerGroup(customerID string) iam.GroupRef {
 }
 
 // EnsureCustomerPermissionGroup creates the hosted customer-portal membership
-// used by SaaS, owned by ownerSubject, and returns its id. It is idempotent.
+// used by the hosted product, owned by ownerSubject, and returns its id. It is idempotent.
 // Billing records and spend policies do not call this.
 func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, customerID, ownerSubject string) (string, error) {
 	if c.Core() == nil {

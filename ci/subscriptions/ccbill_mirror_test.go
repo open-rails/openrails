@@ -21,7 +21,7 @@ import (
 // sendCCBill posts one CCBill event without asserting, for use off the test
 // goroutine.
 func (w *world) sendCCBill(ctx context.Context, eventType string, fields map[string]string) int {
-	form := url.Values{"clientAccnum": {"945280"}, "clientSubacc": {"0000"}, "timestamp": {ccbillTimestamp(w.clock.Now())}}
+	form := url.Values{"clientAccnum": {"999999"}, "clientSubacc": {"0000"}, "timestamp": {ccbillTimestamp(w.clock.Now())}}
 	for k, v := range fields {
 		form.Set(k, v)
 	}

@@ -663,7 +663,7 @@ type ResolvedPSP struct {
 	Rail models.Rail
 	// AccountID is this account's rail-native identity (#641/#655): NMI
 	// gateway-id, Stripe acct_…, CCBill clientAccnum-clientSubacc (dash-joined,
-	// e.g. 945280-0000, #697), or Solana wallet (#592: operator-declared).
+	// e.g. 999999-0000, #697), or Solana wallet (#592: operator-declared).
 	// REQUIRED — ValidateRailSet rejects an empty one.
 	AccountID string
 	// Archived keeps an account addressable for existing obligations and inbound
@@ -801,7 +801,7 @@ func (p *ResolvedPSP) EffectiveAccountID() string {
 // handled by the callers' requiredness rules.
 func ValidateRailAccountID(rail models.Rail, accountID string) error {
 	if rail == models.RailCCBill && strings.Contains(accountID, "/") {
-		return fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000 (got %q)", accountID)
+		return fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000 (got %q)", accountID)
 	}
 	return nil
 }
@@ -906,7 +906,7 @@ func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error) {
 	acc, sub, ok := strings.Cut(strings.TrimSpace(accountID), "-")
 	acc, sub = strings.TrimSpace(acc), strings.TrimSpace(sub)
 	if !ok || acc == "" || sub == "" {
-		return "", "", fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000 (got %q)", accountID)
+		return "", "", fmt.Errorf("CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 999999-0000 (got %q)", accountID)
 	}
 	return acc, sub, nil
 }

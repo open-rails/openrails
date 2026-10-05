@@ -110,7 +110,7 @@ func RequiresRecentSignIn(perm string) bool {
 
 // Platform-operator (root) permissions (#721). AuthKit's #111 rename made
 // `root:` the platform-operator namespace (was `platform:`); namespace purity
-// means root-persona roles may only hold `root:` perms, so openrails-saas #16's
+// means root-persona roles may only hold `root:` perms, so the hosted product's
 // platform:merchants:* map 1:1 onto these. They gate the standalone
 // cross-merchant directory and root-only operational overrides.
 const (

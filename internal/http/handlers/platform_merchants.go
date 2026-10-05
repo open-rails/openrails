@@ -19,7 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Platform merchant directory handlers (#721; openrails-saas #16): the
+// Platform merchant directory handlers (#721): the
 // cross-merchant operator surface. Orchestration-free reads go straight to gen
 // (#688); soft-delete/restore are single-row directory tombstone flips —
 // DIRECTORY state only (list exclusion + merchant-auth resolution failure via

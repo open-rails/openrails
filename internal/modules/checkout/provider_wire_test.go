@@ -108,22 +108,22 @@ func TestCCBillUpgradeWire(t *testing.T) {
 			"ccbill": {models.RailKeyRail: "ccbill", models.RailKeyCCBillFormName: "premium", models.RailKeyCCBillFlexID: "flex-123"}}}
 	}
 
-	resp, err := ccbillService(t, "945280-0000").processCCBillUpgrade(merchantCtx(), user, price("eur"), sub)
+	resp, err := ccbillService(t, "999999-0000").processCCBillUpgrade(merchantCtx(), user, price("eur"), sub)
 	require.NoError(t, err)
 	parsed, err := url.Parse(resp.RedirectURL)
 	require.NoError(t, err)
 	q := parsed.Query()
 	require.Equal(t, "978", q.Get("currencyCode"))
-	require.Equal(t, "945280", q.Get("clientAccnum"))
+	require.Equal(t, "999999", q.Get("clientAccnum"))
 	require.Equal(t, "0000", q.Get("clientSubacc"))
 	require.Equal(t, "ccbill-sub-1", q.Get("originalSubscriptionId"))
 	require.NotEmpty(t, q.Get("signature"))
 
 	for _, currency := range []string{"", "sek"} {
-		_, err := ccbillService(t, "945280-0000").processCCBillUpgrade(merchantCtx(), user, price(currency), sub)
+		_, err := ccbillService(t, "999999-0000").processCCBillUpgrade(merchantCtx(), user, price(currency), sub)
 		require.Error(t, err, "a currency CCBill cannot bill is never defaulted: %q", currency)
 	}
-	_, err = ccbillService(t, "945280/0000").processCCBillUpgrade(merchantCtx(), user, price("usd"), sub)
+	_, err = ccbillService(t, "999999/0000").processCCBillUpgrade(merchantCtx(), user, price("usd"), sub)
 	require.ErrorContains(t, err, "CCBill account_id uses a dash")
 
 	missing := &CheckoutService{}
@@ -147,7 +147,7 @@ func TestNMIClientResolutionFailsClosed(t *testing.T) {
 	_, err = unarmed.resolveNMIClient(merchantCtx(), "nmi")
 	require.ErrorContains(t, err, "has no armed PSP")
 
-	captured := ccbillService(t, "945280-0000")
+	captured := ccbillService(t, "999999-0000")
 	pspID := captured.ProviderSecrets.(ccbillScope).scope.ID
 	_, err = captured.resolveNMIClient(db.WithPSPID(merchantCtx(), pspID), "nmi")
 	require.ErrorContains(t, err, "captured PSP rail mismatch")

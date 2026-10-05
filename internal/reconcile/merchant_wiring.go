@@ -253,12 +253,12 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderCCBill, out); ok {
 		// #697: CCBill account_id is dash-joined (clientAccnum-clientSubacc,
-		// e.g. 945280-0000). Both parts are numeric, so the first dash splits.
+		// e.g. 999999-0000). Both parts are numeric, so the first dash splits.
 		acc, sub, cut := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
 		if !cut || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"merchant_id": mid.String(), "rail": "ccbill", "account_id": scope.AccountID,
-			}).Warn("provider pull: rail not armed — CCBill account_id must be clientAccnum-clientSubacc (e.g. 945280-0000)")
+			}).Warn("provider pull: rail not armed — CCBill account_id must be clientAccnum-clientSubacc (e.g. 999999-0000)")
 			return
 		}
 		username, ok := b.requireSecret(ctx, mid, scope, "datalink_username")

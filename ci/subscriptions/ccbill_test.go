@@ -98,7 +98,7 @@ func (w *world) postCCBill(eventType, sourceIP string, fields map[string]string)
 // entry its own X-Forwarded-For line.
 func (w *world) postCCBillVia(eventType string, forwardedFor []string, fields map[string]string) (int, map[string]any) {
 	w.t.Helper()
-	form := url.Values{"clientAccnum": {"945280"}, "clientSubacc": {"0000"}, "timestamp": {ccbillTimestamp(w.clock.Now())}}
+	form := url.Values{"clientAccnum": {"999999"}, "clientSubacc": {"0000"}, "timestamp": {ccbillTimestamp(w.clock.Now())}}
 	for k, v := range fields {
 		form.Set(k, v)
 	}

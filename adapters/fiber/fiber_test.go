@@ -187,25 +187,25 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		calls := 0
 		graph.Runtime.AuthenticateCustomer = denyDelegated(&calls)
 		policy := &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Delegated: true}}}
-		saas := strings.Contains(prefix, "{slug}")
+		hosted := strings.Contains(prefix, "{slug}")
 		if err := embedhttp.ValidateHTTPConfig(policy, nil); err != nil {
-			require.False(t, saas, err)
+			require.False(t, hosted, err)
 			continue
 		}
 		table, err := embedhttp.BuildCustomerRoutes(graph, policy.CustomerRoutes, nil)
 		require.NoError(t, err)
 		if err := embedhttp.ValidateRouteTable(table); err != nil {
-			require.False(t, saas, err)
+			require.False(t, hosted, err)
 			continue
 		}
 		engine := strictApp()
 		if err := (&Bundle{routes: toRoutes(routebundle.FromTable(table))}).Mount(engine); err != nil {
-			require.False(t, saas, err)
+			require.False(t, hosted, err)
 			continue
 		}
 		require.Equal(t, http.StatusNotFound, status(t, engine, http.MethodPost, "/portal/unconfiguredaudience/subscriptions/not-id/cancel", nil),
 			"%s broadened to an undeclared customer audience", prefix)
-		if !saas {
+		if !hosted {
 			continue
 		}
 		for _, request := range []struct {
