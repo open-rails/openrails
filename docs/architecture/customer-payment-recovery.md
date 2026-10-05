@@ -71,9 +71,8 @@ unresolved before a money write. Live NMI scheduling effects remain a separate
 provider qualification requirement.
 
 Current customer-pay support is NMI with PSP-held cards. Unsupported rails or
-custody paths return `customer_payment_unsupported`. Stripe's customer-action/
-3DS continuation remains an explicit #809 follow-up; its existing administrative
-and scheduled off-session collection is unchanged. Invoice payment does not
+custody paths return `customer_payment_unsupported`; Stripe's administrative
+and scheduled off-session collection is unaffected. Invoice payment does not
 reactivate an unrelated subscription.
 
 HTTP commands:

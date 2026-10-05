@@ -12,7 +12,7 @@ own permissions. Off by default.
 
 ### Turning it on and off
 
-Two independent requirements, both needed (#740/#754):
+Two independent requirements, both needed:
 
 1. **Assets in the binary.** `web/admin` go:embeds its `dist` build, which is
    never committed: a binary built from an OpenRails checkout carries a console
@@ -106,13 +106,13 @@ Without `Deps.ConsoleAssets` the engine uses the build embedded in the
 OpenRails module (the standalone binary's). With `Config.ControlPlane` the
 console is part of `Client.Routes` and needs no separate mount.
 
-Fail-loud behaviors, verified: enabled without assets refuses boot
+Enabled without assets refuses boot
 (standalone: `admin_console.enabled is set but web/admin holds no console build: …`;
 embedded: `Config.AdminConsole is enabled but there is no console build: …`). Opt-out is doing nothing.
 
 ### Security posture
 
-What the engine enforces (verified):
+What the engine enforces:
 
 - The SPA itself — static assets and `GET <path>/config.json` — is served with
   **no authentication at the transport layer**. Anyone who can reach the
@@ -120,7 +120,7 @@ What the engine enforces (verified):
   feature flags; no secrets, no data).
 - All **data and actions** go through `/v1/merchant/*` with a Bearer token
   (AuthKit user session or merchant API key) and are enforced server-side by
-  the merchant permission catalog (#567) plus per-query merchant scoping. The console
+  the merchant permission catalog plus per-query merchant scoping. The console
   has no client-side privilege of its own; a 403 renders as a
   "role lacks permission" toast.
 - Core OpenRails imposes **no environment restriction** — `enabled: true`
@@ -136,7 +136,7 @@ their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
 covers the auth endpoints).
 
 Embedded hosts that mount `/v1/merchant/*` for host principals only (no user
-bearers) should keep the console disabled or wire a user authenticator (#739).
+bearers) should keep the console disabled or wire a user authenticator.
 
 ### Viewing it
 
@@ -173,7 +173,7 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
 | Catalog | `/catalog` | Products/prices, price detail + change wizard, archive/restore, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
 | Ops | `/ops` | Findings queue (approve/ignore), repair alerts, worker health |
-| Settings | `/settings` | Tabs: Merchant profile, Team, Notifications (email and encrypted webhooks), Payment providers (configure, rotate credentials, archive), API keys, Customer controls |
+| Settings | `/settings` | Tabs: Merchant profile, Team, Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), API keys, Customer controls |
 
 **Natural-language features** are fail-closed on the server's `llm:` config and
 mirrored into `config.json` so the UI shows a pointed empty-state (naming the

@@ -1,23 +1,28 @@
-# Merchant name authority
+# Merchant names
 
-A merchant's billing UUID and AuthKit group UUID are stable identities. AuthKit owns the public name and its rename/forwarding/reclaim policy. A bound billing row's `slug` is a display projection; it must neither reserve a released name nor select an owner when that name changes hands.
+A merchant's billing UUID is its identity. Its name (`slug`) is a lookup key
+that can change.
 
-AuthKit-free hosts own a separate local namespace. Live unbound merchant names remain unique. A local-only lookup selects unbound rows only; it cannot return a bound merchant based on its cached name. A configured AuthKit lookup resolves the group first and then selects the billing row by that exact group UUID, without falling back to the local namespace.
+- **Where names live.** OpenRails owns merchant names. With a control plane, a
+  merchant is bound to one AuthKit group by UUID, and that binding never
+  changes; the group's own AuthKit name is not the merchant's name. Without a
+  control plane the host's merchants share one local namespace.
+- **Uniqueness.** A name is unique among live merchants. A rename keeps the
+  former name as an alias that forwards to the merchant and that no other
+  merchant can claim until it expires; the merchant can take it back. Retiring
+  or deleting a merchant releases its name and aliases. The rename interval and
+  how long a former name is kept are the deployment's naming policy
+  ([merchant provisioning](merchant-provisioning.md#merchant-identity-and-names)).
+- **Resolution.** Name-bearing boundaries (CLI `--merchant`, a manifest, the
+  `OpenRails-Merchant` header, a Host) resolve the current name or a valid
+  alias once. Everything after runs against the merchant UUID: imports, ledger
+  operations, jobs and foreign keys never store a name.
+- **Reclaimed names.** Provisioning a name another merchant released creates a
+  distinct billing identity. The former merchant keeps its UUID, money and
+  provider state. A display name updates the selected UUID; it never upserts
+  over another owner's row by name.
 
-Name-bearing boundaries (CLI, manifest, catalog, HTTP) resolve the current name or valid forward once, through the configured authority. Imports, ledger operations and maintenance run against the resulting merchant UUID. An embedded host's explicit UUID binding remains the identity across name changes. Missing authority is an error for a bound-name operation; a stored projection is not a substitute.
-
-Provisioning a newly reclaimed name creates a distinct billing identity for the new AuthKit group. The former group and merchant may remain active, with all their existing money and provider state. Re-provisioning the original group still returns its original billing UUID. An operator-supplied display name updates the selected UUID; it never performs a slug-based upsert over some other owner's row.
-
-## Acceptance evidence
-
-The change must prove rename, active forwarding, expiry and reclaim while the original merchant is still alive; both owners retain distinct billing identities and data. The same assertions apply to public resolution, provisioning, manifest/bootstrap, catalog and import/maintenance boundaries. Unbound host names must remain unique, ambiguous projections must never be picked arbitrarily, and all verification must use isolated databases.
-
-The pre-launch cutover needs no old-name compatibility reader or second alias registry. AuthKit's own read-only directory API supplies the same canonical/alias semantics to tools that do not run its issuer, sessions or HTTP server.
-
-## Pre-launch helper API changes
-
-Imports and maintenance operations take `MerchantID billing.MerchantID`, never a name: the operator's converge and pull-provider tools, the declared-facts import on the merchant-bound Client, and the standalone CLI's prune/undo commands. They run on the runtime's unprivileged billing pool.
-
-At a host CLI boundary, call `rt.ResolveMerchant(ctx, name)` once to obtain the billing UUID and canonical name; the runtime's configured directory (its attached control plane's AuthKit authority, or the unbound host namespace) answers.
-
-Standalone maintenance commands interpret bare `--merchant` values as public names, including UUID-shaped names. Deliberate direct operator addressing uses `--merchant id:<uuid>`; it never shares an ambiguous string format with public names. The selected UUID must identify an existing non-deleted billing merchant.
+On the command line a bare `--merchant` value is a name, even a UUID-shaped
+one; `--merchant id:<uuid>` addresses the merchant directly. In Go,
+`openrails.WithMerchant` takes a name and `openrails.ForMerchantID` the UUID
+([choosing the merchant](client-merchant-selection.md)).

@@ -70,7 +70,7 @@ same names in both:
 ```yaml
 settings:
   monthly_floor: 1000000              # don't bother collecting below this
-  arrears_grace_days: 7               # or#878: days past due_at before delinquent
+  arrears_grace_days: 7               # days past due_at before delinquent
   arrears_delinquency_floor: 5000000  # optional; defaults to monthly_floor
 ```
 
@@ -127,13 +127,15 @@ for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyEntered,
     billing.HostEventDelinquencyCleared,
 } {
-    events, err := client.ListHostEvents(ctx, billing.HostEventListOptions{Type: kind, Limit: 100})
+    page, err := client.ListHostEvents(ctx, billing.ListHostEventsRequest{
+        Type: kind, PageRequest: billing.PageRequest{Limit: 100},
+    })
     if err != nil { return err }
-    for _, event := range events {
+    for _, event := range page.Items {
         if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
             return err // leave the event pending for replay
         }
-        if err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
+        if _, err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
     }
 }
 ```
@@ -147,12 +149,14 @@ dedupe key, so a re-run never instructs you to shut the same customer off twice.
 
 ## Reading the state
 
-- `GET /v1/merchant/delinquency` — the overdue roster (grace + delinquent, oldest
-  debt first) plus the effective policy it was judged against. `?state=delinquent`
-  filters. Payers in good standing are never returned: it is an exception list,
-  not a customer directory.
-- `GET /v1/merchant/customers/:customer_id/delinquency` — one payer, per currency.
-  An empty list means the payer has never been overdue.
+- `GET /v1/merchant/delinquency` (`Client.ListDelinquency`): the overdue roster
+  (grace + delinquent, oldest debt first), a cursor page. `?state=delinquent`
+  filters. Customers in good standing are never returned: it is an exception list,
+  not a customer directory. The policy it is judged against is in the merchant's
+  settings (`arrears_grace_days`, `arrears_delinquency_floor`).
+- `GET /v1/merchant/customers/{customer_id}/delinquency`
+  (`Client.ListCustomerDelinquency`): one customer, per currency. An empty list
+  means the customer has never been overdue.
 
 Both are read-only. The state is a reading of invoice truth, so it is settled by
 paying the invoice, never by an API call.

@@ -67,8 +67,8 @@ Back the key up independently of the database, in a different trust domain, and 
 retrieve it *before* you need it. Rotating it requires re-encrypting stored secrets; do not
 rotate as part of an incident.
 
-Outside development, OpenRails refuses to boot the DB-encrypted store without this key set —
-that refusal is deliberate (see `invariants.md`, FC-3).
+Outside development, OpenRails refuses to boot the DB-encrypted store without this key set;
+that refusal is deliberate.
 
 ## Vault
 

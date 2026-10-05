@@ -1,6 +1,8 @@
 # Durable request admission
 
-Implementation contract for issue989; replaces the Redis hold/pointer authority before v1.
+How admissions and their holds behave. The routes are `/v1/merchant/admissions`
+([routes](api/routes.md)); the Go methods are `Admit`, `GetAdmission`,
+`CaptureAdmission`, `ReleaseAdmission` and `ExtendAdmission`.
 
 Malformed request IDs (empty or over 255 UTF-8 bytes), negative estimates and negative prospective rates return structured 400 errors before account creation or money locking.
 

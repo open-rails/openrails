@@ -229,11 +229,7 @@ table billing.checkout_attempts
   column psp_id uuid NOT NULL
   column deleted_at timestamp with time zone
   column destructive_run_id uuid
-  column destructive_run_class text GENERATED ALWAYS AS (
-CASE
-    WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text
-    ELSE NULL::text
-END) STORED
+  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column routing_reason jsonb
   constraint checkout_attempts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
   constraint checkout_attempts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -527,11 +523,7 @@ table billing.entitlements
   column customer_id uuid NOT NULL
   column grant_id uuid NOT NULL
   column destructive_run_id uuid
-  column destructive_run_class text GENERATED ALWAYS AS (
-CASE
-    WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text
-    ELSE NULL::text
-END) STORED
+  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   constraint chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text])))
   constraint chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL)))
   constraint chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at)))
@@ -885,13 +877,7 @@ table billing.maintenance_runs
   column error text
   column inventory_manifest jsonb
   column inventory_total_rows bigint
-  column run_class text NOT NULL GENERATED ALWAYS AS (
-CASE
-    WHEN (kind = 'reconciliation'::text) THEN 'observation'::text
-    WHEN (kind = 'purge_inventory'::text) THEN 'inventory'::text
-    WHEN (kind = 'billing_restore'::text) THEN 'restore'::text
-    ELSE 'destructive'::text
-END) STORED
+  column run_class text NOT NULL GENERATED ALWAYS AS ( CASE WHEN (kind = 'reconciliation'::text) THEN 'observation'::text WHEN (kind = 'purge_inventory'::text) THEN 'inventory'::text WHEN (kind = 'billing_restore'::text) THEN 'restore'::text ELSE 'destructive'::text END) STORED
   constraint maintenance_runs_expected_rows CHECK (((expected_rows IS NULL) OR (expected_rows >= 0)))
   constraint maintenance_runs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint maintenance_runs_merchant_id_id_class_key UNIQUE (merchant_id, id, run_class)
@@ -1350,11 +1336,7 @@ table billing.payments
   column token_type text
   column deleted_at timestamp with time zone
   column destructive_run_id uuid
-  column destructive_run_class text GENERATED ALWAYS AS (
-CASE
-    WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text
-    ELSE NULL::text
-END) STORED
+  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column money_movement text NOT NULL DEFAULT 'none'::text
   constraint chk_payment_not_future CHECK ((purchased_at <= (now() + '00:05:00'::interval)))
   constraint chk_payments_attempt_kind CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text]))))
@@ -1553,11 +1535,7 @@ table billing.provider_intents
   column updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
   column psp_id uuid
   column destructive_run_id uuid
-  column destructive_run_class text GENERATED ALWAYS AS (
-CASE
-    WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text
-    ELSE NULL::text
-END) STORED
+  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column custodian_id uuid
   constraint chk_provider_intents_executed CHECK (((status <> 'succeeded'::text) OR (executed_at IS NOT NULL)))
   constraint chk_provider_intents_origin CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text])))
@@ -1743,11 +1721,7 @@ table billing.reconciliation_findings
   column resolved_by text
   column notified_at timestamp with time zone
   column notified_severity text
-  column seen_run_class text GENERATED ALWAYS AS (
-CASE
-    WHEN ((first_seen_run IS NOT NULL) OR (last_seen_run IS NOT NULL)) THEN 'observation'::text
-    ELSE NULL::text
-END) STORED
+  column seen_run_class text GENERATED ALWAYS AS ( CASE WHEN ((first_seen_run IS NOT NULL) OR (last_seen_run IS NOT NULL)) THEN 'observation'::text ELSE NULL::text END) STORED
   constraint chk_reconciliation_findings_resolution CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text]))))
   constraint chk_reconciliation_findings_resolved_fields CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
   constraint chk_reconciliation_findings_severity CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
@@ -1991,11 +1965,7 @@ table billing.subscriptions
   column psp_id uuid NOT NULL
   column deleted_at timestamp with time zone
   column destructive_run_id uuid
-  column destructive_run_class text GENERATED ALWAYS AS (
-CASE
-    WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text
-    ELSE NULL::text
-END) STORED
+  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column transient_retries integer NOT NULL DEFAULT 0
   column lifecycle_rev bigint NOT NULL DEFAULT 0
   column row_version bigint NOT NULL DEFAULT 0

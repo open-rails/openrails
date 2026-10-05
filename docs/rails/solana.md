@@ -28,7 +28,7 @@ subscriptions use the official on-chain Subscriptions Delegation Program
 
 ### PSP manifest entry
 
-Declared under `merchants.<slug>.psps.<key>.solana`. Unlike other rails,
+Declared under `merchants.<slug>.psps.<key>` with `rail: solana`. Unlike other rails,
 `account_id` is **not** declared — the PSP identity is always
 derived from the signer's public key (a declared value is ignored with a warning).
 
@@ -86,7 +86,7 @@ this set, never more.
   identity.
 - `DUSD` is an embedded host's devnet test stablecoin (`Dev USD`). It is not available
   on mainnet and must never be configured in a live merchant manifest.
-- **`decimals`** — never configurable (#817): read from the SPL mint on-chain.
+- **`decimals`** — never configurable: read from the SPL mint on-chain.
 - **Under `test_mode`** the devnet column applies. Devnet mints are
   per-deployment artefacts with no canonical address, so a built-in symbol with
   no devnet entry (`USDT`, `USD1`, `USDG`) is simply not built-in there —
@@ -110,7 +110,7 @@ the accepted tokens with current pricing.
 
 A merchant checkout attempt (`CreateCheckoutAttempt` with `payment: {rail:
 "solana", token_symbol, flow}`) may instead use `flow: transaction_request`: its
-`solana_pay` link points at `/v1/checkout-attempts/:id/solana-pay`, where the
+`solana_pay` link points at `/v1/checkout-attempts/{id}/solana-pay`, where the
 wallet POSTs its account and receives a server-built transaction to sign.
 `ConfirmCheckoutAttempt` with the signature verifies the transaction on chain.
 
@@ -130,16 +130,17 @@ plan's terms, and a merchant-co-signed pull of the full first period into the
 merchant's ATA, landed within the checkout's validity. A signature settles one
 checkout only, across every merchant and PSP.
 
-- Catalog prices bill in `currency: usd`. Declaring `psps: [solana]` creates or
+- Catalog prices bill in `currency: USD`. Declaring `psps: [solana]` creates or
   reattaches a USDC plan by default. Use `psp_links.solana.token: USD1` to select
   USD1 instead, or supply `plan_pda` to attach an existing plan and resolve its
   configured token from the on-chain mint:
 
   ```yaml
   prices:
-    - currency: usd
+    - key: premium-monthly
+      currency: USD
       unit_amount: 23_000_000
-      duration: 30d
+      access_duration_hours: 720
       auto_renew: true
       psps: [solana]
       # Optional:
@@ -176,15 +177,19 @@ checkout only, across every merchant and PSP.
   cancels the subscription. No dunning.
 - **RPC/gas failures** are operational: retried next run, never held against the
   subscriber.
-- **Cancels are immediate and on-chain** (the user signs a
-  `cancel_subscription`); there is no card-style "cancel at period end"
-  deferral on this rail.
+- **Cancels and tier changes are on-chain and signed by the subscriber.**
+  `POST /v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change-tier`
+  answer `next_action: {type: "solana_sign_transactions", transactions}`; the
+  wallet signs and sends them, and the same request repeated with `signature`
+  mirrors the landed transaction. A cancel is immediate: there is no card-style
+  "cancel at period end" deferral on this rail. A merchant cannot do either for
+  the customer (403 `customer_action_required`).
 
 ### Devnet testing
 
 The network is derived structurally from the deployment's `test_mode`:
 sandbox → **devnet**, live → mainnet. There is no independent network knob, and
-a PSP declares no environment of its own (#882).
+a PSP declares no environment of its own.
 
 To exercise the flows on devnet:
 

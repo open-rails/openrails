@@ -49,7 +49,7 @@ A host imports four kinds of package; everything else is `internal/`:
 |---|---|
 | `openrails` | `New`, `NewRemote`, `Migrate`, the `*Client`, `Config`, `Deps` |
 | `billing` | request/response types, IDs (`billing.MerchantID`, `billing.ParseMerchantID`), errors and codes, permission names (`billing.MerchantAll`) |
-| `catalog` | catalog-as-code manifests and charge models (rate cards, meters, prices) |
+| `catalog` | the catalog document (`catalog.Application`) and its charge models (rate cards, meters, prices) |
 | `adapters/http`, `adapters/gin`, `adapters/fiber` | mount `client.Routes()` on your router |
 
 OpenRails owns its migrations and applies them through your pool; the pool's
@@ -116,10 +116,11 @@ Under `Sandbox` every rail routes to its test environment and live credentials
 refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
 live gateway. See [operations.md](operations.md).
 
-**Rate limiting is on by default** (#742): nil `RateLimits`/`Captcha` get the
-curated defaults the standalone loader applies (tight on checkout to deter
-card-testing; Redis-backed with `Deps.Redis`). Override them, or set
-`RateLimitsDisabled` if your own gateway fronts billing. See
+**Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
+on checkout, card and subscription writes and webhooks (tight on checkout to
+deter card testing; shared across replicas with `Deps.Redis`). Other routes are
+not limited: a per-address ceiling belongs to your proxy. Override the limits,
+or set `RateLimitsDisabled` if your own gateway fronts billing. See
 [rate-limiting.md](rate-limiting.md).
 
 ### 4. Boot, lifecycle and River
@@ -195,12 +196,13 @@ cfg.Merchant = openrails.MerchantDeclaration{
         Profile:                &billing.MerchantProfileInput{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
         InvoiceBillingBoundary: "calendar_month",
     },
-    PSPs: map[string]openrails.PSPConfig{ // PSP key -> rail -> account
-        "my-nmi-sandbox": {"nmi": {
+    PSPs: map[string]openrails.PSPConfig{ // PSP key -> account
+        "my-nmi-sandbox": {
+            Rail:      billing.RailNMI,
             AccountID: "000000", // NMI dashboard "Gateway ID"
             Settings:  map[string]any{"tokenization_key": "placeholder-tokenization-key"},
             Secrets:   map[string]string{"security_key": "placeholder-security-key", "webhook_signing_secret": "placeholder-webhook-secret"},
-        }},
+        },
     },
 }
 ```
@@ -217,8 +219,9 @@ the rail's credential slots and settings, refusing a missing required secret:
 | `nmi` | `SECURITY_KEY`, `WEBHOOK_SIGNING_SECRET` | `TOKENIZATION_KEY`, `TOKENIZATION_URL`, `ENDPOINT_DEPLOYMENT` |
 | `ccbill` | `SALT`, `DATALINK_USERNAME`, `DATALINK_PASSWORD` | |
 
-YAML-first hosts keep the merchant in a file: `openrails.ParseMerchantDeclaration`
-parses one merchant strictly (unknown fields refused); set its `Slug`.
+YAML-first hosts keep the merchant in a file and decode it into
+`openrails.MerchantDeclaration` (its fields carry `yaml` tags; refuse unknown
+fields), then set its `Slug`.
 
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving
@@ -379,7 +382,7 @@ sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
 Original request URLs and bodies reach authentication and webhook verification
 unchanged. Routes are materialized once, so remounting never resets rate limits.
 
-**Admin console** (optional, #754): with `Config.AdminConsole.Enabled`,
+**Admin console** (optional): with `Config.AdminConsole.Enabled`,
 `client.AdminConsole()` is the console's handler for the host to mount at
 `Config.AdminConsole.Path` (`/admin` by default; e.g. `/billing/admin` when the
 host owns `/admin`) on its root router. The console is `Deps.ConsoleAssets` when the host
@@ -495,13 +498,15 @@ for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyEntered,
     billing.HostEventDelinquencyCleared,
 } {
-    events, err := client.ListHostEvents(ctx, billing.HostEventListOptions{Type: kind, Limit: 100})
+    page, err := client.ListHostEvents(ctx, billing.ListHostEventsRequest{
+        Type: kind, PageRequest: billing.PageRequest{Limit: 100},
+    })
     if err != nil { return err }
-    for _, event := range events {
+    for _, event := range page.Items {
         if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
             return err // leave the event pending for replay
         }
-        if err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
+        if _, err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
     }
 }
 ```
@@ -536,6 +541,4 @@ management endpoints.
 
 `Client.CreateCheckoutAttempt` uses the privileged merchant checkout endpoint. The host supplies the customer identity and is trusted to invoke this command for a real customer action. A merchant API key authorizes the host; it does not itself establish that a customer is interacting. Do not use merchant checkout as an unattended way to establish an initial customer-initiated stored-card agreement. Customer-facing self routes retain their authenticated payer boundary.
 
-Set `CheckoutCustomerIdentity.ClientIP` on `CreateCheckoutAttempt` to the customer request's client address, resolved behind the host's trusted proxies. Declined cards then count per address as well as per customer, as on the customer routes, and a card-testing wave through the host can reach attack mode (`docs/rate-limiting.md`). An invalid address is refused with `400`.
-
-This receipt/completion cut preserves that existing host contract. The product and authority review before v1 must decide whether merchant checkout should keep this explicit host trust or require verified per-customer interaction credentials. No request boolean can manufacture that verification.
+Set `CheckoutCustomerIdentity.ClientIP` on `CreateCheckoutAttempt` to the customer request's client address, resolved behind the host's trusted proxies. Declined cards then count per address as well as per customer, as on the customer routes, and a card-testing wave through the host can reach attack mode ([rate-limiting.md](rate-limiting.md)). An invalid address is refused with `400`.

@@ -8,9 +8,9 @@
 CCBill is a hosted-checkout payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
 rail and the PSP name are both `ccbill` (unlike NMI, where a PSP gets its own
-name such as `mobius`). CCBill owns the card vault and the rebill schedule —
-OpenRails never sees card data; it redirects the buyer to a CCBill FlexForm
-and consumes webhooks.
+name such as `mobius`). CCBill owns the card vault and the rebill schedule:
+OpenRails never sees card data, takes no new sales on this rail, and follows
+the subscriptions CCBill already bills through its webhooks.
 
 ### Account structure
 
@@ -63,9 +63,10 @@ maps to:
 
 ```yaml
 prices:
-  - currency: usd
+  - key: premium-monthly
+    currency: USD
     unit_amount: 9990000        # micros ($9.99)
-    duration: 30d
+    access_duration_hours: 720
     auto_renew: true
     psps: [ccbill]
     psp_links:
@@ -78,32 +79,27 @@ The FlexForm's own pricing must match the catalog price: webhooks validate
 billed amounts against the catalog (2% tolerance) and reject a
 `flexId`/`formName` that doesn't match the price's link.
 
-### Checkout flow
+### New sales and upgrades
 
-CCBill is redirect-only and **subscription-only** (one-time purchases are
-rejected). Paying a checkout session's CCBill option with a canonical
-`name_on_card`, `zip`, and ISO-3166 alpha-2 `country` returns
-`requires_action` with a `redirect_to_url` next action:
+OpenRails sells nothing new on CCBill: checkout offers no CCBill option for a
+one-time price or a new subscription, and catalog application refuses a price
+that only CCBill could sell (`price_not_sellable`). Subscriptions that already
+bill at CCBill keep renewing there and stay mirrored.
+
+A customer's tier upgrade (`POST /v1/me/subscriptions/{id}/change-tier`)
+answers `requires_action` with a `redirect_to_url` next action, a FlexForm URL
+carrying the subscription being upgraded:
 
 ```
-https://api.ccbill.com/wap-frontflex/flexforms/{flex_id}?clientAccnum=…&clientSubacc=…&formName=…&username=…&email=…&reservationId=…&signature=…
+https://api.ccbill.com/wap-frontflex/flexforms/{flex_id}?clientAccnum=…&clientSubacc=…&formName=…&originalSubscriptionId=…&signature=…
 ```
 
-- The buyer must have a **verified account email and a username** — OpenRails
-  takes the email from the authenticated server-side identity, not the browser
-  billing payload, and the webhook resolves the user by username.
-- `address1`, `city`, and `state` are optional. OpenRails forwards real values
-  when supplied but omits absent values; it never manufactures address
-  placeholders. Configure the matching Address Fields separately in CCBill's
-  FlexForms Admin if the hosted form should not collect them.
-- `reservationId` carries the OpenRails checkout-session id; the
-  `NewSaleSuccess` webhook echoes it back and marks the session `succeeded`.
+- The customer must have a **verified account email and a username**: OpenRails
+  takes the email from the authenticated server-side identity, not the browser,
+  and the webhook resolves the user by username.
 - `signature` is `sha256(username + salt)`, added when the salt is configured.
-- Tier upgrades reuse the same mechanism: a FlexForm URL carrying
-  `originalSubscriptionId` (via `POST /v1/me/subscriptions/{id}/change-tier`).
-
-There is no return-trip trust: the subscription is created only when the
-webhook arrives.
+- There is no return-trip trust: the upgrade applies only when the
+  `UpgradeSuccess` webhook arrives. Downgrades are not offered.
 
 ### Webhook registration
 
@@ -140,7 +136,7 @@ non-retryable. Events are deduplicated by transaction id / payload hash.
 
 ### Sandbox testing
 
-Set the global `test_mode: sandbox` — it is the only environment switch (#882).
+Set the global `test_mode: sandbox` — it is the only environment switch.
 Sandbox posture routes FlexForm URLs to
 `https://sandbox-api.ccbill.com/wap-frontflex/flexforms/...` instead of
 `api.ccbill.com`. To post webhooks from a local harness, declare its source

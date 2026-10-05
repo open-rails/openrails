@@ -68,12 +68,10 @@ The server derives one-off or recurring checkout from the selected price.
 inputs. It does not set the price's product or merchant. Browser return URLs
 provide navigation; verified provider events establish payment and access.
 
-The typed ID utilities remain available for advanced declared billing imports,
-provider-obligation and host-transaction contracts. They are not required to
-pass ordinary customer, product or price references between SDK resources.
+## What a host declares
 
-## Runtime ownership
-
-Declare the merchant in `Config`, and a host whose `catalog.yaml` is the truth in
-`Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else, creator
-scoping through `client.ForCatalogOwner(subject)` included, is a Client method.
+Declare the merchant in `Config.Merchant`, and a host whose `catalog.yaml` is the
+truth in `Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else,
+creator scoping through `client.ForCatalogOwner(subject)` included, is a Client
+method. See [embedding](embedded-integration.md) and the
+[merchant guide](merchant-guide.md).

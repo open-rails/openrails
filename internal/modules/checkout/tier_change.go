@@ -56,7 +56,7 @@ func PriceAmountOf(p *models.Price) PriceAmount {
 func normalizedCurrency(c string) string { return strings.ToLower(strings.TrimSpace(c)) }
 
 // RequireSameCurrency refuses an absent currency as firmly as a mismatched one:
-// a missing currency is never defaulted or invented (docs/invariants.md).
+// a missing currency is never defaulted or invented.
 func RequireSameCurrency(old, new PriceAmount) error {
 	oldCurrency, newCurrency := normalizedCurrency(old.Currency), normalizedCurrency(new.Currency)
 	if oldCurrency == "" || newCurrency == "" || oldCurrency != newCurrency {

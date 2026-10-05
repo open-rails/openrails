@@ -166,7 +166,7 @@ doubles as the dry-run view of a cutover.
 [--phase=attempting|succeeded|failed|unknown|parked]` renders the append-only
 mutation-attempt log — the executor's audit trail.
 
-### Materialized backlog under mode=limited (#366)
+### Materialized backlog under mode=limited
 
 The dunning worker's scan runs under `limited` and records its decisions
 instead of skipping: window-expired `past_due` subscriptions (a freshly
@@ -229,7 +229,7 @@ Rules:
   subscriber leaves it only when their card lapses and they buy again with a
   new card, which lands on an active PSP.
 
-### Custodians (or#880)
+### Custodians
 
 `billing.custodians` is the same kind of catalog, one axis over: a row is
 one merchant-owned account with a third-party card CUSTODIAN (Basis Theory
@@ -240,19 +240,19 @@ not once per PSP.
 Custodial credentials are scoped by the custodian's own identity,
 `custodians/<kind>/<environment>/<account_id>/<key>`, exactly as PSP
 credentials are scoped by theirs, and are read through the same rotation
-version floor (or#812) — recorded on `custodians.credential_versions` rather
+version floor — recorded on `custodians.credential_versions` rather
 than on a PSP row. Rotation and archival follow the PSP rules
 above verbatim: rotate in place under the same row; to move to a different
 custodian account, declare a NEW one and archive the old one for drain — an
 instrument the old custodian holds is never re-vaulted or destroyed
-(or#870/or#655).
+.
 
 Inbound custodian webhooks route by the global `(kind, environment,
 account_id)` key (`ResolveCustodianOwnerByIdentity`). They resolve the
 CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
 which of several referencing PSPs it belongs to has no answer.
 
-## Provider Pull (#107, #511)
+## Provider Pull
 
 Manual-only — **never scheduled**. It never writes to a provider.
 
@@ -326,7 +326,7 @@ openrails pull-provider --merchant=<slug>          # advisory: review findings, 
 **Dry run is the default.** With no `--apply` the command prints what it would
 restore, the provider writes it would supersede, the ones that already fired and
 cannot be undone, plus the coverage proof that every live provider row is
-PSP-attributed (or#893 — a non-zero count refuses the undo outright).
+PSP-attributed (a non-zero count refuses the undo outright).
 Applying additionally requires `--expect-rows` to match that plan: an undo is
 itself a mass mutation of the live book, at the worst possible moment to be
 wrong.
@@ -465,7 +465,7 @@ disappears. Two safety doctrines matter operationally:
   (`billing.reconciliation_state`, a ratchet). During an import, "not in
   the local DB" is not absence — it usually means *not imported yet*. Held
   repairs stay `reconcile_required` with the unproven domain in evidence.
-- **Stuck intents** (`life.provider_intent.stuck`): the sweep flags rail
+- **Stuck intents** (`life.provider_intent.stuck`): the sweep flags provider
   intents sitting non-terminal too long — `pending`/`failed_retryable` older
   than 24h, `in_flight`/`unknown_needs_verify` older than 2h; thresholds are
   hardcoded. Mode-parked intents are informational (that wait is by design);
@@ -473,7 +473,7 @@ disappears. Two safety doctrines matter operationally:
   or a dead worker. The engine never touches intent rows (the
   executor/verifier own them); findings auto-resolve on recovery.
 
-## Dunning (#359)
+## Dunning
 
 No knobs. The schedule is a hardcoded function of the price's billing cycle —
 the retry span always stays well inside one cycle. Retries are OFFSETS from
@@ -490,7 +490,7 @@ The window always ends inside one cycle (1h → 30m, 1d → 12h). An unknown
 cycle (≤ 0, e.g. a one-time price behind a membership) is never given a
 schedule: collection refuses to charge, retry or end it and raises
 `life.cadence.unknown` for the operator. What a decline does comes from one
-table (`internal/decline`), the same for every owner:
+table, the same for every owner:
 
 - **Retry on the schedule:** issuer soft and generic declines (insufficient
   funds, over limit, do-not-honor, call issuer, retry later) and gateway,
@@ -579,13 +579,13 @@ reference once the provider's read shows nothing for 5 minutes (at most twice);
 an unreadable provider or spent cap raises `life.submission.unresolved`
 (docs/provider-uncertainty.md).
 
-## Provider Refresh (#574) and the unknown cohort (#632/#664/#665)
+## Provider Refresh and the unknown cohort
 
 `pull-provider` is the manual operator command. **Provider Refresh** is the
 always-on provider-read system: a 4-hourly scheduler (RunOnStart, so startup
 after a stale dump or outage does not wait for the tick) fans out one
 per-merchant refresh job — staggered, unique per merchant, on a bounded
-queue, skipping merchants with no declared PSPs (#719). Three lanes:
+queue, skipping merchants with no declared PSPs. Three lanes:
 
 | Lane | Purpose |
 |---|---|
@@ -616,8 +616,8 @@ Mode gating: Provider Refresh runs under `full` AND `limited`; skipped under
 `readonly`. Each pass logs a heartbeat plus a per-merchant summary
 (`renewed/adopted/past_due/canceled/still_unknown/probed/backfilled/rail_errors`).
 
-**Access during silence — standing access (#691).** There is no timed grace
-window (the #368 trailing-grace mechanism was deleted). An auto-renew
+**Access during silence — standing access.** There is no timed grace
+window. An auto-renew
 subscription's entitlement window is **standing (open-ended) from creation**
 and closes only on proven events: terminal dunning failure,
 provider-confirmed death, or an explicit cancel (access then ends at period
@@ -629,7 +629,7 @@ at signup; legacy-imported subscriptions whose NMI `orderid` predates
 OpenRails won't match the per-subscription probe — the Event Refresh lane's
 watermarked backfill catches their provider events.
 
-## Solana Pay settlement (#1086)
+## Solana Pay settlement
 
 Solana Pay state is in PostgreSQL. A checkout attempt has one reference in
 `billing.solana_pay_references` (`pending` → `confirmed` | `expired`). Every
@@ -661,7 +661,7 @@ across all references.
   checkout is recorded as `duplicate`.
 - Unresolved reviews and pending references refuse the billing archive. After
   refunding, close a review with `openrails solana-pay resolve --merchant …
-  --signature … --resolution …` (embedded: `operator.ResolveSolanaPayReview`).
+  --signature … --resolution …`.
 - A paid or expired reference stays watched for 7 days so later transfers are
   recorded; the GC job then deletes it. Credited, review and duplicate
   receipts are kept.
@@ -784,7 +784,7 @@ fair-sweep cursor is a ring position, saved by compare-and-swap on an opaque
 per-save version (a counter, not a timestamp, so tokens never collide), so a
 pass finishing after a newer one keeps the newer position.
 
-No job runs under a clock (xs-007). River's one-minute `JobTimeout` default is
+No job runs under a clock. River's one-minute `JobTimeout` default is
 overridden to "never" on every OpenRails worker; a running job is canceled
 only when it reports no progress past the same staleness rule the health
 checker uses for its kind (3× the declared cadence, floored at 30 min), and
@@ -800,14 +800,13 @@ public and carry no dependency detail: a failing check is logged and answers
 their own handler. Readiness requires Postgres, the merchants service, the River producer and a
 locally managed River worker consumer; Redis, Vault and PSP posture are
 reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. A
-host-owned embedded River client is outside that local-process check and is
-observed with `CheckJobProgress`.
+host-owned embedded River fleet is outside that local-process check and is
+observed through the `openrails_job_progress` probe (`Client.Probes`).
 
 `GET /metrics` exports `openrails_dependency_up{dependency,class}` for every
 dependency readiness reports, optional ones included. The authenticated
 `/v1/merchant/metrics` query and schema routes expose merchant business
-analytics, not Go/process telemetry; runtime observability remains parked in
-tracker issue #701.
+analytics, not Go/process telemetry.
 
 ## Operating modes (the safety levers)
 
@@ -824,9 +823,26 @@ Managed DB credentials always require encryption. `public_billing_base_url` is
 only the public callback/link mount base; issuer, `auth.request_origin`, remote
 Client server URL and `dashboard_base_url` are independent.
 
-New supported subscriptions use OpenRails collection by default. Existing or
-imported agreements retain their persisted owner and provider obligations; startup
-configuration never transfers them or starts a second collector.
+Every subscription has one collector, fixed when it is created or imported
+(`subscriptions.collection_policy`):
+
+| Policy | Who charges | Who retries a decline |
+|---|---|---|
+| `engine` | OpenRails, on a saved card (NMI, Stripe) or by on-chain pull (Solana) | OpenRails ([dunning](#dunning)) |
+| `nmi_schedule` | NMI, on its own schedule | OpenRails |
+| `provider` | the provider (Stripe, CCBill) | the provider |
+
+New subscriptions are `engine`: they need no provider catalog link, and a rail
+or term OpenRails cannot collect (CCBill, a trial first phase) is refused
+before payment. Imported subscriptions keep the collector their rail implies;
+it is never inferred from a saved card, and sharing or replacing a card does
+not change it. Configuration never transfers a subscription or starts a second
+collector.
+
+`engine_admission_hold: true` pauses the admission and first submission of new
+engine payments (initial and renewal). Operations that may already have been
+submitted are still verified, and webhooks are still handled. It changes no
+stored ownership; `provider_write_mode` remains a separate gate.
 
 What each provider write mode permits (`test_mode` applies orthogonally: with
 sandbox the same matrix holds against sandbox rails, so no real money can move
@@ -834,7 +850,7 @@ in any mode):
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
-| User checkout / charge | yes | yes | no — fails loudly (`ErrProviderReadOnly`) |
+| User checkout / charge | yes | yes | no — refused |
 | Card/vault save, tier change, resume, refund | yes | yes | no |
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
@@ -864,7 +880,7 @@ reconciliation and the provider API alike); unavailable, indeterminate or live
 responses refuse the arm, and an update that omits credentials re-probes the
 stored key — a secret-backend failure cannot bypass it. Nothing caches a
 verdict. Production mode does not run the sandbox probe.
-Sandbox is allowed in every environment (#762) — what keeps it honest is
+Sandbox is allowed in every environment — what keeps it honest is
 rail-credential validation (the live-key refusal and the NMI live-gateway
 probe, which ask the credential itself), not the environment string.
 
@@ -901,7 +917,7 @@ never back-billed: dunning past the staleness window cancels instead of
 charging, and a Solana subscription that skipped whole periods gets exactly
 one pull anchored at the pull moment.
 
-## The destructive-action kill switch (#836) and first-enforce gate (#835)
+## The destructive-action kill switch and first-enforce gate
 
 `provider_write_mode` is a boot setting: changing it needs a deploy. The kill
 switch is the runtime brake — a single DB row, read at the top of every
@@ -946,7 +962,7 @@ SELECT status, count(*) FROM billing.provider_intents
 Worker logs name the gate explicitly: `destructive actions gated — instance kill
 switch is OFF`.
 
-### Arming a merchant (the #835 first-enforce gate)
+### Arming a merchant (the first-enforce gate)
 
 A merchant with no `billing.merchant_destructive_policy` row — or one with
 `enforce_armed_at IS NULL` — pulls in **advisory** mode: findings are persisted,
@@ -972,7 +988,7 @@ UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'you';
 Both halves must be on: the instance switch gates the fleet, the merchant row
 gates one merchant. Disabling either stops that merchant.
 
-### Cancellation caps (#837)
+### Cancellation caps
 
 Independently of the switch, one pass may cancel at most
 `min(25, max(3, 5% of the merchant's live linked book))` subscriptions, or the
@@ -994,28 +1010,30 @@ Investigate the roster before clearing it. The usual causes are a misdeclared
 `psps.account_id`, a credential rotated onto a sibling sub-account, or a
 provider incident returning a short page — never 850 customers all leaving.
 
-## Per-merchant API hosts (#734) + browser CORS (#765)
+## Per-merchant API hosts + browser CORS
 
 Public multi-merchant deployments (one engine serving several merchants) give
-each merchant its own canonical API hostname — used for Host→merchant
-resolution and Host-routed webhooks. Browser CORS is a **separate, fixed,
+each merchant its own canonical API hostname, used for Host→merchant
+resolution on the public routes. Browser CORS is a **separate, fixed,
 engine-wide policy**, not a per-merchant setting.
 
-- **Configuring a merchant's host**: `merchants.Service.SetHostConfig(ctx,
-  merchantID, apiHost)` sets `billing.merchants.api_host` (globally unique
-  among live merchants) — a plain row UPDATE, resolved LIVE on the next
+- **Configuring a merchant's host**: the owner claims and proves one
+  (`PUT /v1/merchant/api-host`, then `POST /v1/merchant/api-host/verify`), or
+  the operator binds it with `Client.SetMerchantAPIHost`. It is
+  `billing.merchants.api_host` (globally unique among live merchants),
+  resolved LIVE on the next
   request; no boot-time host map, so a merchant configured on one node
   resolves immediately on every node sharing the database. Leave `api_host`
   unset for a merchant that should never resolve from any Host.
 - **Local-dev hostnames**: `api_host` compares against the request Host with
-  the port stripped (`merchants.NormalizeAPIHost`), so
+  the port stripped, so
   `api_host = "api.acme.localhost"` resolves on any listen port — point
   `/etc/hosts` at `127.0.0.1` per name.
 - **Reserved names**: `billing.ReservedMerchantSlugs` is the advisory list
   a hosted product should refuse to let a merchant self-provision as a slug
   (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
   it — the host does.
-- **Webhook surface**: `<prefix>/v1/webhooks/:rail/:account_id` in embedded and
+- **Webhook surface**: `<prefix>/v1/webhooks/{rail}/{account_id}` in embedded and
   standalone deployments. The provider account resolves its merchant in the
   configured environment; an explicit runtime merchant binding is enforced.
   Provider signature/source verification and matching payload identity remain
@@ -1026,15 +1044,15 @@ engine-wide policy**, not a per-merchant setting.
   merchant-scoped route. The check only fires when a Host actually resolved a
   merchant.
 
-### Browser CORS doctrine (#765)
+### Browser CORS doctrine
 
 CORS protects requests authorized by an ambient credential (a cookie the
 browser attaches automatically). OpenRails never issues cookies: every
 browser-tier request carries an explicit bearer JWT placed by the page's own
 JS, which a different origin's script cannot read; an unauthenticated
 cross-origin call just 401s; a stolen token is replayed from `curl`, where
-CORS doesn't exist. So a per-merchant origin allowlist protected nothing —
-cut in #765. The engine answers a **static, non-configurable** policy, by
+CORS doesn't exist. So a per-merchant origin allowlist would protect nothing.
+The engine answers a **static, non-configurable** policy, by
 route tier:
 
 - **Checkout + self-service** (buyer-facing
@@ -1048,11 +1066,9 @@ route tier:
   merchant/service API, inbound webhooks, control-plane auth) emits NO CORS
   headers at all — the correct, free posture for bearer-JWT curl/service
   callers.
-- This is engine code (`internal/http/middleware.PermissiveCORSHTTP`, gated
-  by a `BrowserTierRoutes` registry populated as the browser-tier routes
-  mount), not a database column or config key, and it has no dependency on
-  `api_host`/Host resolution. The legacy global `cors_origins` config key
-  stays retired: OpenRails' CORS posture isn't configurable at all.
+- This is engine code, not a database column or config key, and it does not
+  depend on `api_host` or Host resolution: OpenRails' CORS posture is not
+  configurable.
 
 ## Payment-method update notices
 

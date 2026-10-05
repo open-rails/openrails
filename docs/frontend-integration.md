@@ -54,8 +54,8 @@ Native clients may use the certificate-bound delegated profile instead:
 `cnf.x5t#S256`. A proxy header is not a client certificate. Unbound delegated
 JWTs and a DPoP token downgraded to Bearer are refused.
 
-See AuthKit's [browser delegation contract](https://github.com/open-rails/authkit/blob/v0.101.0/docs/browser-delegation.md)
-for exact mint/proof fields and shared replay-store requirements.
+See AuthKit's [tokens](https://github.com/open-rails/authkit/blob/master/docs/tokens.md#delegated-tokens)
+for the mint and proof fields and the shared replay store.
 
 ### The self-service surface: `/v1/me/*`
 
@@ -68,24 +68,24 @@ GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
 GET  /v1/me/transactions?currency=USD     credit ledger, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
-GET  /v1/me/invoices[/:id]                itemized statements (cursor page)
+GET  /v1/me/invoices[/{id}]               itemized statements (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements                  active entitlements
 PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
-GET  /v1/me/subscriptions[/:id]           own subscriptions: the shared Subscription shape (typed ids, price/product, scheduled change, card, access)
-POST /v1/me/subscriptions/:id/cancel      body {"reason": "..."} → the Subscription (next_action when the wallet must sign)
-POST /v1/me/subscriptions/:id/resume      undo a scheduled cancel → the Subscription
-POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} → a TierChange (upgrades/downgrades)
-PUT  /v1/me/subscriptions/:id/payment-method  swap the saved card → the Subscription
+GET  /v1/me/subscriptions[/{id}]          own subscriptions (cursor page): typed ids, price/product, scheduled change, card, access
+POST /v1/me/subscriptions/{id}/cancel      body {"reason": "..."} → the Subscription (next_action when the wallet must sign)
+POST /v1/me/subscriptions/{id}/resume      undo a scheduled cancel → the Subscription
+POST /v1/me/subscriptions/{id}/change-tier body {"price_id":"price_..."} → a TierChange (upgrades/downgrades)
+PUT  /v1/me/subscriptions/{id}/payment-method  swap the saved card → the Subscription
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
-PUT|DELETE /v1/me/payment-methods/:id     replace NMI card / provider-aware delete
+PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
 POST /v1/me/billing-portal                → {"url": ...} (Stripe-portal deployments)
 GET  /v1/me/notifications[.../unread-count]   billing notifications
 ```
 
-The public catalog needs no auth: `GET /v1/products` (with embedded active prices) and
-`GET /v1/prices?product=prod_...` drive your pricing page.
+The public catalog needs no auth: `GET /v1/products` (each product with its current
+prices) and `GET /v1/prices?product_id=prod_...` drive your pricing page.
 
 ### Discovering payment options: `GET /v1/checkout-config`
 
@@ -99,8 +99,8 @@ catalog.
 {
   "object": "checkout_config",
   "psps": [
-    { "key": "mobius", "rail": "nmi", "custodian": "psp", "display_name": "Credit Card",
-      "flow": "tokenize",
+    { "psp_id": "psp_...", "key": "mobius", "rail": "nmi", "custodian": "psp", "display_name": "Credit Card",
+      "flow": "tokenize", "checkout": true,
       "config": { "tokenization_key": "<public Collect.js key>",
                   "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js" } },
     { "key": "mobius-bt", "rail": "nmi", "custodian": "basis_theory", "display_name": "Credit Card",
@@ -144,17 +144,19 @@ catalog.
 
 Rail-specific gotchas the UI must handle:
 
-- **Cancel** is queued (202), not instant — reflect "cancellation pending".
-  CCBill subscriptions return `422 { error, support_url }`: cancellation happens in the
-  CCBill portal; link the user there.
-- **Change-tier** returns `status: succeeded | requires_action | blocked`, plus
+- **Cancel** and **resume** answer the `Subscription` in the request. A Solana
+  subscription answers it unchanged with `next_action` (`solana_sign_transactions`):
+  the wallet signs and sends the transactions, then the same request is repeated with
+  `signature`.
+- **Change-tier** returns `status: succeeded | processing | requires_action | blocked`, plus
   `action: upgrade | downgrade`. Upgrades are immediate with proration; downgrades come
-  back `succeeded` with `delayed_start` (takes effect at period end). CCBill upgrades
-  return `requires_action` with a top-level `url` — redirect. Solana: 400, unsupported.
+  back `succeeded` with `delayed_start` (takes effect at period end). `requires_action`
+  carries a `next_action`: a `redirect_to_url` (CCBill), wallet transactions to sign
+  (Solana), or a card challenge (`payment_authentication` with `operation_id`).
 - Paying a checkout session for a second subscription in the same tier group
   answers `status: "blocked"` — send those users to `change-tier`.
 
-### Checkout rail eligibility (#1078)
+### Which rails sell what
 
 A PSP is offered for a price iff it is armed (credentials resolve and its
 posture verification did not disarm it) and its rail can make that kind of new
@@ -184,8 +186,8 @@ can live on another host. `@openrails/billing-ui`'s
 
 ```
 POST /v1/me/checkout-sessions        {"price_id" | "price_key", "success_url"?} → 201 {id, url, expires_at}
-GET  /v1/checkout-sessions/:id       the offer: plan, amounts, options, saved methods, status
-POST /v1/checkout-sessions/:id/pay   {"option_id", instrument, billing fields} → {status, next_action, operation, failure}
+GET  /v1/checkout-sessions/{id}      the offer: plan, amounts, options, saved methods, status
+POST /v1/checkout-sessions/{id}/pay  {"option_id", instrument, billing fields} → {status, next_action, operation, failure}
 ```
 
 The pay body names one of the session's `options` and the instrument its `driver`
@@ -203,7 +205,7 @@ not request fields: a body that names them is refused (`unknown_field`).
 The chosen PSP and the reason for it are recorded on the checkout attempt
 (`checkout_attempts.routing_reason`), so support can answer "why did this customer
 get this PSP" without guessing. Merchants can preview a decision without creating
-anything: `POST /v1/merchant/payment-providers/routing/dry-run` with
+anything: `POST /v1/merchant/psps/routing-preview` (`Client.PreviewPSPRouting`) with
 `{"price_id": "...", "country": "US"}` returns the winner, the ranked fallbacks, and
 every skipped candidate with its reason.
 
@@ -223,7 +225,7 @@ The pay answer's `status` tells the page what to do next:
     link, as a QR code or wallet link. OpenRails watches the payment's reference on
     chain and settles.
   - `operation.id`: a card challenge (3-D Secure).
-    `GET /v1/me/payment-operations/:op/authentication` gives the client secret for
+    `GET /v1/me/payment-operations/{id}/authentication` gives the client secret for
     Stripe.js; then `POST .../authentication/confirm`, which verifies with the provider.
 
 ```mermaid
@@ -236,8 +238,8 @@ sequenceDiagram
     Y-->>B: delegated JWT (TTL ~5 min)
     B->>O: POST /v1/me/checkout-sessions (DPoP delegated JWT + proof)
     O-->>B: {id, url}
-    B->>O: GET /v1/checkout-sessions/:id
-    B->>O: POST /v1/checkout-sessions/:id/pay
+    B->>O: GET /v1/checkout-sessions/{id}
+    B->>O: POST /v1/checkout-sessions/{id}/pay
     O->>P: charge
     O-->>B: status succeeded, subscription_id
 ```
@@ -264,7 +266,7 @@ collects its own customer and billing fields.
 `POST /v1/me/payment-methods` takes the PSP's `psp_id`, a Collect.js `payment_token`
 (or, for a PSP whose card entry is server, the `card`) and optional `billing_details`
 (`name`, `email`, `phone`, `address` with `line1`, `line2`, `city`, `state`,
-`postal_code`, `country`) and creates an NMI vault record. `PUT /:id` replaces an NMI
+`postal_code`, `country`) and creates an NMI vault record. `PUT` on the method replaces an NMI
 card with a new `payment_token` or `card`. OpenRails reads the saved card's brand, last
 four and expiry from the PSP; the browser never states them. Checkout with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
@@ -299,17 +301,18 @@ Errors use a Stripe-style envelope:
 Handle in the frontend:
 
 - **401** — delegated token expired/invalid. Re-fetch from your exchange endpoint and
-  retry once (the helper above does this). Embedded: your normal session-expiry flow.
+  retry once. Embedded: your normal session-expiry flow.
 - **403** — acting on a resource that isn't yours (foreign checkout session, someone
   else's `payment_method_id`).
-- **409** — `idempotency_key_reuse` (same key, different body) or
-  `idempotency_in_progress` (retry landed while the original is still running).
-- **410** — checkout session expired; create a new one.
+- **409** — `idempotency_key_reused` (same key, different terms),
+  `payment_in_progress` (a retry landed while the original is still running) or
+  `provider_outcome_unknown` (read the resource before trying again).
+- **410** — `checkout_session_expired`; create a new one.
 - **413** — request body over the bucket cap (64 KiB on checkout/subscription/
   payment-method routes). Carries `Retry-After`.
 - **429** — rate limited. Fixed 1-minute windows, counted per IP **and** per
-  authenticated user; defaults: checkout creation 10/min, subscription mutations
-  20/min, payment-methods 40/min, everything else 300/min. Read
+  authenticated user; defaults: checkout 10/min, subscription mutations
+  20/min, payment methods 40/min; other routes are not limited by OpenRails. Read
   `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` and back off for
   `Retry-After` seconds. The tight checkout limit deters card-testing — don't
   auto-retry checkout POSTs in a loop.

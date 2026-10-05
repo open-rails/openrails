@@ -2,7 +2,7 @@
 
 Security policy is independent of `test_mode: sandbox | live`. Both postures
 require encrypted managed database credentials, verified provider webhook
-signatures, explicit provider write permission and declared rate-limit policy.
+signatures and an explicit provider write mode.
 `env` / `ENV`, `api_url` / `API_URL`, and
 `new_subscription_collection_policy` / `NEW_SUBSCRIPTION_COLLECTION_POLICY` are
 retired inputs and refuse configuration loading.
@@ -10,9 +10,9 @@ retired inputs and refuse configuration loading.
 ## Authentication
 
 Embedded billing receives `openrails.Config` and the host's authentication hooks
-in `openrails.Deps`; it does not load AuthKit configuration. Standalone hosts use
-`internal/hostconfig.Config`, which composes billing settings with the control
-plane's `auth` settings (`openrails.AuthConfig`). Its loader handles YAML, environment variables
+in `openrails.Deps`; it does not load AuthKit configuration. The standalone
+server's `config.yaml` composes billing settings with the control plane's `auth`
+settings (`openrails.AuthConfig`); its loader handles YAML, environment variables
 and mounted secret files. Remote consumers only construct a Client.
 
 An embedded host supplying authentication does not need a standalone issuer or
@@ -37,9 +37,10 @@ start unless one can be enrolled: a 16, 24 or 32-byte key at
 
 `auth.mint_disabled` explicitly selects verification-only operation. A key-loading
 failure never silently selects it. Inline signing keys retain their restart-only
-rotation warning. Runtime constructors supply rate-limit and captcha defaults
-when omitted. `rate_limits_disabled` explicitly declares that the host supplies
-rate limiting instead.
+rotation warning. `rate_limits` names the limited buckets (`checkout`, `payment`,
+`subscribe`, `webhook`; any other key refuses boot) and defaults to the built-in
+limits; `rate_limits_disabled` declares that the host supplies rate limiting
+instead ([rate limiting](rate-limiting.md)).
 
 HyperSwitch has its own `hyperswitch.allow_loopback_http` exception. It permits
 literal loopback HTTP fixtures only with sandbox provider credentials. This
@@ -82,6 +83,13 @@ holds every OpenRails table, function and type. It must be a plain identifier
 runs there verbatim. Any other schema is reached by one token-aware rewrite,
 applied to migrations and to every statement at runtime: it moves schema
 qualifiers, the name after `SCHEMA`, `SET search_path` values and
-`'billing.x'::regclass` / `to_regclass('billing.x')` literals. Every other string
+`'billing.<table>'::regclass` / `to_regclass('billing.<table>')` literals. Every other string
 literal and comment is data and is never rewritten. River and AuthKit keep their
 own schemas.
+
+The role that runs the migrations owns every object and is the role OpenRails
+runs as; there are no grants and no row-level security. When two apps share one
+schema, `schema_owner` (`Config.SchemaOwner`) names an existing role both logins
+inherit: `Migrate` hands the schema, and a managed River schema, to it, and a
+rerun changes nothing. The whole schema is listed in
+[`api/schema.txt`](../api/schema.txt); see [compatibility](compatibility.md#database-schema).

@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -181,6 +182,8 @@ func missing(from, in []string) []string {
 	return out
 }
 
+var lineBreak = regexp.MustCompile(`\s*\n\s*`)
+
 type relation struct {
 	name  string
 	lines []string
@@ -309,7 +312,9 @@ func dump(ctx context.Context, conn *pgx.Conn, schema string) ([]byte, error) {
 			if r == nil {
 				return nil, fmt.Errorf("%s belongs to no listed table: %s", line[0], line[1])
 			}
-			r.lines = append(r.lines, line[1])
+			// One line per column, constraint, index and trigger: an
+			// expression the catalog prints over several lines is joined.
+			r.lines = append(r.lines, lineBreak.ReplaceAllString(line[1], " "))
 		}
 	}
 

@@ -36,9 +36,9 @@ AuthKit authority bootstrap remains first-run only. Merchant startup reloads
 snapshot credentials while preserving existing metadata and archived accounts.
 Catalog manifests are applied explicitly and are not replayed at ordinary boot.
 
-Embedded hosts provision merchants programmatically
-(`Config.Merchant`, same manifest shape) and pass auth at
-Runtime construction; the issuer-as-owner path below is the standalone mechanism.
+Embedded hosts declare their merchant programmatically
+(`Config.Merchant`, the same shape) and pass their auth in `Deps`; the
+issuer-as-owner path below is the standalone mechanism.
 
 ## Merchant identity and names
 
@@ -79,7 +79,7 @@ Hosts running the control plane in process set
 Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
 (`merchant:settings:update`), subject to the rename interval and, on hosted
 deployments, the reserved names and creation pattern. Hosts rename as the
-operator with `ControlPlane.RenameMerchant`. `GET /v1/platform/merchants?q=`
+operator with `Client.RenameMerchant`. `GET /v1/platform/merchants?q=`
 searches current names. A signed-in user lists the merchants they hold a role in
 with `GET /v1/merchants` (`{id, slug, display_name, role}`, the user's role in
 each); hosts use `Client.ListUserMerchants`.
@@ -113,7 +113,7 @@ With it set, signed-in users create merchants they own with
 `POST /v1/merchants {"name", "display_name"?}`: 201 on creation, 200 when the
 name already resolves to a merchant the caller owns (the idempotent repair).
 Refusals: 400 `invalid_name`, 409 `name_taken` / `name_reserved`, 403
-`email_unverified` / `creation_refused`, 402 `payment_method_required`. Creation
+`email_unverified` / `creation_refused`, 402 `merchant_creation_payment_method_required`. Creation
 is capped at 12 per 24 hours per client IP and per user (429 with
 `Retry-After`). The same policy holds in-process `ProvisionMerchant` calls that
 name an `OwnerUserID` (typed refusals `billing.ErrMerchantSlugReserved` /
@@ -150,7 +150,7 @@ is the host's policy (openrails-saas owns its own, with its own notices).
 
 Activity is any customer (and everything owned through customers), payment or
 subscription history including tombstones, ledger account, provider connection
-(PSP, custodian, stored secret, applied webhook, rail intent), undelivered host
+(PSP, custodian, stored secret, applied webhook, provider intent), undelivered host
 event, outbound webhook or catalog definition. Every blocker references the
 merchant row, so the retirement lock serializes concurrent writes. Retired
 merchants cannot be restored. Self-hosted deployments need no host state to use
@@ -245,17 +245,17 @@ merged over the manifest in order (later wins) and strict-parsed with it:
 an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.
 
-- Embedded hosts pass them from their own config tree:
-  `openrails.ParseMerchantDeclaration` for one merchant.
+- Embedded hosts merge them in their own config loader and pass the result as
+  `Config.Merchant` (`PSPConfig.Secrets`).
 - Standalone snapshot custody lists mounted files in `merchant_manifest_overlays`
   (env `MERCHANT_MANIFEST_OVERLAYS`).
 
-The engine itself reads no `BILLING_MERCHANTS_*` env and no secret directory.
+The engine itself reads no environment variable and no secret directory.
 
 ## Secrets: seeding vs runtime source of truth
 
 Secrets are addressed by `(merchant_id, name)`. PSP credentials use the
-canonical account-scoped name (built only by `merchants.PSPSecretName`):
+canonical account-scoped name:
 
 ```text
 psps/<rail>/<environment>/<account_id>/<secret_key>
@@ -287,46 +287,24 @@ Direct backend edits do not publish credentials. Changing custody is an
 explicit migration, independent of external HTTP publication. Snapshot values
 are never implicitly copied to a managed backend.
 
-## Merchant lifecycle
+## Deleting a merchant
 
-`internal/merchants.Service`; merchant status is `active` or `deleted`.
+A merchant is never hard-deleted through an API. The standalone operator
+soft-deletes one with `DELETE /v1/platform/merchants/{id}` and brings it back
+with `POST /v1/platform/merchants/{id}/restore`; a never-used merchant is retired
+with `Client.RetireUnusedMerchant` (above), which releases its name for good.
 
-| Operation | Behavior |
-|---|---|
-| `Provision` | Idempotently creates the `billing.merchants` row and records `permission_group_id` for control-plane merchants. |
-| `TakePurgeInventory` | Records what a purge would destroy: per-table row counts, secret **names**, and an explicit `not_captured` list. **It is not a backup and restores nothing** (was `Export`, a name that implied otherwise). |
-| `Delete` | One-way gated purge. See below. |
+Two things no deletion does, by construction:
 
-### The purge is one-way, and the inventory is not a backup
+- **It does not revoke stored instruments.** The cards stay at the PSP; only the
+  end user deletes their own instrument.
+- **It does not remove real billing history.** The append-only grant log pins
+  the products and payments it justifies and is never purged.
 
-`TakePurgeInventory` copies no data. It writes counts and secret names to
-`billing.maintenance_runs` so an operator sees the blast radius
-before confirming — nothing more. The only way back from a purge is
-**whole-cluster Postgres point-in-time recovery** with the
-`ENCRYPTION_MASTER_KEY` and Vault alongside it (`backup-and-recovery.md`).
-
-`Delete` therefore stands behind five walls:
-
-1. the destructive-action gate (`operations.md`) — the same instance kill switch
-   and per-merchant policy that hold a mass cancellation. **Unwired = denied.**
-2. a typed confirmation phrase: `purge merchant <slug> permanently, no backup exists`
-3. a typed row count that must equal the true total
-4. a purge inventory recorded against *that* count — a stale one authorises nothing
-5. a `maintenance_runs` row (`kind='merchant_purge'`) recording who, what and how many
-
-**There is deliberately no route and no CLI for it.** A test guard fails the
-build if `merchants.DeleteOptions` is constructed anywhere outside the package.
-The purge gains an operator surface when a real per-merchant snapshot/restore
-exists to gate it on, not before.
-
-Two things a purge cannot do, by construction:
-
-- **It cannot revoke stored instruments.** It drops the local custody mirror;
-  the cards stay at the PSP. Only the end user deletes their own instrument.
-- **It cannot delete a merchant with real billing history.** The append-only
-  grant log FK-pins the products and payments it justifies and is never purged,
-  so `Delete` refuses whole rather than half-purging. Retire the merchant
-  instead.
+Moving a merchant's billing data to another deployment is an archive export and
+restore: see [merchant portability](merchant-portability.md). Recovering a whole
+deployment is Postgres point-in-time recovery with the `ENCRYPTION_MASTER_KEY`
+and Vault alongside it: see [backup and recovery](backup-and-recovery.md).
 
 ## API keys
 
@@ -350,15 +328,15 @@ Inbound rail webhooks resolve the merchant first, then verify. Each deployment
 shape mounts the same account-addressed surface:
 
 ```text
-POST /v1/webhooks/:rail/:account_id                          # standalone: configured account resolves merchant
-POST /billing/v1/webhooks/:rail/:account_id                  # embedded under /billing
+POST /v1/webhooks/{rail}/{account_id}                        # standalone: configured account resolves merchant
+POST /billing/v1/webhooks/{rail}/{account_id}                # embedded under /billing
 ```
 
-`:rail` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
-`basistheory` — never a PSP key. A PSP is named by `:account_id`, not by the
-rail segment: `mobius` and `paykings` both post to `/v1/webhooks/nmi/{account_id}`. Accountless routes are not registered; payload account identities must agree with the selected account.
-
-Before deploying this route contract, update existing provider webhook registrations that omit the account segment. Old URLs return404. Updating the callback URL does not change subscription ownership or billing schedules.
+`{rail}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
+`basistheory` — never a PSP key. A PSP is named by `{account_id}`, not by the
+rail segment: `mobius` and `paykings` both post to `/v1/webhooks/nmi/{account_id}`.
+There is no accountless route, and the payload's account identity must agree
+with the selected account.
 
 Provider account identity resolves the merchant in the runtime's configured
 sandbox/live environment. A runtime bound to one merchant refuses another
@@ -367,14 +345,13 @@ must pass, and payload account identity must agree. Host headers and merchant
 slugs do not grant callback authority. The public billing base supplies only the
 external mount prefix; generated Stripe URLs use this same path.
 
-## Admin surface
+## What the merchant API can change
 
-OpenRails core exposes no cross-merchant lifecycle or credential routes.
-Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
-configuration routes require explicit HTTP publication. Snapshot credential writes
-are unavailable, while authorized metadata operations and archive decisions remain
-available through the Client. Catalog mutation routes are omitted unless
-`allow_catalog_updates: true`. The embedded in-process Client is the process
-owner and writes its own catalog whatever the flag says. Catalog reads remain available, and trusted local operator application
-is independent of this flag. Catalog data always lives in the database.
-See [self-hosting-mode1.md](self-hosting-mode1.md).
+Merchant routes are scoped to the authenticated merchant; cross-merchant
+operations are the standalone operator's (`/v1/platform`). PSP metadata and
+archive decisions are always available through the Client; writing a PSP
+credential needs a writable secret backend, so it is refused under `snapshot`
+custody. Catalog mutation routes are mounted only with
+`allow_catalog_updates: true`; the embedded in-process Client is the process
+owner and writes its own catalog whatever the flag says. Catalog data always
+lives in the database. See [self-hosting-mode1.md](self-hosting-mode1.md).

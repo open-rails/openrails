@@ -1,4 +1,4 @@
-# CCBill refund qualification (#696)
+# CCBill refund qualification
 
 Automatic CCBill refunds are unavailable. This applies to full, partial, and
 combined cancel-and-refund requests. There is no configuration override. This

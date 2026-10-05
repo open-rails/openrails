@@ -29,46 +29,34 @@ var foreignPaths = []string{
 }
 
 var (
-	prosePath   = regexp.MustCompile("(?:\\b(GET|POST|PUT|PATCH|DELETE) `?)?(?:/billing)?(/v1/[A-Za-z0-9_{}/:.*<>-]*)")
+	proseHost   = regexp.MustCompile(`https?://[^/\s]+`)
+	prosePath   = regexp.MustCompile("(?:\\b(GET|POST|PUT|PATCH|DELETE) `?|(?:^|[^\\w/.:-]))(?:/billing)?(/v1/[A-Za-z0-9_{}/:.*<>-]*)")
 	proseGo     = regexp.MustCompile(`\b(openrails|billing|catalog)\.([A-Z]\w*)(?:\.([A-Z]\w*))?`)
 	proseMethod = regexp.MustCompile(`\b[cC]lient\.([A-Z]\w*)\(`)
 	proseField  = regexp.MustCompile(`(?:^|[^.\w])(Config|Deps|HTTPConfig|MerchantDeclaration|PSPConfig|CheckoutConfig)\.([A-Z]\w*)`)
 	proseTable  = regexp.MustCompile(`\bbilling\.([a-z][a-z0-9_]*)\b(\.?)`)
 	proseCode   = regexp.MustCompile("\\b([1-5]\\d\\d) `?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b")
 	prosePerm   = regexp.MustCompile(`\b((?:merchant|root)(?::[a-z0-9-]+){2,})`)
-	fileSuffix  = []string{"yaml", "yml", "json", "jsonl", "ts", "tsx", "js", "go", "md", "sql", "css", "example"}
+	// A private tracker id means nothing to a reader of the public docs.
+	proseIssue = regexp.MustCompile("(?:^|[^&\\w`])([a-z]{0,3}#\\d{2,4}\\b|SEC-\\d+)")
+	fileSuffix = []string{"yaml", "yml", "json", "jsonl", "ts", "tsx", "js", "go", "md", "sql", "css", "example"}
 )
 
 // TestDocsNameWhatExists keeps the prose on the surface it describes: every
 // route, Go identifier, table, permission and error code (with its status) a
 // document names is in the route catalog, api/go.txt, api/schema.txt or the
 // error-code registry. A rename or a removal fails here until its documents
-// follow.
+// follow. No document cites a tracker issue.
 func TestDocsNameWhatExists(t *testing.T) {
 	root := filepath.Join("..", "..")
 	goAPI := readGoAPI(t, filepath.Join(root, "api", "go.txt"))
 	tables := readSchemaNames(t, filepath.Join(root, "api", "schema.txt"))
 
-	var docs []string
-	for _, pattern := range []string{"README.md", ".claude/CLAUDE.md", "compatibility/README.md", "sdk/billing-ui/README.md", "sdk/billing-ui/docs/*.md", "web/admin/README.md"} {
-		found, err := filepath.Glob(filepath.Join(root, pattern))
-		require.NoError(t, err)
-		docs = append(docs, found...)
-	}
-	require.NoError(t, filepath.WalkDir(filepath.Join(root, "docs"), func(path string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".md") {
-			docs = append(docs, path)
-		}
-		return err
-	}))
-
-	for _, doc := range docs {
-		rel, _ := filepath.Rel(root, doc)
-		rel = filepath.ToSlash(rel)
+	for _, rel := range proseDocs(t, root) {
 		if slices.Contains(proseSkipped, rel) {
 			continue
 		}
-		body, err := os.ReadFile(doc)
+		body, err := os.ReadFile(filepath.Join(root, rel))
 		require.NoError(t, err)
 		for n, line := range strings.Split(string(body), "\n") {
 			at := rel + ":" + strconv.Itoa(n+1)
@@ -79,7 +67,8 @@ func TestDocsNameWhatExists(t *testing.T) {
 				}
 				line = row[strings.LastIndex(row, "|")+1:]
 			}
-			for _, m := range prosePath.FindAllStringSubmatch(line, -1) {
+			// A URL's path is checked; another service's mount (/api/v1) is not.
+			for _, m := range prosePath.FindAllStringSubmatch(proseHost.ReplaceAllString(line, " "), -1) {
 				if why := routeNamed(m[1], m[2]); why != "" {
 					t.Errorf("%s: %s: %s", at, strings.TrimSpace(m[0]), why)
 				}
@@ -103,6 +92,9 @@ func TestDocsNameWhatExists(t *testing.T) {
 					t.Errorf("%s: %s is not in api/go.txt", at, m[0])
 				}
 			}
+			for _, m := range proseIssue.FindAllStringSubmatch(line, -1) {
+				t.Errorf("%s: %s cites a tracker issue", at, m[1])
+			}
 			for _, m := range proseCode.FindAllStringSubmatch(line, -1) {
 				switch code, ok := billing.LookupErrorCode(m[2]); {
 				case !ok:
@@ -122,6 +114,77 @@ func TestDocsNameWhatExists(t *testing.T) {
 					continue
 				}
 				t.Errorf("%s: %s is not in api/schema.txt", at, strings.TrimSuffix(m[0], "."))
+			}
+		}
+	}
+}
+
+// proseDocs lists the documents, relative to the repository root.
+func proseDocs(t *testing.T, root string) []string {
+	t.Helper()
+	var docs []string
+	for _, pattern := range []string{"README.md", ".claude/CLAUDE.md", "compatibility/README.md", "sdk/billing-ui/*.md", "sdk/billing-ui/docs/*.md", "web/admin/README.md"} {
+		found, err := filepath.Glob(filepath.Join(root, pattern))
+		require.NoError(t, err)
+		docs = append(docs, found...)
+	}
+	require.NoError(t, filepath.WalkDir(filepath.Join(root, "docs"), func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".md") {
+			docs = append(docs, path)
+		}
+		return err
+	}))
+	for i, doc := range docs {
+		rel, err := filepath.Rel(root, doc)
+		require.NoError(t, err)
+		docs[i] = filepath.ToSlash(rel)
+	}
+	return docs
+}
+
+var (
+	proseLink    = regexp.MustCompile(`\]\(([^)\s]+)\)`)
+	proseHeading = regexp.MustCompile("(?m)^#{1,6} +(.+?) *$")
+	slugDropped  = regexp.MustCompile(`[^\p{L}\p{N} _-]`)
+	fencedBlock  = regexp.MustCompile("(?s)```.*?```")
+)
+
+// TestDocsLinksResolve keeps every relative link on a file that exists and,
+// when it names one, a heading of that file.
+func TestDocsLinksResolve(t *testing.T) {
+	root := filepath.Join("..", "..")
+	anchors := map[string]map[string]bool{}
+	anchorsOf := func(rel string) map[string]bool {
+		if anchors[rel] == nil {
+			anchors[rel] = map[string]bool{}
+			body, err := os.ReadFile(filepath.Join(root, rel))
+			require.NoError(t, err)
+			for _, m := range proseHeading.FindAllStringSubmatch(fencedBlock.ReplaceAllString(string(body), ""), -1) {
+				text := proseLink.ReplaceAllString(m[1], "")
+				slug := strings.ReplaceAll(slugDropped.ReplaceAllString(strings.ToLower(text), ""), " ", "-")
+				anchors[rel][slug] = true
+			}
+		}
+		return anchors[rel]
+	}
+	for _, rel := range proseDocs(t, root) {
+		body, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoError(t, err)
+		for _, m := range proseLink.FindAllStringSubmatch(fencedBlock.ReplaceAllString(string(body), ""), -1) {
+			target, fragment, _ := strings.Cut(m[1], "#")
+			if strings.Contains(target, ":") { // another site
+				continue
+			}
+			file := rel
+			if target != "" {
+				file = filepath.ToSlash(filepath.Join(filepath.Dir(rel), target))
+				if _, err := os.Stat(filepath.Join(root, file)); err != nil {
+					t.Errorf("%s: link to %s: no such file", rel, m[1])
+					continue
+				}
+			}
+			if fragment != "" && strings.HasSuffix(file, ".md") && !anchorsOf(file)[fragment] {
+				t.Errorf("%s: link to %s: no such heading", rel, m[1])
 			}
 		}
 	}

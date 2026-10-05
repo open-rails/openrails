@@ -17,7 +17,7 @@ merchant account you hold is a **PSP** entry named whatever you like (`mobius`,
 `paykings`, ...). One merchant can declare several NMI PSPs. See
 `docs/glossary.md`.
 
-All NMI HTTP goes through one client, `internal/integrations/nmi`. It talks to:
+All NMI HTTP goes through one client. It talks to:
 
 - `https://secure.nmi.com/api/v5` — the v5 JSON API (most operations)
 - `https://secure.networkmerchants.com/api/transact.php` — classic Direct Post
@@ -61,7 +61,7 @@ merchants:
 ```
 
 Store real secret values in Vault (or the encrypted DB store) and overlay them;
-never commit them. A PSP declares no environment (#882): the deployment-level
+never commit them. A PSP declares no environment: the deployment-level
 `test_mode` decides, and every PSP in the deployment follows it.
 
 ### Card entry: browser or server
@@ -105,10 +105,10 @@ What OpenRails does in `server` mode:
 
 ```yaml
       mobius:
-        nmi:
-          account_id: "1234567"
-          settings:
-            card_entry: server
+        rail: nmi
+        account_id: "1234567"
+        settings:
+          card_entry: server
 ```
 
 Boot refuses `card_entry: server` on any rail other than NMI and on a PSP
@@ -132,8 +132,8 @@ A price is offered on NMI when the PSP is armed.
 In the NMI dashboard, register a webhook endpoint pointing at your OpenRails
 deployment:
 
-- URL: `https://<your-host>/v1/webhooks/nmi/{account_id}` — the rail, not the PSP key; a
-  `mobius` account posts here too, and is identified by the payload's Gateway ID
+- URL: `https://<your-host>/v1/webhooks/nmi/{account_id}` — the rail, not the PSP key, then
+  the PSP's Gateway ID; the payload's Gateway ID must agree with it
 - Signing secret: exactly the value you declared as `webhook_signing_secret`
 
 OpenRails verifies every delivery: HMAC-SHA256 over `<timestamp>.<body>` from a
@@ -195,33 +195,30 @@ NMI PSP then declares which NMI deployment its credentials belong to, in
 
 ```yaml
       mobius:
-        nmi:
-          account_id: "1234567"           # dashboard Gateway ID
-          settings:
-            endpoint_deployment: gateway  # or sandbox
-            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-            tokenization_key: public-collectjs-key
-          secrets:
-            security_key: ...
-            webhook_signing_secret: ...
+        rail: nmi
+        account_id: "1234567"           # dashboard Gateway ID
+        settings:
+          endpoint_deployment: gateway  # or sandbox
+          tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+          tokenization_key: public-collectjs-key
+        secrets:
+          security_key: ...
+          webhook_signing_secret: ...
 ```
 
 Verification runs once per loaded credential set (startup, credential
 create/rotate), bound to merchant + PSP + endpoint + credential fingerprint.
 Every NMI client (checkout, card save, rebills, refunds, pulls,
 custodian proxies) is built from that same PSP scope, so all of them share the
-one verdict;
-see `docs/design/provider-sandbox-posture.md`. A false, unknown or unavailable
-verdict disarms the PSP: every NMI mutation is refused with
-`providerposture.ErrDisarmed`, reads still work, and `Ready()` reports
-`psp_posture` as degraded until a background retry succeeds.
+one verdict; see [sandbox posture](../sandbox-posture.md). A false, unknown or
+unavailable verdict disarms the PSP: every NMI mutation is refused before
+anything is sent, reads still work, and the `openrails_psp_posture` probe fails
+until a background retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
-only into Collect.js fields. The former live E2E harness has been removed;
-browser tokenization, vault save, sales, enrollment, signed webhooks, remote
-query, and cancellation require separately scoped provider qualification.
-Sandboxes generally cannot advance time; deterministic e2e transports
-prove local scheduling behavior without waiting for a provider billing period.
+only into Collect.js fields. Sandboxes generally cannot advance time, so
+scheduling behavior is proven with deterministic transports, not by waiting
+for a provider billing period.
 
 ### Quirks worth knowing
 
@@ -240,16 +237,9 @@ doesn't surprise you:
   Implicit incomplete combinations fail before network I/O. Subscription updates stay on Classic because the
   documented `PATCH /v5/subscriptions/{id}` returns `E_ROUTE_NOT_FOUND` on the
   live gateway. Transaction search stays on `query.php` (v5 has no list/search).
-- **Legacy anchor recovery is availability-first and observable.** OpenRails
-  first uses the agreement-scoped recurring/unscheduled reference, then the
-  older vault-creation `initial_transaction_id`. If neither survived migration,
-  an explicitly marked legacy MIT still sends `initiated_by=merchant` and
-  `stored_credential_indicator=used`, omitting only the unavailable reference.
-  That final path emits the `nmi.stored_credential.unanchored_mit` operational
-  metric and a structured warning. It avoids stranding subscriptions, but it is
-  not fully network-compliant: NMI requires the original CIT reference on every
-  subsequent transaction. A successful fallback MIT is never persisted as if
-  it were the original CIT anchor.
+- **Every later charge names its first.** A merchant-initiated charge carries
+  the agreement's initial NMI transaction id; a card with no recorded anchor is
+  not charged off-session (an import raises `life.import.no_recurring_anchor`).
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference
@@ -261,7 +251,7 @@ doesn't surprise you:
   NMI" as a terminal state, not an error.
 - **Duplicate-transaction window.** The gateway rejects a repeat of the same
   card + amount + order_id within its duplicate window. OpenRails randomizes
-  probe amounts; the E2E harness randomizes test amounts for the same reason.
+  probe amounts for that reason.
 - **"Processor" in webhook payloads** (`processor_id`,
   `transaction_was_declined_by_processor`) is NMI's backend *acquirer*, not
   anything you configure in OpenRails.

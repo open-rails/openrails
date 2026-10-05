@@ -54,7 +54,7 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 // currency is a converter that cannot refuse an amount whose currency nobody
 // established, and it is not reintroducible if it does not exist.
 //
-// Deliberately NOT converted (see docs/invariants.md GAP-12): DB columns are
+// Deliberately NOT converted: DB columns are
 // still bare bigint, most struct fields are still int64, and
 // NativeToRailMinor still takes int64 because its input is "internal units at
 // the CURRENCY's registered scale" (JPY is 10^4), which is not always micros —

@@ -2,8 +2,8 @@
 
 How to move an existing site's subscribers, payment history, and provider-side
 subscription/vault records from a legacy billing system onto OpenRails
-(embedded or standalone). The import surface here is the #737 DeclaredBilling
-seam; the cutover doctrine it feeds into lives in
+(embedded or standalone). The import surface is `Client.ImportBilling` with a
+`billing.DeclaredBilling` document; the cutover doctrine it feeds into lives in
 [operations.md](operations.md).
 
 ### The mental model
@@ -14,7 +14,7 @@ for live money state**. For provider-vaulted rails (NMI, CCBill, Stripe) the
 provider owns the card vault and the recurring billing schedule: it keeps
 charging on its own clock after your cutover. Importing brings OpenRails'
 mirror up to date as of a declared horizon; from then on webhooks, the
-scheduled [Provider Refresh](operations.md#provider-refresh-574-and-the-unknown-cohort-632664665),
+scheduled [Provider Refresh](operations.md#provider-refresh-and-the-unknown-cohort),
 and manual `pull-provider` runs converge the mirror against provider truth.
 
 You hand over **facts, not classifications**: who, which price, which rail,
@@ -58,7 +58,7 @@ The book (`DeclaredBilling`) carries four record kinds:
 | `subscriptions` | (rail, rail_subscription_id) | `source_id` (host's stable id) keys per-row results; `psp` binds the row to the PSP that owns it at the provider; optional `payment_method` ref, `cancel` / `dunning` evidence, raw `evidence` JSON stored verbatim on `gateway_response` |
 | `transactions` | (rail, transaction_id) | successes **and** declines — the true attempt history; `amount_cents` is provider-wire cents, converted to ledger micros inside OpenRails |
 
-**Attribution is required (or#893).** Every provider-bound row an import writes
+**Attribution is required.** Every provider-bound row an import writes
 carries the PSP it came from — the same `psp_id` a pull stamps — because the
 same prune, rollback and uniqueness rules apply to an imported row as to a
 pulled one. State it once for the whole book with `default_psp`, or per row
@@ -161,12 +161,12 @@ billing data over this seam:
 
 Steps 6–8 in depth:
 [Cutover: booting against production credentials](operations.md#cutover-booting-against-production-credentials)
-and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited-366).
+and [Materialized backlog under mode=limited](operations.md#materialized-backlog-under-modelimited).
 
 ### Gotchas
 
 - **Stale `past_due` is canceled, never charged.** Anything past the
-  [dunning staleness window](operations.md#dunning-359) (derived from the
+  [dunning staleness window](operations.md#dunning) (derived from the
   billing cycle; 14 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
 - **`unverified` is healthy.** Evidence-starved rows park as `unverified` and keep
@@ -227,7 +227,7 @@ OpenRails.
    vault or pause changed at NMI), `pull.payment_method.mismatch` (vault card removed)
    and blocked import rows. Fix the book and re-import rather than editing rows.
 3. **Arm the destructive switch** for the merchant
-   ([operations.md](operations.md#arming-a-merchant-the-835-first-enforce-gate)).
+   ([operations.md](operations.md#arming-a-merchant-the-first-enforce-gate)).
    Until then a member's cancel of an NMI-owned membership is refused with
    `provider_cancel_held` and raises `life.provider_cancel.held`: OpenRails
    will not cancel locally while NMI would keep charging. Account deletion
@@ -237,7 +237,7 @@ OpenRails.
    schedule once; card updates repoint the schedule to the new vault; refunds
    go to NMI, and a refund with `revoke_access` also ends the membership and
    deletes its NMI schedule (refused with `provider_cancel_held` while
-   disarmed). `Client.RefreshProviders` (`POST /v1/merchant/provider-refresh`)
+   disarmed). `Client.RefreshPSPs` (`POST /v1/merchant/psps/refresh`)
    runs the merchant's provider refresh now, from embedded or remote hosts;
    otherwise it runs every four hours, and NMI's own subscription webhooks
    converge the schedule they name at once. Tier changes (same tier group,

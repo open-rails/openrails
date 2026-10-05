@@ -8,9 +8,9 @@ windows per (customer, entitlement)**. The timeline is the single source of trut
 
 `billing.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `start_at`,
 `end_at` (NULL = indefinite), `source_type` + `source_id`, `grant_id`, `revoked_at` +
-`revoke_reason`, `deleted_at`. Windows are half-open `[start_at, end_at)`; a generated
-`period` tstzrange plus an exclusion constraint forbids overlap among active windows of
-one (merchant, customer, entitlement). Finite windows satisfy `start_at < end_at`.
+`revoke_reason`, `deleted_at`. Windows are half-open `[start_at, end_at)`; finite
+windows satisfy `start_at < end_at`. On the wire the bounds are `starts_at` and
+`ends_at` (`EntitlementRecord`).
 
 A window is **active at T** iff:
 
@@ -38,20 +38,20 @@ prefix `/v1` standalone, `/billing/v1` embedded):
 Embedded hosts sharing the DB may run the SQL predicate above directly
 (add `customer_id = $1 AND entitlement = $2`); it is exactly what the API executes.
 
-## Write API (stack-like)
+## Writes
 
-Exactly two operations mutate a timeline (serialized per timeline by an advisory lock):
+A timeline changes in two ways only: a window is appended at its tail, or active
+windows are revoked (and future scheduled ones removed). A window's end is immutable:
+a renewal appends a new window, never edits one.
 
-- `PushNewEntitlement` — append a window at the **tail** (finite or indefinite).
-- `RevokeExistingEntitlement` — revoke currently-active window(s) and soft-delete future
-  scheduled ones.
-
-`end_at` is immutable after creation: renewals and grace extensions append new windows,
-never edit existing ones.
+Every window derives from a grant. A merchant grants one by hand with
+`POST /v1/merchant/customers/{customer_id}/entitlements` (`Client.CreateEntitlement`)
+and revokes it with `DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}`
+(`Client.DeleteEntitlement`), which revokes the grant behind it.
 
 ## Grants vs entitlements
 
-The **grant ledger** (`billing.grants`, #514) is the append-only access-domain sibling of
+The **grant ledger** (`billing.grants`) is the append-only access-domain sibling of
 the money ledger. Derive-1 appends immutable events (grant / revoke / expire / supersede —
 a revoke is a NEW event referencing the original); derive-2 (`MaterializeGrant`) folds the
 log into projections: **entitlement windows** (rows carry the producing `grant_id`),
@@ -62,8 +62,8 @@ pass repairs any drift between the two.
 ## Sources
 
 `source_type` + `source_id` on each window: `subscription` (paid access from a subscription),
-`one_off` (a one-time purchase), `admin` (admin-granted; source is the grant itself), and
-`grace` (historical — see below).
+`purchase` (a one-time purchase), `admin` (granted by the merchant; the source is the grant
+itself), and `grace` (see below).
 
 ## Standing access — auto-renew subscriptions have no end date
 
@@ -71,10 +71,9 @@ An auto-renew subscription's entitlement window is **standing**: open-ended, clo
 by a proven event (a confirmed cancellation, a terminal decline, exhausted dunning — never
 by the clock alone). A lost webhook, a provider billing on its own day boundary, or a dead
 webhook pipe therefore cannot gate a paying user: access simply continues while
-reconciliation converges the subscription against provider truth. This replaced the older
-appended-grace-window mechanism (#368, deleted by #691) — `grace` remains in the source
-vocabulary for historical rows and as a pacing marker in convergence, but no code appends
-grace windows for provider cohorts. Deliberate cancellation still ends access at the period
+reconciliation converges the subscription against provider truth. `grace` remains in the
+source vocabulary as a pacing marker in convergence; no code appends grace windows for
+provider cohorts. Deliberate cancellation still ends access at the period
 end the user expects.
 
 Engine memberships (OpenRails collects them itself) are the exception: access is the paid

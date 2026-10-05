@@ -58,14 +58,13 @@ read under a shared lock on the method row — and is judged against those
 frozen facts forever after: it refuses to submit while the method no longer
 matches them, and every receipt read (verifier, `--receipt`, `--not-executed`)
 uses the frozen account and the frozen custody's rule, never the method's
-current row. An unresolved operation therefore blocks an or#297 custody remap
+current row. An unresolved operation therefore blocks a custody remap
 of the instrument it names (`operation_unresolved`) until it resolves.
 Automatic NMI collection requires an approved unscheduled stored-credential
 reference. Creating a vault record alone does not establish that agreement:
 designating an unanchored card as the collection method is refused. A prior
 customer-present charge can establish the scoped reference; an unscoped initial
-transaction id is not a fallback. Customer-present invoice onboarding and its
-subsequent off-session workflow are a separate #809 acceptance item.
+transaction id is not a fallback.
 
 A pre-submission failure (unarmed account, missing secret, parked instrument)
 parks the operation without consuming an attempt. After the write-ahead fence every adapter error is a possible
