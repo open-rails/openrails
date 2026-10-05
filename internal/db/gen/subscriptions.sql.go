@@ -1230,7 +1230,7 @@ type ListActiveSubscriptionsByPriceIDsParams struct {
 
 // #773: every active subscription pinned to one of a set of price rows — the
 // reprice_all_prior_versions(key, ...) match set (a key's prior-version price
-// ids). Uses idx_subscriptions_price_id.
+// ids). Uses subscriptions_price_id_idx.
 func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, arg ListActiveSubscriptionsByPriceIDsParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listActiveSubscriptionsByPriceIDs, arg.MerchantID, arg.PriceIds)
 	if err != nil {

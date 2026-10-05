@@ -1011,7 +1011,7 @@ type GetLiveTierChangeProviderIntentParams struct {
 }
 
 // The one unresolved tier change that owns a subscription
-// (uq_provider_intents_tier_change_subscription).
+// (provider_intents_subscription_id_tier_change_subscription_key).
 func (q *Queries) GetLiveTierChangeProviderIntent(ctx context.Context, arg GetLiveTierChangeProviderIntentParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, getLiveTierChangeProviderIntent, arg.MerchantID, arg.SubscriptionID)
 	var i BillingProviderIntent

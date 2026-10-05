@@ -208,7 +208,7 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(ps
 
 -- #773: every active subscription pinned to one of a set of price rows — the
 -- reprice_all_prior_versions(key, ...) match set (a key's prior-version price
--- ids). Uses idx_subscriptions_price_id.
+-- ids). Uses subscriptions_price_id_idx.
 -- name: ListActiveSubscriptionsByPriceIDs :many
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = ANY(sqlc.arg(price_ids)::uuid[]) AND sub.status = 'active'

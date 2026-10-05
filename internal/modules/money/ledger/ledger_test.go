@@ -35,7 +35,7 @@ func sorted[T ~string](vs []T) []string {
 	return out
 }
 
-// #832: idx_ledger_transfers_lot_once is partial on named transfer_type
+// #832: ledger_transfers_grant_id_transfer_type_key is partial on named transfer_type
 // literals, so Go and DB vocabularies must agree exactly or a typo silently
 // escapes the lot-once index and a lot is deposited/revoked twice.
 func TestLedgerVocabularyMatchesSchema(t *testing.T) {
@@ -58,7 +58,7 @@ func TestLedgerVocabularyMatchesSchema(t *testing.T) {
 	schema := b.String()
 
 	require.Equal(t, sqlVocabulary(t, schema, `CONSTRAINT ledger_transfers_type_check CHECK`), sorted(ledger.AllTransferTypes))
-	require.Equal(t, sqlVocabulary(t, schema, `CREATE UNIQUE INDEX idx_ledger_transfers_lot_once `), sorted(ledger.LotOnceTransferTypes))
+	require.Equal(t, sqlVocabulary(t, schema, `CREATE UNIQUE INDEX ledger_transfers_grant_id_transfer_type_key `), sorted(ledger.LotOnceTransferTypes))
 	require.Subset(t, sorted(ledger.AllTransferTypes), sorted(ledger.LotOnceTransferTypes))
 	require.Equal(t, sqlVocabulary(t, schema, `CONSTRAINT ledger_accounts_type_check CHECK`), sorted([]ledger.AccountType{
 		ledger.CustomerBalance, ledger.PlatformRevenue, ledger.RailClearing, ledger.ArrearsLiability,

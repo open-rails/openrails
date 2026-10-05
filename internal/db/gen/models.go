@@ -1021,7 +1021,7 @@ type BillingPrice struct {
 	TrialUnitAmount *int64
 	// Optional trial first-phase length in HOURS; NULL = no trial.
 	TrialDurationHours *int32
-	// Durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see uq_prices_merchant_key_current. Archived rows keep their key as a back-reference to the chain.
+	// Durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see prices_key_key. Archived rows keep their key as a back-reference to the chain.
 	Key string
 }
 
@@ -1113,7 +1113,7 @@ type BillingProviderIntent struct {
 	CreatedAt      time.Time
 	ExecutedAt     *time.Time
 	UpdatedAt      time.Time
-	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (provider_intents_addressed).
+	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (provider_intents_addressed_check).
 	PspID *uuid.UUID
 	// The destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
 	DestructiveRunID    *uuid.UUID
@@ -1127,7 +1127,7 @@ type BillingProviderMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
-	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed).
+	// PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed_check).
 	PspID            *uuid.UUID
 	ProviderIntentID *uuid.UUID
 	IntentType       *string
@@ -1379,7 +1379,7 @@ type BillingSubscription struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs uq_subscriptions_customer_tier_group_active: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
+	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs subscriptions_customer_id_tier_group_key: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID

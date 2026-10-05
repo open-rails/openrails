@@ -291,14 +291,14 @@ func productToCatalogProduct(p *models.Product) *billing.Product {
 }
 
 // priceNaturalKeyNull is the canonical encoding of a SQL NULL price field for
-// id derivation (#662). The unique_prices_product_amount_window index is
+// id derivation (#662). The prices_product_amount_window_key index is
 // NULLS NOT DISTINCT (a NULL equals another NULL), so every absent value must
 // hash to ONE fixed token — and it carries a NUL byte, which a decimal integer
 // string can never contain, so it can never collide with a present value.
 const priceNaturalKeyNull = "\x00null"
 
 // priceDeterministicID derives a price's id from the immutable financial tuple
-// that IS its identity — exactly the unique_prices_product_amount_window
+// that IS its identity — exactly the prices_product_amount_window_key
 // columns (#662), canonicalized the SAME way that NULLS-NOT-DISTINCT unique
 // index compares them (amount as decimal, currency lowercased, absent nullable
 // fields → priceNaturalKeyNull). Equal terms therefore always hash equal, so a
@@ -394,7 +394,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	}
 	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
 	// is case-insensitive, so without this a caller-supplied "usd" validated
-	// fine and then failed the prices_currency_shape CHECK at INSERT.
+	// fine and then failed the prices_currency_check CHECK at INSERT.
 	req.Currency = money.NormalizeCurrency(req.Currency)
 	if err := validateCatalogPriceTerms(req); err != nil {
 		return nil, err
@@ -412,7 +412,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	req.ProductID = billing.ProductID(product.ID)
 
 	// #662: the price id is a pure function of its immutable financial tuple —
-	// exactly the unique_prices_product_amount_window columns. A reprice hashes
+	// exactly the prices_product_amount_window_key columns. A reprice hashes
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
 	priceID := priceDeterministicID(req.ProductID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)

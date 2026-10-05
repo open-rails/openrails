@@ -33,7 +33,7 @@ var (
 	ErrRepriceInactivePrice = apperr.New(http.StatusUnprocessableEntity, "reprice_inactive_price", "reprice: to_price must be active")
 
 	// ErrRepriceAlreadyScheduled: at most one scheduled reprice may exist per
-	// subscription at a time (uq_subscription_reprices_one_scheduled) — cancel
+	// subscription at a time (subscription_reprices_subscription_id_key) — cancel
 	// the existing one first.
 	ErrRepriceAlreadyScheduled = apperr.New(http.StatusConflict, "reprice_already_scheduled", "reprice: subscription already has a scheduled reprice")
 

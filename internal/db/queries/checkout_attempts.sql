@@ -96,7 +96,7 @@ WHERE checkout_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
 
 -- Binds a verified landed Solana transaction to the one checkout it settles.
 -- Zero rows: the checkout is already settled by another transaction. A unique
--- violation (uq_checkout_attempts_solana_signature): the transaction already
+-- violation (checkout_attempts_transaction_id_key): the transaction already
 -- settles another checkout.
 -- name: ClaimSolanaCheckoutSignature :execrows
 UPDATE billing.checkout_attempts SET transaction_id = sqlc.arg(signature)::text

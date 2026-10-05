@@ -29,7 +29,7 @@ import (
 
 // tierChangeSubjectConstraint is the one-unresolved-tier-change-per-
 // subscription unique index shared by every durable tier change type.
-const tierChangeSubjectConstraint = "uq_provider_intents_tier_change_subscription"
+const tierChangeSubjectConstraint = "provider_intents_subscription_id_tier_change_subscription_key"
 
 // One client key names one tier change of one customer, independent of rail.
 // The ledger's (merchant_id, idempotency_key) unique constraint arbitrates

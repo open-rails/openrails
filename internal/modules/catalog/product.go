@@ -319,7 +319,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "products_live_subscription_tier_group" {
 			return nil, ErrProductTierGroupInUse
 		}
-		if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_subscriptions_customer_tier_group_active" {
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "subscriptions_customer_id_tier_group_key" {
 			return nil, ErrProductTierGroupConflict
 		}
 		return nil, err

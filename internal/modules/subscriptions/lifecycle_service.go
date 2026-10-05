@@ -1628,7 +1628,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	now := s.now()
 	endedAt := c.EndedAt
 	// canceled_at is the operation instant, but never after ended_at: the
-	// chk_ended_not_before_canceled constraint requires ended_at >= canceled_at,
+	// subscriptions_ended_not_before_canceled_check constraint requires ended_at >= canceled_at,
 	// and an immediate revoke pins ended_at to the caller's `now` (computed a hair
 	// before this method's own s.now()).
 	canceledAt := now

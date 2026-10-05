@@ -119,7 +119,7 @@ compare-and-swap guard on one row, never a lookup, and is not flagged.
 **PERMANENT — capped by a caller-supplied list.**
 `SnapshotPaymentCards` is capped
 by `transaction_ids[]` and index-backed by
-`idx_payments_merchant_rail_transaction`; a `UNIQUE(merchant_id, rail,
+`payments_rail_transaction_id_idx`; a `UNIQUE(merchant_id, rail,
 transaction_id)` would make it provable.
 
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged

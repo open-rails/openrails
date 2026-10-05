@@ -68,7 +68,7 @@ type EnqueueParams struct {
 	PspID uuid.UUID
 	// CustodianID addresses the write to a custodian instead (or#795's batch
 	// account updater uploads one token batch to a custodian that backs many
-	// PSPs, so no single psp_id names it). Exactly the provider_intents_addressed
+	// PSPs, so no single psp_id names it). Exactly the provider_intents_addressed_check
 	// constraint: one of the two must be set.
 	CustodianID    uuid.UUID
 	Payload        any
@@ -294,7 +294,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.BillingProviderIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
-	// or#893/or#795 (provider_intents_addressed): the intent names the account it
+	// or#893/or#795 (provider_intents_addressed_check): the intent names the account it
 	// will execute against — a PSP, or a custodian for the writes addressed to
 	// one. An explicit value wins; otherwise the PSP the caller already routed
 	// to and pinned on ctx (checkout's stampPSP, the webhook plane) is the

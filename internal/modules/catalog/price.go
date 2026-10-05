@@ -439,7 +439,7 @@ func (s *PriceService) SetKey(ctx context.Context, id uuid.UUID, key string) err
 
 // GetCurrentByKey returns the CURRENT (non-archived) row for a key, or
 // pgx.ErrNoRows if the key names no live price. At most one such row can
-// exist per (merchant, key) — enforced by uq_prices_merchant_key_current.
+// exist per (merchant, key) — enforced by prices_key_key.
 func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID, key string) (*models.Price, error) {
 	catalogID, err := queryCatalogMerchant(ctx, merchantID)
 	if err != nil {

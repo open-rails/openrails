@@ -74,7 +74,7 @@ const (
 const HeldBulkFindingType = "life.provider_intent.held_bulk"
 
 // heldBulkSubjectKey keys ONE standing finding per merchant across all
-// destructive types (uq_reconciliation_findings_identity).
+// destructive types (reconciliation_findings_finding_type_psp_id_subject_key_key).
 const heldBulkSubjectKey = "destructive_volume"
 
 // DestructiveBudget is the breaker's window budget for a merchant with the

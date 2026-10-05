@@ -225,7 +225,7 @@ type GetScheduledRepriceForSubscriptionParams struct {
 }
 
 // The subscription's current scheduled reprice, if any (at most one by
-// uq_subscription_reprices_one_scheduled) — used both to refuse a second
+// subscription_reprices_subscription_id_key) — used both to refuse a second
 // schedule and, at the renewal boundary, to check whether it is DUE
 // (effective_at <= now, checked in Go).
 func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, arg GetScheduledRepriceForSubscriptionParams) (BillingSubscriptionReprice, error) {
@@ -493,7 +493,7 @@ type UnblockSubscriptionRepriceParams struct {
 
 // #816: the re-driver's un-block — the exact inverse of
 // BlockSubscriptionReprice, status-predicated so a concurrent transition wins
-// cleanly. uq_subscription_reprices_one_scheduled makes this fail (unique
+// cleanly. subscription_reprices_subscription_id_key makes this fail (unique
 // violation) if the subscription acquired another scheduled row meanwhile —
 // callers treat that as a skip.
 func (q *Queries) UnblockSubscriptionReprice(ctx context.Context, arg UnblockSubscriptionRepriceParams) (int64, error) {

@@ -178,7 +178,7 @@ func (k IdempotencyKey) requireSameAmount(ctx context.Context, q *gen.Queries, m
 }
 
 // invoiceItemSourceID is the pending-invoice-item key for this coordinate.
-// uq_invoice_items_source is (merchant, customer, currency, source_type,
+// invoice_items_customer_id_currency_source_type_source_id_key is (merchant, customer, currency, source_type,
 // source_id), so the OPERATION has to be in the string for the same reason it
 // is in the ledger coordinate — otherwise a capture's owed leg and a usage
 // charge's owed leg at one (source, source_id) collide into one accrued item.

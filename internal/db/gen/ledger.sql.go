@@ -312,7 +312,7 @@ type InsertLedgerTransferParams struct {
 }
 
 // InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
-// NOTHING against idx_ledger_transfers_operation_once makes once-only a
+// NOTHING against ledger_transfers_operation_once_key makes once-only a
 // DATABASE fact: a replay at the same (merchant, customer, currency,
 // transfer_type, operation, source, source_id, grant_id) inserts nothing and
 // returns zero rows, whatever order the caller took its locks in. Zero rows is

@@ -167,7 +167,7 @@ func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	_, err = insert(&psp)
 	var pgErr *pgconn.PgError
 	require.ErrorAs(t, err, &pgErr)
-	require.Equal(t, "payment_methods_psp_custody", pgErr.ConstraintName)
+	require.Equal(t, "payment_methods_psp_custody_check", pgErr.ConstraintName)
 	vaulted, err := insert(nil)
 	require.NoError(t, err)
 

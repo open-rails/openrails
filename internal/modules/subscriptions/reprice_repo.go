@@ -248,7 +248,7 @@ func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batc
 // the exact inverse of BlockScheduledReprice, status-predicated. Returns
 // ErrRepriceNotScheduled when the row is no longer blocked (a concurrent
 // transition won); a unique violation on
-// uq_subscription_reprices_one_scheduled (the subscription acquired another
+// subscription_reprices_subscription_id_key (the subscription acquired another
 // scheduled row meanwhile) surfaces as the driver error for the caller to
 // treat as a skip.
 func (r *RepriceRepo) Unblock(ctx context.Context, id uuid.UUID) error {
@@ -282,7 +282,7 @@ func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscr
 
 // GetScheduledForSubscription returns the subscription's current scheduled
 // reprice, or pgx.ErrNoRows if none exists. At most one can exist at a time
-// (uq_subscription_reprices_one_scheduled).
+// (subscription_reprices_subscription_id_key).
 func (r *RepriceRepo) GetScheduledForSubscription(ctx context.Context, subscriptionID uuid.UUID) (*models.SubscriptionReprice, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {

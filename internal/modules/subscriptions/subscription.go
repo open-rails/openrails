@@ -146,7 +146,7 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 
 	if err := s.subscriptionRepo.Create(ctx, subscription); err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_subscriptions_customer_product_lifecycle" {
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "subscriptions_customer_id_product_id_key" {
 			return ErrActiveSubscriptionExists
 		}
 		return err

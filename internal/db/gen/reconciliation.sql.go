@@ -1613,7 +1613,7 @@ type ListRecentlyClosedLastEntitlementWindowsRow struct {
 
 // #789 NOTIFY `notify.access_ended` detector: customers whose LAST entitlement
 // window closed inside (closed_after, now] — the close instant is
-// LEAST(ends_at, revoked_at) (NULL = infinity; matches idx_entitlements_closed_at)
+// LEAST(ends_at, revoked_at) (NULL = infinity; matches entitlements_closed_at_idx)
 // — with NO other live window for the same (customer, entitlement). One row per
 // customer (latest close) — one email per customer, whatever ended the access
 // (dunning, reconcile-driven cancel, grant lapse). customer_id nullable:
@@ -2452,7 +2452,7 @@ type ReconcileBackfillPaymentParams struct {
 // subscription. Admin grants and grace windows are different source types and
 // are untouchable by construction.
 // PS-4: backfill a rail charge that has no local payment record.
-// Dedupe rides the uq_payments_merchant_psp_transaction identity.
+// Dedupe rides the payments_psp_id_transaction_id_key identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
 		arg.MerchantID,
