@@ -447,28 +447,22 @@ func (q *Queries) GetPaymentByID(ctx context.Context, arg GetPaymentByIDParams) 
 	return i, err
 }
 
-const getPaymentByPSPMetadataValue = `-- name: GetPaymentByPSPMetadataValue :one
+const getPaymentByNMISubscriptionOrder = `-- name: GetPaymentByNMISubscriptionOrder :one
 SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM billing.payments purch
 WHERE purch.merchant_id = $1::uuid AND purch.psp_id = $2::uuid
-  AND purch.metadata ->> $3::text = $4::text
+  AND purch.metadata ->> 'nmi_subscription_order_id' = $3::text
   AND purch.deleted_at IS NULL
 LIMIT 1
 `
 
-type GetPaymentByPSPMetadataValueParams struct {
+type GetPaymentByNMISubscriptionOrderParams struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
-	Key        string
-	Value      string
+	OrderID    string
 }
 
-func (q *Queries) GetPaymentByPSPMetadataValue(ctx context.Context, arg GetPaymentByPSPMetadataValueParams) (BillingPayment, error) {
-	row := q.db.QueryRow(ctx, getPaymentByPSPMetadataValue,
-		arg.MerchantID,
-		arg.PspID,
-		arg.Key,
-		arg.Value,
-	)
+func (q *Queries) GetPaymentByNMISubscriptionOrder(ctx context.Context, arg GetPaymentByNMISubscriptionOrderParams) (BillingPayment, error) {
+	row := q.db.QueryRow(ctx, getPaymentByNMISubscriptionOrder, arg.MerchantID, arg.PspID, arg.OrderID)
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
@@ -532,6 +526,60 @@ func (q *Queries) GetPaymentByPSPTransactionID(ctx context.Context, arg GetPayme
 		arg.Rail,
 		arg.TransactionID,
 	)
+	var i BillingPayment
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.Channel,
+		&i.Rail,
+		&i.TransactionID,
+		&i.Amount,
+		&i.ListAmount,
+		&i.Currency,
+		&i.Status,
+		&i.SubscriptionID,
+		&i.RefundedPaymentID,
+		&i.DiscountCode,
+		&i.DiscountReason,
+		&i.DiscountMetadata,
+		&i.EntitlementsSpecSnapshot,
+		&i.Metadata,
+		&i.PurchasedAt,
+		&i.CreatedAt,
+		&i.CardBrand,
+		&i.CardLast4,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.AttemptKind,
+		&i.FailureCode,
+		&i.FailureReason,
+		&i.ReversalKind,
+		&i.TokenType,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.MoneyMovement,
+	)
+	return i, err
+}
+
+const getPaymentByStripeInvoice = `-- name: GetPaymentByStripeInvoice :one
+SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM billing.payments purch
+WHERE purch.merchant_id = $1::uuid AND purch.psp_id = $2::uuid
+  AND purch.metadata ->> 'stripe_invoice_id' = $3::text
+  AND purch.deleted_at IS NULL
+LIMIT 1
+`
+
+type GetPaymentByStripeInvoiceParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	InvoiceID  string
+}
+
+func (q *Queries) GetPaymentByStripeInvoice(ctx context.Context, arg GetPaymentByStripeInvoiceParams) (BillingPayment, error) {
+	row := q.db.QueryRow(ctx, getPaymentByStripeInvoice, arg.MerchantID, arg.PspID, arg.InvoiceID)
 	var i BillingPayment
 	err := row.Scan(
 		&i.ID,

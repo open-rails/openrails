@@ -17,7 +17,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = $1::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
-      AND g.source_type = 'admin' AND g.source_id = $2::text
+      AND g.source_type = 'admin' AND g.source_id = $2::text AND g.source_id <> ''
 ) AS exists
 `
 

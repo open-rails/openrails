@@ -465,23 +465,40 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 	return nil
 }
 
-func (r *PaymentRepo) GetByPSPMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	mid, err := merchant.Require(ctx)
+// GetByNMISubscriptionOrder reads the attempt an NMI subscription order
+// reference names.
+func (r *PaymentRepo) GetByNMISubscriptionOrder(ctx context.Context, orderID string) (*models.Payment, error) {
+	mid, pspID, err := r.pspScope(ctx)
 	if err != nil {
 		return nil, err
 	}
-	pspID, err := db.RequirePSPID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	row, err := r.db.Gen(ctx).GetPaymentByPSPMetadataValue(ctx, gen.GetPaymentByPSPMetadataValueParams{MerchantID: mid.UUID(), PspID: pspID,
-		Key:   strings.TrimSpace(key),
-		Value: strings.TrimSpace(value),
-	})
+	row, err := r.db.Gen(ctx).GetPaymentByNMISubscriptionOrder(ctx, gen.GetPaymentByNMISubscriptionOrderParams{MerchantID: mid, PspID: pspID, OrderID: strings.TrimSpace(orderID)})
 	if err != nil {
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
+}
+
+// GetByStripeInvoice reads the payment a Stripe invoice settled.
+func (r *PaymentRepo) GetByStripeInvoice(ctx context.Context, invoiceID string) (*models.Payment, error) {
+	mid, pspID, err := r.pspScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetPaymentByStripeInvoice(ctx, gen.GetPaymentByStripeInvoiceParams{MerchantID: mid, PspID: pspID, InvoiceID: strings.TrimSpace(invoiceID)})
+	if err != nil {
+		return nil, err
+	}
+	return models.PaymentFromGen(row)
+}
+
+func (r *PaymentRepo) pspScope(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	return mid.UUID(), pspID, err
 }
 
 func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {

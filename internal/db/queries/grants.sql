@@ -455,7 +455,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
-      AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
+      AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text AND g.source_id <> ''
 ) AS exists;
 
 -- CROSS-MERCHANT: merchants holding a past-expiry credit lot that was not

@@ -294,8 +294,12 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 	return s.GetByPSPTransactionID(ctx, payment.Rail, payment.TransactionID)
 }
 
-func (s *PaymentService) GetByPSPMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	return s.repo.GetByPSPMetadataValue(ctx, key, value)
+func (s *PaymentService) GetByNMISubscriptionOrder(ctx context.Context, orderID string) (*models.Payment, error) {
+	return s.repo.GetByNMISubscriptionOrder(ctx, orderID)
+}
+
+func (s *PaymentService) GetByStripeInvoice(ctx context.Context, invoiceID string) (*models.Payment, error) {
+	return s.repo.GetByStripeInvoice(ctx, invoiceID)
 }
 
 func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) (*models.Payment, error) {

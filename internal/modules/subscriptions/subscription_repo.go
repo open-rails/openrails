@@ -531,9 +531,11 @@ func (r *SubscriptionRepo) GetByPSPSubscriptionID(ctx context.Context, rail, rai
 	return r.oneWithDetails(ctx, row, false)
 }
 
-func (r *SubscriptionRepo) GetByPSPMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
-	if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
-		return nil, errors.New("provider metadata key and reference are required")
+// GetByGatewayOrder reads the subscription whose gateway response names the
+// order reference.
+func (r *SubscriptionRepo) GetByGatewayOrder(ctx context.Context, rail, orderID string) (*models.Subscription, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return nil, errors.New("gateway order reference is required")
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -543,12 +545,11 @@ func (r *SubscriptionRepo) GetByPSPMetadataValue(ctx context.Context, rail, key,
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetSubscriptionByPSPMetadataValue(ctx, gen.GetSubscriptionByPSPMetadataValueParams{
+	row, err := r.db.Gen(ctx).GetSubscriptionByGatewayOrder(ctx, gen.GetSubscriptionByGatewayOrderParams{
 		MerchantID: merchantID.UUID(),
 		PspID:      pspID,
 		Rail:       strings.TrimSpace(rail),
-		Key:        strings.TrimSpace(key),
-		Value:      strings.TrimSpace(value),
+		OrderID:    strings.TrimSpace(orderID),
 	})
 	if err != nil {
 		return nil, err

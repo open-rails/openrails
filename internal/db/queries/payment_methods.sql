@@ -237,6 +237,7 @@ UPDATE billing.payment_methods SET
     network_token_status = sqlc.arg(network_token_status),
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian <> 'psp'
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
   AND network_token_id = sqlc.arg(network_token_id)
@@ -398,6 +399,7 @@ LIMIT 2;
 -- A custodian-held card by its custodian token.
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.custodian <> 'psp'
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.rail_method_ref = sqlc.arg(rail_method_ref)::text
 ORDER BY pm.created_at, pm.id

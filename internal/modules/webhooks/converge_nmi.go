@@ -303,7 +303,7 @@ func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc 
 		return nil, fmt.Errorf("load subscription by rail subscription ID: %w", err)
 	}
 
-	subscription, err = subSvc.GetByPSPMetadataValue(ctx, rail, "order_id", ref)
+	subscription, err = subSvc.GetByGatewayOrder(ctx, rail, ref)
 	if err == nil {
 		return subscription, nil
 	}
@@ -312,7 +312,7 @@ func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc 
 	}
 
 	if paySvc != nil {
-		attempt, lookupErr := paySvc.GetByPSPMetadataValue(ctx, "nmi_subscription_order_id", ref)
+		attempt, lookupErr := paySvc.GetByNMISubscriptionOrder(ctx, ref)
 		if lookupErr != nil && !db.IsNotFound(lookupErr) {
 			return nil, fmt.Errorf("load NMI subscription attempt by order metadata: %w", lookupErr)
 		}

@@ -160,11 +160,11 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(ps
 LIMIT 1
 FOR UPDATE;
 
--- name: GetSubscriptionByPSPMetadataValue :one
+-- name: GetSubscriptionByGatewayOrder :one
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.rail = $1
-  AND sub.gateway_response ->> sqlc.arg(key)::text = sqlc.arg(value)::text
+  AND sub.rail = sqlc.arg(rail)::text
+  AND sub.gateway_response ->> 'order_id' = sqlc.arg(order_id)::text
   AND sub.deleted_at IS NULL
 LIMIT 1;
 

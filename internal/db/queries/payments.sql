@@ -148,10 +148,17 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND status = 'pending'
   AND deleted_at IS NULL;
 
--- name: GetPaymentByPSPMetadataValue :one
+-- name: GetPaymentByNMISubscriptionOrder :one
 SELECT * FROM billing.payments purch
 WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.psp_id = sqlc.arg(psp_id)::uuid
-  AND purch.metadata ->> sqlc.arg(key)::text = sqlc.arg(value)::text
+  AND purch.metadata ->> 'nmi_subscription_order_id' = sqlc.arg(order_id)::text
+  AND purch.deleted_at IS NULL
+LIMIT 1;
+
+-- name: GetPaymentByStripeInvoice :one
+SELECT * FROM billing.payments purch
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.psp_id = sqlc.arg(psp_id)::uuid
+  AND purch.metadata ->> 'stripe_invoice_id' = sqlc.arg(invoice_id)::text
   AND purch.deleted_at IS NULL
 LIMIT 1;
 

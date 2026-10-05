@@ -264,8 +264,8 @@ func (s *SubscriptionService) GetByPSPSubscriptionID(ctx context.Context, rail, 
 	return s.subscriptionRepo.GetByPSPSubscriptionID(ctx, rail, railSubscriptionID)
 }
 
-func (s *SubscriptionService) GetByPSPMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByPSPMetadataValue(ctx, rail, key, value)
+func (s *SubscriptionService) GetByGatewayOrder(ctx context.Context, rail, orderID string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByGatewayOrder(ctx, rail, orderID)
 }
 
 // GetActiveSubscriptionsForPSP gets all active subscriptions for a rail

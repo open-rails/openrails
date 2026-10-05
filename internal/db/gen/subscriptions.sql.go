@@ -699,6 +699,71 @@ func (q *Queries) GetSubscriptionByCustomerAndPrice(ctx context.Context, arg Get
 	return i, err
 }
 
+const getSubscriptionByGatewayOrder = `-- name: GetSubscriptionByGatewayOrder :one
+SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions sub
+WHERE sub.merchant_id = $1::uuid AND sub.psp_id = $2::uuid
+  AND sub.rail = $3::text
+  AND sub.gateway_response ->> 'order_id' = $4::text
+  AND sub.deleted_at IS NULL
+LIMIT 1
+`
+
+type GetSubscriptionByGatewayOrderParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	OrderID    string
+}
+
+func (q *Queries) GetSubscriptionByGatewayOrder(ctx context.Context, arg GetSubscriptionByGatewayOrderParams) (BillingSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByGatewayOrder,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Rail,
+		arg.OrderID,
+	)
+	var i BillingSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Rail,
+		&i.CollectionPolicy,
+		&i.RailSubscriptionID,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CanceledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.EntitlementsSpecSnapshot,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.TransientRetries,
+		&i.LifecycleRev,
+		&i.RowVersion,
+		&i.DunningPolicy,
+	)
+	return i, err
+}
+
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions WHERE subscriptions.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL
@@ -767,73 +832,6 @@ type GetSubscriptionByIDForUpdateParams struct {
 // Lifecycle read-modify-writes hold this lock through their transaction.
 func (q *Queries) GetSubscriptionByIDForUpdate(ctx context.Context, arg GetSubscriptionByIDForUpdateParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByIDForUpdate, arg.ID, arg.MerchantID)
-	var i BillingSubscription
-	err := row.Scan(
-		&i.ID,
-		&i.PriceID,
-		&i.ProductID,
-		&i.Status,
-		&i.Rail,
-		&i.CollectionPolicy,
-		&i.RailSubscriptionID,
-		&i.PaymentMethodID,
-		&i.CurrentPeriodStartsAt,
-		&i.CurrentPeriodEndsAt,
-		&i.StartedAt,
-		&i.EndedAt,
-		&i.GraceEndsAt,
-		&i.ScheduledPriceID,
-		&i.LastRetryAt,
-		&i.RetryAttempts,
-		&i.NextRetryAt,
-		&i.CanceledAt,
-		&i.CancelType,
-		&i.CancelFeedback,
-		&i.EntitlementsSpecSnapshot,
-		&i.GatewayResponse,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.TierGroup,
-		&i.DeletionScheduledAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.TransientRetries,
-		&i.LifecycleRev,
-		&i.RowVersion,
-		&i.DunningPolicy,
-	)
-	return i, err
-}
-
-const getSubscriptionByPSPMetadataValue = `-- name: GetSubscriptionByPSPMetadataValue :one
-SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions sub
-WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
-  AND sub.rail = $1
-  AND sub.gateway_response ->> $4::text = $5::text
-  AND sub.deleted_at IS NULL
-LIMIT 1
-`
-
-type GetSubscriptionByPSPMetadataValueParams struct {
-	Rail       string
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	Key        string
-	Value      string
-}
-
-func (q *Queries) GetSubscriptionByPSPMetadataValue(ctx context.Context, arg GetSubscriptionByPSPMetadataValueParams) (BillingSubscription, error) {
-	row := q.db.QueryRow(ctx, getSubscriptionByPSPMetadataValue,
-		arg.Rail,
-		arg.MerchantID,
-		arg.PspID,
-		arg.Key,
-		arg.Value,
-	)
 	var i BillingSubscription
 	err := row.Scan(
 		&i.ID,

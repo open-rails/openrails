@@ -1201,8 +1201,8 @@ ALTER TABLE ONLY billing.products
     ADD CONSTRAINT products_merchant_key_key UNIQUE (merchant_id, key);
 ALTER TABLE ONLY billing.products
     ADD CONSTRAINT products_pkey PRIMARY KEY (merchant_id, id);
-
 CREATE INDEX idx_products_archived ON billing.products USING btree (archived);
+
 CREATE INDEX idx_products_key ON billing.products USING btree (key);
 CREATE INDEX products_merchant_created ON billing.products (merchant_id, created_at DESC, id DESC);
 CREATE INDEX idx_products_tier_group ON billing.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
@@ -1300,7 +1300,6 @@ ALTER TABLE ONLY billing.prices
 ALTER TABLE ONLY billing.prices
     ADD CONSTRAINT prices_merchant_id_id_product_id_key UNIQUE (merchant_id, id, product_id);
 
-CREATE INDEX idx_prices_archived ON billing.prices USING btree (archived);
 CREATE INDEX idx_prices_merchant_key ON billing.prices USING btree (merchant_id, key);
 CREATE INDEX prices_merchant_created ON billing.prices (merchant_id, created_at DESC, id DESC);
 CREATE UNIQUE INDEX uq_prices_merchant_key_current ON billing.prices USING btree (merchant_id, key) WHERE (NOT archived);
@@ -1781,7 +1780,6 @@ ALTER TABLE ONLY billing.subscriptions
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
 
-CREATE INDEX idx_subscriptions_customer_active_created ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC) WHERE (status = 'active');
 CREATE INDEX idx_subscriptions_destructive_run ON billing.subscriptions USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_subscriptions_engine_due ON billing.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
 CREATE INDEX idx_subscriptions_due_dunning ON billing.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due') AND (next_retry_at IS NOT NULL));
@@ -1792,7 +1790,6 @@ CREATE INDEX idx_subscriptions_merchant_ended ON billing.subscriptions USING btr
 CREATE INDEX idx_subscriptions_merchant_created ON billing.subscriptions USING btree (merchant_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL);
 CREATE INDEX idx_subscriptions_customer_created ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL);
 CREATE INDEX idx_subscriptions_merchant_started ON billing.subscriptions USING btree (merchant_id, started_at);
-CREATE INDEX idx_subscriptions_next_retry_at ON billing.subscriptions USING btree (next_retry_at) WHERE (next_retry_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_payment_method_id ON billing.subscriptions USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL);
 CREATE INDEX idx_subscriptions_period_overdue ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active');
 CREATE INDEX idx_subscriptions_price_id ON billing.subscriptions USING btree (merchant_id, price_id);
@@ -1958,7 +1955,6 @@ ALTER TABLE ONLY billing.subscription_reprices
 
 CREATE INDEX idx_subscription_reprices_batch ON billing.subscription_reprices USING btree (merchant_id, reprice_batch_id) WHERE (reprice_batch_id IS NOT NULL);
 CREATE INDEX idx_subscription_reprices_blocked_plan_change ON billing.subscription_reprices USING btree (merchant_id) WHERE ((status = 'blocked'::text) AND (kind = 'plan_change'::text));
-CREATE INDEX idx_subscription_reprices_due ON billing.subscription_reprices USING btree (effective_at) WHERE (status = 'scheduled'::text);
 CREATE INDEX idx_subscription_reprices_merchant ON billing.subscription_reprices USING btree (merchant_id, created_at DESC, id DESC);
 CREATE INDEX idx_subscription_reprices_subscription ON billing.subscription_reprices USING btree (merchant_id, subscription_id);
 CREATE UNIQUE INDEX uq_subscription_reprices_one_scheduled ON billing.subscription_reprices USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text);
@@ -2108,7 +2104,6 @@ CREATE INDEX idx_payments_metadata_stripe_invoice ON billing.payments USING btre
 CREATE INDEX idx_payments_price_id ON billing.payments USING btree (merchant_id, price_id);
 CREATE INDEX idx_payments_psp ON billing.payments USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
 CREATE INDEX idx_payments_purchased_at ON billing.payments USING btree (purchased_at);
-CREATE INDEX idx_payments_rail ON billing.payments USING btree (rail);
 CREATE INDEX idx_payments_refunded_payment_id ON billing.payments USING btree (merchant_id, refunded_payment_id) WHERE (refunded_payment_id IS NOT NULL);
 CREATE INDEX idx_payments_subscription_id ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_payments_merchant_offrail_transaction ON billing.payments USING btree (merchant_id, channel, transaction_id) WHERE ((channel <> 'rail'::text) AND (deleted_at IS NULL));
@@ -2172,7 +2167,6 @@ COMMENT ON COLUMN billing.checkout_attempts.routing_reason IS 'Processor-routing
 ALTER TABLE ONLY billing.checkout_attempts
     ADD CONSTRAINT checkout_attempts_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX checkout_attempts_expires_at_idx ON billing.checkout_attempts USING btree (expires_at);
 CREATE INDEX checkout_attempts_customer_id_idx ON billing.checkout_attempts USING btree (merchant_id, customer_id);
 CREATE INDEX idx_checkout_attempts_destructive_run ON billing.checkout_attempts USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_checkout_attempts_payment_id ON billing.checkout_attempts USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
@@ -2498,7 +2492,6 @@ ALTER TABLE ONLY billing.ledger_accounts
 ALTER TABLE ONLY billing.ledger_accounts
     ADD CONSTRAINT ledger_accounts_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_ledger_accounts_customer ON billing.ledger_accounts USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_ledger_accounts_customer ON billing.ledger_accounts USING btree (merchant_id, customer_id, account_type, currency) WHERE (customer_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_ledger_accounts_system ON billing.ledger_accounts USING btree (merchant_id, account_type, currency) WHERE (customer_id IS NULL);
 
@@ -2727,8 +2720,6 @@ ALTER TABLE ONLY billing.entitlements
 CREATE INDEX idx_entitlements_closed_at ON billing.entitlements USING btree (merchant_id, LEAST(COALESCE(ends_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE ((ends_at IS NOT NULL) OR (revoked_at IS NOT NULL));
 CREATE INDEX idx_entitlements_customer_active_window ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_destructive_run ON billing.entitlements USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_entitlements_grace_by_subscription_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, starts_at, ends_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_grant_id ON billing.entitlements USING btree (merchant_id, grant_id);
 CREATE INDEX idx_entitlements_live_by_id ON billing.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_purchase_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'purchase'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_reverse_active ON billing.entitlements USING btree (merchant_id, entitlement, customer_id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
@@ -2822,7 +2813,6 @@ COMMENT ON COLUMN billing.money_settings.credit_limit_amount IS 'Admin-set arrea
 ALTER TABLE ONLY billing.money_settings
     ADD CONSTRAINT money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency);
 
-CREATE INDEX money_settings_collection_payment_method_id_idx ON billing.money_settings USING btree (merchant_id, collection_payment_method_id) WHERE (collection_payment_method_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.money_settings
     ADD CONSTRAINT money_settings_collection_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, collection_payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (collection_payment_method_id);
@@ -2888,16 +2878,13 @@ COMMENT ON COLUMN billing.usage_events.occurred_at IS 'When the usage happened; 
 ALTER TABLE billing.usage_events
     ADD CONSTRAINT usage_events_pkey PRIMARY KEY (merchant_id, id, occurred_at);
 
-CREATE INDEX idx_usage_events_invoker ON billing.usage_events USING btree (merchant_id, invoker_id, occurred_at DESC);
 CREATE INDEX idx_usage_events_merchant_occurred ON billing.usage_events USING btree (merchant_id, occurred_at);
 CREATE INDEX idx_usage_events_merchant_type_time ON billing.usage_events USING btree (merchant_id, event_type, occurred_at);
 CREATE INDEX ix_usage_events_payer_time ON billing.usage_events USING btree (merchant_id, customer_id, occurred_at);
-CREATE INDEX ix_usage_events_payer_type_time ON billing.usage_events USING btree (merchant_id, customer_id, event_type, occurred_at);
 -- A partitioned unique index must carry the partition key, so this one stops
 -- only an exact repeat. The idempotency coordinate is claimed under the
 -- customer spend lock by a lookup over the ingest window.
 CREATE UNIQUE INDEX uq_usage_events_idem ON billing.usage_events USING btree (merchant_id, customer_id, currency, event_type, source, source_id, occurred_at);
-CREATE INDEX usage_events_ledger_transfer_id_idx ON billing.usage_events USING btree (merchant_id, ledger_transfer_id) WHERE (ledger_transfer_id IS NOT NULL);
 
 ALTER TABLE billing.usage_events
     ADD CONSTRAINT usage_events_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -2973,8 +2960,6 @@ COMMENT ON COLUMN billing.admission_operations.admitted_at IS 'When the request 
 CREATE INDEX admission_operations_held ON billing.admission_operations (merchant_id, customer_id, currency, expires_at)
     WHERE state = 'open';
 CREATE INDEX admission_operations_windows ON billing.admission_operations (merchant_id, customer_id, currency, admitted_at)
-    WHERE state <> 'released';
-CREATE INDEX admission_operations_window_keys ON billing.admission_operations USING gin (window_keys)
     WHERE state <> 'released';
 
 CREATE TRIGGER immutable_admission_operation_facts BEFORE UPDATE OR DELETE ON billing.admission_operations
@@ -3201,9 +3186,6 @@ COMMENT ON COLUMN billing.provider_intents.custodian_id IS 'The custodian this o
 ALTER TABLE ONLY billing.provider_intents
     ADD CONSTRAINT provider_intents_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_provider_intents_actor_created ON billing.provider_intents USING btree (actor, created_at) WHERE (actor IS NOT NULL);
-CREATE INDEX idx_provider_intents_created ON billing.provider_intents USING btree (created_at);
-CREATE INDEX idx_provider_intents_custodian ON billing.provider_intents USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
 -- Exact handle lookup serves both pending exclusion and permanent erasure history.
 CREATE INDEX idx_provider_intents_custodian_method_delete ON billing.provider_intents
     (merchant_id, custodian_id, (payload->'instrument'->>'rail_method_ref'))
@@ -3624,13 +3606,11 @@ COMMENT ON COLUMN billing.invoice_payments.psp_id IS 'PSP that took this invoice
 ALTER TABLE ONLY billing.invoice_payments
     ADD CONSTRAINT invoice_payments_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_invoice_payments_psp ON billing.invoice_payments USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
 CREATE INDEX ix_invoice_payments_invoice ON billing.invoice_payments USING btree (merchant_id, invoice_id, created_at DESC);
 CREATE INDEX invoice_payments_customer_id_idx ON billing.invoice_payments USING btree (merchant_id, customer_id);
 CREATE UNIQUE INDEX uq_invoice_payments_ledger_transfer ON billing.invoice_payments USING btree (merchant_id, ledger_transfer_id) WHERE (ledger_transfer_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_invoice_payments_settled_rail_payment ON billing.invoice_payments USING btree (merchant_id, psp_id, rail_payment_id) WHERE ((status = 'settled'::text) AND (psp_id IS NOT NULL) AND (rail_payment_id IS NOT NULL));
 CREATE UNIQUE INDEX ux_invoice_payments_attempt_key ON billing.invoice_payments USING btree (merchant_id, invoice_id, idempotency_key) WHERE (idempotency_key IS NOT NULL);
-CREATE INDEX invoice_payments_payment_method_id_idx ON billing.invoice_payments USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.invoice_payments
     ADD CONSTRAINT invoice_payments_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -3674,7 +3654,6 @@ COMMENT ON COLUMN billing.notifications.emailed_at IS 'When the notification ema
 ALTER TABLE ONLY billing.notifications
     ADD CONSTRAINT notifications_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_notifications_created_at ON billing.notifications USING btree (created_at);
 CREATE INDEX idx_notifications_customer ON billing.notifications USING btree (merchant_id, customer_id) WHERE (customer_id IS NOT NULL);
 CREATE INDEX idx_notifications_event_type ON billing.notifications USING btree (event_type);
 CREATE INDEX notifications_inbox_idx ON billing.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC);
@@ -3803,8 +3782,6 @@ ALTER TABLE ONLY billing.reconciliation_findings
     ADD CONSTRAINT reconciliation_findings_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_reconciliation_findings_actionable ON billing.reconciliation_findings USING btree (finding_type) WHERE (status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text]));
-CREATE INDEX idx_reconciliation_findings_low_severity_pending_digest ON billing.reconciliation_findings USING btree (merchant_id) WHERE ((status = 'requires_review'::text) AND (severity = 'low'::text) AND (notified_at IS NULL));
-CREATE INDEX idx_reconciliation_findings_requires_review ON billing.reconciliation_findings USING btree (last_seen_at DESC) WHERE (status = 'requires_review'::text);
 CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON billing.reconciliation_findings USING btree (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT;
 CREATE INDEX idx_reconciliation_findings_resolved ON billing.reconciliation_findings USING btree (merchant_id, GREATEST(resolved_at, last_seen_at)) WHERE (resolved_at IS NOT NULL);
 CREATE INDEX idx_reconciliation_findings_open_catalog ON billing.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text));
