@@ -81,6 +81,10 @@ func (s *PaymentService) GetByPSPTransactionID(ctx context.Context, rail models.
 	return s.repo.GetByPSPTransactionID(ctx, rail, transactionID)
 }
 
+func (s *PaymentService) GetManualByTransactionID(ctx context.Context, transactionID string) (*models.Payment, error) {
+	return s.repo.GetManualByTransactionID(ctx, transactionID)
+}
+
 func (s *PaymentService) Update(ctx context.Context, payment *models.Payment) error {
 	return errors.New("payments are immutable; updates are not supported")
 }

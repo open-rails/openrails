@@ -57,12 +57,10 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 			out.Product = p.Price.Product.Summary()
 		}
 	}
-	switch channel := models.Channel(p.Rail); channel {
-	case models.ChannelManual, models.ChannelAdmin:
-		out.Channel = billing.PaymentChannel(channel)
-	default:
-		rail := string(p.Rail)
-		out.Rail = &rail
+	if p.Channel == models.ChannelManual {
+		out.Channel = billing.ChannelManual
+	} else {
+		out.Rail = new(string(p.Rail))
 	}
 	if p.PspID != nil {
 		psp := billing.PSPID(*p.PspID)

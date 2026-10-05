@@ -581,7 +581,7 @@ func CreateOffChannelPayment(r *httprequest.Request) {
 	}
 	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
 	ctx := r.Request.Context()
-	if existing, err := r.State.PaymentService.GetByPSPTransactionID(ctx, models.Rail(models.ChannelManual), transactionID); err == nil {
+	if existing, err := r.State.PaymentService.GetManualByTransactionID(ctx, transactionID); err == nil {
 		if !offChannelTermsMatch(existing, customer.UUID(), req.PriceID.UUID(), req.Amount, currency, purchasedAt) {
 			r.ErrorCode(billing.CodeIdempotencyKeyReused, "transaction_id was already recorded with other terms")
 			return
@@ -589,7 +589,7 @@ func CreateOffChannelPayment(r *httprequest.Request) {
 		writeRecordedPayment(r, http.StatusOK, existing.ID)
 		return
 	}
-	register := &payments.RegisterPurchaseRequest{UserID: customer.String(), PriceID: req.PriceID.UUID(), Rail: string(models.ChannelManual), TransactionID: transactionID,
+	register := &payments.RegisterPurchaseRequest{UserID: customer.String(), PriceID: req.PriceID.UUID(), Channel: models.ChannelManual, TransactionID: transactionID,
 		Currency: currency, PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata}
 	if req.Amount != nil {
 		register.Amount, register.AmountProvided = *req.Amount, true

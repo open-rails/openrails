@@ -500,7 +500,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		}
 		settled, err := q.SettleClaimedInvoicePaymentAttempt(ctx, gen.SettleClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
-			LedgerTransferID: &transfer.ID, Rail: optionalRail(rail), RailPaymentID: optionalString(transactionID), Now: now,
+			LedgerTransferID: &transfer.ID, RailPaymentID: optionalString(transactionID), Now: now,
 		})
 		if err != nil {
 			return err
@@ -574,7 +574,7 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		failureReason := decline.ReasonFor(rail, failureCode)
 		failed, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
-			Rail: optionalRail(rail), RailPaymentID: optionalString(transactionID), FailureCode: &code, FailureReason: &failureReason,
+			RailPaymentID: optionalString(transactionID), FailureCode: &code, FailureReason: &failureReason,
 			FailureMessage: optionalString(failureMessage), Now: now,
 		})
 		if err != nil {
@@ -653,7 +653,7 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 		}
 		if _, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
-			Rail: optionalRail(p.Rail), FailureCode: &code, FailureReason: &code, FailureMessage: &reason, Now: now,
+			FailureCode: &code, FailureReason: &code, FailureMessage: &reason, Now: now,
 		}); err != nil {
 			return err
 		}

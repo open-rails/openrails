@@ -311,12 +311,12 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
 -- name: InsertInvoicePayment :exec
 INSERT INTO billing.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
-    currency, amount, status, rail, rail_payment_id,
+    currency, amount, status, channel, rail, rail_payment_id,
     failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
     payment_method_id, idempotency_key, psp_id
 ) VALUES (
     $1, $2, $3, sqlc.arg(invoice_id), sqlc.narg(ledger_transfer_id),
-    sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.narg(rail),
+    sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.arg(channel)::text, sqlc.narg(rail),
     sqlc.narg(rail_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(failure_message),
     sqlc.arg(attempted_at), sqlc.narg(settled_at), sqlc.arg(created_at), sqlc.arg(updated_at),
     sqlc.narg(payment_method_id), sqlc.narg(idempotency_key), sqlc.narg(psp_id)::uuid
@@ -341,7 +341,6 @@ LIMIT 1;
 -- name: FailClaimedInvoicePaymentAttempt :execrows
 UPDATE billing.invoice_payments
 SET status = 'failed',
-    rail = sqlc.narg(rail),
     rail_payment_id = sqlc.narg(rail_payment_id),
     failure_code = sqlc.narg(failure_code),
     failure_reason = sqlc.arg(failure_reason),
@@ -357,7 +356,6 @@ WHERE merchant_id = $1
 UPDATE billing.invoice_payments
 SET status = 'settled',
     ledger_transfer_id = sqlc.arg(ledger_transfer_id),
-    rail = sqlc.narg(rail),
     rail_payment_id = sqlc.narg(rail_payment_id),
     settled_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz

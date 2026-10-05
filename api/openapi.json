@@ -20747,7 +20747,6 @@
           "channel": {
             "type": "string",
             "enum": [
-              "admin",
               "manual",
               "rail"
             ]

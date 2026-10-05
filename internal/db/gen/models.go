@@ -536,6 +536,7 @@ type BillingInvoicePayment struct {
 	Currency         string
 	Amount           int64
 	Status           string
+	Channel          string
 	Rail             *string
 	RailPaymentID    *string
 	FailureCode      *string
@@ -544,7 +545,7 @@ type BillingInvoicePayment struct {
 	SettledAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
-	// PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement.
+	// PSP that took this invoice payment attempt. Set exactly when channel = rail (invoice_payments_channel_psp_check).
 	PspID           *uuid.UUID
 	FailureReason   *string
 	PaymentMethodID *uuid.UUID
@@ -849,9 +850,11 @@ type BillingOperationAuthorization struct {
 
 // Records of all payment transactions. Retention: permanent, never pruned.
 type BillingPayment struct {
-	ID            uuid.UUID
-	PriceID       uuid.UUID
-	Rail          string
+	ID      uuid.UUID
+	PriceID uuid.UUID
+	// How the money arrived: rail (through a PSP), manual (recorded by the merchant) or admin (an operator comp). Off-rail rows have no rail and no PSP.
+	Channel       string
+	Rail          *string
 	TransactionID string
 	Amount        int64
 	ListAmount    int64
@@ -871,7 +874,7 @@ type BillingPayment struct {
 	CardLast4                *string
 	MerchantID               uuid.UUID
 	CustomerID               uuid.UUID
-	// PSP that took this charge. Required on every real rail (payments_psp_required_on_rail); NULL only for off-rail channels (manual/admin), which have no provider.
+	// PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).
 	PspID *uuid.UUID
 	// initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
 	AttemptKind *string

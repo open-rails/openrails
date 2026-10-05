@@ -405,7 +405,7 @@ export type Payment = {
   price_id: string
   price: Price | null
   product: ProductSummary | null
-  channel: "admin" | "manual" | "rail"
+  channel: "manual" | "rail"
   rail: string | null
   psp_id: string | null
   transaction_id: string

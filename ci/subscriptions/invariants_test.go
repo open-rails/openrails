@@ -57,7 +57,7 @@ func (w *world) checkMoneyInvariants() {
 
 	local := map[string]bool{}
 	rows, err := w.pool.Query(ctx, `SELECT transaction_id, rail FROM `+schema+`.payments
-		WHERE status = 'completed' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL`)
+		WHERE channel = 'rail' AND status = 'completed' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL`)
 	if err != nil {
 		t.Errorf("invariants: read payments: %v", err)
 		return

@@ -2027,7 +2027,8 @@ $$;
 CREATE TABLE billing.payments (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid NOT NULL,
-    rail text NOT NULL,
+    channel text NOT NULL,
+    rail text,
     transaction_id text NOT NULL,
     amount bigint NOT NULL,
     list_amount bigint NOT NULL,
@@ -2063,11 +2064,15 @@ CREATE TABLE billing.payments (
     CONSTRAINT chk_payments_reversal_kind CHECK (((reversal_kind IS NULL) OR (reversal_kind = ANY (ARRAY['refund'::text, 'chargeback'::text, 'dispute_reversal'::text])))),
     CONSTRAINT chk_payments_token_type CHECK (((token_type IS NULL) OR (token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))),
     CONSTRAINT payments_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
-    CONSTRAINT payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text]))))
+    CONSTRAINT payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text, 'admin'::text]))),
+    CONSTRAINT payments_channel_psp_check CHECK (CASE WHEN channel = 'rail' THEN rail IS NOT NULL AND psp_id IS NOT NULL ELSE rail IS NULL AND psp_id IS NULL END),
+    CONSTRAINT payments_reversal_check CHECK (((reversal_kind IS NULL) = (refunded_payment_id IS NULL))),
+    CONSTRAINT payments_sign_check CHECK (CASE WHEN reversal_kind IS NULL OR reversal_kind = 'dispute_reversal' THEN amount >= 0 ELSE amount <= 0 END)
 );
 COMMENT ON TABLE billing.payments IS 'Records of all payment transactions. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.payments.subscription_id IS 'Links a payment to the subscription that generated it (nullable for one-off payments)';
-COMMENT ON COLUMN billing.payments.psp_id IS 'PSP that took this charge. Required on every real rail (payments_psp_required_on_rail); NULL only for off-rail channels (manual/admin), which have no provider.';
+COMMENT ON COLUMN billing.payments.channel IS 'How the money arrived: rail (through a PSP), manual (recorded by the merchant) or admin (an operator comp). Off-rail rows have no rail and no PSP.';
+COMMENT ON COLUMN billing.payments.psp_id IS 'PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).';
 COMMENT ON COLUMN billing.payments.attempt_kind IS 'initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).';
 COMMENT ON COLUMN billing.payments.failure_code IS 'Raw rail decline code, recorded verbatim (no fabrication).';
 COMMENT ON COLUMN billing.payments.failure_reason IS 'Normalized decline category, derived deterministically from failure_code per rail.';
@@ -2096,7 +2101,7 @@ CREATE INDEX idx_payments_purchased_at ON billing.payments USING btree (purchase
 CREATE INDEX idx_payments_rail ON billing.payments USING btree (rail);
 CREATE INDEX idx_payments_refunded_payment_id ON billing.payments USING btree (merchant_id, refunded_payment_id) WHERE (refunded_payment_id IS NOT NULL);
 CREATE INDEX idx_payments_subscription_id ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
-CREATE UNIQUE INDEX uq_payments_merchant_offrail_transaction ON billing.payments USING btree (merchant_id, rail, transaction_id) WHERE ((psp_id IS NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_payments_merchant_offrail_transaction ON billing.payments USING btree (merchant_id, channel, transaction_id) WHERE ((channel <> 'rail'::text) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_payments_merchant_psp_transaction ON billing.payments USING btree (merchant_id, psp_id, transaction_id) WHERE ((psp_id IS NOT NULL) AND (deleted_at IS NULL));
 
 ALTER TABLE ONLY billing.payments
@@ -3563,6 +3568,7 @@ CREATE TABLE billing.invoice_payments (
     currency text NOT NULL,
     amount bigint NOT NULL,
     status text DEFAULT 'attempted'::text NOT NULL,
+    channel text NOT NULL,
     rail text,
     rail_payment_id text,
     failure_code text,
@@ -3577,11 +3583,12 @@ CREATE TABLE billing.invoice_payments (
     idempotency_key text,
     CONSTRAINT invoice_payments_amount_positive_chk CHECK ((amount > 0)),
     CONSTRAINT invoice_payments_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
-    CONSTRAINT invoice_payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text])))),
+    CONSTRAINT invoice_payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text]))),
+    CONSTRAINT invoice_payments_channel_psp_check CHECK (CASE WHEN channel = 'rail' THEN rail IS NOT NULL AND psp_id IS NOT NULL ELSE rail IS NULL AND psp_id IS NULL END),
     CONSTRAINT invoice_payments_status_check CHECK ((status = ANY (ARRAY['attempted'::text, 'settled'::text, 'failed'::text])))
 );
 COMMENT ON TABLE billing.invoice_payments IS 'Payment attempts and settled payments allocated to a specific invoice. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.invoice_payments.psp_id IS 'PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement.';
+COMMENT ON COLUMN billing.invoice_payments.psp_id IS 'PSP that took this invoice payment attempt. Set exactly when channel = rail (invoice_payments_channel_psp_check).';
 
 ALTER TABLE ONLY billing.invoice_payments
     ADD CONSTRAINT invoice_payments_pkey PRIMARY KEY (merchant_id, id);

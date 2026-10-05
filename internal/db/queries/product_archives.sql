@@ -31,7 +31,7 @@ WHERE pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.product_id = sqlc.arg
   AND pay.purchased_at >= sqlc.arg(purchased_since)::timestamptz
   AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'completed'
   AND pay.deleted_at IS NULL AND pay.subscription_id IS NULL
-  AND (pay.money_movement = 'rail' OR pay.rail IN ('manual', 'admin'))
+  AND (pay.money_movement = 'rail' OR pay.channel <> 'rail')
 ORDER BY pay.purchased_at, pay.id;
 
 -- Insert-if-absent: a resolved review is never reopened.

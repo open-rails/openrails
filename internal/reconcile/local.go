@@ -286,13 +286,15 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 		p := LocalPayment{
 			ID:                row.ID,
 			CustomerID:        row.CustomerID,
-			Rail:              string(row.Rail),
 			TransactionID:     row.TransactionID,
 			AmountCents:       row.Amount / moneyutil.MicrosPerCent,
 			Status:            string(row.Status),
 			SubscriptionID:    row.SubscriptionID,
 			RefundedPaymentID: row.RefundedPaymentID,
 			PurchasedAt:       row.PurchasedAt,
+		}
+		if row.Rail != nil {
+			p.Rail = *row.Rail
 		}
 		out = append(out, p)
 	}

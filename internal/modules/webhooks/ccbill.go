@@ -844,6 +844,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			ListAmount:     newPrice.Amount,
 			Currency:       currencyValue,
 			AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
+			Status:         payments.PaymentStatusCompletedValue,
 			MoneyMovement:  models.MoneyMovementRail, // or#827: CCBill billed the upgrade.
 			PurchasedAt:    purchasedAt,
 			CreatedAt:      now,

@@ -2410,12 +2410,12 @@ const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 
 
 INSERT INTO billing.payments (
-    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, psp_id,
     money_movement
 ) VALUES (
     $1::uuid,
-    $2, $3::text,
+    $2, 'rail', $3::text,
     $4, $5, $5,
     $6,
     'completed', $7, $8,
@@ -2452,7 +2452,7 @@ type ReconcileBackfillPaymentParams struct {
 // subscription. Admin grants and grace windows are different source types and
 // are untouchable by construction.
 // PS-4: backfill a rail charge that has no local payment record.
-// Dedupe rides the uq_payments_merchant_rail_transaction identity.
+// Dedupe rides the uq_payments_merchant_psp_transaction identity.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
 		arg.MerchantID,
@@ -2552,7 +2552,7 @@ type ReconcileListPaymentsByTransactionIDsParams struct {
 type ReconcileListPaymentsByTransactionIDsRow struct {
 	ID                uuid.UUID
 	CustomerID        uuid.UUID
-	Rail              string
+	Rail              *string
 	TransactionID     string
 	Amount            int64
 	Status            string
@@ -2889,12 +2889,12 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 
 const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO billing.payments (
-    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     $1::uuid,
-    $2, $3::text,
+    $2, 'rail', $3::text,
     $4, $5, $5,
     $6,
     'completed', $7, $8,

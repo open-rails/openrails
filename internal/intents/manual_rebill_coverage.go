@@ -47,7 +47,7 @@ func acceptedRebillPaymentOverlaps(row gen.ListCompletedManualRebillPaymentCover
 	if !found {
 		return false, errors.New("rebill payment has no qualified receipt custody")
 	}
-	if accepted.Renewal.CustomerID != target.Renewal.CustomerID || accepted.Renewal.SubscriptionID != target.Renewal.SubscriptionID || accepted.Instrument.PSPID != target.Instrument.PSPID || row.PaidCustomerID != accepted.Renewal.CustomerID || row.PaidSubscriptionID == nil || *row.PaidSubscriptionID != accepted.Renewal.SubscriptionID || row.PaidPspID == nil || *row.PaidPspID != accepted.Instrument.PSPID || row.PaidRail != accepted.Rail || row.PaidTransactionID != receipt.TransactionID() || row.PaidPriceID != accepted.Renewal.PriceID || row.PaidAmount != accepted.Renewal.Amount || row.PaidCurrency != accepted.Renewal.Currency {
+	if accepted.Renewal.CustomerID != target.Renewal.CustomerID || accepted.Renewal.SubscriptionID != target.Renewal.SubscriptionID || accepted.Instrument.PSPID != target.Instrument.PSPID || row.PaidCustomerID != accepted.Renewal.CustomerID || row.PaidSubscriptionID == nil || *row.PaidSubscriptionID != accepted.Renewal.SubscriptionID || row.PaidPspID == nil || *row.PaidPspID != accepted.Instrument.PSPID || row.PaidRail == nil || *row.PaidRail != accepted.Rail || row.PaidTransactionID != receipt.TransactionID() || row.PaidPriceID != accepted.Renewal.PriceID || row.PaidAmount != accepted.Renewal.Amount || row.PaidCurrency != accepted.Renewal.Currency {
 		return false, errors.New("completed rebill payment contradicts its accepted receipt terms")
 	}
 	return accepted.Renewal.PeriodStart.Before(target.Renewal.PeriodEnd) && target.Renewal.PeriodStart.Before(accepted.Renewal.PeriodEnd), nil

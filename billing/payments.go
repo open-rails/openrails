@@ -33,7 +33,6 @@ type PaymentChannel string
 const (
 	ChannelRail   PaymentChannel = "rail"
 	ChannelManual PaymentChannel = "manual"
-	ChannelAdmin  PaymentChannel = "admin"
 )
 
 // Payment is money that moved, or a reversal of it. A declined authorization

@@ -495,6 +495,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
 			Currency: invoice.Currency, Amount: chargedAmount, Status: "attempted",
+			Channel: string(models.ChannelRail), Rail: new(normalizeRail(method.Rail)),
 			AttemptedAt: now, CreatedAt: now, UpdatedAt: now,
 			PaymentMethodID: &method.ID, IdempotencyKey: &key, PspID: &psp,
 		}); err != nil {

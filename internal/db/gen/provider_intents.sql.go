@@ -1452,7 +1452,7 @@ type ListCompletedManualRebillPaymentCoverageRow struct {
 	PaidCustomerID        uuid.UUID
 	PaidPspID             *uuid.UUID
 	PaidSubscriptionID    *uuid.UUID
-	PaidRail              string
+	PaidRail              *string
 	PaidTransactionID     string
 	PaidPriceID           uuid.UUID
 	PaidAmount            int64

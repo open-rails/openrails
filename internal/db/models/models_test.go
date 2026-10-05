@@ -19,7 +19,7 @@ func TestGenMappingPreservesStoredValues(t *testing.T) {
 		require.Equal(t, want, *IntPtrTo32(ptr(in)), "clamp, never wrap")
 	}
 
-	payment, err := PaymentFromGen(gen.BillingPayment{Rail: "paypal", Metadata: []byte(`{"order_id":"o-1"}`)})
+	payment, err := PaymentFromGen(gen.BillingPayment{Channel: "rail", Rail: ptr("paypal"), Metadata: []byte(`{"order_id":"o-1"}`)})
 	require.NoError(t, err)
 	require.Equal(t, Rail("paypal"), payment.Rail, "an unregistered persisted rail is preserved, not rejected")
 	require.Equal(t, "o-1", payment.Metadata["order_id"])
@@ -130,15 +130,7 @@ func TestPriceCadenceAndPurchasability(t *testing.T) {
 	require.Nil(t, sub.CanceledAt)
 }
 
-// Mirrors the DB CHECKs payments_psp_required_on_rail and
-// invoice_payments_psp_required_on_rail: only channels may omit a PSP.
-func TestOffRailChannelsAndMoneyMovement(t *testing.T) {
-	for _, rail := range []string{"manual", "admin", "MANUAL", " Admin "} {
-		require.True(t, IsOffRailChannel(rail), rail)
-	}
-	for _, rail := range []string{"nmi", "stripe", "ccbill", "solana", "mobius", ""} {
-		require.False(t, IsOffRailChannel(rail), rail)
-	}
+func TestMoneyMovement(t *testing.T) {
 	require.False(t, MoneyMovementUndeclared.Valid(), "undeclared must not pass for none")
 	require.True(t, MoneyMovementNone.Valid())
 	require.True(t, MoneyMovementRail.Valid())

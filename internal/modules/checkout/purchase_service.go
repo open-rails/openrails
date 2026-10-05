@@ -413,7 +413,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	if req.TransactionID == "" {
 		return nil, errors.New("transaction_id is required")
 	}
-	if req.Rail == "" {
+	if req.Rail == "" && req.Channel != models.ChannelManual {
 		return nil, errors.New("rail is required")
 	}
 
@@ -471,11 +471,13 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		CustomerID:               customerID,
 		PriceID:                  price.ID,
 		SubscriptionID:           req.SubscriptionID,
+		Channel:                  req.Channel,
 		Rail:                     models.Rail(req.Rail),
 		TransactionID:            req.TransactionID,
 		Amount:                   amount,
 		ListAmount:               price.Amount,
 		Currency:                 currency,
+		Status:                   payments.PaymentStatusCompletedValue,
 		PurchasedAt:              purchasedAt,
 		CreatedAt:                now,
 		DiscountCode:             req.DiscountCode,
@@ -501,7 +503,13 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
 	if !created {
-		existingPayment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
+		lookup := func() (*models.Payment, error) {
+			if req.Channel == models.ChannelManual {
+				return s.PaymentService.GetManualByTransactionID(ctx, req.TransactionID)
+			}
+			return s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
+		}
+		existingPayment, err := lookup()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}

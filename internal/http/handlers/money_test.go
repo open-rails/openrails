@@ -156,7 +156,7 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 	require.Equal(t, billing.PaymentFailed, failed.Status, "a failed charge never reads as refunded")
 	require.NotNil(t, failed.Failure)
 
-	manual := PaymentToAPI(&models.Payment{ID: uuid.New(), Rail: models.Rail(models.ChannelManual), Amount: 1000, Status: "completed"}, nil)
+	manual := PaymentToAPI(&models.Payment{ID: uuid.New(), Channel: models.ChannelManual, Amount: 1000, Status: "completed"}, nil)
 	require.Equal(t, billing.ChannelManual, manual.Channel)
 	require.Nil(t, manual.Rail, "an off-rail payment names no rail")
 }

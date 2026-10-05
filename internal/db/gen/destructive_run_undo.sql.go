@@ -122,7 +122,7 @@ SELECT
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*) FROM billing.payments
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL
-        AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
+        AND channel = 'rail')::bigint AS payments,
     (SELECT count(*) FROM billing.checkout_attempts
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_attempts,
     -- payment_methods carries no soft-delete column; every row is live. A

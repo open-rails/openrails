@@ -80,7 +80,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 		return nil
 	}
 	transaction := receipt.TransactionID()
-	row, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: op.MerchantID, PspID: op.PspID, Rail: op.Rail, TransactionID: transaction})
+	row, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: op.MerchantID, PspID: op.PspID, Channel: "rail", Rail: &op.Rail, TransactionID: transaction})
 	if err != nil {
 		return err
 	}

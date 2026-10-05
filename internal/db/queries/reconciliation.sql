@@ -385,15 +385,15 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 -- subscription. Admin grants and grace windows are different source types and
 -- are untouchable by construction.
 -- PS-4: backfill a rail charge that has no local payment record.
--- Dedupe rides the uq_payments_merchant_rail_transaction identity.
+-- Dedupe rides the uq_payments_merchant_psp_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO billing.payments (
-    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, psp_id,
     money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(rail)::text,
+    sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
@@ -408,12 +408,12 @@ ON CONFLICT DO NOTHING;
 -- amount payment row linked to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
 INSERT INTO billing.payments (
-    merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
+    merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     customer_id, psp_id, reversal_kind, money_movement
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), sqlc.arg(rail)::text,
+    sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),

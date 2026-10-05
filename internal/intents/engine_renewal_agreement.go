@@ -71,7 +71,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 		if err != nil {
 			return agreement, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 		}
-		payment, err = d.Gen(ctx).GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: op.MerchantID, PspID: op.PspID, Rail: op.Rail, TransactionID: receipt.TransactionID()})
+		payment, err = d.Gen(ctx).GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: op.MerchantID, PspID: op.PspID, Channel: string(models.ChannelRail), Rail: &op.Rail, TransactionID: receipt.TransactionID()})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return agreement, fmt.Errorf("%w: paid agreement payment is missing", ErrRebillNotRetryable)

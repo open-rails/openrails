@@ -103,7 +103,7 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 		PriceID:           p.PriceID,
 		SubscriptionID:    p.SubscriptionID,
 		RefundedPaymentID: p.RefundedPaymentID,
-		Rail:              Rail(p.Rail),
+		Channel:           Channel(p.Channel),
 		TransactionID:     p.TransactionID,
 		Amount:            p.Amount,
 		ListAmount:        p.ListAmount,
@@ -131,6 +131,9 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	}
 	if err := FromJSONB(p.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "payments.entitlements_spec_snapshot"); err != nil {
 		return nil, err
+	}
+	if p.Rail != nil {
+		m.Rail = Rail(*p.Rail)
 	}
 	return m, nil
 }
