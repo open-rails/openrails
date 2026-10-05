@@ -30,10 +30,10 @@ const (
 	maxCancelReasonChars = 500
 )
 
-// CustomerCancelSubscriptionRequest is the customer's cancel, at period end.
+// CustomerCancelSubscriptionParams is the customer's cancel, at period end.
 // Signature completes a solana_sign_transactions next action: the signature
 // of the cancel transaction the customer's wallet sent.
-type CustomerCancelSubscriptionRequest struct {
+type CustomerCancelSubscriptionParams struct {
 	Reason    string `json:"reason"`
 	Signature string `json:"signature"`
 }
@@ -44,7 +44,7 @@ type CustomerCancelSubscriptionRequest struct {
 // subscription with next_action; the customer repeats the request with the
 // signature.
 func CancelSubscription(r *httprequest.Request) {
-	var req CustomerCancelSubscriptionRequest
+	var req CustomerCancelSubscriptionParams
 	if !r.BindJSON(&req) {
 		return
 	}

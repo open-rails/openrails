@@ -141,7 +141,7 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req billing.EntitlementCheckParams
+	var req billing.CheckEntitlementsParams
 	if !r.BindJSON(&req) {
 		return
 	}

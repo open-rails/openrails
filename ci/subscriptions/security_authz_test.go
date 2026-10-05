@@ -240,12 +240,12 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	_, err = r.client.GetProduct(ctx, price.ProductID)
 	require.ErrorIs(t, err, billing.ErrNotFound)
-	list, err := r.client.ListPayments(ctx, billing.ListPaymentsParams{CustomerID: e.c.cid()})
+	list, err := r.client.ListPayments(ctx, billing.PaymentListParams{CustomerID: e.c.cid()})
 	require.NoError(t, err)
 	require.Empty(t, list.Items)
 
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
-	_, err = r.client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+	_, err = r.client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: e.ent, PriceID: pid(e.price),
 		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -256,7 +256,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	rivalPrice, err := own.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	_, err = own.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+	_, err = own.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
 		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -309,7 +309,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = customerRemote.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "customer-refund"})
 	require.Error(t, err)
-	_, err = customerRemote.ListPayments(ctx, billing.ListPaymentsParams{})
+	_, err = customerRemote.ListPayments(ctx, billing.PaymentListParams{})
 	require.Error(t, err)
 
 	w.settle()

@@ -30,7 +30,7 @@ func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*bil
 	if payment.PaymentToken != "" {
 		payment.NameOnCard, payment.Zip, payment.Country = "Hosted Payer", "10001", "US"
 	}
-	return h.w.client[h.tp].CreateCheckoutAttempt(h.w.t.Context(), billing.CreateCheckoutAttemptRequest{
+	return h.w.client[h.tp].CreateCheckoutAttempt(h.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(h.c.id)}, PriceID: pid(h.price), IdempotencyKey: key,
 		PaymentOptions: payment,
 	})
@@ -141,7 +141,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
-			session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+			session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
 				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 				SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",

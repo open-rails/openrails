@@ -9,7 +9,7 @@ import (
 
 // ListHostEvents pages the merchant's host events, oldest first. Process each
 // idempotently, AcknowledgeHostEvent it, and list again.
-func (c *Client) ListHostEvents(ctx context.Context, req billing.ListHostEventsRequest, options ...RequestOption) (billing.ListPage[billing.HostEvent], error) {
+func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListParams, options ...RequestOption) (*billing.ListPage[billing.HostEvent], error) {
 	q := cursorQuery(req.PageRequest)
 	if req.Type != "" {
 		q.Set("type", string(req.Type))
@@ -21,8 +21,10 @@ func (c *Client) ListHostEvents(ctx context.Context, req billing.ListHostEventsR
 		q.Set("payment_id", req.PaymentID.String())
 	}
 	var out billing.ListPage[billing.HostEvent]
-	err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+q.Encode(), nil, &out, options...)
-	return out, err
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+q.Encode(), nil, &out, options...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // AcknowledgeHostEvent is idempotent. Call only after the host's idempotent

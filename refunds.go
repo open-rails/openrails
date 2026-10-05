@@ -3,10 +3,7 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -34,38 +31,16 @@ func (c *Client) RefundPayment(ctx context.Context, id billing.PaymentID, params
 	return &out, nil
 }
 
-type archiveProductRequest struct {
-	ProductID  string                  `json:"product_id,omitempty"`
-	ProductKey string                  `json:"product_key,omitempty"`
-	Purchases  archiveProductPurchases `json:"purchases"`
-	Reason     string                  `json:"reason,omitempty"`
-}
-
-type archiveProductPurchases struct {
-	Action         billing.PurchaseAction `json:"action"`
-	PurchasedSince *time.Time             `json:"purchased_since,omitempty"`
-	Window         string                 `json:"window,omitempty"`
-}
-
 // ArchiveProduct archives a product (never deletes it) and, per the caller's
-// policy, refunds or queues for review its recent one-time purchases.
+// policy, refunds or holds for review its recent one-time purchases. A
+// purchase held for review is a finding: ResolveFinding refunds it (approve)
+// or keeps it (ignore).
 func (c *Client) ArchiveProduct(ctx context.Context, params billing.ArchiveProductParams, requestOptions ...RequestOption) (*billing.ProductArchive, error) {
 	if strings.TrimSpace(params.IdempotencyKey) == "" {
 		return nil, invalidErr("Idempotency-Key required")
 	}
-	request := archiveProductRequest{ProductID: params.ProductID, ProductKey: params.ProductKey, Reason: params.Reason, Purchases: archiveProductPurchases{Action: params.Action}}
-	if request.Purchases.Action == "" {
-		request.Purchases.Action = billing.PurchaseActionNone
-	}
-	if !params.PurchasedSince.IsZero() {
-		since := params.PurchasedSince.UTC()
-		request.Purchases.PurchasedSince = &since
-	}
-	if params.Window != 0 {
-		request.Purchases.Window = params.Window.String()
-	}
 	var out billing.ProductArchive
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/catalog/product-archives", request, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/catalog/product-archives", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -73,47 +48,13 @@ func (c *Client) ArchiveProduct(ctx context.Context, params billing.ArchiveProdu
 
 // GetProductArchive reads an archive operation with the current outcome of
 // each qualifying purchase. It performs no refunds.
-func (c *Client) GetProductArchive(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.ProductArchive, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, invalidErr("product archive id required")
+func (c *Client) GetProductArchive(ctx context.Context, id billing.ProductArchiveID, requestOptions ...RequestOption) (*billing.ProductArchive, error) {
+	path, err := requireTypedID("product_archive_id", id)
+	if err != nil {
+		return nil, err
 	}
 	var out billing.ProductArchive
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/product-archives/"+url.PathEscape(id), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListPurchaseReviews is one page of purchase reviews, oldest first.
-func (c *Client) ListPurchaseReviews(ctx context.Context, filter billing.ListPurchaseReviewsParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PurchaseReview], error) {
-	q := pageValues(nil, filter.Page)
-	if status := strings.TrimSpace(filter.Status); status != "" {
-		q.Set("status", status)
-	}
-	if archive := strings.TrimSpace(filter.ProductArchiveID); archive != "" {
-		q.Set("product_archive_id", archive)
-	}
-	var out billing.ListPage[billing.PurchaseReview]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/purchase-reviews?"+q.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ResolvePurchaseReview refunds or dismisses one review.
-func (c *Client) ResolvePurchaseReview(ctx context.Context, id string, params billing.ResolvePurchaseReviewParams, requestOptions ...RequestOption) (*billing.PurchaseReview, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, invalidErr("purchase review id required")
-	}
-	switch params.Decision {
-	case billing.PurchaseReviewDecisionRefund, billing.PurchaseReviewDecisionDismiss:
-	default:
-		return nil, invalidErr("decision must be " + strconv.Quote(string(billing.PurchaseReviewDecisionRefund)) + " or " + strconv.Quote(string(billing.PurchaseReviewDecisionDismiss)))
-	}
-	var out billing.PurchaseReview
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/purchase-reviews/"+url.PathEscape(id)+"/resolve", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/product-archives/"+path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

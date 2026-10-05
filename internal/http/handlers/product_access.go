@@ -124,7 +124,7 @@ func CheckProductAccess(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req billing.ProductAccessCheckParams
+	var req billing.CheckProductAccessParams
 	if !r.BindJSON(&req) {
 		return
 	}

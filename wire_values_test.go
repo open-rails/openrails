@@ -160,7 +160,7 @@ func TestProviderObligationRequestsCarryNoRatedAmount(t *testing.T) {
 			walk(field.Type, path+"."+field.Name)
 		}
 	}
-	for _, request := range []any{billing.OperationAuthorizationParams{}, billing.ReleaseOperationAuthorizationParams{}, billing.ProviderBillingObservationParams{}} {
+	for _, request := range []any{billing.OpenOperationAuthorizationParams{}, billing.ReleaseOperationAuthorizationParams{}, billing.RecordProviderBillingObservationParams{}} {
 		walk(reflect.TypeOf(request), reflect.TypeOf(request).Name())
 	}
 }
@@ -200,9 +200,9 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 // Explicit empty lists mean "clear"; absent lists mean "unchanged".
 func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	revision, amount := "before", int64(9007199254740993)
-	params := billing.MerchantConfigurationApplyParams{ApplicationID: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+	params := billing.ApplyMerchantConfigurationParams{ApplicationID: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 		InvoiceCollectionThreshold: &amount,
-		BillingPolicies:            []billing.BillingPolicyInput{}, BillingPolicyBindings: []billing.BillingPolicyBindingInput{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
+		BillingPolicies:            []billing.BillingPolicy{}, BillingPolicyBindings: []billing.BillingPolicyBinding{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
 	}}
 	body, err := json.Marshal(params)
 	require.NoError(t, err)

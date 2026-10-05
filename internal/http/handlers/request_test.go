@@ -131,7 +131,7 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 	require.Nil(t, billingDetailsFromMetadata(map[string]any{"e2e_run_id": "x"}), "no billing details is null")
 
 	for _, alias := range []string{"first_name", "last_name"} {
-		err := httprequest.DecodeStrict([]byte(`{"price_key":"p","payment":{"`+alias+`":"x"}}`), &billing.CreateCheckoutAttemptRequest{})
+		err := httprequest.DecodeStrict([]byte(`{"price_key":"p","payment":{"`+alias+`":"x"}}`), &billing.CreateCheckoutAttemptParams{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
 	}
 	out := PaymentMethodToAPI(&models.PaymentMethod{Rail: "nmi", Card: models.Card{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2099}}, nil, nil, time.Now())

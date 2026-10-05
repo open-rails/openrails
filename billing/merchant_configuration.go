@@ -5,22 +5,22 @@ import (
 	"time"
 )
 
-// MerchantConfigurationApplyParams is an explicit, replayable metadata update.
+// ApplyMerchantConfigurationParams is an explicit, replayable metadata update.
 // Omitted fields preserve stored values. Credentials and provider lifecycle
-// changes use the PSP methods and their separate publication receipts.
-type MerchantConfigurationApplyParams struct {
+// changes use the PSP methods and their separate publication receipts; the
+// API host is claimed, proven and released with SetAPIHost.
+type ApplyMerchantConfigurationParams struct {
 	ApplicationID    string            `json:"application_id"`
 	ExpectedRevision *string           `json:"expected_revision"`
 	Settings         *MerchantSettings `json:"settings,omitempty"`
 	DisplayName      *string           `json:"display_name,omitempty"`
-	APIHost          *string           `json:"api_host,omitempty"`
 }
 
 // MarshalJSON preserves explicit empty policy lists across both Client
 // transports. MerchantSettings omitempty tags otherwise turn a clear into
 // omission, which means preserve for a metadata application.
-func (p MerchantConfigurationApplyParams) MarshalJSON() ([]byte, error) {
-	type plain MerchantConfigurationApplyParams
+func (p ApplyMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
+	type plain ApplyMerchantConfigurationParams
 	body, err := json.Marshal(plain(p))
 	if err != nil || p.Settings == nil {
 		return body, err
@@ -89,9 +89,9 @@ type APIHostRecord struct {
 	Value string `json:"value"`
 }
 
-// SetAPIHostRequest claims APIHost for the merchant; "" releases the host and
+// SetAPIHostParams claims APIHost for the merchant; "" releases the host and
 // any claim.
-type SetAPIHostRequest struct {
+type SetAPIHostParams struct {
 	APIHost string `json:"api_host"`
 }
 

@@ -95,7 +95,7 @@ func newBillingExportCmd() *cobra.Command {
 				}
 				defer close()
 				counter := &archiveCountingWriter{Writer: w}
-				if err := client.ExportMerchantBilling(ctx, counter); err != nil {
+				if err := client.ExportBillingArchive(ctx, counter); err != nil {
 					return err
 				}
 				bytes = counter.n
@@ -143,7 +143,7 @@ func newBillingImportCmd() *cobra.Command {
 				return err
 			}
 			defer close()
-			result, err := client.ImportMerchantBilling(ctx, f)
+			result, err := client.ImportBillingArchive(ctx, f)
 			if err != nil {
 				return fmt.Errorf("import billing: %w", err)
 			}

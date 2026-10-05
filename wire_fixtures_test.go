@@ -52,11 +52,11 @@ func canonicalWireFixtures() map[string]any {
 		}},
 		"merchant_settings.json": billing.MerchantSettings{
 			InvoiceCollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,
-			BillingPolicies: []billing.BillingPolicyInput{
+			BillingPolicies: []billing.BillingPolicy{
 				{Name: "credit_line", Kind: "outstanding_cap", OutstandingCapAmount: maxMoney, CollectionThresholdAmount: &minMoney},
 				{Name: "monthly", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: maxMoney, Currency: "USD"}}},
 			},
-			BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "credit_line"}, {PolicyName: "monthly", Tier: "cloud"}},
+			BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "credit_line"}, {PolicyName: "monthly", Tier: "cloud"}},
 		},
 		"spend_delegations.json": billing.ListPage[billing.SpendDelegation]{Items: []billing.SpendDelegation{
 			{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker-1", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: "sha256:fixture"},

@@ -51,7 +51,7 @@ func EnsureCustomer(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.CustomerParams
+	var params billing.EnsureCustomerParams
 	if !r.BindJSON(&params) {
 		return
 	}
@@ -92,7 +92,7 @@ func SetCustomerBillingPolicy(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.CustomerBillingPolicyParams
+	var params billing.SetCustomerBillingPolicyParams
 	if !r.BindJSON(&params) {
 		return
 	}

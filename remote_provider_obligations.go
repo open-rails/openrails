@@ -29,7 +29,7 @@ func providerOperationPath(operationID string) (string, error) {
 
 // OpenOperationAuthorization reserves capacity for one provider operation. An
 // identical retry replays; any changed immutable field is refused.
-func (c *Client) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
+func (c *Client) OpenOperationAuthorization(ctx context.Context, req billing.OpenOperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
 	var out billing.OperationAuthorization
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/provider-operations", req, &out, requestOptions...); err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req billing.
 // ProviderBillingObservationMaxBytes, so the cap is applied here first: an
 // oversized observation gets the server's invalid_param refusal in every
 // deployment instead of the transport's body-limit status.
-func (c *Client) RecordProviderBillingObservation(ctx context.Context, req billing.ProviderBillingObservationParams, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
+func (c *Client) RecordProviderBillingObservation(ctx context.Context, req billing.RecordProviderBillingObservationParams, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
 		return nil, err

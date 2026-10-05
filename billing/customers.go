@@ -14,9 +14,9 @@ type Customer struct {
 	LastSeenAt time.Time  `json:"last_seen_at"`
 }
 
-// CustomerParams declares a customer. EnsureCustomer creates the customer or
+// EnsureCustomerParams declares a customer. EnsureCustomer creates the customer or
 // replaces these fields; a nil Email clears it.
-type CustomerParams struct {
+type EnsureCustomerParams struct {
 	Email *string `json:"email"`
 }
 
@@ -48,9 +48,9 @@ type CustomerBillingPolicy struct {
 	PolicyName *string    `json:"policy_name"`
 }
 
-// CustomerBillingPolicyParams assigns a declared billing policy to a
+// SetCustomerBillingPolicyParams assigns a declared billing policy to a
 // customer; a null PolicyName restores inheritance.
-type CustomerBillingPolicyParams struct {
+type SetCustomerBillingPolicyParams struct {
 	PolicyName *string `json:"policy_name"`
 }
 

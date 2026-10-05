@@ -26,7 +26,7 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
 	shop := uniqueName("stepup")
-	_, err = cp.ProvisionMerchant(t.Context(), billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	fresh := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
 	stale := authtest.StaleSession(t, cp.AuthKit(), authtest.SignIn(t, cp.AuthKit(), owner).AccessToken)
@@ -41,7 +41,7 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		{http.MethodPost, "/v1/merchant/payments/" + uuid.NewString() + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/customers/" + customer + "/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/api-keys", map[string]string{"name": "ci", "role": "viewer"}},
-		{http.MethodPost, "/v1/import/billing", map[string]any{}},
+		{http.MethodPost, "/v1/merchant/billing-import", map[string]any{}},
 	} {
 		w := call(t, handler, stale, op.method, op.path, shop, op.body)
 		require.Equal(t, http.StatusForbidden, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())

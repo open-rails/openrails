@@ -54,10 +54,10 @@ type PaymentAttempt struct {
 	EnrichedAt      *time.Time       `json:"enriched_at"`
 }
 
-// ListPaymentAttemptsParams selects attempts, newest first; every field is
+// PaymentAttemptListParams selects attempts, newest first; every field is
 // optional, and a list matches any of its values. Since and Until bound
 // attempted_at to [Since, Until).
-type ListPaymentAttemptsParams struct {
+type PaymentAttemptListParams struct {
 	Page                                                   PageRequest
 	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
 	Source, ObservedVia, AVSResult, CVVResult              []string
@@ -98,10 +98,10 @@ type RebillCycle struct {
 	Attempts []PaymentAttempt `json:"attempts"`
 }
 
-// ListRebillCyclesParams selects cycles, latest due first; every field is
+// RebillCycleListParams selects cycles, latest due first; every field is
 // optional, and a list matches any of its values. DueSince and DueUntil bound
 // due_at to [DueSince, DueUntil).
-type ListRebillCyclesParams struct {
+type RebillCycleListParams struct {
 	Page                                     PageRequest
 	Owner, FirstOutcome, MissReason, Outcome []string
 	PSPID                                    PSPID

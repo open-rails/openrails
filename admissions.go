@@ -50,7 +50,7 @@ func (c *Client) GetAdmission(ctx context.Context, requestID string, requestOpti
 // CaptureAdmission settles an admitted request. An exact retry returns the
 // original receipt; a changed amount or usage is
 // billing.ErrIdempotencyKeyReused.
-func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureParams, requestOptions ...RequestOption) (*billing.CaptureReceipt, error) {
+func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams, requestOptions ...RequestOption) (*billing.CaptureReceipt, error) {
 	path, err := admissionPath(requestID)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (c *Client) ExtendAdmission(ctx context.Context, requestID string, params b
 
 // ReportWastedSpend records spend a customer's invoker wasted (failed or
 // abusive work). Source and SourceID identify the report.
-func (c *Client) ReportWastedSpend(ctx context.Context, params billing.WastedSpendParams, requestOptions ...RequestOption) (*billing.WastedSpendReport, error) {
+func (c *Client) ReportWastedSpend(ctx context.Context, params billing.ReportWastedSpendParams, requestOptions ...RequestOption) (*billing.WastedSpendReport, error) {
 	params.Currency = normalizeCurrency(params.Currency)
 	var out billing.WastedSpendReport
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", params, &out, requestOptions...); err != nil {
@@ -108,7 +108,7 @@ func (c *Client) ReportWastedSpend(ctx context.Context, params billing.WastedSpe
 // RecordUsage records one usage event. Its source and source id make a retry
 // record and charge it once (Replayed); a retry with a different amount is
 // billing.ErrIdempotencyKeyReused.
-func (c *Client) RecordUsage(ctx context.Context, params billing.UsageEventParams, requestOptions ...RequestOption) (*billing.UsageEvent, error) {
+func (c *Client) RecordUsage(ctx context.Context, params billing.RecordUsageParams, requestOptions ...RequestOption) (*billing.UsageEvent, error) {
 	params.Currency = normalizeCurrency(params.Currency)
 	var out billing.UsageEvent
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage-events", params, &out, requestOptions...); err != nil {
@@ -119,7 +119,7 @@ func (c *Client) RecordUsage(ctx context.Context, params billing.UsageEventParam
 
 // GetUsage reports a customer's usage in one currency over [From, To),
 // grouped by GroupBy. A zero window is the month before now.
-func (c *Client) GetUsage(ctx context.Context, customer billing.CustomerID, params billing.UsageParams, requestOptions ...RequestOption) (*billing.Usage, error) {
+func (c *Client) GetUsage(ctx context.Context, customer billing.CustomerID, params billing.GetUsageParams, requestOptions ...RequestOption) (*billing.Usage, error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err

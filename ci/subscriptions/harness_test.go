@@ -329,7 +329,7 @@ func (w *world) start() {
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
-	config, err := local.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
+	config, err := local.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
 	require.NoError(t, err)
 	w.psp = map[string]billing.PSPID{}
 	for _, psp := range config.PSPs {
@@ -373,7 +373,7 @@ func (w *world) applySettings(ctx context.Context, settings billing.MerchantSett
 	if err != nil {
 		return err
 	}
-	_, err = client.ApplyMerchantConfiguration(ctx, &billing.MerchantConfigurationApplyParams{ApplicationID: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
+	_, err = client.ApplyMerchantConfiguration(ctx, billing.ApplyMerchantConfigurationParams{ApplicationID: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
 	return err
 }
 
@@ -624,7 +624,7 @@ type customer struct {
 
 func (w *world) newCustomer() *customer {
 	id := uuid.NewString()
-	_, err := w.client[embedded].EnsureCustomer(w.t.Context(), billing.CustomerID(uuid.MustParse(id)), billing.CustomerParams{})
+	_, err := w.client[embedded].EnsureCustomer(w.t.Context(), billing.CustomerID(uuid.MustParse(id)), billing.EnsureCustomerParams{})
 	require.NoError(w.t, err)
 	return &customer{w: w, id: id, token: w.auth.token(w.t, id)}
 }
@@ -710,7 +710,7 @@ func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, metho
 
 func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	attempt, err := c.w.client[tp].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptRequest{
+	attempt, err := c.w.client[tp].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
 		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -801,7 +801,7 @@ func (w *world) payments(tp topology, customerID string) []billing.Payment {
 	w.t.Helper()
 	id, err := billing.ParseCustomerID(customerID)
 	require.NoError(w.t, err)
-	page, err := w.client[tp].ListPayments(w.t.Context(), billing.ListPaymentsParams{CustomerID: id, Page: billing.PageRequest{Limit: 100}})
+	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentListParams{CustomerID: id, Page: billing.PageRequest{Limit: 100}})
 	require.NoError(w.t, err)
 	return page.Items
 }

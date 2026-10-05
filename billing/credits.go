@@ -51,12 +51,12 @@ func (id *CreditTransactionID) UnmarshalText(text []byte) error {
 	return err
 }
 
-// CreditGrantParams grants a customer prepaid credit. SourceID identifies the
+// CreateCreditGrantParams grants a customer prepaid credit. SourceID identifies the
 // grant per customer and must be reproducible across retries: an identical
 // retry returns the existing grant (Replayed), one whose amount, currency or
 // expiry differs is ErrIdempotencyKeyReused. Source labels where the money
 // came from; Invoker records who granted it (default: the customer).
-type CreditGrantParams struct {
+type CreateCreditGrantParams struct {
 	Currency    string     `json:"currency"`
 	Amount      int64      `json:"amount,string"`
 	SourceID    string     `json:"source_id"`
@@ -183,8 +183,8 @@ type CreditLimit struct {
 	Amount     int64      `json:"amount,string"`
 }
 
-// CreditLimitParams sets a customer's credit limit; zero allows no arrears.
-type CreditLimitParams struct {
+// SetCreditLimitParams sets a customer's credit limit; zero allows no arrears.
+type SetCreditLimitParams struct {
 	Currency string `json:"currency"`
 	Amount   int64  `json:"amount,string"`
 }
@@ -197,8 +197,8 @@ type TrustLevel struct {
 	TrustLevel string     `json:"trust_level"`
 }
 
-// TrustLevelParams sets a customer's trust level; empty clears it.
-type TrustLevelParams struct {
+// SetTrustLevelParams sets a customer's trust level; empty clears it.
+type SetTrustLevelParams struct {
 	Currency   string `json:"currency"`
 	TrustLevel string `json:"trust_level"`
 }
@@ -232,13 +232,13 @@ type SpendDelegation struct {
 	Provenance string               `json:"provenance"`
 }
 
-// SpendDelegationsParams replaces a customer's spend delegations.
-type SpendDelegationsParams struct {
+// SetSpendDelegationsParams replaces a customer's spend delegations.
+type SetSpendDelegationsParams struct {
 	Delegations []SpendDelegation `json:"delegations"`
 }
 
-// SpendDelegationParams sets the delegation at a scope and key.
-type SpendDelegationParams struct {
+// SetSpendDelegationParams sets the delegation at a scope and key.
+type SetSpendDelegationParams struct {
 	Windows    []BudgetWindow `json:"windows"`
 	Provenance string         `json:"provenance,omitempty"`
 }
@@ -264,8 +264,8 @@ type SpendLimits struct {
 	Windows  []SpendWindow `json:"windows"`
 }
 
-// MerchantProfileInput is public/communication metadata stored per merchant.
-type MerchantProfileInput struct {
+// MerchantProfile is public/communication metadata stored per merchant.
+type MerchantProfile struct {
 	DisplayName string `json:"display_name,omitempty"`
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
@@ -276,12 +276,12 @@ type MerchantProfileInput struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                    *MerchantProfileInput `json:"profile,omitempty"`
-	InvoiceCollectionThreshold *int64                `json:"collection_threshold,omitempty,string"`
-	InvoiceMonthlyFloor        *int64                `json:"monthly_floor,omitempty,string"`
-	InvoiceBillingBoundary     string                `json:"billing_period_boundary,omitempty"`
-	AlertEmail                 *string               `json:"alert_email,omitempty"`
-	RepriceNoticeWindowDays    *int                  `json:"reprice_notice_window_days,omitempty"`
+	Profile                    *MerchantProfile `json:"profile,omitempty"`
+	InvoiceCollectionThreshold *int64           `json:"collection_threshold,omitempty,string"`
+	InvoiceMonthlyFloor        *int64           `json:"monthly_floor,omitempty,string"`
+	InvoiceBillingBoundary     string           `json:"billing_period_boundary,omitempty"`
+	AlertEmail                 *string          `json:"alert_email,omitempty"`
+	RepriceNoticeWindowDays    *int             `json:"reprice_notice_window_days,omitempty"`
 	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription:
 	// a renewal starting sooner than this after the membership start or the
 	// last receipted renewal sends none. Nil uses 24; 0 receipts every renewal.
@@ -300,14 +300,14 @@ type MerchantSettings struct {
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".
-	BillingPolicies                   []BillingPolicyInput        `json:"billing_policies,omitempty"`
-	BillingPolicyBindings             []BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
-	DelegatedInvokerWastedSpendLimits []BudgetWindow              `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	BillingPolicies                   []BillingPolicy        `json:"billing_policies,omitempty"`
+	BillingPolicyBindings             []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+	DelegatedInvokerWastedSpendLimits []BudgetWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 }
 
-// BillingPolicyInput declares one named billing policy (or#897). The policy says
+// BillingPolicy declares one named billing policy (or#897). The policy says
 // WHICH quantity is capped; the binding says who it applies to.
-type BillingPolicyInput struct {
+type BillingPolicy struct {
 	Name string `json:"name"`
 	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
 	// line on debt, refused with outstanding_cap_reached), "window_spend_cap"
@@ -342,9 +342,9 @@ type BillingPolicyInput struct {
 	PolicyCurrency  string         `json:"policy_currency,omitempty"`
 }
 
-// BillingPolicyBindingInput declares a merchant-default or per-tier policy.
+// BillingPolicyBinding declares a merchant-default or per-tier policy.
 // Customer assignments are runtime state managed by SetCustomerBillingPolicy.
-type BillingPolicyBindingInput struct {
+type BillingPolicyBinding struct {
 	PolicyName string `json:"policy"`
 	Tier       string `json:"tier,omitempty"`
 }

@@ -75,7 +75,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	page := billing.PageRequest{Limit: 2}
 	for pages := 0; ; pages++ {
 		require.Less(t, pages, 3)
-		got, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: c.cid(), Page: page})
+		got, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: c.cid(), Page: page})
 		require.NoError(t, err)
 		for _, p := range got.Items {
 			read = append(read, p.ID)
@@ -87,7 +87,7 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	}
 	require.Equal(t, recorded, read, "every payment once, newest first")
 
-	_, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{Page: billing.PageRequest{Cursor: "not-a-cursor"}})
+	_, err := client.ListPayments(t.Context(), billing.PaymentListParams{Page: billing.PageRequest{Cursor: "not-a-cursor"}})
 	requireCode(t, err, http.StatusBadRequest, "invalid_cursor")
 
 	// The customer's own list is the same page shape.
@@ -109,24 +109,24 @@ func TestCustomerInvoiceProfile(t *testing.T) {
 	c.saveCard("nmi", visa) // the customer exists
 	client := w.client[remote]
 
-	_, err := client.GetCustomerInvoiceProfile(t.Context(), c.cid())
+	_, err := client.GetInvoiceProfile(t.Context(), c.cid())
 	require.ErrorIs(t, err, billing.ErrNotFound)
 
 	net30 := billing.InvoiceProfile{NetTermsDays: 30, CollectionMethod: billing.CollectSendInvoice, PONumber: "PO-1", BillingContacts: []billing.InvoiceContact{{Email: "ap@example.com"}}}
-	got, err := client.SetCustomerInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net30, IfAbsent: true})
+	got, err := client.SetInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net30, IfAbsent: true})
 	require.NoError(t, err)
 	require.Equal(t, 30, got.NetTermsDays)
 
 	net60 := net30
 	net60.NetTermsDays = 60
-	got, err = client.SetCustomerInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net60, IfAbsent: true})
+	got, err = client.SetInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net60, IfAbsent: true})
 	require.NoError(t, err)
 	require.Equal(t, 30, got.NetTermsDays, "IfAbsent answers the existing profile unchanged")
 
-	got, err = client.SetCustomerInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net60})
+	got, err = client.SetInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net60})
 	require.NoError(t, err)
 	require.Equal(t, 60, got.NetTermsDays)
-	read, err := client.GetCustomerInvoiceProfile(t.Context(), c.cid())
+	read, err := client.GetInvoiceProfile(t.Context(), c.cid())
 	require.NoError(t, err)
 	require.Equal(t, []any{60, "PO-1"}, []any{read.NetTermsDays, read.PONumber})
 }

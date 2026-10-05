@@ -16,7 +16,7 @@ import (
 // Tx form rides a transaction owned by an embedding host, which alone commits
 // or rolls it back.
 
-func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.Op
 	return out, err
 }
 
-func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

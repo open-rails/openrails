@@ -76,7 +76,7 @@ func CreateAlertWebhook(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var in billing.CreateAlertWebhookRequest
+	var in billing.CreateAlertWebhookParams
 	if !r.BindJSON(&in) {
 		return
 	}
@@ -99,7 +99,7 @@ func SetAlertWebhookURL(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var in billing.SetAlertWebhookURLRequest
+	var in billing.SetAlertWebhookURLParams
 	if !r.BindJSON(&in) {
 		return
 	}
@@ -152,7 +152,7 @@ func ListMerchantNotifications(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	notes, err := svc.ListNotifications(r.Request.Context(), billing.ListMerchantNotificationsRequest{PageRequest: page, UnreadOnly: q.Unread})
+	notes, err := svc.ListNotifications(r.Request.Context(), billing.MerchantNotificationListParams{PageRequest: page, UnreadOnly: q.Unread})
 	if err != nil {
 		writeRefusal(r, err, "list notifications failed")
 		return

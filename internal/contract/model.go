@@ -71,7 +71,7 @@ func wireForm(t reflect.Type) (reflect.Type, bool) {
 		return reflect.TypeFor[CardEntry](), true
 	case name == "billing.AmountMap":
 		return reflect.TypeFor[map[string]string](), true
-	case name == "billing.MerchantConfigurationApplyParams":
+	case name == "billing.ApplyMerchantConfigurationParams":
 		// Its codec only enforces strictness; the members are the wire.
 		return t, true
 	case strings.HasPrefix(name, "catalog.Field["):
@@ -147,7 +147,7 @@ type field struct {
 	name     string
 	t        reflect.Type
 	optional bool // omitempty or omitzero: absent when empty
-	nullable bool // null when unset: a pointer, slice or map written without omitempty
+	nullable bool // null when unset: a pointer or map written without omitempty (a nil list is written [])
 	quoted   bool // `,string`: a number written as a string
 }
 
@@ -194,8 +194,11 @@ func fieldsOf(t reflect.Type) []field {
 				}
 			}
 			switch f.Type.Kind() {
-			case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
+			case reflect.Pointer, reflect.Map, reflect.Interface:
 				member.nullable = !member.optional
+			case reflect.Slice:
+				// wireform writes a nil list as []; raw bytes and JSON stay null.
+				member.nullable = !member.optional && f.Type.Elem().Kind() == reflect.Uint8
 			}
 			if strings.HasPrefix(f.Type.String(), "catalog.Field[") {
 				member.nullable = true

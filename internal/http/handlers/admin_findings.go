@@ -177,7 +177,7 @@ func AdminResolveFinding(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req billing.ResolveFindingRequest
+	var req billing.ResolveFindingParams
 	if !r.BindJSON(&req) {
 		return
 	}

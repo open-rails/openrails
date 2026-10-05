@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/api"
@@ -21,17 +24,17 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// Product archive operations (#1058). The receipt fixes the product, action,
+// Product archive operations. The receipt fixes the product, action,
 // resolved window and reason. Every call re-derives the qualifying purchases
 // from the ledger, so replays converge: refunds use one deterministic key per
-// operation and payment, and reviews are one insert-if-absent finding per
-// payment. Only rail money movement is refunded automatically; anything the
-// refund path refuses becomes a review instead of being dropped.
+// operation and payment, and a purchase under review is one insert-if-absent
+// finding per payment, resolved through the findings queue. Only rail money
+// movement is refunded automatically; anything the refund path refuses
+// becomes a finding instead of being dropped.
 
 const (
 	productArchiveFindingType = "life.product_archived_purchase"
@@ -41,17 +44,14 @@ const (
 	productArchiveMaxReason    = 500
 )
 
-type ProductArchiveRequest struct {
-	ProductID  string                  `json:"product_id,omitempty"`
-	ProductKey string                  `json:"product_key,omitempty"`
-	Purchases  productArchivePurchases `json:"purchases"`
-	Reason     string                  `json:"reason,omitempty"`
-}
-
-type productArchivePurchases struct {
-	Action         string     `json:"action"`
-	PurchasedSince *time.Time `json:"purchased_since,omitempty"`
-	Window         string     `json:"window,omitempty"`
+// purchaseReview is the finding that holds one archived purchase for the
+// merchant's decision.
+type purchaseReview struct {
+	ID       billing.FindingID
+	Detail   string
+	RefundID *billing.PaymentID
+	// Outcome is review_open, review_refunded or review_dismissed.
+	Outcome billing.ArchivedPurchaseOutcome
 }
 
 type productArchiveOperation struct {
@@ -64,67 +64,54 @@ type productArchiveOperation struct {
 	CreatedAt      time.Time
 }
 
-func productArchiveError(status int, code, message string) *api.APIError {
-	errType := api.ErrorTypeInvalidRequest
-	if status >= 500 {
-		errType = api.ErrorTypeAPI
-	}
-	return api.NewAPIError(status, errType, code, message)
-}
-
-// fingerprint canonicalizes the caller's terms. A relative window is part of
-// the identity, never the instant it resolved to, so a replay matches.
-func (req ProductArchiveRequest) fingerprint() []byte {
+// productArchiveFingerprint canonicalizes the caller's terms. A relative
+// window is part of the identity, never the instant it resolved to, so a
+// replay matches.
+func productArchiveFingerprint(req billing.ArchiveProductParams) []byte {
 	canonical := map[string]string{
-		"product_id": strings.TrimSpace(req.ProductID), "product_key": strings.TrimSpace(req.ProductKey),
-		"action": req.Purchases.Action, "reason": strings.TrimSpace(req.Reason),
+		"product_id": req.ProductID.String(), "product_key": strings.TrimSpace(req.ProductKey),
+		"action": string(req.PurchaseAction), "reason": strings.TrimSpace(req.Reason),
 	}
-	if req.Purchases.PurchasedSince != nil {
-		canonical["purchased_since"] = req.Purchases.PurchasedSince.UTC().Format(time.RFC3339Nano)
+	if !req.PurchasedSince.IsZero() {
+		canonical["purchased_since"] = req.PurchasedSince.UTC().Format(time.RFC3339Nano)
 	}
-	if req.Purchases.Window != "" {
-		window, _ := time.ParseDuration(req.Purchases.Window)
-		canonical["window"] = window.String()
+	if req.WindowSeconds != 0 {
+		canonical["window_seconds"] = strconv.FormatInt(req.WindowSeconds, 10)
 	}
 	raw, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(raw)
 	return sum[:]
 }
 
-func (req *ProductArchiveRequest) validate() *api.APIError {
-	invalid := func(msg string) *api.APIError {
-		return productArchiveError(http.StatusBadRequest, api.CodeInvalidParam, msg)
+func validateProductArchive(req *billing.ArchiveProductParams) *api.APIError {
+	invalid := func(param, msg string) *api.APIError {
+		return api.Coded(billing.CodeInvalidParam, msg).WithParam(param)
 	}
-	if (strings.TrimSpace(req.ProductID) == "") == (strings.TrimSpace(req.ProductKey) == "") {
-		return invalid("exactly one of product_id or product_key is required")
+	if req.ProductID.IsZero() == (strings.TrimSpace(req.ProductKey) == "") {
+		return invalid("product_id", "exactly one of product_id or product_key is required")
 	}
 	if len(strings.TrimSpace(req.Reason)) > productArchiveMaxReason {
-		return invalid("reason is too long")
+		return invalid("reason", "reason is too long")
 	}
-	req.Purchases.Action = strings.ToLower(strings.TrimSpace(req.Purchases.Action))
-	if req.Purchases.Action == "" {
-		req.Purchases.Action = string(billing.PurchaseActionNone)
+	if req.PurchaseAction == "" {
+		req.PurchaseAction = billing.PurchaseActionNone
 	}
-	windowed := req.Purchases.PurchasedSince != nil || strings.TrimSpace(req.Purchases.Window) != ""
-	switch billing.PurchaseAction(req.Purchases.Action) {
+	windowed := !req.PurchasedSince.IsZero() || req.WindowSeconds != 0
+	switch req.PurchaseAction {
 	case billing.PurchaseActionNone:
 		if windowed {
-			return invalid("purchases.action none takes no purchase window")
+			return invalid("purchase_action", "purchase_action none takes no purchase window")
 		}
 		return nil
 	case billing.PurchaseActionRefund, billing.PurchaseActionReview:
 	default:
-		return invalid(`purchases.action must be "none", "refund" or "review"`)
+		return invalid("purchase_action", `purchase_action must be "none", "refund" or "review"`)
 	}
-	if (req.Purchases.PurchasedSince != nil) == (strings.TrimSpace(req.Purchases.Window) != "") {
-		return invalid("exactly one of purchases.purchased_since or purchases.window is required")
+	if req.PurchasedSince.IsZero() == (req.WindowSeconds == 0) {
+		return invalid("purchased_since", "exactly one of purchased_since or window_seconds is required")
 	}
-	if req.Purchases.Window != "" {
-		window, err := time.ParseDuration(strings.TrimSpace(req.Purchases.Window))
-		if err != nil || window <= 0 {
-			return invalid("purchases.window must be a positive duration such as \"720h\"")
-		}
-		req.Purchases.Window = window.String()
+	if req.WindowSeconds < 0 {
+		return invalid("window_seconds", "window_seconds must be positive")
 	}
 	return nil
 }
@@ -132,21 +119,21 @@ func (req *ProductArchiveRequest) validate() *api.APIError {
 // CreateProductArchive archives a product and applies the caller's purchase
 // policy. POST /merchant/catalog/product-archives, Idempotency-Key required.
 func CreateProductArchive(r *httprequest.Request) {
-	var req ProductArchiveRequest
+	var req billing.ArchiveProductParams
 	if !bindCatalogJSON(r, &req) {
 		return
 	}
-	if apiErr := req.validate(); apiErr != nil {
+	if apiErr := validateProductArchive(&req); apiErr != nil {
 		r.APIError(apiErr)
 		return
 	}
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
 	if key == "" || len(key) > 255 {
-		r.APIError(productArchiveError(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required (at most 255 bytes)"))
+		r.ErrorCode("idempotency_key_required", "Idempotency-Key header is required (at most 255 bytes)")
 		return
 	}
 	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product archive ledger unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "product archive ledger unavailable")
 		return
 	}
 	ctx := r.Request.Context()
@@ -170,20 +157,20 @@ func CreateProductArchive(r *httprequest.Request) {
 // GetProductArchive projects the current outcome of each qualifying purchase
 // without issuing refunds or reviews.
 func GetProductArchive(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid product archive id")
+	id, err := billing.ParseProductArchiveID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid product archive id").WithParam("id"))
 		return
 	}
 	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "product archive ledger unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "product archive ledger unavailable")
 		return
 	}
 	ctx := r.Request.Context()
-	op, err := loadProductArchiveByID(ctx, r.State.DB, id)
+	op, err := loadProductArchiveByID(ctx, r.State.DB, id.UUID())
 	if err != nil {
 		if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
-			r.ErrorJSON(http.StatusNotFound, "product archive not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "product archive not found")
 			return
 		}
 		r.InternalError("product archive could not be loaded", err)
@@ -225,10 +212,10 @@ func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (product
 
 // acceptProductArchive records the receipt once per key; a replay with other
 // terms is refused before anything else happens.
-func acceptProductArchive(ctx context.Context, r *httprequest.Request, req ProductArchiveRequest, key string) (productArchiveOperation, *api.APIError) {
+func acceptProductArchive(ctx context.Context, r *httprequest.Request, req billing.ArchiveProductParams, key string) (productArchiveOperation, *api.APIError) {
 	var op productArchiveOperation
 	var refusal *api.APIError
-	fingerprint := req.fingerprint()
+	fingerprint := productArchiveFingerprint(req)
 	err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
@@ -243,7 +230,7 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req Produ
 		switch {
 		case err == nil:
 			if string(stored) != string(fingerprint) {
-				refusal = productArchiveError(http.StatusConflict, "idempotency_key_reused", "Idempotency-Key was already used for a different product archive request")
+				refusal = api.Coded(billing.CodeIdempotencyKeyReused, "Idempotency-Key was already used for a different product archive request")
 				return nil
 			}
 			op = existing
@@ -252,41 +239,36 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req Produ
 			return fmt.Errorf("load product archive: %w", err)
 		}
 		var product gen.BillingProduct
-		if raw := strings.TrimSpace(req.ProductID); raw != "" {
-			typed, perr := billing.ParseProductID(raw)
-			if perr != nil || typed.IsZero() {
-				refusal = productArchiveError(http.StatusBadRequest, api.CodeInvalidParam, "invalid product_id")
-				return nil
-			}
-			product, err = q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: mid.UUID(), ID: typed.UUID()})
+		if !req.ProductID.IsZero() {
+			product, err = q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: mid.UUID(), ID: req.ProductID.UUID()})
 		} else {
 			product, err = q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: mid.UUID(), Key: strings.TrimSpace(req.ProductKey)})
 		}
 		if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
-			refusal = productArchiveError(http.StatusNotFound, api.CodeResourceNotFound, "product not found")
+			refusal = api.Coded("product_not_found", "product not found")
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("resolve product: %w", err)
 		}
 		var since *time.Time
-		if req.Purchases.PurchasedSince != nil {
-			at := req.Purchases.PurchasedSince.UTC()
+		if !req.PurchasedSince.IsZero() {
+			at := req.PurchasedSince.UTC()
 			since = &at
-		} else if req.Purchases.Window != "" {
-			window, _ := time.ParseDuration(req.Purchases.Window)
-			at := r.Clock.Now().UTC().Add(-window)
+		} else if req.WindowSeconds != 0 {
+			at := r.Clock.Now().UTC().Add(-time.Duration(req.WindowSeconds) * time.Second)
 			since = &at
 		}
 		if err := q.InsertProductArchive(ctx, gen.InsertProductArchiveParams{MerchantID: mid.UUID(), IdempotencyKey: key, RequestSha256: fingerprint,
-			ProductID: product.ID, PurchaseAction: req.Purchases.Action, PurchasedSince: since, Reason: strings.TrimSpace(req.Reason)}); err != nil {
+			ProductID: product.ID, PurchaseAction: string(req.PurchaseAction), PurchasedSince: since, Reason: strings.TrimSpace(req.Reason)}); err != nil {
 			return fmt.Errorf("record product archive: %w", err)
 		}
 		op, _, err = loadProductArchiveByKey(ctx, txDB, key)
 		return err
 	})
 	if err != nil {
-		return op, productArchiveError(http.StatusInternalServerError, "api_error", "product archive could not be recorded")
+		logrus.WithContext(ctx).WithError(err).Error("product archive could not be recorded")
+		return op, api.Coded(billing.CodeInternalError, "product archive could not be recorded")
 	}
 	return op, refusal
 }
@@ -344,9 +326,12 @@ func productArchiveRefundKey(op productArchiveOperation) string {
 
 func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op productArchiveOperation, act bool) (*billing.ProductArchive, error) {
 	out := &billing.ProductArchive{
-		ID: op.ID.String(), Object: "product_archive", ProductID: billing.ProductID(op.ProductID), ProductKey: op.ProductKey,
-		Action: op.Action, PurchasedSince: op.PurchasedSince, Reason: op.Reason, CreatedAt: op.CreatedAt,
+		ID: billing.ProductArchiveID(op.ID), ProductID: billing.ProductID(op.ProductID), ProductKey: op.ProductKey,
+		PurchaseAction: op.Action, PurchasedSince: op.PurchasedSince, CreatedAt: op.CreatedAt,
 		Complete: true, Purchases: []billing.ArchivedPurchase{},
+	}
+	if op.Reason != "" {
+		out.Reason = &op.Reason
 	}
 	purchases, err := qualifyingPurchases(ctx, r.State.DB, op)
 	if err != nil {
@@ -368,7 +353,7 @@ func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op prod
 
 func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op productArchiveOperation, purchase qualifyingPurchase, act bool, budget *int) (billing.ArchivedPurchase, error) {
 	item := billing.ArchivedPurchase{
-		PaymentID: billing.PaymentID(purchase.ID), CustomerID: purchase.CustomerID.String(),
+		PaymentID: billing.PaymentID(purchase.ID), CustomerID: billing.CustomerID(purchase.CustomerID),
 		Amount: purchase.Amount, Currency: purchase.Currency, PurchasedAt: purchase.PurchasedAt,
 	}
 	paymentService := payments.NewPaymentService(r.State.DB, r.Clock)
@@ -450,29 +435,26 @@ func reviewArchivedPurchase(ctx context.Context, r *httprequest.Request, op prod
 	return applyReviewOutcome(item, review), nil
 }
 
-func applyReviewOutcome(item billing.ArchivedPurchase, review billing.PurchaseReview) billing.ArchivedPurchase {
-	// The review keeps the reason recorded when it was opened, so every
+func applyReviewOutcome(item billing.ArchivedPurchase, review purchaseReview) billing.ArchivedPurchase {
+	// The finding keeps the reason recorded when it was opened, so every
 	// projection of the operation reports the same detail.
-	item.ReviewID = review.ID
-	item.Detail = review.Detail
-	switch review.Status {
-	case billing.PurchaseReviewRefunded:
-		item.Outcome = billing.ArchivedPurchaseReviewRefunded
+	item.FindingID = &review.ID
+	if review.Detail != "" {
+		item.Detail = &review.Detail
+	}
+	item.Outcome = review.Outcome
+	if review.Outcome == billing.ArchivedPurchaseReviewRefunded {
 		item.RefundID = review.RefundID
-	case billing.PurchaseReviewDismissed:
-		item.Outcome = billing.ArchivedPurchaseReviewDismissed
-	default:
-		item.Outcome = billing.ArchivedPurchaseReviewOpen
 	}
 	return item
 }
 
 // recordPurchaseReview inserts one open finding per payment. It never reopens
 // a finding the merchant already resolved.
-func recordPurchaseReview(ctx context.Context, d *db.DB, op productArchiveOperation, purchase qualifyingPurchase, detail string) (billing.PurchaseReview, error) {
+func recordPurchaseReview(ctx context.Context, d *db.DB, op productArchiveOperation, purchase qualifyingPurchase, detail string) (purchaseReview, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return billing.PurchaseReview{}, err
+		return purchaseReview{}, err
 	}
 	payment := billing.PaymentID(purchase.ID)
 	evidence := map[string]any{
@@ -487,52 +469,37 @@ func recordPurchaseReview(ctx context.Context, d *db.DB, op productArchiveOperat
 	}
 	raw, err := json.Marshal(evidence)
 	if err != nil {
-		return billing.PurchaseReview{}, err
+		return purchaseReview{}, err
 	}
 	if err := d.Gen(ctx).InsertPurchaseReview(ctx, gen.InsertPurchaseReviewParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType,
 		SubjectKey: purchase.ID.String(), RecommendedAction: "Refund or dismiss a purchase of an archived product", Evidence: raw}); err != nil {
-		return billing.PurchaseReview{}, fmt.Errorf("record purchase review: %w", err)
+		return purchaseReview{}, fmt.Errorf("record purchase review: %w", err)
 	}
 	review, _, err := loadPurchaseReview(ctx, d, purchase.ID)
 	return review, err
 }
 
-func loadPurchaseReview(ctx context.Context, d *db.DB, paymentID uuid.UUID) (billing.PurchaseReview, bool, error) {
+func loadPurchaseReview(ctx context.Context, d *db.DB, paymentID uuid.UUID) (purchaseReview, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return billing.PurchaseReview{}, false, err
+		return purchaseReview{}, false, err
 	}
 	row, err := d.Gen(ctx).GetPurchaseReviewBySubject(ctx, gen.GetPurchaseReviewBySubjectParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, SubjectKey: paymentID.String()})
 	if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
-		return billing.PurchaseReview{}, false, nil
+		return purchaseReview{}, false, nil
 	}
 	if err != nil {
-		return billing.PurchaseReview{}, false, err
+		return purchaseReview{}, false, err
 	}
-	return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt), true, nil
-}
-
-func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *string, created time.Time, resolved *time.Time) billing.PurchaseReview {
 	var evidence struct {
 		Local      map[string]string `json:"local"`
 		Resolution map[string]any    `json:"resolution"`
 	}
-	_ = json.Unmarshal(raw, &evidence)
-	local := evidence.Local
-	review := billing.PurchaseReview{
-		ID: id.String(), ProductArchiveID: local["product_archive_id"], ProductKey: local["product_key"],
-		CustomerID: local["customer_id"], Currency: local["currency"], Detail: local["detail"], CreatedAt: created, ResolvedAt: resolved,
-	}
-	review.ProductID, _ = billing.ParseProductID(local["product_id"])
-	review.PaymentID, _ = billing.ParsePaymentID(local["payment_id"])
-	fmt.Sscan(local["amount"], &review.Amount)
-	review.PurchasedAt, _ = time.Parse(time.RFC3339Nano, local["purchased_at"])
-	if notes != nil {
-		review.Notes = *notes
-	}
-	switch status {
+	_ = json.Unmarshal(row.Evidence, &evidence)
+	review := purchaseReview{ID: billing.FindingID(row.ID), Detail: evidence.Local["detail"], Outcome: billing.ArchivedPurchaseReviewOpen}
+	switch row.Status {
 	case "fixed":
-		review.Status = billing.PurchaseReviewRefunded
+		review.Outcome = billing.ArchivedPurchaseReviewRefunded
 		if refundID, ok := evidence.Resolution["refund_id"].(string); ok {
 			if parsed, err := uuid.Parse(refundID); err == nil {
 				typed := billing.PaymentID(parsed)
@@ -540,122 +507,7 @@ func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *s
 			}
 		}
 	case "ignored":
-		review.Status = billing.PurchaseReviewDismissed
-	default:
-		review.Status = billing.PurchaseReviewOpen
+		review.Outcome = billing.ArchivedPurchaseReviewDismissed
 	}
-	return review
-}
-
-// ListPurchaseReviews lists archive purchase reviews, oldest first.
-//
-//	GET /merchant/purchase-reviews?status=open|refunded|dismissed&product_archive_id=&limit=&offset=
-func ListPurchaseReviews(r *httprequest.Request) {
-	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "purchase review ledger unavailable")
-		return
-	}
-	ctx := r.Request.Context()
-	statuses := map[string][]string{
-		"": {"requires_review", "reconcile_required"}, billing.PurchaseReviewOpen: {"requires_review", "reconcile_required"},
-		billing.PurchaseReviewRefunded: {"fixed"}, billing.PurchaseReviewDismissed: {"ignored"},
-	}
-	findingStatuses, ok := statuses[strings.TrimSpace(r.Query("status"))]
-	if !ok {
-		r.APIError(api.Coded(billing.CodeInvalidQuery, `status must be "open", "refunded" or "dismissed"`).WithParam("status"))
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
-	afterAt, afterID, err := pagination.After(page.Cursor)
-	if err != nil {
-		writeRefusal(r, err, "invalid cursor")
-		return
-	}
-	archive := strings.TrimSpace(r.Query("product_archive_id"))
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		r.InternalError("purchase reviews unavailable", err)
-		return
-	}
-	rows, err := r.State.DB.Gen(ctx).ListPurchaseReviews(ctx, gen.ListPurchaseReviewsParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, Statuses: findingStatuses,
-		ProductArchiveID: archive, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(page.Limit)})
-	if err != nil {
-		r.InternalError("purchase reviews could not be listed", err)
-		return
-	}
-	cut := pagination.Cut(rows, page.Limit, func(row gen.ListPurchaseReviewsRow) any { return pagination.TimeID{At: row.CreatedAt, ID: row.ID} })
-	r.SuccessJSON(pagination.Map(cut, func(row gen.ListPurchaseReviewsRow) billing.PurchaseReview {
-		return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt)
-	}))
-}
-
-// ResolvePurchaseReview refunds (approve) or dismisses (ignore) one review
-// through the findings queue. Repeating the recorded decision is a no-op.
-//
-//	POST /merchant/purchase-reviews/{id}/resolve {decision, notes}
-func ResolvePurchaseReview(r *httprequest.Request) {
-	store, ok := findingsStore(r)
-	if !ok {
-		return
-	}
-	ctx := r.Request.Context()
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid purchase review id")
-		return
-	}
-	var req billing.ResolvePurchaseReviewParams
-	if !r.BindJSON(&req) {
-		return
-	}
-	var outcome, want string
-	switch req.Decision {
-	case billing.PurchaseReviewDecisionRefund:
-		outcome, want = "approve", billing.PurchaseReviewRefunded
-	case billing.PurchaseReviewDecisionDismiss:
-		outcome, want = "ignore", billing.PurchaseReviewDismissed
-	default:
-		r.ErrorJSON(http.StatusBadRequest, `decision must be "refund" or "dismiss"`)
-		return
-	}
-	finding, err := store.GetFinding(ctx, id)
-	if err != nil || string(finding.Type) != productArchiveFindingType {
-		r.ErrorJSON(http.StatusNotFound, "purchase review not found")
-		return
-	}
-	notes := strings.TrimSpace(req.Notes)
-	if notes == "" {
-		notes = "purchase review " + string(req.Decision)
-	}
-	if findingIsOpen(finding) {
-		if status, message := resolveFinding(r, store, finding, outcome, notes, nil); status != http.StatusOK {
-			r.ErrorJSON(status, message)
-			return
-		}
-	}
-	review, err := loadPurchaseReviewByID(ctx, r.State.DB, id)
-	if err != nil {
-		r.InternalError("purchase review could not be reloaded", err)
-		return
-	}
-	if review.Status != want {
-		r.APIError(productArchiveError(http.StatusConflict, "purchase_review_resolved", "purchase review was already resolved as "+review.Status))
-		return
-	}
-	r.JSON(http.StatusOK, review)
-}
-
-func loadPurchaseReviewByID(ctx context.Context, d *db.DB, id uuid.UUID) (billing.PurchaseReview, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return billing.PurchaseReview{}, err
-	}
-	row, err := d.Gen(ctx).GetPurchaseReviewByID(ctx, gen.GetPurchaseReviewByIDParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, ID: id})
-	if err != nil {
-		return billing.PurchaseReview{}, err
-	}
-	return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt), nil
+	return review, true, nil
 }

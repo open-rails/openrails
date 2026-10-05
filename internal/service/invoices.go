@@ -86,7 +86,7 @@ func InvoicePaymentView(a models.InvoicePaymentAttempt) billing.InvoicePayment {
 }
 
 // ListInvoices is one page of invoices, newest period first.
-func (s *Service) ListInvoices(ctx context.Context, p billing.ListInvoicesParams) (billing.ListPage[billing.Invoice], error) {
+func (s *Service) ListInvoices(ctx context.Context, p billing.InvoiceListParams) (billing.ListPage[billing.Invoice], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return billing.ListPage[billing.Invoice]{}, err
@@ -240,15 +240,15 @@ func (s *Service) PayInvoice(ctx context.Context, payer identity.CustomerID, inv
 	return out, err
 }
 
-// GetCustomerInvoiceProfile reads a customer's invoice profile; nil when none
+// GetInvoiceProfile reads a customer's invoice profile; nil when none
 // is set.
-func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*billing.InvoiceProfile, error) {
+func (s *Service) GetInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*billing.InvoiceProfile, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	p, err := s.moneyService().GetCustomerInvoiceProfile(ctx, payer)
+	p, err := s.moneyService().GetInvoiceProfile(ctx, payer)
 	if err != nil || p == nil {
 		return nil, err
 	}
@@ -262,10 +262,10 @@ func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.
 	}, nil
 }
 
-// SetCustomerInvoiceProfile replaces a customer's invoice profile, or with
+// SetInvoiceProfile replaces a customer's invoice profile, or with
 // IfAbsent creates it only when none is set. created reports a new profile.
 // Operator surface: a customer never grants itself credit terms.
-func (s *Service) SetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p billing.SetInvoiceProfileParams) (profile *billing.InvoiceProfile, created bool, err error) {
+func (s *Service) SetInvoiceProfile(ctx context.Context, payer identity.CustomerID, p billing.SetInvoiceProfileParams) (profile *billing.InvoiceProfile, created bool, err error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, false, err
@@ -286,9 +286,9 @@ func (s *Service) SetCustomerInvoiceProfile(ctx context.Context, payer identity.
 		if created, err = s.moneyService().EnsureCustomerInvoiceProfile(ctx, payer, in); err != nil {
 			return nil, false, err
 		}
-	} else if err = s.moneyService().SetCustomerInvoiceProfile(ctx, payer, in); err != nil {
+	} else if err = s.moneyService().SetInvoiceProfile(ctx, payer, in); err != nil {
 		return nil, false, err
 	}
-	profile, err = s.GetCustomerInvoiceProfile(ctx, payer)
+	profile, err = s.GetInvoiceProfile(ctx, payer)
 	return profile, created, err
 }

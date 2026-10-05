@@ -101,7 +101,7 @@ func PutMerchantAPIHost(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req billing.SetAPIHostRequest
+	var req billing.SetAPIHostParams
 	if !r.BindJSON(&req) {
 		return
 	}

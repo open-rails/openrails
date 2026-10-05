@@ -27,11 +27,11 @@ func (id *UsageEventID) UnmarshalText(text []byte) error {
 	return err
 }
 
-// UsageEventParams records one metered usage event for a customer. Source and
+// RecordUsageParams records one metered usage event for a customer. Source and
 // SourceID identify the event within its EventType: a retry with the same
 // Amount records nothing new, one with a different Amount is
 // ErrIdempotencyKeyReused.
-type UsageEventParams struct {
+type RecordUsageParams struct {
 	CustomerID CustomerID       `json:"customer_id"`
 	Invoker    string           `json:"invoker"`
 	Currency   string           `json:"currency"`
@@ -84,9 +84,9 @@ const (
 	UsageByTier     UsageGroupBy = "tier"
 )
 
-// UsageParams selects a usage report: one currency over [From, To), grouped
+// GetUsageParams selects a usage report: one currency over [From, To), grouped
 // by GroupBy (event_type when empty).
-type UsageParams struct {
+type GetUsageParams struct {
 	Currency string       `form:"currency"`
 	From     time.Time    `form:"from"`
 	To       time.Time    `form:"to"`

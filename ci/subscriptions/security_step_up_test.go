@@ -62,7 +62,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/payments/off-channel", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/payments/" + none + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/subscriptions/" + none + "/cancel", map[string]any{}},
-		{http.MethodPost, "/v1/import/billing", map[string]any{}},
+		{http.MethodPost, "/v1/merchant/billing-import", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/catalog/prices", map[string]any{}},
 		{http.MethodPatch, "/v1/merchant/catalog/prices/" + price.ID.String(), map[string]any{}},
 		{http.MethodPost, "/v1/merchant/catalog/products", map[string]any{}},

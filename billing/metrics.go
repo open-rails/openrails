@@ -132,13 +132,13 @@ type DashboardGrid struct {
 	H int `json:"h"`
 }
 
-// SetDashboardRequest replaces the merchant's layout.
-type SetDashboardRequest struct {
+// SetDashboardParams replaces the merchant's layout.
+type SetDashboardParams struct {
 	Widgets []DashboardWidget `json:"widgets"`
 }
 
-// AskMetricsRequest is a question about the merchant's metrics.
-type AskMetricsRequest struct {
+// AskMetricsParams is a question about the merchant's metrics.
+type AskMetricsParams struct {
 	Question string `json:"question"`
 }
 
@@ -155,9 +155,9 @@ type MetricsEvidence struct {
 	MetricsResult
 }
 
-// GenerateWidgetRequest describes a widget in words; BaseQuery, when set, is
+// GenerateDashboardWidgetParams describes a widget in words; BaseQuery, when set, is
 // an existing widget's query to refine.
-type GenerateWidgetRequest struct {
+type GenerateDashboardWidgetParams struct {
 	Prompt    string        `json:"prompt"`
 	BaseQuery *MetricsQuery `json:"base_query"`
 }

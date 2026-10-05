@@ -499,15 +499,15 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 	return admission.NewInvokerSpendLimitStore(s.rt.DB).Replace(ctx, payer, rows)
 }
 
-// BillingPolicyInput declares one named billing policy (or#897). Window entries
+// BillingPolicy declares one named billing policy (or#897). Window entries
 // carry the same {key, window_seconds, limit, currency} shape everywhere in this
 // package — billing.BudgetWindow.
-type BillingPolicyInput = billing.BillingPolicyInput
+type BillingPolicy = billing.BillingPolicy
 
-// BillingPolicyBindingInput points one rung at a policy name (or#897). Set
+// BillingPolicyBinding points one rung at a policy name (or#897). Set
 // CustomerID for the per-customer rung, Tier for the per-tier rung, neither for
 // the merchant default — never both.
-type BillingPolicyBindingInput struct {
+type BillingPolicyBinding struct {
 	PolicyName string
 	CustomerID billing.CustomerID
 	Tier       string
@@ -1109,7 +1109,7 @@ var ErrInvalidBillingPolicy = errors.New("invalid billing policy")
 // ValidateBillingPolicy runs the ONE shared normalizer (or#288 pattern) over a
 // declared policy. Both the manifest loader and this API call it, so a policy
 // that boots cannot be one the API would have refused.
-func ValidateBillingPolicy(in BillingPolicyInput) (string, models.BillingPolicy, error) {
+func ValidateBillingPolicy(in BillingPolicy) (string, models.BillingPolicy, error) {
 	name, err := merchantconfig.NormalizeBillingPolicyName(in.Name)
 	if err != nil {
 		return "", models.BillingPolicy{}, fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
@@ -1135,7 +1135,7 @@ func ValidateBillingPolicy(in BillingPolicyInput) (string, models.BillingPolicy,
 
 // SetBillingPolicy declares (or redeclares) one named billing policy (or#897).
 // Declaring a policy binds nothing — BindBillingPolicy decides who gets it.
-func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicyInput) error {
+func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicy) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -1158,7 +1158,7 @@ func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicyInput) e
 // BindBillingPolicy points one rung (customer / tier / merchant default) at a
 // declared policy name. This is the merchant's runtime lever: rebinding changes
 // which cap applies to a payer and moves no money.
-func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBindingInput) error {
+func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBinding) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -1188,7 +1188,7 @@ func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBinding
 }
 
 // ListBillingPolicies returns every declared policy for the config-sync document.
-func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput, error) {
+func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicy, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -1207,10 +1207,10 @@ func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := make([]BillingPolicyInput, 0, len(names))
+	out := make([]BillingPolicy, 0, len(names))
 	for _, name := range names {
 		body := stored[name]
-		out = append(out, BillingPolicyInput{
+		out = append(out, BillingPolicy{
 			Name:                      name,
 			Kind:                      string(body.Kind),
 			OutstandingCapAmount:      body.OutstandingCapAmount,
@@ -1230,7 +1230,7 @@ func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput
 // ListBillingPolicyBindings returns the DECLARATIVE bindings — the merchant
 // default and the per-tier rungs. Per-customer bindings are runtime segmentation
 // state and are never enumerated (that read would scale with customers).
-func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]billing.BillingPolicyBindingInput, error) {
+func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]billing.BillingPolicyBinding, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -1244,9 +1244,9 @@ func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]billing.Bill
 	if err != nil {
 		return nil, err
 	}
-	out := make([]billing.BillingPolicyBindingInput, 0, len(rows))
+	out := make([]billing.BillingPolicyBinding, 0, len(rows))
 	for _, r := range rows {
-		b := billing.BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
+		b := billing.BillingPolicyBinding{PolicyName: r.PolicyName, Tier: r.Tier}
 		out = append(out, b)
 	}
 	return out, nil

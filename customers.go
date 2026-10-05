@@ -38,7 +38,7 @@ func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID, request
 // EnsureCustomer creates the customer under the bound merchant, or replaces
 // its declared fields. Commerce writes create customers on demand; call this
 // to declare one first, or to set its billing email.
-func (c *Client) EnsureCustomer(ctx context.Context, id billing.CustomerID, params billing.CustomerParams, requestOptions ...RequestOption) (*billing.Customer, error) {
+func (c *Client) EnsureCustomer(ctx context.Context, id billing.CustomerID, params billing.EnsureCustomerParams, requestOptions ...RequestOption) (*billing.Customer, error) {
 	path, err := customerIDPath(id)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (c *Client) GetCustomerBillingPolicy(ctx context.Context, id billing.Custom
 
 // SetCustomerBillingPolicy assigns a declared policy to a customer; a nil
 // PolicyName restores inheritance. It never creates a customer.
-func (c *Client) SetCustomerBillingPolicy(ctx context.Context, id billing.CustomerID, params billing.CustomerBillingPolicyParams, requestOptions ...RequestOption) (*billing.CustomerBillingPolicy, error) {
+func (c *Client) SetCustomerBillingPolicy(ctx context.Context, id billing.CustomerID, params billing.SetCustomerBillingPolicyParams, requestOptions ...RequestOption) (*billing.CustomerBillingPolicy, error) {
 	path, err := customerIDPath(id)
 	if err != nil {
 		return nil, err

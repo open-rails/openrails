@@ -13,7 +13,7 @@ const MaxMerchantConfigurationBytes = 1 << 20
 
 // ParseMerchantConfigurationYAML accepts one bounded document without YAML
 // aliases, anchors, tags, duplicate fields or unknown schema fields.
-func ParseMerchantConfigurationYAML(raw []byte) (*MerchantConfigurationApplyParams, error) {
+func ParseMerchantConfigurationYAML(raw []byte) (*ApplyMerchantConfigurationParams, error) {
 	body, err := configdocument.YAMLToJSON(raw, MaxMerchantConfigurationBytes)
 	if err != nil {
 		return nil, err
@@ -21,13 +21,13 @@ func ParseMerchantConfigurationYAML(raw []byte) (*MerchantConfigurationApplyPara
 	return ParseMerchantConfigurationJSON(body)
 }
 
-func ParseMerchantConfigurationJSON(raw []byte) (*MerchantConfigurationApplyParams, error) {
+func ParseMerchantConfigurationJSON(raw []byte) (*ApplyMerchantConfigurationParams, error) {
 	if err := configdocument.GuardJSON(raw, MaxMerchantConfigurationBytes); err != nil {
 		return nil, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	var params MerchantConfigurationApplyParams
+	var params ApplyMerchantConfigurationParams
 	if err := decoder.Decode(&params); err != nil {
 		return nil, err
 	}

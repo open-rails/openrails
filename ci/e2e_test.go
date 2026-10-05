@@ -150,9 +150,9 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 
 	customerA := uuid.NewString()
 	customerB := uuid.NewString()
-	_, err = alice.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.CustomerParams{})
+	_, err = alice.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.EnsureCustomerParams{})
 	require.NoError(t, err)
-	_, err = bob.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerB)), billing.CustomerParams{})
+	_, err = bob.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerB)), billing.EnsureCustomerParams{})
 	require.NoError(t, err)
 	_, err = alice.CreateEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.CreateEntitlementParams{Entitlement: "content:" + productA.Key})
 	require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	customer := uuid.NewString()
-	request := billing.CreateCheckoutAttemptRequest{
+	request := billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(customer), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:premium",

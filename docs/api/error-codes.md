@@ -12,7 +12,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `allowance_source_in_use` | 409 | `invalid_request_error` | The allowance source is in use. |
 | `allowance_source_invalid` | 409 | `invalid_request_error` | The allowance source cannot back this rate card. |
 | `api_host_claim_missing` | 409 | `invalid_request_error` | No api_host has been claimed. |
-| `api_host_requires_proof` | 409 | `invalid_request_error` | A new api_host must be claimed and proven before configuration names it. |
 | `api_host_reserved` | 400 | `invalid_request_error` | The api_host serves this deployment. |
 | `api_host_taken` | 409 | `invalid_request_error` | The api_host is assigned to another merchant. |
 | `api_host_unproven` | 409 | `invalid_request_error` | The api_host's DNS proof was not found. |
@@ -128,6 +127,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
+| `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
 | `name_reserved` | 409 | `invalid_request_error` | The merchant name is reserved. |
 | `name_taken` | 409 | `invalid_request_error` | The merchant name is taken. |
 | `operation_authorization_conflict` | 409 | `invalid_request_error` | The operation id was reused with a changed term; param names it. |

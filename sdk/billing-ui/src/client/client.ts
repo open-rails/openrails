@@ -338,7 +338,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           body: {
             reason: input.reason.trim(),
             signature: input.signature,
-          } satisfies wire.CustomerCancelSubscriptionRequest,
+          } satisfies wire.CustomerCancelSubscriptionParams,
         }
       )
     },
@@ -363,7 +363,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "PUT",
           body: {
             payment_method_id: paymentMethodId,
-          } satisfies wire.UpdateSubscriptionPaymentMethodParams,
+          } satisfies wire.SetSubscriptionPaymentMethodParams,
         }
       )
     },
@@ -406,7 +406,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           body: {
             price_id: input.priceId,
             signature: input.signature,
-          } satisfies wire.CustomerChangeTierRequest,
+          } satisfies wire.CustomerChangeTierParams,
           headers: { "Idempotency-Key": input.idempotencyKey },
         }
       )
@@ -585,7 +585,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           price_key: input.priceKey,
           price_id: input.priceId,
           success_url: input.successUrl,
-        } satisfies wire.CheckoutSessionMintRequest,
+        } satisfies wire.MintCheckoutSessionParams,
       })
     },
 
@@ -604,7 +604,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           try {
             return await json(payResultSchema, `${path}/pay`, {
               method: "POST",
-              body: request satisfies wire.CheckoutSessionPayRequest,
+              body: request satisfies wire.PayCheckoutSessionParams,
               anonymous: true,
             })
           } catch (err) {

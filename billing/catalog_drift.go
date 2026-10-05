@@ -33,9 +33,9 @@ type CatalogDriftListParams struct {
 	ResourceType string
 }
 
-// CatalogDriftCheck is the result of reading every linked PSP's catalog
+// CatalogDriftRefresh is the result of reading every linked PSP's catalog
 // now: what it scanned, and how many findings it opened and resolved.
-type CatalogDriftCheck struct {
+type CatalogDriftRefresh struct {
 	ScannedProducts    int `json:"scanned_products"`
 	ScannedPrices      int `json:"scanned_prices"`
 	ScannedNMIPlans    int `json:"scanned_nmi_plans"`

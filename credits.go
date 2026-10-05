@@ -42,7 +42,7 @@ func withQuery(path string, q url.Values) string {
 // idempotent: an identical retry returns the existing grant with Replayed set,
 // one with a different amount, currency or expiry is
 // billing.ErrIdempotencyKeyReused.
-func (c *Client) CreateCreditGrant(ctx context.Context, customer billing.CustomerID, params billing.CreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error) {
+func (c *Client) CreateCreditGrant(ctx context.Context, customer billing.CustomerID, params billing.CreateCreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (c *Client) GetCreditLimit(ctx context.Context, customer billing.CustomerID
 }
 
 // SetCreditLimit sets how much a customer may owe in arrears.
-func (c *Client) SetCreditLimit(ctx context.Context, customer billing.CustomerID, params billing.CreditLimitParams, requestOptions ...RequestOption) (*billing.CreditLimit, error) {
+func (c *Client) SetCreditLimit(ctx context.Context, customer billing.CustomerID, params billing.SetCreditLimitParams, requestOptions ...RequestOption) (*billing.CreditLimit, error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func (c *Client) GetTrustLevel(ctx context.Context, customer billing.CustomerID,
 
 // SetTrustLevel stores the trust level a customer's admissions use when a
 // request names none; an empty level clears it.
-func (c *Client) SetTrustLevel(ctx context.Context, customer billing.CustomerID, params billing.TrustLevelParams, requestOptions ...RequestOption) (*billing.TrustLevel, error) {
+func (c *Client) SetTrustLevel(ctx context.Context, customer billing.CustomerID, params billing.SetTrustLevelParams, requestOptions ...RequestOption) (*billing.TrustLevel, error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (c *Client) SetSpendDelegations(ctx context.Context, customer billing.Custo
 		delegations = []billing.SpendDelegation{}
 	}
 	var out billing.ListPage[billing.SpendDelegation]
-	if err := c.do(ctx, http.MethodPut, path+"/spend-delegations", billing.SpendDelegationsParams{Delegations: delegations}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPut, path+"/spend-delegations", billing.SetSpendDelegationsParams{Delegations: delegations}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -253,7 +253,7 @@ func (c *Client) SetSpendDelegation(ctx context.Context, customer billing.Custom
 		return nil, err
 	}
 	var out billing.SpendDelegation
-	body := billing.SpendDelegationParams{Windows: delegation.Windows, Provenance: delegation.Provenance}
+	body := billing.SetSpendDelegationParams{Windows: delegation.Windows, Provenance: delegation.Provenance}
 	if err := c.do(ctx, http.MethodPut, path, body, &out, requestOptions...); err != nil {
 		return nil, err
 	}

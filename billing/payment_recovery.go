@@ -30,7 +30,7 @@ func (o PaymentOperation) Unresolved() bool {
 	return false
 }
 
-type RetrySubscriptionNowRequest struct {
+type RetrySubscriptionNowParams struct {
 	SubscriptionID SubscriptionID `json:"-"`
 	IdempotencyKey string         `json:"-"`
 	// If supplied, the method must be the subscription's current saved method.

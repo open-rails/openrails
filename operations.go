@@ -8,26 +8,30 @@ import (
 )
 
 // ListRepairAlerts pages ledger repairs that need the merchant.
-func (c *Client) ListRepairAlerts(ctx context.Context, req billing.ListRepairAlertsRequest, options ...RequestOption) (billing.ListPage[billing.Notification], error) {
+func (c *Client) ListRepairAlerts(ctx context.Context, req billing.RepairAlertListParams, options ...RequestOption) (*billing.ListPage[billing.Notification], error) {
 	q := cursorQuery(req.PageRequest)
 	if req.Seen != nil {
 		q.Set("seen", map[bool]string{true: "true", false: "false"}[*req.Seen])
 	}
 	var out billing.ListPage[billing.Notification]
-	err := c.do(ctx, http.MethodGet, "/v1/merchant/repair-alerts?"+q.Encode(), nil, &out, options...)
-	return out, err
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/repair-alerts?"+q.Encode(), nil, &out, options...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // ListWorkerHealth returns each background job kind's recent runs.
-func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (billing.ListPage[billing.WorkerHealth], error) {
+func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error) {
 	var out billing.ListPage[billing.WorkerHealth]
-	err := c.do(ctx, http.MethodGet, "/v1/merchant/worker-health", nil, &out, options...)
-	return out, err
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/worker-health", nil, &out, options...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // ListFindings pages the findings queue: open findings unless req.Status
 // names another, most severe first, then oldest.
-func (c *Client) ListFindings(ctx context.Context, req billing.ListFindingsRequest, options ...RequestOption) (billing.ListPage[billing.Finding], error) {
+func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams, options ...RequestOption) (*billing.ListPage[billing.Finding], error) {
 	q := cursorQuery(req.PageRequest)
 	for key, value := range map[string]string{"status": string(req.Status), "severity": req.Severity, "finding_type": req.Type} {
 		if value != "" {
@@ -35,8 +39,10 @@ func (c *Client) ListFindings(ctx context.Context, req billing.ListFindingsReque
 		}
 	}
 	var out billing.ListPage[billing.Finding]
-	err := c.do(ctx, http.MethodGet, "/v1/merchant/findings?"+q.Encode(), nil, &out, options...)
-	return out, err
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings?"+q.Encode(), nil, &out, options...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetFindingSummary returns the findings queue at a glance.
@@ -62,7 +68,7 @@ func (c *Client) GetFinding(ctx context.Context, id billing.FindingID, options .
 
 // ResolveFinding approves (runs the recommendation) or ignores one open
 // finding.
-func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req billing.ResolveFindingRequest, options ...RequestOption) (*billing.FindingResolution, error) {
+func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req billing.ResolveFindingParams, options ...RequestOption) (*billing.FindingResolution, error) {
 	if id.IsZero() {
 		return nil, invalidErr("finding id is required")
 	}

@@ -205,7 +205,7 @@ func (s *PlanMigrationService) redriveRow(ctx context.Context, row *models.Subsc
 	// (not persisted, and stale by definition) must not manufacture an
 	// off-schedule entitlement cutover — the renewal-boundary flip is the
 	// forced-migration invariant-safe mode on every rail.
-	req := &PlanMigrationRequest{
+	req := &CreatePlanMigrationParams{
 		SourcePriceID: source.ID,
 		TargetPriceID: target.ID,
 		EffectiveAt:   row.EffectiveAt,

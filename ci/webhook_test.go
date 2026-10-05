@@ -167,9 +167,9 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CustomerParams{})
+	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.EnsureCustomerParams{})
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "webhook@example.test"},
 		PriceID:        price.ID,
 		Entitlement:    "content:webhook",
@@ -215,7 +215,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	access, err := client.HasEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(userID)), "content:webhook", time.Time{})
 	require.NoError(t, err)
 	require.True(t, access)
-	payments, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
+	payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
 	require.NoError(t, err)
 	require.Len(t, payments.Items, 1, "event replay must not duplicate the payment")
 	require.EqualValues(t, 1_000_000, payments.Items[0].Amount)

@@ -16,14 +16,10 @@ internal/http/handlers/checkout_session.go 1
 internal/http/handlers/customer_payment.go 2
 internal/http/handlers/entitlement_features.go 4
 internal/http/handlers/entitlements.go 7
-internal/http/handlers/merchant_catalog_copilot.go 6
-internal/http/handlers/merchant_dashboard.go 1
-internal/http/handlers/merchant_metrics.go 2
 internal/http/handlers/payment_attempts.go 1
 internal/http/handlers/platform_merchants.go 15
 internal/http/handlers/portal.go 3
 internal/http/handlers/product_access.go 5
-internal/http/handlers/product_archive.go 9
 internal/http/handlers/self_account.go 2
 internal/http/handlers/service_commerce.go 4
 internal/http/handlers/solana_pay.go 13

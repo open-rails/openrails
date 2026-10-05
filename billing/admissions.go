@@ -134,17 +134,17 @@ type CaptureUsage struct {
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 }
 
-// CaptureParams settles an admitted request at Amount; zero completes it at
+// CaptureAdmissionParams settles an admitted request at Amount; zero completes it at
 // no cost. Amount is required. A retry that changes the terms is
 // ErrIdempotencyKeyReused.
-type CaptureParams struct {
+type CaptureAdmissionParams struct {
 	Amount int64         `json:"amount,string"`
 	Usage  *CaptureUsage `json:"usage,omitempty"`
 }
 
 // UnmarshalJSON refuses a capture that does not name its amount, so a
 // missing field is never read as a free completion.
-func (p *CaptureParams) UnmarshalJSON(raw []byte) error {
+func (p *CaptureAdmissionParams) UnmarshalJSON(raw []byte) error {
 	var in struct {
 		Amount *int64        `json:"amount,string"`
 		Usage  *CaptureUsage `json:"usage"`
@@ -178,10 +178,10 @@ type ExtendAdmissionParams struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// WastedSpendParams reports spend a customer's invoker wasted (failed or
+// ReportWastedSpendParams reports spend a customer's invoker wasted (failed or
 // abusive work). Source and SourceID identify the report: a replay records
 // nothing new, one with a changed Amount is ErrIdempotencyKeyReused.
-type WastedSpendParams struct {
+type ReportWastedSpendParams struct {
 	CustomerID  CustomerID  `json:"customer_id"`
 	Invoker     string      `json:"invoker"`
 	InvokerType InvokerType `json:"invoker_type"`

@@ -125,7 +125,7 @@ func (c *customer) session(body map[string]any) hostedSession {
 // minted server-side through the Client.
 func (w *world) handOver(c *customer, price billing.PriceID) hostedSession {
 	w.t.Helper()
-	link, err := w.client[remote].CreateCheckoutSession(w.t.Context(), billing.CreateCheckoutSessionRequest{Customer: c.identity(), PriceID: price})
+	link, err := w.client[remote].CreateCheckoutSession(w.t.Context(), billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price})
 	require.NoError(w.t, err)
 	return hostedSession{w: w, id: link.ID}
 }
@@ -435,7 +435,7 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 	for _, tp := range []topology{embedded, remote} {
 		buyer := app.newCustomer()
 		method := buyer.saveCard("nmi", visa)
-		link, err := app.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		link, err := app.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceKey: price.Key,
 		})
 		require.NoError(t, err, tp)
@@ -459,7 +459,7 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 		require.True(t, buyer.entitled("content:members"))
 	}
 
-	_, err := app.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+	_, err := app.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString())}, PriceKey: "no-such-price",
 	})
 	require.ErrorIs(t, err, billing.ErrInvalid)

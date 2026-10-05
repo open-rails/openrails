@@ -45,6 +45,13 @@ func (f *fixture) attachControlPlane(t *testing.T, edit func(*openrails.Config, 
 	return client
 }
 
+// operatorRename renames a merchant as the operator: no rename interval, no
+// reserved-name check.
+func operatorRename(ctx context.Context, cp *openrails.Client, id billing.MerchantID, name string) error {
+	_, err := operator.Get(engine.Graph(cp)).RenameMerchant(ctx, id, name, "", true)
+	return err
+}
+
 // standaloneHandler is the standalone server's full HTTP surface.
 func standaloneHandler(client *openrails.Client) (http.Handler, error) {
 	server, err := operator.StandaloneServer(engine.Graph(client))
@@ -119,41 +126,41 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	other, _ := newUser(t, cp)
 
 	acme := uniqueName("acme")
-	created, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: acme, OwnerUserID: owner})
+	created, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: acme, OwnerUserID: owner})
 	require.NoError(t, err)
 	require.True(t, created.Created)
 	group, err := cp.AuthKit().Group(ctx, iam.GroupByID(created.GroupID))
 	require.NoError(t, err)
 	require.Equal(t, created.MerchantID.String(), group.ID, "the AuthKit group is keyed by the merchant and carries no name")
 
-	again, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
+	again, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
 	require.False(t, again.Created, "a taken name never becomes another merchant")
 	require.Equal(t, created.MerchantID, again.MerchantID)
 
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: reserved, OwnerUserID: owner})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: reserved, OwnerUserID: owner})
 	require.ErrorIs(t, err, billing.ErrMerchantSlugReserved)
-	platform, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: reserved})
+	platform, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: reserved})
 	require.NoError(t, err, "operators claim reserved names")
 	require.True(t, platform.Created)
 
 	renamed := uniqueName("acme")
-	require.NoError(t, cp.RenameMerchant(ctx, created.MerchantID, renamed))
+	require.NoError(t, operatorRename(ctx, cp, created.MerchantID, renamed))
 	for _, ref := range []string{acme, renamed} {
 		mid, current, err := cp.ResolveMerchantForGroup(ctx, ref)
 		require.NoError(t, err, ref)
 		require.Equal(t, created.MerchantID, mid, "the former name forwards")
 		require.Equal(t, renamed, current)
 	}
-	blocked, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
+	blocked, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
 	require.False(t, blocked.Created, "a former name is not claimable by another merchant")
 	var pgErr *pgconn.PgError
 	_, err = f.pool.Exec(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1)", acme)
 	require.ErrorAs(t, err, &pgErr, "the database guards the namespace for every writer")
 	require.Equal(t, "merchant_slug_aliases_pkey", pgErr.ConstraintName)
-	require.ErrorIs(t, cp.RenameMerchant(ctx, platform.MerchantID, acme), billing.ErrMerchantNameTaken)
-	require.NoError(t, cp.RenameMerchant(ctx, created.MerchantID, acme), "a merchant takes its own former name back")
+	require.ErrorIs(t, operatorRename(ctx, cp, platform.MerchantID, acme), billing.ErrMerchantNameTaken)
+	require.NoError(t, operatorRename(ctx, cp, created.MerchantID, acme), "a merchant takes its own former name back")
 	mid, current, err := cp.ResolveMerchantForGroup(ctx, renamed)
 	require.NoError(t, err)
 	require.Equal(t, []any{created.MerchantID, acme}, []any{mid, current})
@@ -164,7 +171,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	for _, released := range []string{acme, renamed} {
 		_, _, err := cp.ResolveMerchantForGroup(ctx, released)
 		require.ErrorIs(t, err, billing.ErrMerchantUnresolved, released)
-		reclaimed, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: released, OwnerUserID: other})
+		reclaimed, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: released, OwnerUserID: other})
 		require.NoError(t, err)
 		require.True(t, reclaimed.Created, "retirement releases the name and its former names")
 		require.NotEqual(t, created.MerchantID, reclaimed.MerchantID)
@@ -180,10 +187,10 @@ func TestMerchantRenameRoute(t *testing.T) {
 	ctx := t.Context()
 	owner, token := newOwner(t, cp)
 	shop := uniqueName("shop")
-	m, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner})
+	m, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner})
 	require.NoError(t, err)
 	taken := uniqueName("taken")
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: taken})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: taken})
 	require.NoError(t, err)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

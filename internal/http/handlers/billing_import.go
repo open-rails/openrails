@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// ImportDeclaredBilling handles POST /v1/import/billing (#737): the HTTP door
+// ImportDeclaredBilling handles POST /v1/merchant/billing-import (#737): the HTTP door
 // into the DeclaredBilling import seam (billingimport.Import — the same body/
 // result vocabulary as pkg/embedded.ImportBilling). The merchant comes from the
 // authenticated credential; times are RFC3339, amounts provider-wire CENTS

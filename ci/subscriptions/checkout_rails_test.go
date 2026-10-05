@@ -46,7 +46,7 @@ products:
 
 func (w *world) options(priceKey string) map[string]billing.CheckoutOption {
 	w.t.Helper()
-	config, err := w.client[remote].GetCheckoutConfig(w.t.Context(), billing.CheckoutConfigQuery{PriceKey: priceKey})
+	config, err := w.client[remote].GetCheckoutConfig(w.t.Context(), billing.GetCheckoutConfigParams{PriceKey: priceKey})
 	require.NoError(w.t, err)
 	out := map[string]billing.CheckoutOption{}
 	for _, option := range config.Options {
@@ -128,7 +128,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	// The advertised Solana option is sellable: a subscription session opens
 	// a Solana Pay request for the published plan.
 	buyer := w.newCustomer()
-	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(priceID(t, w, key+"-monthly")),
 		IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: solana.Selector, PSPID: solana.PSPID, TokenSymbol: solana.PublicConfig["token_symbol"]},
@@ -186,7 +186,7 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	require.Contains(t, options, "nmi")
 
 	buyer := w.newCustomer()
-	_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id), VerifiedEmail: "buyer@e2e.test"}, PriceID: pid(priceID(t, w, key+"-monthly")),
 		IdempotencyKey: "ccbill-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "E2E Payer", Zip: "10001", Country: "US"},

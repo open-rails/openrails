@@ -476,12 +476,12 @@ func ListMyPayments(r *httprequest.Request) {
 }
 
 // paymentListParams reads the filters both payment lists share.
-func paymentListParams(r *httprequest.Request) (billing.ListPaymentsParams, bool) {
+func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool) {
 	page, ok := r.Page()
 	if !ok {
-		return billing.ListPaymentsParams{}, false
+		return billing.PaymentListParams{}, false
 	}
-	params := billing.ListPaymentsParams{Page: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
+	params := billing.PaymentListParams{Page: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
 	for name, parse := range map[string]func(string) error{
 		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
 		"price_id":        func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return },
@@ -489,7 +489,7 @@ func paymentListParams(r *httprequest.Request) (billing.ListPaymentsParams, bool
 		if raw := strings.TrimSpace(r.Query(name)); raw != "" {
 			if parse(raw) != nil {
 				r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
-				return billing.ListPaymentsParams{}, false
+				return billing.PaymentListParams{}, false
 			}
 		}
 	}
@@ -499,13 +499,13 @@ func paymentListParams(r *httprequest.Request) (billing.ListPaymentsParams, bool
 			params.Kind = kind
 		default:
 			r.APIError(api.Coded(billing.CodeInvalidQuery, "kind is invalid").WithParam("kind"))
-			return billing.ListPaymentsParams{}, false
+			return billing.PaymentListParams{}, false
 		}
 	}
 	return params, true
 }
 
-func writePaymentPage(r *httprequest.Request, params billing.ListPaymentsParams) {
+func writePaymentPage(r *httprequest.Request, params billing.PaymentListParams) {
 	page, err := r.State.PaymentService.ListPage(r.Request.Context(), params)
 	if err != nil {
 		writeRefusal(r, err, "failed to list payments")

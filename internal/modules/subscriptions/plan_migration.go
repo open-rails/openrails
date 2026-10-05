@@ -78,9 +78,9 @@ var (
 	ErrPlanMigrationBadFallback = errors.New("plan migration: fallback_policy must be keep_grandfathered or cancel_at_period_end")
 )
 
-// PlanMigrationRequest is one operator decision: retire source_price, move
+// CreatePlanMigrationParams is one operator decision: retire source_price, move
 // its whole cohort to target_price.
-type PlanMigrationRequest struct {
+type CreatePlanMigrationParams struct {
 	SourcePriceID uuid.UUID
 	TargetPriceID uuid.UUID
 	// EffectiveAt: each subscription flips at its FIRST RENEWAL on/after this
@@ -183,7 +183,7 @@ func normalizeFallback(policy string) (string, error) {
 }
 
 // resolveMigration loads and validates the source/target pair.
-func (s *PlanMigrationService) resolveMigration(ctx context.Context, req *PlanMigrationRequest) (source, target *models.Price, err error) {
+func (s *PlanMigrationService) resolveMigration(ctx context.Context, req *CreatePlanMigrationParams) (source, target *models.Price, err error) {
 	source, err = s.reprice.prices.GetByID(ctx, req.SourcePriceID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("plan migration: source price: %w", err)
@@ -209,7 +209,7 @@ func (s *PlanMigrationService) resolveMigration(ctx context.Context, req *PlanMi
 
 // classify runs the shared per-subscription pass (capability, scheduled
 // conflicts, #781 notice window) without writing anything.
-func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationRequest, source, target *models.Price) (cohort []*models.Subscription, outcomes []PlanMigrationOutcome, byRail map[string]*RailCounts, err error) {
+func (s *PlanMigrationService) classify(ctx context.Context, req *CreatePlanMigrationParams, source, target *models.Price) (cohort []*models.Subscription, outcomes []PlanMigrationOutcome, byRail map[string]*RailCounts, err error) {
 	cohort, err = s.reprice.repo.ListMigratableSubscriptionsByPriceID(ctx, source.ID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("plan migration: list cohort: %w", err)
@@ -283,7 +283,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 // Preview classifies the whole cohort WITHOUT writing anything — the
 // operator's commit gate: per-rail auto/requires-action/skip counts and the
 // full per-subscription ledger.
-func (s *PlanMigrationService) Preview(ctx context.Context, req PlanMigrationRequest) (*PlanMigrationResult, error) {
+func (s *PlanMigrationService) Preview(ctx context.Context, req CreatePlanMigrationParams) (*PlanMigrationResult, error) {
 	fallback, err := normalizeFallback(req.FallbackPolicy)
 	if err != nil {
 		return nil, err
@@ -323,7 +323,7 @@ func (s *PlanMigrationService) Preview(ctx context.Context, req PlanMigrationReq
 // degrade the affected rows to blocked (with the push error) instead of
 // failing the whole batch — the ledger stays complete and a re-run migrates
 // the remainder (already-scheduled subs skip via the one-scheduled conflict).
-func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationRequest) (*PlanMigrationResult, error) {
+func (s *PlanMigrationService) Migrate(ctx context.Context, req CreatePlanMigrationParams) (*PlanMigrationResult, error) {
 	fallback, err := normalizeFallback(req.FallbackPolicy)
 	if err != nil {
 		return nil, err
@@ -436,7 +436,7 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 }
 
 // executeScheduled performs the per-rail action for one scheduled row.
-func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMigrationRequest, sub *models.Subscription, source, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
+func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *CreatePlanMigrationParams, sub *models.Subscription, source, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
 	switch s.classifyMigrationCapability(ctx, sub) {
 	case capabilityAutoStripe:
 		return s.pushStripe(ctx, req, sub, source, target, row)
@@ -473,7 +473,7 @@ func deferredPushRequired(effectiveAt time.Time, sub *models.Subscription) bool 
 // applied in the same operation. Billing flips at the NEXT rebill (NMI
 // charges the record's amount on its unchanged schedule); nothing is charged
 // here and the rebill date never moves.
-func (s *PlanMigrationService) pushNMI(ctx context.Context, req *PlanMigrationRequest, sub *models.Subscription, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
+func (s *PlanMigrationService) pushNMI(ctx context.Context, req *CreatePlanMigrationParams, sub *models.Subscription, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
 	if s.nmi == nil {
 		return fmt.Errorf("nmi pusher not configured")
 	}
@@ -502,7 +502,7 @@ func (s *PlanMigrationService) pushNMI(ctx context.Context, req *PlanMigrationRe
 // proration_behavior=none (nothing charged until the next invoice). The
 // INTERNAL cutover is applied by converge from fetched provider truth, which
 // also marks the row applied (ApplyScheduledRepriceForSubscriptionPrice).
-func (s *PlanMigrationService) pushStripe(ctx context.Context, req *PlanMigrationRequest, sub *models.Subscription, source, target *models.Price, row *models.SubscriptionReprice) error {
+func (s *PlanMigrationService) pushStripe(ctx context.Context, req *CreatePlanMigrationParams, sub *models.Subscription, source, target *models.Price, row *models.SubscriptionReprice) error {
 	if s.stripe == nil {
 		return fmt.Errorf("stripe pusher not configured")
 	}

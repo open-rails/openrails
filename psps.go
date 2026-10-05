@@ -91,7 +91,7 @@ func (c *Client) ArchivePSP(ctx context.Context, id billing.PSPID, params billin
 
 // PreviewPSPRouting reports which PSP a checkout for a price would use, and
 // why each other PSP was passed over. Nothing is created.
-func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PSPRoutingPreviewParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error) {
+func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error) {
 	var out billing.PSPRoutingPreview
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/routing-preview", params, &out, requestOptions...); err != nil {
 		return nil, err

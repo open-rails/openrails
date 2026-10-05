@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -88,23 +88,23 @@ func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64,
 // service's mutating methods, only its own reads (GetCurrentByKey etc.) to
 // pre-flight the same business rule the API would enforce if this ever
 // became a real reprice call.
-func crossConstraintRefusal(from, to *models.Price) *DraftRefusal {
+func crossConstraintRefusal(from, to *models.Price) *billing.CatalogDraftRefusal {
 	if to.Archived {
-		return &DraftRefusal{
+		return &billing.CatalogDraftRefusal{
 			Code:       "inactive_price",
 			Reason:     "the target price is archived and cannot receive a migration",
 			Workaround: "point at the key's CURRENT price (call get_price to confirm which one that is) instead of an archived version.",
 		}
 	}
 	if to.ProductID != from.ProductID {
-		return &DraftRefusal{
+		return &billing.CatalogDraftRefusal{
 			Code:       "cross_product",
 			Reason:     "the target price belongs to a DIFFERENT product — moving subscribers onto a pre-existing, distinct product is plan consolidation, not a price change",
 			Workaround: "cross-product migration is deferred (#778) until a real consolidation need appears. Workaround: archive the old product's prices (stops new sales) and leave the existing cohort grandfathered on it; a genuine consolidation needs a human to plan the entitlement/invoice-naming implications.",
 		}
 	}
 	if !strings.EqualFold(strings.TrimSpace(to.Currency), strings.TrimSpace(from.Currency)) {
-		return &DraftRefusal{
+		return &billing.CatalogDraftRefusal{
 			Code:       "cross_currency",
 			Reason:     "the target price is in a different currency — repricing never crosses currencies (no FX surprises on an existing billing agreement)",
 			Workaround: "pick a target price in the same currency, or draft a same-currency successor under this key instead.",
@@ -144,7 +144,7 @@ type draftPriceChangeArgs struct {
 	MigrateToPriceKey string `json:"migrate_to_price_key,omitempty"`
 }
 
-func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) (string, *Draft, error) {
+func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) (string, *billing.CatalogDraft, error) {
 	var args draftPriceChangeArgs
 	if err := strictDecode(raw, &args); err != nil {
 		return "", nil, err
@@ -173,7 +173,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 			// ordinary same-key version bump under a different name, which
 			// this tool does not support ambiguously. Ask for a plain
 			// draft_price_change on price_key instead.
-			refusal = &DraftRefusal{
+			refusal = &billing.CatalogDraftRefusal{
 				Code:       "same_product_migration",
 				Reason:     "migrate_to_price_key resolves to the same product/currency — this tool only bumps price_key's OWN version; there is no separate 'move to a same-product key' operation",
 				Workaround: fmt.Sprintf("call draft_price_change with price_key=%q and the new amount directly.", key),
@@ -181,7 +181,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		}
 		return fmt.Sprintf("refused (%s): %s\nworkaround: %s\nnext: relay this to the merchant — no draft was created, nothing was changed.",
 				refusal.Code, refusal.Reason, refusal.Workaround),
-			&Draft{Kind: "refused", Refusal: refusal}, nil
+			&billing.CatalogDraft{Kind: billing.CatalogDraftRefused, Refusal: refusal}, nil
 	}
 
 	if args.NewAmount <= 0 {
@@ -218,36 +218,33 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	reviewText := buildPriceChangeReviewText(current.Currency, current.Amount, args.NewAmount, affected, mode, effectiveAt, now)
 
-	providers := make([]string, 0, len(current.PSPLinks))
-	for provider := range current.PSPLinks {
-		providers = append(providers, provider)
+	psps := make([]string, 0, len(current.PSPLinks))
+	for psp := range current.PSPLinks {
+		psps = append(psps, psp)
 	}
+	sort.Strings(psps)
 
-	draft := &PriceChangeDraft{
-		DraftID:       uuid.NewString(),
-		DraftedBy:     DraftedBy,
+	draft := &billing.PriceChangeDraft{
 		PriceKey:      key,
 		CurrentAmount: current.Amount,
 		NewAmount:     args.NewAmount,
 		Currency:      current.Currency,
-		Direction:     direction,
-		MigrationMode: mode,
 		AffectedCount: affected,
 		ReviewText:    reviewText,
-		CreatePrice: CreatePriceDraft{
-			ProductID: current.ProductID.String(), Key: key,
+		CreatePrice: billing.CreatePriceParams{
+			ProductID: billing.ProductID(current.ProductID), Key: key,
 			UnitAmount: args.NewAmount, Currency: current.Currency,
 			AccessDurationHours: current.AccessDurationHours, AutoRenew: current.AutoRenew,
 			TrialUnitAmount: current.TrialUnitAmount, TrialDurationHours: current.TrialDurationHours,
-			Providers: providers,
+			PSPs: psps,
 		},
 	}
 	if mode == "migrate" {
-		draft.Reprice = &RepriceDraft{PriceKey: key, EffectiveAt: effectiveAt}
+		draft.Reprice = &billing.CreateRepriceBatchParams{PriceKey: key, EffectiveAt: effectiveAt}
 	}
 
-	content := fmt.Sprintf("draft ready (draft_id=%s): %s\nnext: requires human confirm via the price-change wizard — nothing has been changed yet.", draft.DraftID, reviewText)
-	return content, &Draft{Kind: "price_change", PriceChange: draft}, nil
+	content := fmt.Sprintf("draft ready: %s\nnext: requires human confirm via the price-change wizard — nothing has been changed yet.", reviewText)
+	return content, &billing.CatalogDraft{Kind: billing.CatalogDraftPriceChange, PriceChange: draft}, nil
 }
 
 // -- Tool: draft_catalog_diff ---------------------------------------------------
@@ -283,7 +280,7 @@ type draftCatalogDiffArgs struct {
 	AutoRenew           bool   `json:"auto_renew,omitempty"`
 }
 
-func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) (string, *Draft, error) {
+func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) (string, *billing.CatalogDraft, error) {
 	var args draftCatalogDiffArgs
 	if err := strictDecode(raw, &args); err != nil {
 		return "", nil, err
@@ -326,15 +323,14 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 	reviewText := fmt.Sprintf("New tier %q on %s: %s / %s. No existing subscribers are affected until you create it.",
 		key, product.DisplayName, moneyutil.FormatAmount(args.UnitAmount, currency), interval)
 
-	draft := &CatalogDiffDraft{
-		DraftID: uuid.NewString(), DraftedBy: DraftedBy,
+	draft := &billing.NewPriceDraft{
 		ProductKey: productKey, ReviewText: reviewText,
-		CreatePrice: CreatePriceDraft{
-			ProductID: product.ID.String(), Key: key,
+		CreatePrice: billing.CreatePriceParams{
+			ProductID: billing.ProductID(product.ID), Key: key,
 			UnitAmount: args.UnitAmount, Currency: currency,
 			AccessDurationHours: args.AccessDurationHours, AutoRenew: args.AutoRenew,
 		},
 	}
-	content := fmt.Sprintf("draft ready (draft_id=%s): %s\nnext: requires human confirm via the console's new-price form — nothing has been changed yet.", draft.DraftID, reviewText)
-	return content, &Draft{Kind: "catalog_diff", CatalogDiff: draft}, nil
+	content := fmt.Sprintf("draft ready: %s\nnext: requires human confirm via the console's new-price form — nothing has been changed yet.", reviewText)
+	return content, &billing.CatalogDraft{Kind: billing.CatalogDraftNewPrice, NewPrice: draft}, nil
 }

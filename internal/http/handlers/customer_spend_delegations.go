@@ -33,7 +33,7 @@ func SetSpendDelegations(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.SpendDelegationsParams
+	var params billing.SetSpendDelegationsParams
 	if !r.BindJSON(&params) {
 		return
 	}
@@ -64,7 +64,7 @@ func SetSpendDelegation(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.SpendDelegationParams
+	var params billing.SetSpendDelegationParams
 	if !r.BindJSON(&params) {
 		return
 	}

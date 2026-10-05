@@ -192,7 +192,7 @@ var pendingDynamicMoney = map[string]string{
 // the test that pins its money encoding; a marshaler the struct-tag scan
 // cannot see must be pinned or it is a violation.
 var pinnedMarshalers = map[string]string{
-	"billing/merchant_configuration.go:MerchantConfigurationApplyParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
+	"billing/merchant_configuration.go:ApplyMerchantConfigurationParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
 	"billing/amount_map.go:AmountMap":                                    "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
 	"internal/modules/metrics/service.go:MoneyCell":                      "TestResultWireEncoding — decimal string",
 	"catalog/application.go:Field":                                       "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",

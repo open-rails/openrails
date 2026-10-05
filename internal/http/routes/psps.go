@@ -17,20 +17,20 @@ var pspsRoutes = []Route{
 		Query: params(queryOf(handlers.PSPListQuery{}), integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
 	{Method: POST, Path: "/v1/merchant/psps", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
 		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
-	{Method: GET, Path: "/v1/merchant/psps/{psp_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+	{Method: GET, Path: "/v1/merchant/psps/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
 		Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.GetPSP)},
 	// Credentials rotate here; settings changes work with a read-only
 	// credential backend.
-	{Method: PATCH, Path: "/v1/merchant/psps/{psp_id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+	{Method: PATCH, Path: "/v1/merchant/psps/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
 		Request: billing.UpdatePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: pspWriteErrors("psp_not_found"), Handler: h(handlers.UpdatePSP)},
 	// Archiving writes only the PSP row, never a secret, never the provider:
 	// a terminated account archives from any deployment.
-	{Method: POST, Path: "/v1/merchant/psps/{psp_id}/archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+	{Method: POST, Path: "/v1/merchant/psps/{id}/archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
 		Request: billing.ArchivePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_last_active", "psp_not_found", "service_unavailable"), Handler: h(handlers.ArchivePSP)},
 	// or#288: which PSP a checkout would get, and why. A projection of the
 	// PSP catalog, so it takes the same read.
 	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
-		Request: billing.PSPRoutingPreviewParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
+		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
 	// A refresh rewrites the subscription mirrors from provider truth.
 	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
 		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},

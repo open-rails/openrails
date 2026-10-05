@@ -21,7 +21,7 @@ func GetMerchantConfiguration(r *httprequest.Request) {
 }
 
 func ApplyMerchantConfiguration(r *httprequest.Request) {
-	var params billing.MerchantConfigurationApplyParams
+	var params billing.ApplyMerchantConfigurationParams
 	if !r.BindJSON(&params) {
 		return
 	}

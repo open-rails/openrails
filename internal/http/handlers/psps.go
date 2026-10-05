@@ -40,7 +40,7 @@ func ListPSPs(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetPSP handles GET /v1/merchant/psps/{psp_id}.
+// GetPSP handles GET /v1/merchant/psps/{id}.
 func GetPSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
 	if !ok {
@@ -72,7 +72,7 @@ func CreatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
-// UpdatePSP handles PATCH /v1/merchant/psps/{psp_id}.
+// UpdatePSP handles PATCH /v1/merchant/psps/{id}.
 func UpdatePSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
 	if !ok {
@@ -90,7 +90,7 @@ func UpdatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ArchivePSP handles POST /v1/merchant/psps/{psp_id}/archive. The body is
+// ArchivePSP handles POST /v1/merchant/psps/{id}/archive. The body is
 // optional; no provider call is made, so a dark account archives too.
 func ArchivePSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
@@ -144,9 +144,9 @@ func pspPathContext(r *httprequest.Request) (*merchants.Service, billing.Merchan
 	if !ok {
 		return nil, billing.MerchantID{}, billing.PSPID{}, false
 	}
-	pspID, err := billing.ParsePSPID(r.Param("psp_id"))
+	pspID, err := billing.ParsePSPID(r.Param("id"))
 	if err != nil || pspID.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must be a psp_ id").WithParam("psp_id"))
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid PSP id").WithParam("id"))
 		return nil, billing.MerchantID{}, billing.PSPID{}, false
 	}
 	return svc, id, pspID, true

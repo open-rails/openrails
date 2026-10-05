@@ -39,6 +39,9 @@ const (
 	CodeIdempotencyKeyReused   = "idempotency_key_reused"
 	CodeInsufficientCredits    = "insufficient_credits"
 	CodeInsufficientFunds      = "insufficient_funds"
+	// CodeModelUnavailable: the language model behind an ask or generate
+	// route did not answer.
+	CodeModelUnavailable = "model_unavailable"
 )
 
 // Request-shape codes: the request never reached its operation.
@@ -116,6 +119,7 @@ var errorCodes = []ErrorCode{
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
 	{CodeInsufficientFunds, 402, card, "The payment instrument lacks funds."},
 	{"database_busy", 503, fault, "No database connection is available; retry shortly."},
+	{CodeModelUnavailable, 502, fault, "The language model did not answer; retry, or ask a narrower question."},
 
 	// Request shape and transport.
 	{CodeUnknownField, 400, invalid, "The JSON body names a field the route does not accept; param is the field."},
@@ -316,7 +320,6 @@ var errorCodes = []ErrorCode{
 	{"invalid_psp_reference", 400, invalid, "The PSP reference is invalid."},
 	{"merchant_configuration_application_conflict", 409, invalid, "The application id already committed with different content."},
 	{"merchant_configuration_revision_conflict", 409, invalid, "The merchant configuration changed; read its revision before applying."},
-	{"api_host_requires_proof", 409, invalid, "A new api_host must be claimed and proven before configuration names it."},
 	{"invalid_api_host", 400, invalid, "api_host must be a bare lowercase domain name."},
 	{"api_host_reserved", 400, invalid, "The api_host serves this deployment."},
 	{"api_host_taken", 409, invalid, "The api_host is assigned to another merchant."},

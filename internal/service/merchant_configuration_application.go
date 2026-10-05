@@ -17,13 +17,12 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ApplyMerchantMetadata is the trusted startup entry to the same application
 // boundary used by the authorized Client. It does not select a merchant.
-func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params billing.MerchantConfigurationApplyParams) (*billing.MerchantConfigurationReceipt, error) {
+func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params billing.ApplyMerchantConfigurationParams) (*billing.MerchantConfigurationReceipt, error) {
 	return (&Service{rt: &app.Runtime{DB: database}}).ApplyMerchantConfiguration(ctx, params)
 }
 
@@ -79,7 +78,7 @@ func (s *Service) GetMerchantConfigurationState(ctx context.Context) (state *bil
 	return state, err
 }
 
-func merchantApplicationDigest(params billing.MerchantConfigurationApplyParams) ([32]byte, error) {
+func merchantApplicationDigest(params billing.ApplyMerchantConfigurationParams) ([32]byte, error) {
 	// JSON omitempty otherwise erases the distinction between an omitted list
 	// and an explicitly empty list that clears declarative policy.
 	presence := struct{ Policies, Bindings, Windows bool }{}
@@ -89,13 +88,13 @@ func merchantApplicationDigest(params billing.MerchantConfigurationApplyParams) 
 		presence.Windows = params.Settings.DelegatedInvokerWastedSpendLimits != nil
 	}
 	body, err := json.Marshal(struct {
-		Params   billing.MerchantConfigurationApplyParams
+		Params   billing.ApplyMerchantConfigurationParams
 		Presence any
 	}{params, presence})
 	return sha256.Sum256(body), err
 }
 
-func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing.MerchantConfigurationApplyParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
+func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing.ApplyMerchantConfigurationParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
 	params.ApplicationID = strings.TrimSpace(params.ApplicationID)
 	if params.ApplicationID == "" || len(params.ApplicationID) > 128 || params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
 		return nil, apperr.Invalidf("application_id and expected_revision are required")
@@ -150,23 +149,8 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing
 				return err
 			}
 		}
-		directory := gen.ApplyMerchantConfigurationDirectoryParams{MerchantID: mid.UUID()}
 		if params.DisplayName != nil {
-			directory.SetDisplayName = true
-			directory.DisplayName = strings.TrimSpace(*params.DisplayName)
-		}
-		if params.APIHost != nil {
-			// A new host must be claimed and proven (#1107); the document may
-			// only keep or clear the proven one.
-			host := merchants.NormalizeAPIHost(*params.APIHost)
-			if host != "" && host != current.APIHost {
-				return apperr.New(409, "api_host_requires_proof", "claim a new api_host at PUT /v1/merchant/api-host and prove it; the configuration document only keeps or clears the proven host")
-			}
-			directory.SetApiHost = true
-			directory.ApiHost = host
-		}
-		if directory.SetDisplayName || directory.SetApiHost {
-			if err := q.ApplyMerchantConfigurationDirectory(ctx, directory); err != nil {
+			if err := q.SetMerchantConfigurationDisplayName(ctx, gen.SetMerchantConfigurationDisplayNameParams{MerchantID: mid.UUID(), DisplayName: strings.TrimSpace(*params.DisplayName)}); err != nil {
 				return err
 			}
 		}
@@ -193,7 +177,7 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing
 
 func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.MerchantSettings {
 	if patch.Profile != nil {
-		p := billing.MerchantProfileInput{}
+		p := billing.MerchantProfile{}
 		if current.Profile != nil {
 			p = *current.Profile
 		}

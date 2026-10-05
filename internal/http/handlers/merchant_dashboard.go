@@ -68,7 +68,7 @@ func GenerateDashboardWidget(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "widget generation unavailable")
 		return
 	}
-	var body billing.GenerateWidgetRequest
+	var body billing.GenerateDashboardWidgetParams
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -95,7 +95,7 @@ func GenerateDashboardWidget(r *httprequest.Request) {
 				"the model could not produce a valid query for that prompt — try rephrasing").
 				WithMetadata(map[string]any{"errors": invalid.Errors}))
 		default:
-			r.ErrorJSON(http.StatusBadGateway, "widget generation failed: the LLM request did not complete")
+			modelFailure(r, err, false)
 		}
 		return
 	}

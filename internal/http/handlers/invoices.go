@@ -30,7 +30,7 @@ func ListInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 		if !ok {
 			return
 		}
-		params := billing.ListInvoicesParams{Page: page}
+		params := billing.InvoiceListParams{Page: page}
 		if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
 			id, err := billing.ParseCustomerID(raw)
 			if err != nil || id.IsZero() {
@@ -196,7 +196,7 @@ func ListMyInvoices(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListInvoices(r.Request.Context(), billing.ListInvoicesParams{CustomerID: billing.CustomerID(payer), Page: page})
+	out, err := svc.ListInvoices(r.Request.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(payer), Page: page})
 	if err != nil {
 		writeInvoiceError(r, err)
 		return
@@ -271,9 +271,9 @@ func PayMyInvoice(r *httprequest.Request) {
 	r.JSON(status, out)
 }
 
-// GetCustomerInvoiceProfile (GET /merchant/customers/{customer_id}/invoice-profile)
+// GetInvoiceProfile (GET /merchant/customers/{customer_id}/invoice-profile)
 // reads a customer's invoice profile; 404 when none is set.
-func GetCustomerInvoiceProfile(r *httprequest.Request) {
+func GetInvoiceProfile(r *httprequest.Request) {
 	payer, ok := invoiceProfileCustomer(r)
 	if !ok {
 		return
@@ -282,7 +282,7 @@ func GetCustomerInvoiceProfile(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	profile, err := svc.GetCustomerInvoiceProfile(r.Request.Context(), payer)
+	profile, err := svc.GetInvoiceProfile(r.Request.Context(), payer)
 	if err != nil {
 		writeInvoiceError(r, err)
 		return
@@ -294,10 +294,10 @@ func GetCustomerInvoiceProfile(r *httprequest.Request) {
 	r.SuccessJSON(profile)
 }
 
-// SetCustomerInvoiceProfile (PUT /merchant/customers/{customer_id}/invoice-profile)
+// SetInvoiceProfile (PUT /merchant/customers/{customer_id}/invoice-profile)
 // replaces a customer's invoice profile; with If-None-Match: * it only
 // creates one (201), answering an existing profile unchanged (200).
-func SetCustomerInvoiceProfile(r *httprequest.Request) {
+func SetInvoiceProfile(r *httprequest.Request) {
 	payer, ok := invoiceProfileCustomer(r)
 	if !ok {
 		return
@@ -326,7 +326,7 @@ func SetCustomerInvoiceProfile(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	profile, created, err := svc.SetCustomerInvoiceProfile(r.Request.Context(), payer, billing.SetInvoiceProfileParams{InvoiceProfile: body, IfAbsent: r.Header("If-None-Match") == "*"})
+	profile, created, err := svc.SetInvoiceProfile(r.Request.Context(), payer, billing.SetInvoiceProfileParams{InvoiceProfile: body, IfAbsent: r.Header("If-None-Match") == "*"})
 	if err != nil {
 		writeInvoiceError(r, err)
 		return

@@ -18,7 +18,7 @@ var (
 
 // CreateCreditGrant grants a customer prepaid credit, idempotent on the
 // customer and SourceID.
-func (s *Service) CreateCreditGrant(ctx context.Context, customer identity.CustomerID, params billing.CreditGrantParams) (*billing.CreditGrant, error) {
+func (s *Service) CreateCreditGrant(ctx context.Context, customer identity.CustomerID, params billing.CreateCreditGrantParams) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err

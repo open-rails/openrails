@@ -54,7 +54,7 @@ func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.Price
 
 // CreateCheckoutAttempt charges one price for a customer, relaying that
 // customer's pay action: a recurring price is enrolled and charged now.
-func (s *Service) CreateCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptRequest) (*billing.CheckoutAttempt, error) {
+func (s *Service) CreateCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptParams) (*billing.CheckoutAttempt, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (s *Service) CreateCheckoutAttempt(ctx context.Context, req billing.CreateC
 
 // createCheckoutAttempt runs the engine's checkout. card is a card the
 // checkout session's page entered; the engine wipes it.
-func (s *Service) createCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptRequest, card *cardguard.Card) (*billing.CheckoutAttempt, error) {
+func (s *Service) createCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptParams, card *cardguard.Card) (*billing.CheckoutAttempt, error) {
 	engine, err := s.requireCheckoutAttemptService()
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (s *Service) createCheckoutAttempt(ctx context.Context, req billing.CreateC
 
 // lookupCheckoutAttempt reads the attempt an idempotency key created, without
 // creating, routing or contacting a provider.
-func (s *Service) lookupCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptRequest) (*billing.CheckoutAttempt, error) {
+func (s *Service) lookupCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptParams) (*billing.CheckoutAttempt, error) {
 	engine, err := s.requireCheckoutAttemptService()
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func (s *Service) getCheckoutAttempt(ctx context.Context, id billing.CheckoutAtt
 
 // ConfirmCheckoutAttempt completes a Solana attempt with the signature of the
 // transaction the buyer's wallet signed.
-func (s *Service) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, req billing.ConfirmCheckoutAttemptRequest) (*billing.CheckoutAttempt, error) {
+func (s *Service) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, req billing.ConfirmCheckoutAttemptParams) (*billing.CheckoutAttempt, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -248,7 +248,7 @@ func checkoutUserIdentity(customer billing.CheckoutCustomerIdentity) (*checkout.
 	return &checkout.UserIdentity{ID: customer.ID.String(), Email: email, Username: strings.TrimSpace(customer.Username), ClientIP: clientIP}, nil
 }
 
-func checkoutCreateRequest(req billing.CreateCheckoutAttemptRequest, card *cardguard.Card) (*checkout.CheckoutAttemptCreateRequest, error) {
+func checkoutCreateRequest(req billing.CreateCheckoutAttemptParams, card *cardguard.Card) (*checkout.CheckoutAttemptCreateRequest, error) {
 	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
 		id, err := billing.ParsePaymentMethodID(raw)
 		if err != nil || id.IsZero() {

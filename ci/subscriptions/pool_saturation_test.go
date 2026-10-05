@@ -44,12 +44,12 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for range 2 {
-				if _, err := client.GetCheckoutConfig(ctx, billing.CheckoutConfigQuery{PriceID: price.ID}); err != nil {
+				if _, err := client.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{PriceID: price.ID}); err != nil {
 					errs[i] = err
 					return
 				}
 			}
-			session, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+			session, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
 				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "checkout:" + uuid.NewString() + ":1",
 				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Pool Payer", Zip: "10001", Country: "US"},
 			})

@@ -5,7 +5,7 @@
 // Admin comps ride the same book (AdminGrants): SourceID idempotency,
 // per-source result lists, one merchant-scoped transaction.
 //
-// The wire vocabulary (POST /v1/import/billing and Client.ImportBilling) is
+// The wire vocabulary (POST /v1/merchant/billing-import and Client.ImportBilling) is
 // defined on the root openrails package; this package aliases it.
 package billingimport
 

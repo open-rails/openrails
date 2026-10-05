@@ -26,7 +26,7 @@ func (c *Client) CreateRepriceBatch(ctx context.Context, params billing.CreateRe
 
 // PreviewRepriceBatch counts the subscribers a batch for a price key would
 // move, without writing anything.
-func (c *Client) PreviewRepriceBatch(ctx context.Context, params billing.RepriceBatchPreviewParams, requestOptions ...RequestOption) (*billing.RepriceBatchPreview, error) {
+func (c *Client) PreviewRepriceBatch(ctx context.Context, params billing.PreviewRepriceBatchParams, requestOptions ...RequestOption) (*billing.RepriceBatchPreview, error) {
 	if strings.TrimSpace(params.PriceKey) == "" {
 		return nil, invalidErr("price_key is required")
 	}
@@ -77,7 +77,7 @@ func (c *Client) CancelRepriceBatch(ctx context.Context, id billing.RepriceBatch
 }
 
 // PreviewPlanMigration classifies the affected subscriptions without writing.
-func (c *Client) PreviewPlanMigration(ctx context.Context, request billing.PlanMigrationRequest, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error) {
+func (c *Client) PreviewPlanMigration(ctx context.Context, request billing.CreatePlanMigrationParams, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error) {
 	if err := requirePlanMigrationPrices(request); err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (c *Client) PreviewPlanMigration(ctx context.Context, request billing.PlanM
 }
 
 // CreatePlanMigration schedules the migration and records its batch.
-func (c *Client) CreatePlanMigration(ctx context.Context, request billing.PlanMigrationRequest, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error) {
+func (c *Client) CreatePlanMigration(ctx context.Context, request billing.CreatePlanMigrationParams, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error) {
 	if err := requirePlanMigrationPrices(request); err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (c *Client) CreatePlanMigration(ctx context.Context, request billing.PlanMi
 }
 
 // requirePlanMigrationPrices is the server's first check, applied before any I/O.
-func requirePlanMigrationPrices(r billing.PlanMigrationRequest) error {
+func requirePlanMigrationPrices(r billing.CreatePlanMigrationParams) error {
 	if strings.TrimSpace(r.SourcePrice) == "" || strings.TrimSpace(r.TargetPrice) == "" {
 		return invalidErr("source_price and target_price required")
 	}

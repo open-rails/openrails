@@ -64,7 +64,7 @@ func getUsage(r *httprequest.Request, customer billing.CustomerID) {
 		return
 	}
 	query := r.Request.URL.Query()
-	params := billing.UsageParams{Currency: query.Get("currency"), From: from, To: to, GroupBy: billing.UsageGroupBy(query.Get("group_by"))}
+	params := billing.GetUsageParams{Currency: query.Get("currency"), From: from, To: to, GroupBy: billing.UsageGroupBy(query.Get("group_by"))}
 	switch params.GroupBy {
 	case "", billing.UsageByEventType, billing.UsageByResource, billing.UsageByInvoker, billing.UsageByFunction, billing.UsageByTier:
 	default:

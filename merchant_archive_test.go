@@ -55,11 +55,11 @@ func TestMerchantArchiveStreamsBothDirections(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"merchant_id":%q,"digest":"receipt","rows":"7000","already_imported":false}`, mid.String())
 	}, WithCredentialProvider(targetCredential))
 	var dst bytes.Buffer
-	require.NoError(t, client.ExportMerchantBilling(t.Context(), &dst, ForMerchantID(mid)))
+	require.NoError(t, client.ExportBillingArchive(t.Context(), &dst, ForMerchantID(mid)))
 	require.True(t, bytes.Equal(archive, dst.Bytes()))
-	result, err := client.ImportMerchantBilling(t.Context(), bytes.NewReader(dst.Bytes()), ForMerchantID(mid))
+	result, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(dst.Bytes()), ForMerchantID(mid))
 	require.NoError(t, err)
-	require.Equal(t, billing.MerchantBillingImportResult{MerchantID: mid, Digest: "receipt", Rows: 7000}, *result)
+	require.Equal(t, billing.BillingArchiveImport{MerchantID: mid, Digest: "receipt", Rows: 7000}, *result)
 	require.Equal(t, "fixture", client.merchantSlug, "per-call selection leaves the default")
 }
 
@@ -75,34 +75,34 @@ func TestMerchantArchiveRefusals(t *testing.T) {
 	}, WithMerchantID(mid))
 
 	reply(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(archive[:len(archive)-8]) })
-	require.ErrorIs(t, client.ExportMerchantBilling(t.Context(), io.Discard), billing.ErrUnreachable, "a truncated success is not an archive")
+	require.ErrorIs(t, client.ExportBillingArchive(t.Context(), io.Discard), billing.ErrUnreachable, "a truncated success is not an archive")
 
 	reply(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Request-ID", "archive-request")
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"billing_archive_not_empty","message":"destination billing state must be empty"}}`))
 	})
-	_, err := client.ImportMerchantBilling(t.Context(), bytes.NewReader(archive))
+	_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 	var status *billing.StatusError
 	require.ErrorAs(t, err, &status)
 	require.ErrorIs(t, err, billing.ErrConflict)
 	require.Equal(t, "billing_archive_not_empty", status.Code)
 	require.Equal(t, "archive-request", status.RequestID)
-	require.ErrorAs(t, client.ExportMerchantBilling(t.Context(), io.Discard), &status, "export keeps the coded refusal")
+	require.ErrorAs(t, client.ExportBillingArchive(t.Context(), io.Discard), &status, "export keeps the coded refusal")
 
 	for name, body := range map[string]string{"two receipts": `{} {}`, "not JSON": `receipt`} {
 		reply(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
-		_, err := client.ImportMerchantBilling(t.Context(), bytes.NewReader(archive))
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.ErrorIs(t, err, billing.ErrUnreachable, name)
 	}
 
 	before := calls.Load()
 	other := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
-	require.ErrorIs(t, client.ExportMerchantBilling(other, io.Discard), billing.ErrConflict)
-	_, err = client.ImportMerchantBilling(other, bytes.NewReader(archive))
+	require.ErrorIs(t, client.ExportBillingArchive(other, io.Discard), billing.ErrConflict)
+	_, err = client.ImportBillingArchive(other, bytes.NewReader(archive))
 	require.ErrorIs(t, err, billing.ErrConflict)
-	require.ErrorIs(t, client.ExportMerchantBilling(t.Context(), nil), billing.ErrInvalid)
-	_, err = client.ImportMerchantBilling(t.Context(), nil)
+	require.ErrorIs(t, client.ExportBillingArchive(t.Context(), nil), billing.ErrInvalid)
+	_, err = client.ImportBillingArchive(t.Context(), nil)
 	require.ErrorIs(t, err, billing.ErrInvalid)
 	require.Equal(t, before, calls.Load(), "refused before reaching the server")
 }

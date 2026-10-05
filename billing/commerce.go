@@ -26,9 +26,9 @@ type CheckoutOption struct {
 	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
-// CheckoutConfigQuery selects the price whose options GetCheckoutConfig
+// GetCheckoutConfigParams selects the price whose options GetCheckoutConfig
 // lists: at most one of PriceID or PriceKey.
-type CheckoutConfigQuery struct {
+type GetCheckoutConfigParams struct {
 	PriceID  PriceID
 	PriceKey string
 }
@@ -110,7 +110,7 @@ type CheckoutCustomerIdentity struct {
 	ClientIP string `json:"client_ip"`
 }
 
-// CreateCheckoutAttemptRequest charges one price for a merchant-owned
+// CreateCheckoutAttemptParams charges one price for a merchant-owned
 // customer now, relaying that customer's pay action: a recurring price is
 // enrolled and charged in this call. The server derives one-off versus
 // recurring from the price. Retries with the same IdempotencyKey never charge
@@ -118,7 +118,7 @@ type CheckoutCustomerIdentity struct {
 // interaction, so never call this unattended to establish a stored-card
 // agreement. To hand a purchase to the customer instead, create a checkout
 // session.
-type CreateCheckoutAttemptRequest struct {
+type CreateCheckoutAttemptParams struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
 	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
 	// when they resemble ids. Accepted retries retain the original offer.
@@ -220,9 +220,9 @@ type NextAction struct {
 	Transactions []string `json:"transactions"`
 }
 
-// ConfirmCheckoutAttemptRequest completes a Solana attempt the buyer's wallet
+// ConfirmCheckoutAttemptParams completes a Solana attempt the buyer's wallet
 // signed.
-type ConfirmCheckoutAttemptRequest struct {
+type ConfirmCheckoutAttemptParams struct {
 	Signature string `json:"signature"`
 	Wallet    string `json:"wallet"`
 }

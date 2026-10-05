@@ -392,7 +392,7 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 // permission_group_id. Embedded calls it with only Database, which registers an
 // ownerless merchant row and applies the same profile/PSP
 // configuration path without touching AuthKit or startup bootstrap markers.
-type ProvisionMerchantRequest struct {
+type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
 	MerchantID    billing.MerchantID
@@ -406,7 +406,7 @@ type ProvisionMerchantRequest struct {
 	Options       MerchantManifestReconcileOptions
 }
 
-func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
+func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merchants.Merchant, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
 	if err := ValidateMerchantDeclaration(req.Config, mt); err != nil {

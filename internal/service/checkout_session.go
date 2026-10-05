@@ -39,7 +39,7 @@ var errHostedOfferUnavailable = apperr.New(http.StatusUnprocessableEntity, "chec
 // and public values to the price's options (the HTTP layer's checkout-config
 // projection); an option the page cannot drive is not offered.
 type CheckoutSessionMint struct {
-	billing.CreateCheckoutSessionRequest
+	billing.CreateCheckoutSessionParams
 	Advertise func([]billing.CheckoutOption)
 }
 
@@ -155,7 +155,7 @@ func (s *Service) GetCheckoutSession(ctx context.Context, id string) (*checkouts
 // so repeated and concurrent submissions charge at most once. The attempt
 // advances only after the engine reports it terminally failed; an ambiguous
 // error keeps it, and the next submission replays the same key.
-func (s *Service) PayCheckoutSession(ctx context.Context, id string, input checkoutsession.CheckoutSessionPayRequest, clientIP string) (*checkoutsession.CheckoutSessionPayResult, error) {
+func (s *Service) PayCheckoutSession(ctx context.Context, id string, input checkoutsession.PayCheckoutSessionParams, clientIP string) (*checkoutsession.CheckoutSessionPayResult, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -288,7 +288,7 @@ func (s *Service) hostedSettle(ctx context.Context, rt *app.Runtime, session che
 // hostedReclaim handles an attempt whose key already holds other payment
 // details, as after a refusal. Only a terminal attempt advances; a live one is
 // in progress. It returns the session at its next attempt.
-func (s *Service) hostedReclaim(ctx context.Context, rt *app.Runtime, session checkoutsession.Session, request billing.CreateCheckoutAttemptRequest) (checkoutsession.Session, error) {
+func (s *Service) hostedReclaim(ctx context.Context, rt *app.Runtime, session checkoutsession.Session, request billing.CreateCheckoutAttemptParams) (checkoutsession.Session, error) {
 	current, found, err := s.hostedLookup(ctx, request)
 	if err != nil {
 		return checkoutsession.Session{}, err
@@ -309,7 +309,7 @@ func (s *Service) hostedReclaim(ctx context.Context, rt *app.Runtime, session ch
 // hostedRefused answers a definite refusal of the current attempt. The engine
 // is the authority: a live attempt for the key is adopted, and only a terminal
 // or absent one lets the session advance.
-func (s *Service) hostedRefused(ctx context.Context, rt *app.Runtime, session checkoutsession.Session, request billing.CreateCheckoutAttemptRequest, refusal *checkoutsession.CheckoutSessionPayResult) (*checkoutsession.CheckoutSessionPayResult, error) {
+func (s *Service) hostedRefused(ctx context.Context, rt *app.Runtime, session checkoutsession.Session, request billing.CreateCheckoutAttemptParams, refusal *checkoutsession.CheckoutSessionPayResult) (*checkoutsession.CheckoutSessionPayResult, error) {
 	current, found, err := s.hostedLookup(ctx, request)
 	if err != nil {
 		return nil, err
@@ -334,7 +334,7 @@ func (s *Service) hostedRefused(ctx context.Context, rt *app.Runtime, session ch
 
 // hostedLookup reads the attempt the session's key created, without creating,
 // routing or contacting a provider.
-func (s *Service) hostedLookup(ctx context.Context, request billing.CreateCheckoutAttemptRequest) (*billing.CheckoutAttempt, bool, error) {
+func (s *Service) hostedLookup(ctx context.Context, request billing.CreateCheckoutAttemptParams) (*billing.CheckoutAttempt, bool, error) {
 	current, err := s.lookupCheckoutAttempt(ctx, request)
 	switch {
 	case errors.Is(err, checkout.ErrCheckoutAttemptNotFound):
@@ -507,8 +507,8 @@ func hostedSavedMethods(ctx context.Context, rt *app.Runtime, session checkoutse
 	return out, nil
 }
 
-func hostedEngineRequest(session checkoutsession.Session, customer billing.CheckoutCustomerIdentity, payment billing.CheckoutPaymentOptions) billing.CreateCheckoutAttemptRequest {
-	return billing.CreateCheckoutAttemptRequest{
+func hostedEngineRequest(session checkoutsession.Session, customer billing.CheckoutCustomerIdentity, payment billing.CheckoutPaymentOptions) billing.CreateCheckoutAttemptParams {
+	return billing.CreateCheckoutAttemptParams{
 		Customer:       customer,
 		PriceID:        billing.PriceID(session.PriceID),
 		IdempotencyKey: session.AttemptKey(),

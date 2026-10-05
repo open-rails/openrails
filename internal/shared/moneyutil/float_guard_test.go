@@ -114,9 +114,8 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/reconcile/mutations.go:mutationRecordsForFinding":    "decodes rows_affected from evidence — a ROW COUNT",
 
 		// --- Not amounts at all -------------------------------------------
-		"internal/http/handlers/admin_findings_actions.go:paramAmountMicros":   "names float64/float32 only to REJECT them: this is the or#863 fix, the guard seeing its own refusal",
-		"internal/http/handlers/merchant_metrics.go:MerchantMetricsAsk":        "math.Ceil over a Retry-After DURATION in seconds, not an amount",
-		"internal/http/handlers/merchant_catalog_copilot.go:CatalogCopilotAsk": "math.Ceil over a Retry-After DURATION in seconds, not an amount",
+		"internal/http/handlers/admin_findings_actions.go:paramAmountMicros": "names float64/float32 only to REJECT them: this is the or#863 fix, the guard seeing its own refusal",
+		"internal/http/handlers/merchant_metrics.go:MerchantMetricsAsk":      "math.Ceil over a Retry-After DURATION in seconds, not an amount",
 	}
 
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))

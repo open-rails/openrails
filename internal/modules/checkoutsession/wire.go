@@ -103,8 +103,8 @@ type CheckoutSessionSavedMethod struct {
 	Card     *billing.CardDetails    `json:"card"`
 }
 
-// CheckoutSessionPayRequest is the browser's POST .../pay body.
-type CheckoutSessionPayRequest struct {
+// PayCheckoutSessionParams is the browser's POST .../pay body.
+type PayCheckoutSessionParams struct {
 	OptionID        string `json:"option_id"`
 	PaymentToken    string `json:"payment_token,omitempty"`
 	PaymentMethodID string `json:"payment_method_id,omitempty"`

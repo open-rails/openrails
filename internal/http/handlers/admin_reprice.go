@@ -73,7 +73,7 @@ func CreateRepriceBatch(r *httprequest.Request) {
 // PreviewRepriceBatch counts the subscribers a batch for price_key would
 // move, without writing anything.
 func PreviewRepriceBatch(r *httprequest.Request) {
-	var req billing.RepriceBatchPreviewParams
+	var req billing.PreviewRepriceBatchParams
 	if !r.BindJSON(&req) {
 		return
 	}

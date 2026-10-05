@@ -294,7 +294,7 @@ func (c *Client) DeclarePSP(ctx context.Context, merchantID billing.MerchantID, 
 // obligation commits atomically with host rows. OpenRails binds the declared
 // merchant and never commits or rolls tx back; after an error the host rolls
 // back. Embedded only: a remote client returns ErrRemoteClient.
-func (c *Client) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+func (c *Client) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
@@ -324,7 +324,7 @@ func (c *Client) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx,
 
 // RecordProviderBillingObservationTx is RecordProviderBillingObservation inside
 // tx (see OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
+func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err

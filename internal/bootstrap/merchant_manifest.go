@@ -210,7 +210,7 @@ func (j StaticJWKConfig) authkitJWK() iam.JWK {
 // permission_group_id. Embedded calls it with only Database, which registers an
 // ownerless merchant row and applies the same profile/PSP
 // configuration path without touching AuthKit or startup bootstrap markers.
-type ProvisionMerchantRequest struct {
+type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
 	MerchantID    billing.MerchantID
@@ -276,7 +276,7 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 			transit = &signeridentity.Transit{TransitClient: transit, DB: database, Directory: directory, Slug: slug,
 				Environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}
 		}
-		tn, err := ProvisionMerchant(ctx, ProvisionMerchantRequest{
+		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
 			Config:        cfg,
 			ControlPlane:  cp,
 			Database:      database,
@@ -339,7 +339,7 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 	return secretBackend.Secrets, secretBackend.SolanaTransit, nil
 }
 
-func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
+func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merchants.Merchant, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
 	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {

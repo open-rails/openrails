@@ -11,33 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const applyMerchantConfigurationDirectory = `-- name: ApplyMerchantConfigurationDirectory :exec
-UPDATE billing.merchants SET
- display_name=CASE WHEN $1::boolean THEN $2::text ELSE display_name END,
- api_host=CASE WHEN $3::boolean THEN NULLIF($4::text,'') ELSE api_host END,
- updated_at=current_timestamp
-WHERE id=$5::uuid AND status='active' AND deleted_at IS NULL
-`
-
-type ApplyMerchantConfigurationDirectoryParams struct {
-	SetDisplayName bool
-	DisplayName    string
-	SetApiHost     bool
-	ApiHost        string
-	MerchantID     uuid.UUID
-}
-
-func (q *Queries) ApplyMerchantConfigurationDirectory(ctx context.Context, arg ApplyMerchantConfigurationDirectoryParams) error {
-	_, err := q.db.Exec(ctx, applyMerchantConfigurationDirectory,
-		arg.SetDisplayName,
-		arg.DisplayName,
-		arg.SetApiHost,
-		arg.ApiHost,
-		arg.MerchantID,
-	)
-	return err
-}
-
 const getMerchantConfigurationApplication = `-- name: GetMerchantConfigurationApplication :one
 SELECT request_sha256,result FROM billing.merchant_configuration_applications
 WHERE merchant_id=$1::uuid AND application_id=$2::text
@@ -96,5 +69,20 @@ func (q *Queries) InsertMerchantConfigurationApplication(ctx context.Context, ar
 		arg.RequestSha256,
 		arg.Result,
 	)
+	return err
+}
+
+const setMerchantConfigurationDisplayName = `-- name: SetMerchantConfigurationDisplayName :exec
+UPDATE billing.merchants SET display_name=$1::text, updated_at=current_timestamp
+WHERE id=$2::uuid AND status='active' AND deleted_at IS NULL
+`
+
+type SetMerchantConfigurationDisplayNameParams struct {
+	DisplayName string
+	MerchantID  uuid.UUID
+}
+
+func (q *Queries) SetMerchantConfigurationDisplayName(ctx context.Context, arg SetMerchantConfigurationDisplayNameParams) error {
+	_, err := q.db.Exec(ctx, setMerchantConfigurationDisplayName, arg.DisplayName, arg.MerchantID)
 	return err
 }

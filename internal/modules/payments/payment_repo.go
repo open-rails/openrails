@@ -513,7 +513,7 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 // ListPage is one page of payments, newest first.
-func (r *PaymentRepo) ListPage(ctx context.Context, p billing.ListPaymentsParams) (billing.ListPage[*models.Payment], error) {
+func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams) (billing.ListPage[*models.Payment], error) {
 	var out billing.ListPage[*models.Payment]
 	mid, err := merchant.Require(ctx)
 	if err != nil {

@@ -23,7 +23,7 @@ func TestRepriceBatches(t *testing.T) {
 	member := w.newCustomer()
 	sub := member.subscribe(embedded, "stripe", old.ID.String(), "content:reprice", member.saveCard("stripe", visa))
 
-	preview, err := client.PreviewRepriceBatch(ctx, billing.RepriceBatchPreviewParams{PriceKey: old.Key})
+	preview, err := client.PreviewRepriceBatch(ctx, billing.PreviewRepriceBatchParams{PriceKey: old.Key})
 	require.NoError(t, err)
 	require.Equal(t, 1, preview.Matched, "the preview counts the whole chain before the new version exists")
 

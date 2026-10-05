@@ -43,7 +43,7 @@ func TestRemoteClientRefusesHostingOperations(t *testing.T) {
 	require.ErrorIs(t, err, ErrRemoteClient)
 	require.False(t, c.RoutesRequireRoot())
 	require.Nil(t, c.Probes())
-	_, err = c.ProvisionMerchant(t.Context(), billing.ProvisionMerchantRequest{Slug: "x"})
+	_, err = c.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: "x"})
 	require.ErrorIs(t, err, ErrRemoteClient)
 	_, err = c.DeclarePSP(t.Context(), billing.MerchantID(uuid.New()), billing.PSPDeclaration{})
 	require.ErrorIs(t, err, ErrRemoteClient)
@@ -116,7 +116,7 @@ func TestCatalogOwnerClientCannotExpandScope(t *testing.T) {
 	_, err = owner.GetProduct(t.Context(), product)
 	require.NoError(t, err)
 
-	_, err = owner.CheckProductAccess(t.Context(), billing.CustomerID(uuid.New()), billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{product}})
+	_, err = owner.CheckProductAccess(t.Context(), billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product}})
 	require.ErrorIs(t, err, billing.ErrDenied, "resource handles bind to the attenuated clone")
 	_, err = owner.ListCatalogs(t.Context(), billing.CatalogListParams{})
 	require.ErrorIs(t, err, billing.ErrDenied)

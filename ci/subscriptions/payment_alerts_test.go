@@ -225,7 +225,7 @@ func TestCriticalFindingEmailsThroughTheOneSender(t *testing.T) {
 	w.start()
 	w.armDestructive()
 	alertTo, from := "ops@merchant.test", "billing@merchant.test"
-	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{AlertEmail: &alertTo, Profile: &billing.MerchantProfileInput{FromEmail: from}}))
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{AlertEmail: &alertTo, Profile: &billing.MerchantProfile{FromEmail: from}}))
 
 	c := w.newCustomer()
 	attempt := attemptSeed{psp: w.psp["nmi"].UUID().String(), rail: "nmi", kind: "initial", owner: "engine", cardEntry: "new", at: w.clock.Now()}

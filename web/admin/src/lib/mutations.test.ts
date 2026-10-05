@@ -251,7 +251,7 @@ it("tells a new off-channel payment from one already recorded", async () => {
 })
 
 describe("price change", () => {
-  const change = { price, copilotDraftId: "draft_1", migration: { priceKey: "pro-monthly", effectiveAt } }
+  const change = { price, migration: { priceKey: "pro-monthly", effectiveAt } }
   const refreshed = catalogTree.map((name) => `merchant-a:${name}`)
 
   it("creates the replacement price before scheduling its migration", async () => {
@@ -264,8 +264,6 @@ describe("price change", () => {
     ])
     expect(requests[1].body).toEqual({ price_key: "pro-monthly", effective_at: effectiveAt })
     expect(invalidated(queryClient, seeded)).toEqual(refreshed)
-    // Provenance is recorded out of band; the write never waits on it.
-    await vi.waitFor(() => expect(calls(requests)).toContain("POST /merchant/catalog/copilot/confirm"))
   })
 
   it("refreshes the catalog when scheduling fails after the price was created", async () => {

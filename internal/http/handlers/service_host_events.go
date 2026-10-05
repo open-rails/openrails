@@ -28,7 +28,7 @@ func ServiceListHostEvents(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	req := billing.ListHostEventsRequest{PageRequest: page, Type: billing.HostEventType(q.Type), IncludeAcknowledged: q.IncludeAcknowledged}
+	req := billing.HostEventListParams{PageRequest: page, Type: billing.HostEventType(q.Type), IncludeAcknowledged: q.IncludeAcknowledged}
 	if q.PaymentID != "" {
 		id, err := billing.ParsePaymentID(q.PaymentID)
 		if err != nil || id.IsZero() {

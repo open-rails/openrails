@@ -37,9 +37,9 @@ func ListCatalogDrift(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// CheckCatalogDrift reads every linked PSP's catalog now and records the
+// RefreshCatalogDrift reads every linked PSP's catalog now and records the
 // drift it finds.
-func CheckCatalogDrift(r *httprequest.Request) {
+func RefreshCatalogDrift(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return

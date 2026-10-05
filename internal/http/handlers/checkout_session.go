@@ -14,8 +14,8 @@ import (
 // merchant; reading and paying need only the session id, which is never
 // logged.
 
-// CheckoutSessionMintRequest is the signed-in customer's mint body.
-type CheckoutSessionMintRequest struct {
+// MintCheckoutSessionParams is the signed-in customer's mint body.
+type MintCheckoutSessionParams struct {
 	PriceID    billing.PriceID `json:"price_id"`
 	PriceKey   string          `json:"price_key"`
 	SuccessURL string          `json:"success_url" binding:"omitempty,url"`
@@ -23,7 +23,7 @@ type CheckoutSessionMintRequest struct {
 
 // CreateCheckoutSession handles POST /v1/me/checkout-sessions.
 func CreateCheckoutSession(r *httprequest.Request) {
-	var body CheckoutSessionMintRequest
+	var body MintCheckoutSessionParams
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -45,13 +45,13 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	if user.Email != nil {
 		customer.VerifiedEmail = *user.Email
 	}
-	mintCheckoutSession(r, billing.CreateCheckoutSessionRequest{Customer: customer, PriceID: body.PriceID, PriceKey: body.PriceKey, SuccessURL: body.SuccessURL})
+	mintCheckoutSession(r, billing.CreateCheckoutSessionParams{Customer: customer, PriceID: body.PriceID, PriceKey: body.PriceKey, SuccessURL: body.SuccessURL})
 }
 
 // ServiceCreateCheckoutSession handles POST /v1/merchant/checkout-sessions:
 // the merchant hands a purchase to its customer.
 func ServiceCreateCheckoutSession(r *httprequest.Request) {
-	var body billing.CreateCheckoutSessionRequest
+	var body billing.CreateCheckoutSessionParams
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -61,7 +61,7 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	mintCheckoutSession(r, body)
 }
 
-func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessionRequest) {
+func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessionParams) {
 	r.SetHeader("Cache-Control", "no-store")
 	config, ok := checkoutConfig(r)
 	if !ok {
@@ -73,8 +73,8 @@ func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessi
 		return
 	}
 	link, err := svc.CreateCheckoutSession(r.Request.Context(), billingservice.CheckoutSessionMint{
-		CreateCheckoutSessionRequest: req,
-		Advertise:                    func(options []billing.CheckoutOption) { advertiseCheckoutOptions(options, config) },
+		CreateCheckoutSessionParams: req,
+		Advertise:                   func(options []billing.CheckoutOption) { advertiseCheckoutOptions(options, config) },
 	})
 	if err != nil {
 		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
@@ -102,7 +102,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 // PayCheckoutSession handles POST /v1/checkout-sessions/{id}/pay.
 func PayCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var body checkoutsession.CheckoutSessionPayRequest
+	var body checkoutsession.PayCheckoutSessionParams
 	if !r.BindJSON(&body) {
 		return
 	}

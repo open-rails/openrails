@@ -5,7 +5,6 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/modules/copilot"
 )
 
 // page is a list route's paging parameters.
@@ -40,7 +39,7 @@ var catalogRoutes = append([]Route{
 	{Method: GET, Path: "/v1/merchant/catalog/drift", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Query: params(page, queryOf(handlers.CatalogDriftQuery{})), Responses: []Reply{{200, billing.ListPage[billing.CatalogDrift]{}}}, Handler: h(handlers.ListCatalogDrift)},
 	{Method: POST, Path: "/v1/merchant/catalog/drift/refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
-		Responses: []Reply{{200, billing.CatalogDriftCheck{}}}, Errors: codes("catalog_scope_mismatch"), Handler: h(handlers.CheckCatalogDrift)},
+		Responses: []Reply{{200, billing.CatalogDriftRefresh{}}}, Errors: codes("catalog_scope_mismatch"), Handler: h(handlers.RefreshCatalogDrift)},
 
 	{Method: GET, Path: "/v1/merchant/catalog/meters", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Meter]{}}}, Handler: h(handlers.ListMeters)},
@@ -62,9 +61,9 @@ var catalogRoutes = append([]Route{
 		Responses: []Reply{{204, nil}}, Errors: codes(meterErrors...), Handler: h(handlers.DeleteRateOverride)},
 
 	{Method: POST, Path: "/v1/merchant/catalog/product-archives", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, Also: billing.MerchantPaymentsRefund, CatalogWrite: true, IdempotencyKey: true,
-		Request: handlers.ProductArchiveRequest{}, Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes(append([]string{"provider_cancel_held", "rebill_terms_committed"}, productErrors...)...), Handler: h(handlers.CreateProductArchive)},
+		Request: billing.ArchiveProductParams{}, Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes(append([]string{"idempotency_key_required", "idempotency_key_reused", "invalid_param", "provider_cancel_held", "rebill_terms_committed", "service_unavailable"}, productErrors...)...), Handler: h(handlers.CreateProductArchive)},
 	{Method: GET, Path: "/v1/merchant/catalog/product-archives/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead, Also: billing.MerchantPaymentsRead,
-		Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes("provider_cancel_held", "rebill_terms_committed", "resource_conflict", "resource_not_found"), Handler: h(handlers.GetProductArchive)},
+		Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes("invalid_param", "provider_cancel_held", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetProductArchive)},
 
 	{Method: GET, Path: "/v1/merchant/catalogs", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Query: params(page, queryOf(handlers.CatalogListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Catalog]{}}}, Handler: h(handlers.ListCatalogs)},
@@ -73,14 +72,10 @@ var catalogRoutes = append([]Route{
 	{Method: GET, Path: "/v1/merchant/catalogs/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Responses: []Reply{{200, billing.Catalog{}}}, Errors: codes("catalog_not_found"), Handler: h(handlers.GetCatalog)},
 
-	// The catalog copilot answers questions about the catalog; it is mounted
-	// only when it is configured, and never changes a catalog row. Confirm
-	// records that a draft was applied, which only a caller who could apply
-	// it may log.
+	// The catalog assistant answers questions about the catalog and drafts
+	// price changes for a person to review; it never changes a catalog row.
 	{Method: POST, Path: "/v1/merchant/catalog/ask", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead, When: FeatureCatalogCopilot,
-		Request: Untyped{}, Responses: []Reply{{200, copilot.AskResult{}}}, Errors: codes("rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.CatalogCopilotAsk)},
-	{Method: POST, Path: "/v1/merchant/catalog/copilot/confirm", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, When: FeatureCatalogCopilot,
-		Request: Untyped{}, Responses: []Reply{{200, Message{}}}, Handler: h(handlers.CatalogCopilotConfirmDraft)},
+		Request: billing.AskCatalogParams{}, Responses: []Reply{{200, billing.CatalogAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.AskCatalog)},
 }, append(catalogResourceRoutes("/v1/merchant/catalog", Merchant, billing.MerchantCatalogRead, billing.MerchantCatalogUpdate),
 	catalogResourceRoutes("/v1/catalog", CatalogOwned, billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate)...)...)
 

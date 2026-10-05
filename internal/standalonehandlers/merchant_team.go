@@ -71,7 +71,7 @@ func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 		if !ok {
 			return
 		}
-		var req billing.InviteTeamMemberRequest
+		var req billing.InviteTeamMemberParams
 		if !r.BindJSON(&req) {
 			return
 		}
@@ -166,7 +166,7 @@ func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) 
 				"user id is required"))
 			return
 		}
-		var req billing.SetTeamRoleRequest
+		var req billing.SetTeamRoleParams
 		if !r.BindJSON(&req) {
 			return
 		}

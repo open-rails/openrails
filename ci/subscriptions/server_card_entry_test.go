@@ -110,7 +110,7 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 			t.Parallel()
 			w := tc.world(t)
 			price := w.membership("content:members", 9_990_000)
-			config, err := w.client[remote].GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
+			config, err := w.client[remote].GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
 			require.NoError(t, err)
 			for _, psp := range config.PSPs {
 				if psp.Rail != "nmi" {

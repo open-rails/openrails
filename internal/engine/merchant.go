@@ -53,7 +53,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m config
 	// Run it through the same billing-only merchant-provisioning boundary openrails.New
 	// and the bootstrap CLI use, with ControlPlane nil. Provider-account reconcile
 	// needs a merchant secret store (built over the engine's own pool).
-	req := boot.ProvisionMerchantRequest{
+	req := boot.ProvisionMerchantParams{
 		Config:     conf,
 		Database:   database,
 		MerchantID: bound,

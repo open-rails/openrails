@@ -105,7 +105,7 @@ func probe(t *testing.T, rt *openrails.Client, name string) error {
 
 func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.CheckoutPSPConfig, bool) {
 	t.Helper()
-	cfg, err := client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
+	cfg, err := client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
 	require.NoError(t, err)
 	for _, psp := range cfg.PSPs {
 		if psp.Rail == rail {
@@ -134,7 +134,7 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:sol",
@@ -163,7 +163,7 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:post",

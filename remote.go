@@ -267,7 +267,7 @@ func (c *Client) HasEntitlement(ctx context.Context, customerID billing.Customer
 		return false, invalidErr("entitlement is required")
 	}
 	var out billing.EntitlementCheck
-	if err := c.do(ctx, http.MethodPost, path+"/entitlements/check", billing.EntitlementCheckParams{Entitlements: []string{entitlement}, At: at}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/entitlements/check", billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: at}, &out, requestOptions...); err != nil {
 		return false, err
 	}
 	return out.Entitlements[entitlement], nil

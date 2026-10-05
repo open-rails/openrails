@@ -135,9 +135,9 @@ type CreateRepriceBatchParams struct {
 	AcknowledgeShortNotice bool `json:"acknowledge_short_notice"`
 }
 
-// RepriceBatchPreviewParams counts the subscribers a batch for PriceKey would
+// PreviewRepriceBatchParams counts the subscribers a batch for PriceKey would
 // move, before the new price version exists.
-type RepriceBatchPreviewParams struct {
+type PreviewRepriceBatchParams struct {
 	PriceKey string `json:"price_key"`
 }
 
@@ -180,10 +180,10 @@ type RepriceBatchCancel struct {
 	Warning             *string          `json:"warning"`
 }
 
-// PlanMigrationRequest moves a price's subscribers to a price of another
+// CreatePlanMigrationParams moves a price's subscribers to a price of another
 // product at each subscription's first renewal on or after EffectiveAt.
 // Prices are addressed by ID or key.
-type PlanMigrationRequest struct {
+type CreatePlanMigrationParams struct {
 	SourcePrice string `json:"source_price"`
 	TargetPrice string `json:"target_price"`
 	// EffectiveAt and NoticeDays are mutually exclusive; both empty means now.

@@ -18,10 +18,10 @@ import (
 // ChangeTierRequest is the merchant's tier change and both previews.
 type ChangeTierRequest = billing.ChangeTierParams
 
-// CustomerChangeTierRequest is the customer's tier change. Signature
+// CustomerChangeTierParams is the customer's tier change. Signature
 // completes a solana_sign_transactions next action: the signature of the
 // tier-change transaction the customer's wallet sent.
-type CustomerChangeTierRequest struct {
+type CustomerChangeTierParams struct {
 	PriceID   billing.PriceID `json:"price_id"`
 	Signature string          `json:"signature"`
 }
@@ -31,7 +31,7 @@ type CustomerChangeTierRequest struct {
 // a rail that needs the customer's own step answers requires_action with
 // next_action.
 func ChangeTier(r *httprequest.Request) {
-	var req CustomerChangeTierRequest
+	var req CustomerChangeTierParams
 	if !r.BindJSON(&req) {
 		return
 	}

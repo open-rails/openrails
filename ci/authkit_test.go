@@ -50,7 +50,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
 	shop := uniqueName("staff")
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	session := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
 
