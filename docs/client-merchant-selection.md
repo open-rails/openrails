@@ -34,8 +34,8 @@ that keeps merchant UUIDs uses `ForMerchantID`, or one client per merchant
 
 Both transports send exactly one `OpenRails-Merchant` header: a slug
 (`OpenRails-Merchant: alpha`) or a stable id (`OpenRails-Merchant: id:<uuid>`).
-Every merchant-scoped route (`/v1/merchant`, `/v1/catalog`, `/v1/import`,
-`/v1/me`) honors it the same way: the server resolves the selector, authorizes
+Every merchant-scoped route (`/v1/merchant`, `/v1/catalog`, `/v1/me`) honors
+it the same way: the server resolves the selector, authorizes
 the credential for that merchant, and only then pins it, before acquiring a
 merchant database connection or running business logic.
 

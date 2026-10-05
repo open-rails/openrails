@@ -78,11 +78,10 @@ Hosts running the control plane in process set
 
 Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
 (`merchant:settings:update`), subject to the rename interval and, on hosted
-deployments, the reserved names and creation pattern. Hosts rename as the
-operator with `Client.RenameMerchant`. `GET /v1/platform/merchants?q=`
+deployments, the reserved names and creation pattern. `GET /v1/platform/merchants?q=`
 searches current names. A signed-in user lists the merchants they hold a role in
 with `GET /v1/merchants` (`{id, slug, display_name, role}`, the user's role in
-each); hosts use `Client.ListUserMerchants`.
+each).
 
 ### Hosted creation recipe (registration is provisioning)
 

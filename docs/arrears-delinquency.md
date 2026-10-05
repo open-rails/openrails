@@ -127,7 +127,7 @@ for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyEntered,
     billing.HostEventDelinquencyCleared,
 } {
-    page, err := client.ListHostEvents(ctx, billing.ListHostEventsRequest{
+    page, err := client.ListHostEvents(ctx, billing.HostEventListParams{
         Type: kind, PageRequest: billing.PageRequest{Limit: 100},
     })
     if err != nil { return err }

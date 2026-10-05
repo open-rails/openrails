@@ -32,12 +32,14 @@ var (
 	proseHost   = regexp.MustCompile(`https?://[^/\s]+`)
 	prosePath   = regexp.MustCompile("(?:\\b(GET|POST|PUT|PATCH|DELETE) `?|(?:^|[^\\w/.:-]))(?:/billing)?(/v1/[A-Za-z0-9_{}/:.*<>-]*)")
 	proseGo     = regexp.MustCompile(`\b(openrails|billing|catalog)\.([A-Z]\w*)(?:\.([A-Z]\w*))?`)
-	proseMethod = regexp.MustCompile(`\b[cC]lient\.([A-Z]\w*)\(`)
-	proseField  = regexp.MustCompile(`(?:^|[^.\w])(Config|Deps|HTTPConfig|MerchantDeclaration|PSPConfig|CheckoutConfig)\.([A-Z]\w*)`)
-	proseTable  = regexp.MustCompile(`\bbilling\.([a-z][a-z0-9_]*)\b(\.?)`)
-	proseCode   = regexp.MustCompile("\\b([1-5]\\d\\d) `?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b")
-	prosePerm   = regexp.MustCompile(`\b((?:merchant|root)(?::[a-z0-9-]+){2,})`)
-	proseTest   = regexp.MustCompile(`\bTest[A-Z]\w*`)
+	proseMethod = regexp.MustCompile(`\b[cC]lient\.([A-Z]\w*)`)
+	// A bare Go name in a code span that reads as a Client operation.
+	proseVerb  = regexp.MustCompile("`((?:Get|List|Create|Update|Delete|Set|Ensure|Apply|Archive|Cancel|Resume|Refund|Record|Capture|Release|Extend|Admit|Open|Preview|Refresh|Resolve|Revoke|Confirm|Check|Has|Import|Export|Provision|Rename|Declare|Retry|Mark|Void|Ask|Query|Generate|Verify|Acknowledge|Report|Change|Retire|Complete)[A-Z]\\w*)(?:\\([^`]*\\))?`")
+	proseField = regexp.MustCompile(`(?:^|[^.\w])(Config|Deps|HTTPConfig|MerchantDeclaration|PSPConfig|CheckoutConfig)\.([A-Z]\w*)`)
+	proseTable = regexp.MustCompile(`\bbilling\.([a-z][a-z0-9_]*)\b(\.?)`)
+	proseCode  = regexp.MustCompile("\\b([1-5]\\d\\d) `?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b")
+	prosePerm  = regexp.MustCompile(`\b((?:merchant|root)(?::[a-z0-9-]+){2,})`)
+	proseTest  = regexp.MustCompile(`\bTest[A-Z]\w*`)
 	// A private tracker id means nothing to a reader of the public docs.
 	proseIssue = regexp.MustCompile("(?:^|[^&\\w`])([a-z]{0,3}#\\d{2,4}\\b|SEC-\\d+)")
 	fileSuffix = []string{"yaml", "yml", "json", "jsonl", "ts", "tsx", "js", "go", "md", "sql", "css", "example"}
@@ -89,6 +91,14 @@ func TestDocsNameWhatExists(t *testing.T) {
 			for _, m := range proseMethod.FindAllStringSubmatch(line, -1) {
 				if !goAPI["openrails.Client"][m[1]] {
 					t.Errorf("%s: Client.%s is not in api/go.txt", at, m[1])
+				}
+			}
+			// billing-ui's documents name TypeScript, not Go.
+			if !strings.HasPrefix(rel, "sdk/") {
+				for _, m := range proseVerb.FindAllStringSubmatch(line, -1) {
+					if !goAPI["names"][m[1]] {
+						t.Errorf("%s: %s is not in api/go.txt", at, m[1])
+					}
 				}
 			}
 			for _, m := range proseField.FindAllStringSubmatch(line, -1) {
@@ -269,7 +279,8 @@ func routeNamed(method, path string) string {
 }
 
 // readGoAPI maps each listed identifier ("billing.Price") to its fields and
-// methods, and "permissions" to the permission names.
+// methods, "permissions" to the permission names, and "names" to every
+// exported name the list mentions.
 func readGoAPI(t *testing.T, file string) map[string]map[string]bool {
 	t.Helper()
 	body, err := os.ReadFile(file)
@@ -277,8 +288,12 @@ func readGoAPI(t *testing.T, file string) map[string]map[string]bool {
 	decl := regexp.MustCompile(`^pkg openrails(?:/(\w+))?, (?:const|var|func|type) (\w+)`)
 	member := regexp.MustCompile(`^pkg openrails(?:/(\w+))?, (?:type (\w+) (?:struct|interface), |method \(\*?(\w+)(?:\[[^\]]*\])?\) )(\w+)`)
 	permission := regexp.MustCompile(`^pkg openrails/billing, const \w+ untyped string = "((?:merchant|root):[^"]+)"`)
-	out := map[string]map[string]bool{"permissions": {}}
+	word := regexp.MustCompile(`\b[A-Z]\w+`)
+	out := map[string]map[string]bool{"permissions": {}, "names": {}}
 	for _, line := range strings.Split(string(body), "\n") {
+		for _, name := range word.FindAllString(line, -1) {
+			out["names"][name] = true
+		}
 		if m := permission.FindStringSubmatch(line); m != nil {
 			out["permissions"][m[1]] = true
 		}

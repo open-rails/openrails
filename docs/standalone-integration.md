@@ -179,7 +179,7 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
+receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
 // or client.ReleaseAdmission(ctx, requestID) if the work failed

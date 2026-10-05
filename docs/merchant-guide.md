@@ -246,7 +246,7 @@ reference: [api/routes.md](api/routes.md).
 | List / inspect subscriptions | `GET /v1/merchant/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
 | Cancel / resume a subscription | `POST /v1/merchant/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/merchant/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Grant / revoke credit | `POST /v1/merchant/customers/{customer_id}/credit-grants`, `POST .../credit-grants/{grant_id}/revoke` | Customers → profile |
+| Grant / revoke credit | `POST /v1/merchant/customers/{customer_id}/credit-grants`, `POST .../credit-grants/{id}/revoke` | Customers → profile |
 | Ask what a grant key did | `GET /v1/merchant/customers/{customer_id}/credit-grants?source_id=` | — |
 | Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{customer_id}/spend-delegations[/{scope}/{scope_key}]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
 | Credit limit / trust level | `PUT /v1/merchant/customers/{customer_id}/credit-limit`, `PUT /v1/merchant/customers/{customer_id}/trust-level` | Settings |
@@ -293,7 +293,8 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 `Client.ArchiveProduct` (`POST /v1/merchant/catalog/product-archives`, catalog
 update plus payment refund permission) archives a product — never deletes it —
 and applies the host's policy to its one-time purchases at or after
-`PurchasedSince` (or within `Window` of first acceptance):
+`PurchasedSince` (or within `WindowSeconds` of first acceptance), chosen by
+`PurchaseAction`:
 
 - `none`: archive only.
 - `refund`: refund each purchase in full and end the access it granted. Purchases
@@ -304,10 +305,10 @@ The idempotency key fixes the product, action, resolved window and reason;
 replays report the current outcome of every purchase and never refund twice.
 A response with `complete: false` stopped at its per-request provider budget;
 replay it to continue. Subscription payments are excluded (subscriptions stay
-grandfathered). Reviews are listed with `Client.ListPurchaseReviews` and
-resolved with `Client.ResolvePurchaseReview`: `refund` returns the remaining
-amount and ends access, `dismiss` keeps both. They also appear in the findings
-queue as `life.product_archived_purchase`.
+grandfathered). A purchase under review is a finding
+(`life.product_archived_purchase`; the archive names it as `finding_id`),
+resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
+and ends access, `ignore` keeps both.
 
 Granting credits is money-in and carries its own permission,
 `merchant:credits:grant` — owner-level by default (`merchant:*`), NOT part of the

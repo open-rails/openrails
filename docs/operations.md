@@ -195,7 +195,7 @@ Rules:
 
 - **Rotating a credential within the SAME PSP**: replace the
   secret under the same PSP row — intents arm with the new value
-  transparently. `PATCH /v1/merchant/psps/{psp_id}` (and the console's
+  transparently. `PATCH /v1/merchant/psps/{id}` (and the console's
   **Rotate** action) is atomic in the way that matters:
   - the **new** credential is live-probed against the provider *before*
     anything is written (NMI and CCBill today). A probe failure fails the whole
@@ -217,7 +217,7 @@ Rules:
   `account_id` would silently lie). Arm a NEW PSP and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
-  `POST /v1/merchant/psps/{psp_id}/archive` makes no provider call, so it
+  `POST /v1/merchant/psps/{id}/archive` makes no provider call, so it
   works when the old provider is terminated or unreachable.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,
@@ -247,11 +247,10 @@ version floor — recorded on `custodians.credential_versions` rather
 than on a PSP row. Rotation and archival follow the PSP rules
 above verbatim: rotate in place under the same row; to move to a different
 custodian account, declare a NEW one and archive the old one for drain — an
-instrument the old custodian holds is never re-vaulted or destroyed
-.
+instrument the old custodian holds is never re-vaulted or destroyed.
 
 Inbound custodian webhooks route by the global `(kind, environment,
-account_id)` key (`ResolveCustodianOwnerByIdentity`). They resolve the
+account_id)` key. They resolve the
 CUSTODIAN, not a PSP: the event is about the stored instrument, and asking
 which of several referencing PSPs it belongs to has no answer.
 

@@ -44,7 +44,7 @@ What import does **not** do:
 **Client**: `client.ImportBilling(ctx, billing.DeclaredBilling{...})` on the
 merchant-bound Client, in every deployment (`openrails.New` in process, or
 `openrails.NewRemote`). Resolve a public name once and bind the Client to
-the captured UUID. **HTTP**: `POST /v1/import/billing`
+the captured UUID. **HTTP**: `POST /v1/merchant/billing-import`
 with the identical JSON body — merchant from the authenticated credential,
 gated on the owner-level `merchant:billing:import` permission. The HTTP body
 cap (1 MiB) forces large books to batch.
@@ -119,7 +119,7 @@ imported members are entitled immediately (a replay re-derives). Operator/manual
 comps — access with no payment behind it — ride the same book as
 `admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
 derives the windows. `Client.ImportBilling` posts the same book over
-`POST /v1/import/billing`.
+`POST /v1/merchant/billing-import`.
 
 ### The migration playbook
 

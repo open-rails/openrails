@@ -193,7 +193,7 @@ cfg.Merchant = openrails.MerchantDeclaration{
     Slug:        "myapp",
     DisplayName: "My App",
     Settings: billing.MerchantSettings{
-        Profile:                &billing.MerchantProfileInput{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
+        Profile:                &billing.MerchantProfile{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
         InvoiceBillingBoundary: "calendar_month",
     },
     PSPs: map[string]openrails.PSPConfig{ // PSP key -> account
@@ -367,7 +367,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | (always) | Capability discovery and signature-checked provider callbacks |
 | `Checkout` | Products, prices, checkout config and reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page. The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
 | `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`) |
-| `Merchant` | The merchant API (`/v1/merchant/*`, `/v1/import/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
+| `Merchant` | The merchant API (`/v1/merchant/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
 slug). An advanced, delegated audience mounts a profile under its own `Prefix`
@@ -405,11 +405,11 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `HasEntitlement`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `CheckCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
 | Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig` |
-| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
-| Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPurchaseReviews`, `ResolvePurchaseReview`, `ListPaymentMethods`, `DeletePaymentMethod` |
-| Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetCustomerInvoiceProfile`, `SetCustomerInvoiceProfile` (`IfAbsent` to only create) |
+| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
+| Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
+| Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetInvoiceProfile`, `SetInvoiceProfile` (`IfAbsent` to only create) |
 | Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
 
@@ -423,7 +423,7 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
 }})
-receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
+receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
 ents, err := client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}})
@@ -473,9 +473,9 @@ sender (`Config.SendGrid` or `Deps.EmailSender`), rendered; text goes through
 (`RoutesRequireRoot`); `HTTP.CustomerRoutes` may add delegated customer
 profiles. Its workers join the same fleet through `RiverJobs`.
 
-The control plane's operations are Client methods: `ProvisionMerchant`,
-`RenameMerchant`, `SetMerchantDisplayName`, `Set`/`GetMerchantAPIHost`,
-`ListUserMerchants`, `ListMerchantsForSubject`, `ListActiveMerchantIDs`,
+The operations a hosted product runs as the operator are Client methods of the
+in-process engine only (a remote Client refuses them): `ProvisionMerchant`,
+`SetMerchantAPIHost`, `ListMerchantsForSubject`, `ListActiveMerchantIDs`,
 `ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`,
 `EnsureCustomerPermissionGroup`, `FleetAnalytics`, `FleetTimeseries`,
 `ListMerchantRetirementCandidates`, `RetireUnusedMerchant`,
@@ -498,7 +498,7 @@ for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyEntered,
     billing.HostEventDelinquencyCleared,
 } {
-    page, err := client.ListHostEvents(ctx, billing.ListHostEventsRequest{
+    page, err := client.ListHostEvents(ctx, billing.HostEventListParams{
         Type: kind, PageRequest: billing.PageRequest{Limit: 100},
     })
     if err != nil { return err }

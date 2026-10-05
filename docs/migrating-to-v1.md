@@ -96,6 +96,13 @@ The Client is flat: no sub-clients (`client.Products`, `client.Prices`,
 no offset and no total. Ids are typed: `billing.CustomerID`, `billing.ProductID`,
 `billing.PriceID`, `billing.PSPID`, `billing.CheckoutAttemptID`.
 
+Every merchant route has exactly one Client method, named for it, and a
+request type is `…Params` named for its method: `CreateCheckoutSessionRequest`
+is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
+`billing.CaptureAdmissionParams`, `ListHostEventsRequest` is
+`billing.HostEventListParams`. Settings nouns lose their `Input` suffix
+(`billing.BillingPolicy`, `billing.MerchantProfile`).
+
 ### Entitlements and access
 
 | Before | After |
@@ -122,15 +129,17 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListOffersForEntitlements` | `client.ListOffers(` with `billing.OfferListParams` |
 | `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()` | `client.EnsureCatalog(`, `client.GetCatalog(`, `client.ListCatalogs(`; `client.ForCatalogOwner(` is the one selector |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
+| `CheckCatalogDrift` | `client.RefreshCatalogDrift(` |
+| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchasedSince` and `WindowSeconds` |
 
 ### Checkout
 
 | Before | After |
 |---|---|
-| `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionRequest` (`Customer`, `PriceID` or `PriceKey`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
+| `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionParams` (`Customer`, `PriceID` or `PriceKey`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
 | `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | `client.CreateCheckoutAttempt(` (creating it accepts the terms), `client.GetCheckoutAttempt(`, `client.ConfirmCheckoutAttempt(` (Solana) |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
-| `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey`; `GetCheckoutConfig(ctx)` | `client.GetCheckoutConfig(` with `billing.CheckoutConfigQuery`; a price in the query fills `options` |
+| `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey`; `GetCheckoutConfig(ctx)` | `client.GetCheckoutConfig(` with `billing.GetCheckoutConfigParams`; a price in the query fills `options` |
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.CheckoutAttemptID`, `chk_` ids, `billing.CheckoutAttempt` |
 | `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
 | `CheckoutPaymentOptions.Card` | Removed: a Client never carries a card |
@@ -140,7 +149,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `CancelSubscription`, `ResumeSubscription`, `UpdateSubscriptionPaymentMethod` returned `error` | Each returns the `billing.Subscription` |
+| `CancelSubscription`, `ResumeSubscription`, `UpdateSubscriptionPaymentMethod` returned `error` | `client.CancelSubscription(`, `client.ResumeSubscription(` and `client.SetSubscriptionPaymentMethod(` each return the `billing.Subscription` |
 | `ChangeTier(ctx, id, idempotencyKey, ChangeTierRequest)` | `client.ChangeTier(` and `client.PreviewTierChange(` take `billing.ChangeTierParams` (`PriceID`, `IdempotencyKey`) |
 | `ListSubscriptions(ctx, SubscriptionFilter)` with a total | `client.ListSubscriptions(` with `billing.SubscriptionListParams`, a cursor page, newest first |
 | `Subscription.CustomerID`, `ProductID`, `PriceID` as strings; `SubscriptionPrice` | Typed ids; `price` is the catalog `billing.Price` |
@@ -153,11 +162,11 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `DepositCredits`, `GetDeposit` | `client.CreateCreditGrant(` with `billing.CreditGrantParams`; `client.ListCreditGrants(` by `source_id` answers what a key did |
+| `DepositCredits`, `GetDeposit` | `client.CreateCreditGrant(` with `billing.CreateCreditGrantParams`; `client.ListCreditGrants(` by `source_id` answers what a key did |
 | Revoke with a body on `DELETE` | `client.RevokeCreditGrant(` |
 | `GetCreditAccount` | `client.GetBalance(` answers `billing.Balance` (`balance_amount`, `held_amount`, `available_amount`, `owed_amount`) |
-| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureParams`, amount required), `client.ReleaseAdmission(`, `client.ExtendAdmission(`. The caller's `request_id` is the id |
-| `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.UsageEventParams`; `client.GetUsage(`. Resource revenue is removed |
+| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmission(`, `client.ExtendAdmission(`. The caller's `request_id` is the id |
+| `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; `client.GetUsage(`. Resource revenue is removed |
 | `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | `client.ListSpendDelegations(`, `client.SetSpendDelegations(`, `client.SetSpendDelegation(`, `client.DeleteSpendDelegation(` |
 | `DeclaredTransaction.AmountCents` | `Amount`, in native units (micros for USD) |
 | `DeclaredSubscription.UserEmail`; `DeclaredPaymentMethod.LastFour`, `CardType`, `ExpiryDate`, `InitialTransactionID` | `DeclaredCustomer.Email`; `DeclaredPaymentMethod.Card` (`billing.CardDetails`); `InitialTransactionID` is removed |
@@ -166,12 +175,12 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `ListPayments(ctx, PaymentFilter)` | `client.ListPayments(` with `billing.ListPaymentsParams`; no status filter |
+| `ListPayments(ctx, PaymentFilter)` | `client.ListPayments(` with `billing.PaymentListParams`; no status filter |
 | `Payment` with `Object`, `Refunded`, `Captured`, string ids | `billing.Payment` with `Kind`, a typed `Status`, `Channel`, `PSPID`, `Card`, `Failure`, and `Refunds` as a slice |
 | `ListPaymentMethods(ctx, customerID string, PageOptions)` | `client.ListPaymentMethods(` with a `billing.CustomerID` and `billing.PageRequest` |
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; invoices use the per-currency collection card |
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListInvoicePayments(`, `client.CreateInvoicePayment(` |
-| `EnsureCustomerInvoiceProfile` | `client.SetCustomerInvoiceProfile(` with `IfAbsent` |
+| `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.SetInvoiceProfile(` with `IfAbsent`; `client.GetInvoiceProfile(` |
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
 
@@ -182,9 +191,12 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(`, `client.ArchivePSP(`, `client.PreviewPSPRouting(`, `client.RefreshPSPs(`, `client.ListRails(` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `client.DeclarePSP(` returns the `billing.PSP` |
 | `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.ApplyMerchantConfiguration(`. `client.Ready(` checks reachability; any authenticated call proves the credential |
-| `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.ListHostEventsRequest`, a page; `client.AcknowledgeHostEvent(` takes a `billing.HostEventID` and returns the event |
+| `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvent(` takes a `billing.HostEventID` and returns the event |
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.SetAlertWebhookURL(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
+| `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |
+| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename is `PUT /v1/merchant/name` and a user's merchants `GET /v1/merchants` |
+| `GetUnreadNotificationCount` returned `int64` | It returns `billing.UnreadCount` |
 
 ## 4. HTTP routes and shapes
 
@@ -206,15 +218,19 @@ fields (`400 unknown_field`), and every error code is in
 - PSP cutover and engine takeover routes.
 - `GET|PUT /v1/merchant/settings`, `GET /v1/solana/config`,
   `GET /v1/merchant/checkout-options`.
+- The purchase-review routes (`/v1/merchant/purchase-reviews`): a purchase under
+  review is a finding.
+- `api_host` in a configuration application: release a host with
+  `PUT /v1/merchant/api-host` and an empty `api_host`.
 
 ### Renamed or reshaped
 
 | Before | After |
 |---|---|
-| `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{psp_id}` (`PATCH` with `expected_revision`), `/v1/merchant/psps/{psp_id}/archive`, `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; `/v1/merchant/rails` |
+| `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`), `/v1/merchant/psps/{id}/archive`, `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; `/v1/merchant/rails` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/merchant/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | `/v1/merchant/checkout-attempts`, `/v1/merchant/checkout-attempts/{id}`, `/v1/merchant/checkout-attempts/{id}/confirm` |
-| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}/revoke` |
+| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`, `/v1/merchant/customers/{customer_id}/credit-limit`, `/v1/merchant/customers/{customer_id}/trust-level` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/transactions` |
 | `PUT …/spend-delegations:upsert` | `/v1/merchant/customers/{customer_id}/spend-delegations` and `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
@@ -230,6 +246,9 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}` | `/v1/merchant/reprice-batches`, `/v1/merchant/reprice-batches/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/merchant/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
 | `GET /v1/merchant/catalogs/by-owner` | `GET /v1/merchant/catalogs` with `owner_subject` |
+| `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
+| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/merchant/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
+| A failed model call answered `502 api_error` | `502 model_unavailable` |
 
 ### Shapes
 
@@ -285,6 +304,7 @@ calendar ([data retention](operations.md#data-retention)):
 | `SavedPaymentMethod` with `brand`, `last_four`, `default` | `SavedPaymentMethod` with `card` |
 | Solana cancel and tier-change methods | `cancelSubscription` and `changeTier` take an optional `signature` |
 | `cancelSubscription`, `resumeSubscription`, `setSubscriptionPaymentMethod` resolved to nothing | Each resolves to the `Subscription` |
+| Generated list fields typed `T[] \| null` | `T[]`: the server always writes `[]` |
 
 A page that posted to `/v1/checkout` renders `<Checkout>` on a session instead.
 Stripe cards are saved with Elements and paid on the session when the PSP

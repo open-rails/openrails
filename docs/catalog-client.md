@@ -47,13 +47,13 @@ purchase history. Use `ListProductAccess` with its cursor only when displaying
 purchase history itself.
 
 ```go
-access, err := client.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{
+access, err := client.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{
     ProductIDs: pageProductIDs,
 })
 if err != nil { return err }
 _ = access[productID]
 
-attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
+attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
     Customer: billing.CheckoutCustomerIdentity{ID: customerID},
     PriceID: price.ID,
     PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe", PaymentMethodID: methodID},

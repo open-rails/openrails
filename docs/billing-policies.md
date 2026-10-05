@@ -121,9 +121,9 @@ The same Go Client operations work embedded and remotely:
 
 ```go
 name := "cloud_monthly"
-assignment, err := client.SetCustomerBillingPolicy(ctx, customerID, billing.CustomerBillingPolicyParams{PolicyName: &name})
+assignment, err := client.SetCustomerBillingPolicy(ctx, customerID, billing.SetCustomerBillingPolicyParams{PolicyName: &name})
 assignment, err = client.GetCustomerBillingPolicy(ctx, customerID)
-assignment, err = client.SetCustomerBillingPolicy(ctx, customerID, billing.CustomerBillingPolicyParams{}) // inherit again
+assignment, err = client.SetCustomerBillingPolicy(ctx, customerID, billing.SetCustomerBillingPolicyParams{}) // inherit again
 ```
 
 HTTP uses `GET` and `PUT` on

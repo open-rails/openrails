@@ -183,7 +183,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   `secret/openrails/merchants/<merchant-uuid>/<name>`. Published references select exact validated versions. Direct backend edits do
   not publish a new active credential. Managed publication does not require restarting the runtime.
 - **Rotation within the same PSP** uses `Client.UpdatePSP`
-  (`PATCH /v1/merchant/psps/{psp_id}`) with a stable operation ID and the
+  (`PATCH /v1/merchant/psps/{id}`) with a stable operation ID and the
   expected revision. A candidate is
   staged and account/environment validated before its exact version is published.
   Retry the same operation to recover a lost response. A failed publication leaves

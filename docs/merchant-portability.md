@@ -5,8 +5,8 @@ merchant billing snapshot between embedded, standalone, and hosted OpenRails
 deployments. Both commands use the same `openrails.Client` methods as Go hosts:
 
 ```go
-err := client.ExportMerchantBilling(ctx, archiveWriter)
-result, err := client.ImportMerchantBilling(ctx, archiveReader)
+err := client.ExportBillingArchive(ctx, archiveWriter)
+result, err := client.ImportBillingArchive(ctx, archiveReader)
 ```
 
 For HTTP, construct the client with `openrails.NewRemote`; in process, use the

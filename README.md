@@ -375,7 +375,7 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | `HasEntitlement` / `ListEntitlements` | Exact grant-backed access; `ListEntitlements` reads up to 500 customers at once |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `GetCheckoutConfig` | `CheckoutConfigQuery`: a `PriceID` or `PriceKey` lists the options that can sell it |
+| `GetCheckoutConfig` | `GetCheckoutConfigParams`: a `PriceID` or `PriceKey` lists the options that can sell it |
 | `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
 | Catalog reads | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
 | Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |
