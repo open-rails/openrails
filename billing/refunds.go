@@ -2,6 +2,8 @@ package billing
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -31,6 +33,29 @@ type RefundPaymentParams struct {
 	IdempotencyKey string `json:"-"`
 }
 
+// ProductArchiveID names one product archive operation; on the wire
+// "par_<uuid>".
+type ProductArchiveID uuid.UUID
+
+const productArchiveIDPrefix = "par_"
+
+func ParseProductArchiveID(s string) (ProductArchiveID, error) {
+	u, err := parsePrefixedID("product archive", productArchiveIDPrefix, s)
+	return ProductArchiveID(u), err
+}
+
+func (id ProductArchiveID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id ProductArchiveID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
+func (id ProductArchiveID) String() string {
+	return formatPrefixedID(productArchiveIDPrefix, uuid.UUID(id))
+}
+func (id ProductArchiveID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id *ProductArchiveID) UnmarshalText(b []byte) error {
+	v, err := ParseProductArchiveID(string(b))
+	*id = v
+	return err
+}
+
 // PurchaseAction is what a product archive does with purchases inside its window.
 type PurchaseAction string
 
@@ -38,117 +63,68 @@ const (
 	// PurchaseActionNone archives the product only.
 	PurchaseActionNone PurchaseAction = "none"
 	// PurchaseActionRefund refunds each qualifying purchase in full and ends the
-	// access that purchase granted. Purchases OpenRails cannot refund
-	// automatically become purchase reviews instead.
+	// access that purchase granted. A purchase OpenRails cannot refund
+	// automatically becomes a finding for the merchant to resolve instead.
 	PurchaseActionRefund PurchaseAction = "refund"
-	// PurchaseActionReview records each qualifying purchase as a purchase review
-	// for the merchant to refund or dismiss.
+	// PurchaseActionReview records each qualifying purchase as a finding for
+	// the merchant to refund (approve) or keep (ignore).
 	PurchaseActionReview PurchaseAction = "review"
 )
 
 // ArchiveProductParams archives one product (ProductID or ProductKey) and
-// applies Action to its one-time purchases made at or after PurchasedSince, or
-// within Window before the operation was first accepted. The window is fixed
-// at first acceptance; retries with the same IdempotencyKey evaluate the same
-// purchases and never refund twice.
+// applies PurchaseAction (empty: none) to its one-time purchases made at or
+// after PurchasedSince, or within WindowSeconds before the operation was first
+// accepted. The window is fixed at first acceptance; retries with the same
+// IdempotencyKey evaluate the same purchases and never refund twice.
 type ArchiveProductParams struct {
-	ProductID      string
-	ProductKey     string
-	Action         PurchaseAction
-	PurchasedSince time.Time
-	Window         time.Duration
-	Reason         string
-	IdempotencyKey string
+	ProductID      ProductID      `json:"product_id,omitzero"`
+	ProductKey     string         `json:"product_key,omitempty"`
+	PurchaseAction PurchaseAction `json:"purchase_action,omitempty"`
+	PurchasedSince time.Time      `json:"purchased_since,omitzero"`
+	WindowSeconds  int64          `json:"window_seconds,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	IdempotencyKey string         `json:"-"`
 }
 
 // ProductArchive is the durable result of ArchiveProduct.
 type ProductArchive struct {
-	ID             string         `json:"id"`
-	Object         string         `json:"object"`
-	ProductID      ProductID      `json:"product_id"`
-	ProductKey     string         `json:"product_key"`
-	Action         PurchaseAction `json:"purchase_action"`
-	PurchasedSince *time.Time     `json:"purchased_since,omitempty"`
-	Reason         string         `json:"reason,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID             ProductArchiveID `json:"id"`
+	ProductID      ProductID        `json:"product_id"`
+	ProductKey     string           `json:"product_key"`
+	PurchaseAction PurchaseAction   `json:"purchase_action"`
+	PurchasedSince *time.Time       `json:"purchased_since"`
+	Reason         *string          `json:"reason"`
+	CreatedAt      time.Time        `json:"created_at"`
 	// Complete is false while qualifying purchases remain unprocessed; retry
 	// the same operation to continue.
 	Complete  bool               `json:"complete"`
 	Purchases []ArchivedPurchase `json:"purchases"`
 }
 
-// Archived purchase outcomes.
+// ArchivedPurchaseOutcome is what an archive did with one purchase.
+type ArchivedPurchaseOutcome string
+
 const (
-	ArchivedPurchaseRefunded        = "refunded"
-	ArchivedPurchaseRefundPending   = "refund_pending"
-	ArchivedPurchaseAlreadyRefunded = "already_refunded"
-	ArchivedPurchaseReviewOpen      = "review_open"
-	ArchivedPurchaseReviewRefunded  = "review_refunded"
-	ArchivedPurchaseReviewDismissed = "review_dismissed"
-	ArchivedPurchaseNotStarted      = "not_started"
+	ArchivedPurchaseRefunded        ArchivedPurchaseOutcome = "refunded"
+	ArchivedPurchaseRefundPending   ArchivedPurchaseOutcome = "refund_pending"
+	ArchivedPurchaseAlreadyRefunded ArchivedPurchaseOutcome = "already_refunded"
+	ArchivedPurchaseReviewOpen      ArchivedPurchaseOutcome = "review_open"
+	ArchivedPurchaseReviewRefunded  ArchivedPurchaseOutcome = "review_refunded"
+	ArchivedPurchaseReviewDismissed ArchivedPurchaseOutcome = "review_dismissed"
+	ArchivedPurchaseNotStarted      ArchivedPurchaseOutcome = "not_started"
 )
 
-// ArchivedPurchase is one qualifying purchase and what the archive did with it.
+// ArchivedPurchase is one qualifying purchase and what the archive did with
+// it. FindingID is the finding a purchase under review is resolved through
+// (ResolveFinding: approve refunds it, ignore keeps it).
 type ArchivedPurchase struct {
-	PaymentID   PaymentID  `json:"payment_id"`
-	CustomerID  string     `json:"customer_id"`
-	Amount      int64      `json:"amount,string"`
-	Currency    string     `json:"currency"`
-	PurchasedAt time.Time  `json:"purchased_at"`
-	Outcome     string     `json:"outcome"`
-	RefundID    *PaymentID `json:"refund_id,omitempty"`
-	ReviewID    string     `json:"review_id,omitempty"`
-	Detail      string     `json:"detail,omitempty"`
-}
-
-// Purchase review statuses.
-const (
-	PurchaseReviewOpen      = "open"
-	PurchaseReviewRefunded  = "refunded"
-	PurchaseReviewDismissed = "dismissed"
-)
-
-// PurchaseReview is a purchase an archive recorded for merchant review.
-type PurchaseReview struct {
-	ID               string     `json:"id"`
-	Status           string     `json:"status"`
-	ProductArchiveID string     `json:"product_archive_id"`
-	ProductID        ProductID  `json:"product_id"`
-	ProductKey       string     `json:"product_key"`
-	PaymentID        PaymentID  `json:"payment_id"`
-	CustomerID       string     `json:"customer_id"`
-	Amount           int64      `json:"amount,string"`
-	Currency         string     `json:"currency"`
-	PurchasedAt      time.Time  `json:"purchased_at"`
-	Detail           string     `json:"detail,omitempty"`
-	RefundID         *PaymentID `json:"refund_id,omitempty"`
-	Notes            string     `json:"notes,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
-}
-
-// ListPurchaseReviewsParams selects reviews, oldest first; Status defaults to
-// open.
-type ListPurchaseReviewsParams struct {
-	Page             PageRequest
-	Status           string
-	ProductArchiveID string
-}
-
-// PurchaseReviewDecision resolves a review.
-type PurchaseReviewDecision string
-
-const (
-	// PurchaseReviewDecisionRefund refunds the remaining amount of the purchase
-	// and ends the access it granted.
-	PurchaseReviewDecisionRefund PurchaseReviewDecision = "refund"
-	// PurchaseReviewDecisionDismiss keeps the purchase and its access.
-	PurchaseReviewDecisionDismiss PurchaseReviewDecision = "dismiss"
-)
-
-// ResolvePurchaseReviewParams is one merchant decision. Resolving a review
-// again with the same decision returns it unchanged.
-type ResolvePurchaseReviewParams struct {
-	Decision PurchaseReviewDecision `json:"decision"`
-	Notes    string                 `json:"notes,omitempty"`
+	PaymentID   PaymentID               `json:"payment_id"`
+	CustomerID  CustomerID              `json:"customer_id"`
+	Amount      int64                   `json:"amount,string"`
+	Currency    string                  `json:"currency"`
+	PurchasedAt time.Time               `json:"purchased_at"`
+	Outcome     ArchivedPurchaseOutcome `json:"outcome"`
+	RefundID    *PaymentID              `json:"refund_id"`
+	FindingID   *FindingID              `json:"finding_id"`
+	Detail      *string                 `json:"detail"`
 }

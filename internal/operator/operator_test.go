@@ -59,7 +59,7 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 	ctx, a, id := context.Background(), &app.App{Runtime: &app.Runtime{}}, billing.MerchantID(uuid.New())
 	calls := map[string]func() error{
 		"ProvisionMerchant": func() error {
-			_, err := ProvisionMerchant(ctx, a, billing.ProvisionMerchantRequest{Slug: "shop"})
+			_, err := ProvisionMerchant(ctx, a, billing.ProvisionMerchantParams{Slug: "shop"})
 			return err
 		},
 		"ProvisionMerchantForRestore": func() error {

@@ -580,7 +580,7 @@ func TestEngineRenewalRefunds(t *testing.T) {
 			e := enroll(t, w, rail, tp)
 			price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, e.price), billing.GetPriceParams{})
 			require.NoError(t, err)
-			archive, err := w.client[tp].ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: price.ProductID.String(), Action: billing.PurchaseActionRefund, Window: 365 * day, Reason: "retired", IdempotencyKey: "archive-" + price.ProductID.String()})
+			archive, err := w.client[tp].ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: price.ProductID, PurchaseAction: billing.PurchaseActionRefund, WindowSeconds: int64(365 * day / time.Second), Reason: "retired", IdempotencyKey: "archive-" + price.ProductID.String()})
 			require.NoError(t, err)
 			w.settle()
 			require.True(t, archive.Complete)
@@ -607,7 +607,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			declined := c.saveCard(rail, card{Brand: "visa", Last4: "0002", Decline: map[string]string{"stripe": "insufficient_funds", "nmi": "202"}[rail]})
-			_, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+			_, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 				IdempotencyKey: "enroll-declined", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: declined},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -635,7 +635,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	c := w.newCustomer()
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
-	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 		IdempotencyKey: "enroll-3ds", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: challenged},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -706,7 +706,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		c := w.newCustomer()
 		method := c.saveCard("nmi", visa)
 		w.nmi.RefuseDuplicates(1)
-		_, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		_, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 			IdempotencyKey: "enroll-dup", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -927,7 +927,7 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 	require.NoError(t, err)
 	c := w.newCustomer()
 	buy := func(method, key string) *billing.CheckoutAttempt {
-		session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 			IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",

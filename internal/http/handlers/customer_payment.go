@@ -68,7 +68,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription id")
 		return
 	}
-	var body billing.RetrySubscriptionNowRequest
+	var body billing.RetrySubscriptionNowParams
 	if !r.BindJSON(&body) {
 		return
 	}

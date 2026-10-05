@@ -13,7 +13,7 @@ import (
 // PreviewPSPRouting explains routing for a price without creating a session.
 // It runs the production decision path, so the answer is what checkout would
 // actually do, not a prediction of it.
-func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PSPRoutingPreviewParams) (*billing.PSPRoutingPreview, error) {
+func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PreviewPSPRoutingParams) (*billing.PSPRoutingPreview, error) {
 	checkoutAttempts, err := s.requireCheckoutAttemptService()
 	if err != nil {
 		return nil, err

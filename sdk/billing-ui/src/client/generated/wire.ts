@@ -132,12 +132,6 @@ export type CheckoutSessionMerchant = {
   display_name: string
 }
 
-export type CheckoutSessionMintRequest = {
-  price_id?: string
-  price_key?: string
-  success_url?: string
-}
-
 export type CheckoutSessionOption = {
   id: string
   psp_id: string
@@ -145,24 +139,6 @@ export type CheckoutSessionOption = {
   mode: string
   driver: string
   public_config: Record<string, string> | null
-}
-
-export type CheckoutSessionPayRequest = {
-  option_id?: string
-  payment_token?: string
-  payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
-  card?: CardEntry
 }
 
 export type CheckoutSessionPayResult = {
@@ -228,12 +204,12 @@ export type CurrencyUnits = {
   minor_decimals: number
 }
 
-export type CustomerCancelSubscriptionRequest = {
+export type CustomerCancelSubscriptionParams = {
   reason?: string
   signature?: string
 }
 
-export type CustomerChangeTierRequest = {
+export type CustomerChangeTierParams = {
   price_id?: string
   signature?: string
 }
@@ -336,6 +312,12 @@ export type InvoicePayment = {
   settled_at: string | null
 }
 
+export type MintCheckoutSessionParams = {
+  price_id?: string
+  price_key?: string
+  success_url?: string
+}
+
 export type NextAction = {
   type: string
   url: string | null
@@ -406,6 +388,24 @@ export type PSPLinkState = {
   sync_status: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
   drift: DriftField[]
   message: string
+}
+
+export type PayCheckoutSessionParams = {
+  option_id?: string
+  payment_token?: string
+  payment_method_id?: string
+  email?: string
+  name_on_card?: string
+  address1?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+  token_symbol?: string
+  last_four?: string
+  card_type?: string
+  expiry_date?: string
+  card?: CardEntry
 }
 
 export type PayInvoiceParams = {
@@ -552,7 +552,7 @@ export type ReplacePaymentMethodCardParams = {
   billing_details?: BillingDetails
 }
 
-export type RetrySubscriptionNowRequest = {
+export type RetrySubscriptionNowParams = {
   payment_method_id?: string
 }
 

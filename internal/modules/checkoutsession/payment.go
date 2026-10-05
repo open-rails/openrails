@@ -30,7 +30,7 @@ func TakesCards(driver string) bool {
 // savedMethod reports whether a saved method id is the buyer's on this option.
 // The card, when the page sent one, is returned beside the options: it
 // travels to the engine and nowhere else.
-func Payment(option Option, input CheckoutSessionPayRequest, verifiedEmail string, savedMethod func(id string) bool) (billing.CheckoutPaymentOptions, *cardguard.Card, error) {
+func Payment(option Option, input PayCheckoutSessionParams, verifiedEmail string, savedMethod func(id string) bool) (billing.CheckoutPaymentOptions, *cardguard.Card, error) {
 	input = trimPayment(input)
 	if exceedsPaymentLimits(input) {
 		return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
@@ -105,7 +105,7 @@ func Payment(option Option, input CheckoutSessionPayRequest, verifiedEmail strin
 	return out, card, nil
 }
 
-func trimPayment(in CheckoutSessionPayRequest) CheckoutSessionPayRequest {
+func trimPayment(in PayCheckoutSessionParams) PayCheckoutSessionParams {
 	in.OptionID = strings.TrimSpace(in.OptionID)
 	in.PaymentToken = strings.TrimSpace(in.PaymentToken)
 	in.PaymentMethodID = strings.TrimSpace(in.PaymentMethodID)
@@ -122,7 +122,7 @@ func trimPayment(in CheckoutSessionPayRequest) CheckoutSessionPayRequest {
 	return in
 }
 
-func exceedsPaymentLimits(in CheckoutSessionPayRequest) bool {
+func exceedsPaymentLimits(in PayCheckoutSessionParams) bool {
 	return len(in.OptionID) > 128 || len(in.PaymentToken) > 4096 || len(in.PaymentMethodID) > 64 ||
 		utf8.RuneCountInString(in.NameOnCard) > 200 || len(in.Address1) > 200 ||
 		len(in.City) > 100 || len(in.State) > 100 || len(in.Zip) > 32 || len(in.Country) > 3 ||

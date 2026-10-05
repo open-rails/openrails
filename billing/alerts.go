@@ -82,17 +82,17 @@ type AlertWebhook struct {
 	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
-// CreateAlertWebhookRequest adds an alert webhook. Format defaults to
+// CreateAlertWebhookParams adds an alert webhook. Format defaults to
 // generic; Enabled to true.
-type CreateAlertWebhookRequest struct {
+type CreateAlertWebhookParams struct {
 	Name    string             `json:"name"`
 	URL     string             `json:"url"`
 	Format  AlertWebhookFormat `json:"format"`
 	Enabled *bool              `json:"enabled"`
 }
 
-// SetAlertWebhookURLRequest replaces a webhook's URL, keeping the webhook.
-type SetAlertWebhookURLRequest struct {
+// SetAlertWebhookURLParams replaces a webhook's URL, keeping the webhook.
+type SetAlertWebhookURLParams struct {
 	URL string `json:"url"`
 }
 
@@ -107,8 +107,8 @@ type MerchantNotification struct {
 	ReadAt    *time.Time     `json:"read_at"`
 }
 
-// ListMerchantNotificationsRequest pages the merchant's inbox, newest first.
-type ListMerchantNotificationsRequest struct {
+// MerchantNotificationListParams pages the merchant's inbox, newest first.
+type MerchantNotificationListParams struct {
 	PageRequest
 	// UnreadOnly leaves out read notifications.
 	UnreadOnly bool
@@ -134,9 +134,9 @@ type WorkerHealth struct {
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
-// ListRepairAlertsRequest pages ledger repairs that need the merchant, newest
+// RepairAlertListParams pages ledger repairs that need the merchant, newest
 // first. Seen, when set, keeps only the alerts read (or unread).
-type ListRepairAlertsRequest struct {
+type RepairAlertListParams struct {
 	PageRequest
 	Seen *bool
 }

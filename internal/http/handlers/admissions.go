@@ -177,7 +177,7 @@ func GetAdmission(r *httprequest.Request) {
 
 // CaptureAdmission settles an admitted request.
 func CaptureAdmission(r *httprequest.Request) {
-	var params billing.CaptureParams
+	var params billing.CaptureAdmissionParams
 	if !r.BindJSON(&params) {
 		return
 	}
@@ -263,7 +263,7 @@ func ExtendAdmission(r *httprequest.Request) {
 
 // ReportWastedSpend records spend a customer's invoker wasted.
 func ReportWastedSpend(r *httprequest.Request) {
-	var params billing.WastedSpendParams
+	var params billing.ReportWastedSpendParams
 	if !r.BindJSON(&params) {
 		return
 	}
@@ -299,7 +299,7 @@ func ReportWastedSpend(r *httprequest.Request) {
 
 // RecordUsageEvent records one metered usage event.
 func RecordUsageEvent(r *httprequest.Request) {
-	var params billing.UsageEventParams
+	var params billing.RecordUsageParams
 	if !r.BindJSON(&params) {
 		return
 	}

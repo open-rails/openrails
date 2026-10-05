@@ -176,9 +176,9 @@ type InvoicePayment struct {
 	SettledAt     *time.Time `json:"settled_at"`
 }
 
-// ListInvoicesParams selects invoices, newest period first; every filter is
+// InvoiceListParams selects invoices, newest period first; every filter is
 // optional. PeriodFrom and PeriodTo bound the invoice's period start.
-type ListInvoicesParams struct {
+type InvoiceListParams struct {
 	CustomerID CustomerID
 	Currency   string
 	Status     InvoiceStatus

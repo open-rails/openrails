@@ -62,7 +62,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var params billing.MerchantConfigurationApplyParams
+			var params billing.ApplyMerchantConfigurationParams
 			if apply {
 				if file == "" {
 					return fmt.Errorf("--file is required for an application document with application_id and expected_revision")
@@ -103,7 +103,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			}
 			var result any
 			if apply {
-				result, err = client.ApplyMerchantConfiguration(cmd.Context(), &params)
+				result, err = client.ApplyMerchantConfiguration(cmd.Context(), params)
 			} else {
 				result, err = client.GetMerchantConfiguration(cmd.Context())
 			}

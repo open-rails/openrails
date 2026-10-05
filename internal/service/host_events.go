@@ -18,7 +18,7 @@ func invalidHostEventRequest(message string) error {
 	return apperr.New(http.StatusBadRequest, "invalid_host_event_request", message)
 }
 
-func (s *Service) ListHostEvents(ctx context.Context, req billing.ListHostEventsRequest) (billing.ListPage[billing.HostEvent], error) {
+func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListParams) (billing.ListPage[billing.HostEvent], error) {
 	switch req.Type {
 	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared:
 	default:

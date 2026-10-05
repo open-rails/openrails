@@ -22,7 +22,7 @@ import (
 
 // ApplyMerchantMetadata is the trusted startup entry to the same application
 // boundary used by the authorized Client. It does not select a merchant.
-func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params billing.MerchantConfigurationApplyParams) (*billing.MerchantConfigurationReceipt, error) {
+func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params billing.ApplyMerchantConfigurationParams) (*billing.MerchantConfigurationReceipt, error) {
 	return (&Service{rt: &app.Runtime{DB: database}}).ApplyMerchantConfiguration(ctx, params)
 }
 
@@ -78,7 +78,7 @@ func (s *Service) GetMerchantConfigurationState(ctx context.Context) (state *bil
 	return state, err
 }
 
-func merchantApplicationDigest(params billing.MerchantConfigurationApplyParams) ([32]byte, error) {
+func merchantApplicationDigest(params billing.ApplyMerchantConfigurationParams) ([32]byte, error) {
 	// JSON omitempty otherwise erases the distinction between an omitted list
 	// and an explicitly empty list that clears declarative policy.
 	presence := struct{ Policies, Bindings, Windows bool }{}
@@ -88,13 +88,13 @@ func merchantApplicationDigest(params billing.MerchantConfigurationApplyParams) 
 		presence.Windows = params.Settings.DelegatedInvokerWastedSpendLimits != nil
 	}
 	body, err := json.Marshal(struct {
-		Params   billing.MerchantConfigurationApplyParams
+		Params   billing.ApplyMerchantConfigurationParams
 		Presence any
 	}{params, presence})
 	return sha256.Sum256(body), err
 }
 
-func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing.MerchantConfigurationApplyParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
+func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing.ApplyMerchantConfigurationParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
 	params.ApplicationID = strings.TrimSpace(params.ApplicationID)
 	if params.ApplicationID == "" || len(params.ApplicationID) > 128 || params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
 		return nil, apperr.Invalidf("application_id and expected_revision are required")
@@ -177,7 +177,7 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing
 
 func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.MerchantSettings {
 	if patch.Profile != nil {
-		p := billing.MerchantProfileInput{}
+		p := billing.MerchantProfile{}
 		if current.Profile != nil {
 			p = *current.Profile
 		}

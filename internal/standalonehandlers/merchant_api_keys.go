@@ -128,7 +128,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 		if !ok {
 			return
 		}
-		var req billing.CreateAPIKeyRequest
+		var req billing.CreateAPIKeyParams
 		if !r.BindJSON(&req) {
 			return
 		}

@@ -113,10 +113,10 @@ type RailDefinition struct {
 	SettingKeys    []string `json:"setting_keys"`
 }
 
-// PSPRoutingPreviewParams asks which PSP a checkout for a price would use.
+// PreviewPSPRoutingParams asks which PSP a checkout for a price would use.
 // PSP names one explicitly (a PSP key); empty asks what the merchant's
 // routing picks.
-type PSPRoutingPreviewParams struct {
+type PreviewPSPRoutingParams struct {
 	PriceID PriceID `json:"price_id"`
 	// Country is the customer's ISO-3166-1 alpha-2 country, when known.
 	Country string `json:"country"`

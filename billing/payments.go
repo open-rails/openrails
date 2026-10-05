@@ -69,9 +69,9 @@ type Payment struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ListPaymentsParams selects payments, newest first; every filter is
+// PaymentListParams selects payments, newest first; every filter is
 // optional.
-type ListPaymentsParams struct {
+type PaymentListParams struct {
 	CustomerID     CustomerID
 	SubscriptionID SubscriptionID
 	PriceID        PriceID

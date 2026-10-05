@@ -130,9 +130,9 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 
 	// One admitted request and one usage event land in this month's partitions.
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, customer, billing.CustomerParams{})
+	_, err = client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
 	require.NoError(t, err)
-	_, err = client.CreateCreditGrant(ctx, customer, billing.CreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	request, deadline := "job-"+uuid.NewString(), now.Add(time.Hour)
 	verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
@@ -141,7 +141,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	_, err = client.CaptureAdmission(ctx, request, billing.CaptureParams{Amount: 90_000, Usage: &billing.CaptureUsage{EventType: "inference"}})
+	_, err = client.CaptureAdmission(ctx, request, billing.CaptureAdmissionParams{Amount: 90_000, Usage: &billing.CaptureUsage{EventType: "inference"}})
 	require.NoError(t, err)
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.`+partitionName("admission_operations", thisMonth)))
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.`+partitionName("usage_events", thisMonth)))
@@ -261,9 +261,9 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	ctx := t.Context()
 	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 	for _, c := range []billing.CustomerID{customer, other} {
-		_, err := client.EnsureCustomer(ctx, c, billing.CustomerParams{})
+		_, err := client.EnsureCustomer(ctx, c, billing.EnsureCustomerParams{})
 		require.NoError(t, err)
-		_, err = client.CreateCreditGrant(ctx, c, billing.CreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+		_, err = client.CreateCreditGrant(ctx, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 		require.NoError(t, err)
 	}
 
@@ -298,7 +298,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	require.NoError(t, err)
 
 	// A usage coordinate is recorded once, whatever time each attempt reports.
-	usage := billing.UsageEventParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"}
+	usage := billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"}
 	first, err := client.RecordUsage(ctx, usage)
 	require.NoError(t, err)
 	require.False(t, first.Replayed)
@@ -315,10 +315,10 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 
 	// An event is accepted within the ingest window and no further back or ahead.
 	backdated := time.Now().Add(-retention.UsageIngestWindow + time.Hour)
-	_, err = client.RecordUsage(ctx, billing.UsageEventParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: "backdated", OccurredAt: &backdated})
+	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: "backdated", OccurredAt: &backdated})
 	require.NoError(t, err)
 	for name, at := range map[string]time.Time{"stale": time.Now().Add(-retention.UsageIngestWindow - time.Hour), "future": time.Now().Add(time.Hour)} {
-		_, err = client.RecordUsage(ctx, billing.UsageEventParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: name, OccurredAt: &at})
+		_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: name, OccurredAt: &at})
 		require.ErrorIs(t, err, billing.ErrInvalid, name)
 	}
 }
@@ -332,7 +332,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	day := 24 * time.Hour
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomer(ctx, customer, billing.CustomerParams{})
+	_, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
 	require.NoError(t, err)
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "plan-" + uuid.NewString()[:8], DisplayName: "Plan"})
 	require.NoError(t, err)
@@ -420,9 +420,9 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	requireRefused(t, err)
 
 	// Money that must survive everything below.
-	_, err = client.CreateCreditGrant(ctx, customer, billing.CreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
-	_, err = client.RecordUsage(ctx, billing.UsageEventParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"})
+	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"})
 	require.NoError(t, err)
 	permanent := func() map[string]int {
 		out := map[string]int{}
@@ -502,9 +502,9 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	day := 24 * time.Hour
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomer(ctx, customer, billing.CustomerParams{})
+	_, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
 	require.NoError(t, err)
-	_, err = client.CreateCreditGrant(ctx, customer, billing.CreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	var psp, account uuid.UUID
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key) VALUES ($1, 'stripe', 'acct_retention', 'stripe') RETURNING id`), w.merchant).Scan(&psp))

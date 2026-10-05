@@ -42,57 +42,57 @@ func TestPayment(t *testing.T) {
 	solana := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_sol", Rail: "solana", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "usdc"}, PSPID: billing.PSPID(uuid.New())}, Selector: "solana"}
 	method := billing.PaymentMethodID{1}.String()
 	owns := func(id string) bool { return id == method }
-	newCard := CheckoutSessionPayRequest{PaymentToken: " tok ", NameOnCard: "A Buyer", Country: "us", Zip: "10001", Address1: "1 Main St", Email: "attacker@example.test"}
+	newCard := PayCheckoutSessionParams{PaymentToken: " tok ", NameOnCard: "A Buyer", Country: "us", Zip: "10001", Address1: "1 Main St", Email: "attacker@example.test"}
 
 	got, _, err := Payment(card, newCard, "buyer@example.test", owns)
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "cards", PSPID: psp, PaymentToken: "tok", Email: "buyer@example.test", NameOnCard: "A Buyer", Country: "US", Zip: "10001"}, got,
 		"the option binds the PSP, the account the email; the compact form carries no street")
 
-	got, _, err = Payment(card, CheckoutSessionPayRequest{PaymentMethodID: method, NameOnCard: "Someone Else", Zip: "99999", Country: "US"}, "", owns)
+	got, _, err = Payment(card, PayCheckoutSessionParams{PaymentMethodID: method, NameOnCard: "Someone Else", Zip: "99999", Country: "US"}, "", owns)
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "cards", PSPID: psp, PaymentMethodID: method}, got, "a saved card keeps its own billing identity")
 
-	got, _, err = Payment(stripe, CheckoutSessionPayRequest{PaymentMethodID: method, NameOnCard: "Ignored", Zip: "99999"}, "buyer@example.test", owns)
+	got, _, err = Payment(stripe, PayCheckoutSessionParams{PaymentMethodID: method, NameOnCard: "Ignored", Zip: "99999"}, "buyer@example.test", owns)
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutPaymentOptions{Rail: "stripe", PSPID: stripe.PSPID, PaymentMethodID: method, Email: "buyer@example.test"}, got, "a card saved in Stripe's fields")
 
-	got, _, err = Payment(solana, CheckoutSessionPayRequest{TokenSymbol: "USDC"}, "", owns)
+	got, _, err = Payment(solana, PayCheckoutSessionParams{TokenSymbol: "USDC"}, "", owns)
 	require.NoError(t, err)
 	require.Equal(t, "USDC", got.TokenSymbol)
 	require.Equal(t, "transfer_request", got.Flow)
 
-	_, _, err = Payment(redirect, CheckoutSessionPayRequest{NameOnCard: "A Buyer", Country: "US", Zip: "10001"}, "buyer@example.test", owns)
+	_, _, err = Payment(redirect, PayCheckoutSessionParams{NameOnCard: "A Buyer", Country: "US", Zip: "10001"}, "buyer@example.test", owns)
 	require.NoError(t, err)
 
 	other := billing.PaymentMethodID{2}.String()
 	for name, tc := range map[string]struct {
 		option Option
-		in     CheckoutSessionPayRequest
+		in     PayCheckoutSessionParams
 	}{
-		"neither token nor method":  {card, CheckoutSessionPayRequest{}},
-		"both token and method":     {card, CheckoutSessionPayRequest{PaymentToken: "tok", PaymentMethodID: method, NameOnCard: "A", Country: "US", Zip: "10001"}},
-		"someone else's method":     {card, CheckoutSessionPayRequest{PaymentMethodID: other}},
-		"malformed method id":       {card, CheckoutSessionPayRequest{PaymentMethodID: "pm_nope"}},
-		"new card without a name":   {card, CheckoutSessionPayRequest{PaymentToken: "tok", Country: "US", Zip: "10001"}},
-		"new card bad country":      {card, CheckoutSessionPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "USA", Zip: "10001"}},
-		"new card missing postal":   {card, CheckoutSessionPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "DE"}},
-		"new card bad US postal":    {card, CheckoutSessionPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "US", Zip: "1000"}},
-		"oversized token":           {card, CheckoutSessionPayRequest{PaymentToken: strings.Repeat("t", 4097), NameOnCard: "A", Country: "US", Zip: "10001"}},
-		"card token on a redirect":  {redirect, CheckoutSessionPayRequest{PaymentToken: "tok"}},
-		"another settlement token":  {solana, CheckoutSessionPayRequest{TokenSymbol: "SOL"}},
-		"saved method on solana":    {solana, CheckoutSessionPayRequest{PaymentMethodID: method}},
-		"a driver no page can run":  {Option{CheckoutSessionOption: CheckoutSessionOption{Driver: "elements"}}, CheckoutSessionPayRequest{PaymentMethodID: method}},
-		"a token on stripe":         {stripe, CheckoutSessionPayRequest{PaymentToken: "tok"}},
-		"a new card on stripe":      {stripe, CheckoutSessionPayRequest{}},
-		"another card on stripe":    {stripe, CheckoutSessionPayRequest{PaymentMethodID: other}},
-		"solana option, no binding": {Option{CheckoutSessionOption: CheckoutSessionOption{Driver: "solana_pay"}}, CheckoutSessionPayRequest{}},
+		"neither token nor method":  {card, PayCheckoutSessionParams{}},
+		"both token and method":     {card, PayCheckoutSessionParams{PaymentToken: "tok", PaymentMethodID: method, NameOnCard: "A", Country: "US", Zip: "10001"}},
+		"someone else's method":     {card, PayCheckoutSessionParams{PaymentMethodID: other}},
+		"malformed method id":       {card, PayCheckoutSessionParams{PaymentMethodID: "pm_nope"}},
+		"new card without a name":   {card, PayCheckoutSessionParams{PaymentToken: "tok", Country: "US", Zip: "10001"}},
+		"new card bad country":      {card, PayCheckoutSessionParams{PaymentToken: "tok", NameOnCard: "A", Country: "USA", Zip: "10001"}},
+		"new card missing postal":   {card, PayCheckoutSessionParams{PaymentToken: "tok", NameOnCard: "A", Country: "DE"}},
+		"new card bad US postal":    {card, PayCheckoutSessionParams{PaymentToken: "tok", NameOnCard: "A", Country: "US", Zip: "1000"}},
+		"oversized token":           {card, PayCheckoutSessionParams{PaymentToken: strings.Repeat("t", 4097), NameOnCard: "A", Country: "US", Zip: "10001"}},
+		"card token on a redirect":  {redirect, PayCheckoutSessionParams{PaymentToken: "tok"}},
+		"another settlement token":  {solana, PayCheckoutSessionParams{TokenSymbol: "SOL"}},
+		"saved method on solana":    {solana, PayCheckoutSessionParams{PaymentMethodID: method}},
+		"a driver no page can run":  {Option{CheckoutSessionOption: CheckoutSessionOption{Driver: "elements"}}, PayCheckoutSessionParams{PaymentMethodID: method}},
+		"a token on stripe":         {stripe, PayCheckoutSessionParams{PaymentToken: "tok"}},
+		"a new card on stripe":      {stripe, PayCheckoutSessionParams{}},
+		"another card on stripe":    {stripe, PayCheckoutSessionParams{PaymentMethodID: other}},
+		"solana option, no binding": {Option{CheckoutSessionOption: CheckoutSessionOption{Driver: "solana_pay"}}, PayCheckoutSessionParams{}},
 	} {
 		_, _, err := Payment(tc.option, tc.in, "buyer@example.test", owns)
 		require.ErrorIs(t, err, ErrInvalid, name)
 	}
 
-	_, _, err = Payment(card, CheckoutSessionPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "QA"}, "", owns)
+	_, _, err = Payment(card, PayCheckoutSessionParams{PaymentToken: "tok", NameOnCard: "A", Country: "QA"}, "", owns)
 	require.NoError(t, err, "a postal code is not demanded where none exists")
 
 	// A PSP whose card_entry is server takes the card itself (#1129).
@@ -100,22 +100,22 @@ func TestPayment(t *testing.T) {
 	entered, err := cardguard.NewCard("4111111111111111", 10, 2027, "0739")
 	require.NoError(t, err)
 	defer entered.Zero()
-	got, sent, err := Payment(server, CheckoutSessionPayRequest{Card: entered, NameOnCard: "A Buyer", Country: "US", Zip: "10001", LastFour: "0000"}, "", owns)
+	got, sent, err := Payment(server, PayCheckoutSessionParams{Card: entered, NameOnCard: "A Buyer", Country: "US", Zip: "10001", LastFour: "0000"}, "", owns)
 	require.NoError(t, err)
 	require.Same(t, entered, sent)
 	require.Empty(t, got.LastFour, "the card names itself")
-	_, _, err = Payment(server, CheckoutSessionPayRequest{PaymentMethodID: method}, "", owns)
+	_, _, err = Payment(server, PayCheckoutSessionParams{PaymentMethodID: method}, "", owns)
 	require.NoError(t, err)
 	for name, tc := range map[string]struct {
 		option Option
-		in     CheckoutSessionPayRequest
+		in     PayCheckoutSessionParams
 	}{
-		"a token for a card page":     {server, CheckoutSessionPayRequest{PaymentToken: "tok", NameOnCard: "A", Country: "US", Zip: "10001"}},
-		"card and a saved method":     {server, CheckoutSessionPayRequest{Card: entered, PaymentMethodID: method}},
-		"a card for a tokenizing PSP": {card, CheckoutSessionPayRequest{Card: entered, NameOnCard: "A", Country: "US", Zip: "10001"}},
-		"a card on a redirect":        {redirect, CheckoutSessionPayRequest{Card: entered}},
-		"a card on solana":            {solana, CheckoutSessionPayRequest{Card: entered, TokenSymbol: "USDC"}},
-		"a card without a name":       {server, CheckoutSessionPayRequest{Card: entered, Country: "US", Zip: "10001"}},
+		"a token for a card page":     {server, PayCheckoutSessionParams{PaymentToken: "tok", NameOnCard: "A", Country: "US", Zip: "10001"}},
+		"card and a saved method":     {server, PayCheckoutSessionParams{Card: entered, PaymentMethodID: method}},
+		"a card for a tokenizing PSP": {card, PayCheckoutSessionParams{Card: entered, NameOnCard: "A", Country: "US", Zip: "10001"}},
+		"a card on a redirect":        {redirect, PayCheckoutSessionParams{Card: entered}},
+		"a card on solana":            {solana, PayCheckoutSessionParams{Card: entered, TokenSymbol: "USDC"}},
+		"a card without a name":       {server, PayCheckoutSessionParams{Card: entered, Country: "US", Zip: "10001"}},
 	} {
 		_, _, err := Payment(tc.option, tc.in, "", owns)
 		require.ErrorIs(t, err, ErrInvalid, name)

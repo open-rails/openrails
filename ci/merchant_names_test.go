@@ -126,21 +126,21 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	other, _ := newUser(t, cp)
 
 	acme := uniqueName("acme")
-	created, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: acme, OwnerUserID: owner})
+	created, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: acme, OwnerUserID: owner})
 	require.NoError(t, err)
 	require.True(t, created.Created)
 	group, err := cp.AuthKit().Group(ctx, iam.GroupByID(created.GroupID))
 	require.NoError(t, err)
 	require.Equal(t, created.MerchantID.String(), group.ID, "the AuthKit group is keyed by the merchant and carries no name")
 
-	again, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
+	again, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
 	require.False(t, again.Created, "a taken name never becomes another merchant")
 	require.Equal(t, created.MerchantID, again.MerchantID)
 
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: reserved, OwnerUserID: owner})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: reserved, OwnerUserID: owner})
 	require.ErrorIs(t, err, billing.ErrMerchantSlugReserved)
-	platform, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: reserved})
+	platform, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: reserved})
 	require.NoError(t, err, "operators claim reserved names")
 	require.True(t, platform.Created)
 
@@ -152,7 +152,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 		require.Equal(t, created.MerchantID, mid, "the former name forwards")
 		require.Equal(t, renamed, current)
 	}
-	blocked, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
+	blocked, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
 	require.False(t, blocked.Created, "a former name is not claimable by another merchant")
 	var pgErr *pgconn.PgError
@@ -171,7 +171,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	for _, released := range []string{acme, renamed} {
 		_, _, err := cp.ResolveMerchantForGroup(ctx, released)
 		require.ErrorIs(t, err, billing.ErrMerchantUnresolved, released)
-		reclaimed, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: released, OwnerUserID: other})
+		reclaimed, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: released, OwnerUserID: other})
 		require.NoError(t, err)
 		require.True(t, reclaimed.Created, "retirement releases the name and its former names")
 		require.NotEqual(t, created.MerchantID, reclaimed.MerchantID)
@@ -187,10 +187,10 @@ func TestMerchantRenameRoute(t *testing.T) {
 	ctx := t.Context()
 	owner, token := newOwner(t, cp)
 	shop := uniqueName("shop")
-	m, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner})
+	m, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner})
 	require.NoError(t, err)
 	taken := uniqueName("taken")
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: taken})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: taken})
 	require.NoError(t, err)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

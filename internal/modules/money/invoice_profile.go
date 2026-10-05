@@ -54,9 +54,9 @@ func normalizeCollectionMethod(s string) (string, error) {
 	}
 }
 
-// SetCustomerInvoiceProfile upserts a payer's invoice profile. Operator
+// SetInvoiceProfile upserts a payer's invoice profile. Operator
 // surface — a payer must not grant itself credit terms.
-func (s *MoneyService) SetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p CustomerInvoiceProfile) error {
+func (s *MoneyService) SetInvoiceProfile(ctx context.Context, payer identity.CustomerID, p CustomerInvoiceProfile) error {
 	_, err := s.writeCustomerInvoiceProfile(ctx, payer, p, false)
 	return err
 }
@@ -145,9 +145,9 @@ func (s *MoneyService) writeCustomerInvoiceProfile(ctx context.Context, payer id
 	return created, nil
 }
 
-// GetCustomerInvoiceProfile returns the payer's invoice profile, or nil when
+// GetInvoiceProfile returns the payer's invoice profile, or nil when
 // none is stored.
-func (s *MoneyService) GetCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*CustomerInvoiceProfile, error) {
+func (s *MoneyService) GetInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*CustomerInvoiceProfile, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -160,7 +160,7 @@ func (s *MoneyService) GetCustomerInvoiceProfile(ctx context.Context, payer iden
 	}
 	var out *CustomerInvoiceProfile
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row, err := s.db.Gen(ctx).GetCustomerInvoiceProfile(ctx, gen.GetCustomerInvoiceProfileParams{
+		row, err := s.db.Gen(ctx).GetInvoiceProfile(ctx, gen.GetInvoiceProfileParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(),
 		})
 		if err != nil {

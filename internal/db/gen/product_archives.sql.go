@@ -90,41 +90,6 @@ func (q *Queries) GetProductArchiveByKey(ctx context.Context, arg GetProductArch
 	return i, err
 }
 
-const getPurchaseReviewByID = `-- name: GetPurchaseReviewByID :one
-SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM billing.reconciliation_findings
-WHERE merchant_id = $1::uuid AND finding_type = $2::text AND id = $3::uuid
-`
-
-type GetPurchaseReviewByIDParams struct {
-	MerchantID  uuid.UUID
-	FindingType string
-	ID          uuid.UUID
-}
-
-type GetPurchaseReviewByIDRow struct {
-	ID            uuid.UUID
-	Status        string
-	Evidence      []byte
-	OperatorNotes *string
-	CreatedAt     time.Time
-	ResolvedAt    *time.Time
-}
-
-func (q *Queries) GetPurchaseReviewByID(ctx context.Context, arg GetPurchaseReviewByIDParams) (GetPurchaseReviewByIDRow, error) {
-	row := q.db.QueryRow(ctx, getPurchaseReviewByID, arg.MerchantID, arg.FindingType, arg.ID)
-	var i GetPurchaseReviewByIDRow
-	err := row.Scan(
-		&i.ID,
-		&i.Status,
-		&i.Evidence,
-		&i.OperatorNotes,
-		&i.CreatedAt,
-		&i.ResolvedAt,
-	)
-	return i, err
-}
-
 const getPurchaseReviewBySubject = `-- name: GetPurchaseReviewBySubject :one
 SELECT id, status, evidence, operator_notes, created_at, resolved_at
 FROM billing.reconciliation_findings
@@ -273,79 +238,12 @@ func (q *Queries) ListProductArchivePurchases(ctx context.Context, arg ListProdu
 	return items, nil
 }
 
-const listPurchaseReviews = `-- name: ListPurchaseReviews :many
-SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM billing.reconciliation_findings
-WHERE merchant_id = $1::uuid AND finding_type = $2::text
-  AND status = ANY($3::text[])
-  AND ($4::text = '' OR evidence -> 'local' ->> 'product_archive_id' = $4::text)
-  AND ($5::timestamptz IS NULL
-       OR (created_at, id) > ($5::timestamptz, $6::uuid))
-ORDER BY created_at, id
-LIMIT $7::int
-`
-
-type ListPurchaseReviewsParams struct {
-	MerchantID       uuid.UUID
-	FindingType      string
-	Statuses         []string
-	ProductArchiveID string
-	AfterAt          *time.Time
-	AfterID          *uuid.UUID
-	RowLimit         int32
-}
-
-type ListPurchaseReviewsRow struct {
-	ID            uuid.UUID
-	Status        string
-	Evidence      []byte
-	OperatorNotes *string
-	CreatedAt     time.Time
-	ResolvedAt    *time.Time
-}
-
-// One page of purchase reviews, oldest first, after a (created_at, id) cursor.
-func (q *Queries) ListPurchaseReviews(ctx context.Context, arg ListPurchaseReviewsParams) ([]ListPurchaseReviewsRow, error) {
-	rows, err := q.db.Query(ctx, listPurchaseReviews,
-		arg.MerchantID,
-		arg.FindingType,
-		arg.Statuses,
-		arg.ProductArchiveID,
-		arg.AfterAt,
-		arg.AfterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPurchaseReviewsRow
-	for rows.Next() {
-		var i ListPurchaseReviewsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Status,
-			&i.Evidence,
-			&i.OperatorNotes,
-			&i.CreatedAt,
-			&i.ResolvedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const lockProductArchiveKey = `-- name: LockProductArchiveKey :exec
 
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
 
-// #1058 product archive operations and their purchase reviews.
+// Product archive operations and the findings that hold their purchases for review.
 func (q *Queries) LockProductArchiveKey(ctx context.Context, lockKey string) error {
 	_, err := q.db.Exec(ctx, lockProductArchiveKey, lockKey)
 	return err

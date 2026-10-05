@@ -9,7 +9,7 @@ import {
 import type {
   Allowance,
   CatalogDrift,
-  CatalogDriftCheck,
+  CatalogDriftRefresh,
   CreateOffChannelPaymentParams,
   CreatePriceParams,
   CreditLimit,
@@ -603,7 +603,7 @@ export const listCatalogDrift = (
   })
 
 export const refreshCatalogDrift = () =>
-  api<CatalogDriftCheck>("/merchant/catalog/drift/refresh", { method: "POST" })
+  api<CatalogDriftRefresh>("/merchant/catalog/drift/refresh", { method: "POST" })
 
 // --- Ops ---
 

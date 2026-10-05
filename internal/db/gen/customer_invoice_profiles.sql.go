@@ -12,19 +12,19 @@ import (
 	"github.com/google/uuid"
 )
 
-const getCustomerInvoiceProfile = `-- name: GetCustomerInvoiceProfile :one
+const getInvoiceProfile = `-- name: GetInvoiceProfile :one
 SELECT merchant_id, customer_id, net_terms_days, collection_method, po_number, tax, billing_contacts, memo, created_at, updated_at FROM billing.customer_invoice_profiles
 WHERE merchant_id = $1 AND customer_id = $2
 LIMIT 1
 `
 
-type GetCustomerInvoiceProfileParams struct {
+type GetInvoiceProfileParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 }
 
-func (q *Queries) GetCustomerInvoiceProfile(ctx context.Context, arg GetCustomerInvoiceProfileParams) (BillingCustomerInvoiceProfile, error) {
-	row := q.db.QueryRow(ctx, getCustomerInvoiceProfile, arg.MerchantID, arg.CustomerID)
+func (q *Queries) GetInvoiceProfile(ctx context.Context, arg GetInvoiceProfileParams) (BillingCustomerInvoiceProfile, error) {
+	row := q.db.QueryRow(ctx, getInvoiceProfile, arg.MerchantID, arg.CustomerID)
 	var i BillingCustomerInvoiceProfile
 	err := row.Scan(
 		&i.MerchantID,

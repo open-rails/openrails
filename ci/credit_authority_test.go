@@ -26,7 +26,7 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 
 	owner := newAccount(t, cp)
 	shop := uniqueName("credit")
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	mid, _, err := cp.ResolveMerchantForGroup(ctx, shop)
 	require.NoError(t, err)

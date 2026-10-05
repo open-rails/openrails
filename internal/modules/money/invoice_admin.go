@@ -18,7 +18,7 @@ import (
 )
 
 // ListInvoices is one page of invoices, newest period first.
-func (s *MoneyService) ListInvoices(ctx context.Context, p billing.ListInvoicesParams) (billing.ListPage[models.Invoice], error) {
+func (s *MoneyService) ListInvoices(ctx context.Context, p billing.InvoiceListParams) (billing.ListPage[models.Invoice], error) {
 	var out billing.ListPage[models.Invoice]
 	mid, err := merchant.Require(ctx)
 	if err != nil {

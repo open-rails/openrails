@@ -25,7 +25,7 @@ func customerFromRow(row gen.BillingCustomer) billing.Customer {
 
 // EnsureCustomer creates the merchant's customer or replaces its declared
 // fields.
-func (s *Service) EnsureCustomer(ctx context.Context, id identity.CustomerID, params billing.CustomerParams) (*billing.Customer, error) {
+func (s *Service) EnsureCustomer(ctx context.Context, id identity.CustomerID, params billing.EnsureCustomerParams) (*billing.Customer, error) {
 	if id.IsZero() {
 		return nil, apperr.Invalidf("customer id is required").WithParam("customer_id")
 	}

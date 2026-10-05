@@ -32,8 +32,8 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			cheap := w.membership("content:basic", 1_000_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			request := func(priceID billing.PriceID, entitlement string) billing.CreateCheckoutAttemptRequest {
-				return billing.CreateCheckoutAttemptRequest{
+			request := func(priceID billing.PriceID, entitlement string) billing.CreateCheckoutAttemptParams {
+				return billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: priceID,
 					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -51,7 +51,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			require.Error(t, err, "a negative access duration is refused")
 
 			archived := w.membership("content:archived", 1_000_000)
-			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID.String(), Action: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
+			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID, PurchaseAction: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
 			require.NoError(t, err)
 			_, err = client.CreateCheckoutAttempt(ctx, request(archived.ID, "content:archived"))
 			require.Error(t, err, "an archived price is not purchasable")
@@ -95,7 +95,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			buy := func(client *openrails.Client) error {
-				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), billing.CreateCheckoutAttemptRequest{
+				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",

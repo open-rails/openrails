@@ -13,7 +13,7 @@ import (
 // payment page. The returned ID reads and pays the session with no other
 // credential (billing-ui's checkoutSource), so it goes to that customer's
 // browser only.
-func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error) {
+func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionParams, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error) {
 	if _, err := requireTypedID("customer.id", request.Customer.ID); err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 // customer's pay action; a recurring price is enrolled. Retries with the same
 // IdempotencyKey never charge twice. A step the buyer must take (a redirect, a
 // Solana Pay link) is the attempt's NextAction.
-func (c *Client) CreateCheckoutAttempt(ctx context.Context, request billing.CreateCheckoutAttemptRequest, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
+func (c *Client) CreateCheckoutAttempt(ctx context.Context, request billing.CreateCheckoutAttemptParams, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
 	if _, err := requireTypedID("customer.id", request.Customer.ID); err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (c *Client) GetCheckoutAttempt(ctx context.Context, id billing.CheckoutAtte
 // ConfirmCheckoutAttempt completes a Solana attempt with the signature of the
 // transaction the buyer's wallet signed (next action
 // solana_sign_transactions).
-func (c *Client) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, request billing.ConfirmCheckoutAttemptRequest, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
+func (c *Client) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, request billing.ConfirmCheckoutAttemptParams, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
 	attempt, err := requireTypedID("id", id)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (c *Client) ConfirmCheckoutAttempt(ctx context.Context, id billing.Checkout
 // GetCheckoutConfig returns the merchant's checkout configuration: its armed
 // PSPs and their public values, and with a price, the ways checkout can sell
 // it.
-func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.CheckoutConfigQuery, requestOptions ...RequestOption) (*billing.CheckoutConfig, error) {
+func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.GetCheckoutConfigParams, requestOptions ...RequestOption) (*billing.CheckoutConfig, error) {
 	if !query.PriceID.IsZero() && strings.TrimSpace(query.PriceKey) != "" {
 		return nil, invalidErr("price_id and price_key are exclusive")
 	}

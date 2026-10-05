@@ -117,7 +117,7 @@ func CreateCreditGrant(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.CreditGrantParams
+	var params billing.CreateCreditGrantParams
 	if !r.BindJSON(&params) {
 		return
 	}
@@ -175,9 +175,9 @@ func ListCreditGrants(r *httprequest.Request) {
 }
 
 func creditGrantParam(r *httprequest.Request) (billing.CreditGrantID, bool) {
-	id, err := billing.ParseCreditGrantID(r.Param("grant_id"))
+	id, err := billing.ParseCreditGrantID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid credit grant id").WithParam("grant_id"))
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid credit grant id").WithParam("id"))
 		return billing.CreditGrantID{}, false
 	}
 	return id, true
@@ -325,7 +325,7 @@ func SetCreditLimit(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.CreditLimitParams
+	var params billing.SetCreditLimitParams
 	if !r.BindJSON(&params) {
 		return
 	}
@@ -369,7 +369,7 @@ func SetTrustLevel(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var params billing.TrustLevelParams
+	var params billing.SetTrustLevelParams
 	if !r.BindJSON(&params) {
 		return
 	}

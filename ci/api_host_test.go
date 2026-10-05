@@ -135,7 +135,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	provision := func(prefix string) shop {
 		owner := newAccount(t, cp)
 		slug := uniqueName(prefix)
-		_, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
+		_, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
 		require.NoError(t, err)
 		return shop{slug, authtest.SignIn(t, cp.AuthKit(), owner).AccessToken}
 	}

@@ -100,6 +100,13 @@ export type Application = {
   meters?: ApplyMeter[]
 }
 
+export type ApplyMerchantConfigurationParams = {
+  application_id?: string
+  expected_revision?: string | null
+  settings?: MerchantSettings
+  display_name?: string
+}
+
 export type ApplyMeter = {
   key?: string
   event_type?: string | null
@@ -139,23 +146,32 @@ export type ArchivePSPParams = {
   allow_last?: boolean
 }
 
+export type ArchiveProductParams = {
+  product_id?: string
+  product_key?: string
+  purchase_action?: "none" | "refund" | "review"
+  purchased_since?: string
+  window_seconds?: number
+  reason?: string
+}
+
 export type ArchivedPurchase = {
   payment_id: string
   customer_id: string
   amount: string
   currency: string
   purchased_at: string
-  outcome: string
-  refund_id?: string
-  review_id?: string
-  detail?: string
+  outcome: "already_refunded" | "not_started" | "refund_pending" | "refunded" | "review_dismissed" | "review_open" | "review_refunded"
+  refund_id: string | null
+  finding_id: string | null
+  detail: string | null
 }
 
 export type AskCatalogParams = {
   question?: string
 }
 
-export type AskMetricsRequest = {
+export type AskMetricsParams = {
   question?: string
 }
 
@@ -178,6 +194,13 @@ export type BillingAddress = {
   country: string | null
 }
 
+export type BillingArchiveImport = {
+  merchant_id: string
+  digest: string
+  rows: string
+  already_imported: boolean
+}
+
 export type BillingDetails = {
   name: string | null
   email: string | null
@@ -192,12 +215,7 @@ export type BillingImportResult = {
   reasons: Record<string, string> | null
 }
 
-export type BillingPolicyBindingInput = {
-  policy: string
-  tier?: string
-}
-
-export type BillingPolicyInput = {
+export type BillingPolicy = {
   name: string
   kind: string
   outstanding_cap_amount?: string
@@ -210,6 +228,11 @@ export type BillingPolicyInput = {
   collection_cycle_boundary?: string
   bad_spend_windows?: BudgetWindow[]
   policy_currency?: string
+}
+
+export type BillingPolicyBinding = {
+  policy: string
+  tier?: string
 }
 
 export type BudgetWindow = {
@@ -236,7 +259,7 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
-export type CaptureParams = {
+export type CaptureAdmissionParams = {
   amount?: string
   usage?: CaptureUsage
 }
@@ -324,7 +347,7 @@ export type CatalogDrift = {
   resolved_at: string | null
 }
 
-export type CatalogDriftCheck = {
+export type CatalogDriftRefresh = {
   scanned_products: number
   scanned_prices: number
   scanned_nmi_plans: number
@@ -347,6 +370,16 @@ export type CatalogRevision = {
 
 export type ChangeTierParams = {
   price_id?: string
+}
+
+export type CheckEntitlementsParams = {
+  entitlements?: string[]
+  at?: string
+}
+
+export type CheckProductAccessParams = {
+  product_ids?: string[]
+  product_keys?: string[]
 }
 
 export type CheckoutAttempt = {
@@ -486,12 +519,6 @@ export type CheckoutSessionMerchant = {
   display_name: string
 }
 
-export type CheckoutSessionMintRequest = {
-  price_id?: string
-  price_key?: string
-  success_url?: string
-}
-
 export type CheckoutSessionOption = {
   id: string
   psp_id: string
@@ -499,24 +526,6 @@ export type CheckoutSessionOption = {
   mode: string
   driver: string
   public_config: Record<string, string> | null
-}
-
-export type CheckoutSessionPayRequest = {
-  option_id?: string
-  payment_token?: string
-  payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
-  card?: CardEntry
 }
 
 export type CheckoutSessionPayResult = {
@@ -550,24 +559,24 @@ export type CollectionPaymentMethod = {
   payment_method_id: string
 }
 
-export type ConfirmCheckoutAttemptRequest = {
+export type ConfirmCheckoutAttemptParams = {
   signature?: string
   wallet?: string
 }
 
-export type CreateAPIKeyRequest = {
+export type CreateAPIKeyParams = {
   name?: string
   role?: string
 }
 
-export type CreateAlertWebhookRequest = {
+export type CreateAlertWebhookParams = {
   name?: string
   url?: string
   format?: "discord" | "generic" | "slack"
   enabled?: boolean | null
 }
 
-export type CreateCheckoutAttemptRequest = {
+export type CreateCheckoutAttemptParams = {
   customer?: CheckoutCustomerIdentity
   price_id?: string
   price_key?: string
@@ -579,11 +588,21 @@ export type CreateCheckoutAttemptRequest = {
   cancel_url?: string
 }
 
-export type CreateCheckoutSessionRequest = {
+export type CreateCheckoutSessionParams = {
   customer?: CheckoutCustomerIdentity
   price_id?: string
   price_key?: string
   success_url?: string
+}
+
+export type CreateCreditGrantParams = {
+  currency?: string
+  amount?: string
+  source_id?: string
+  source?: string
+  invoker?: string
+  expires_at?: string
+  description?: string
 }
 
 export type CreateEntitlementParams = {
@@ -597,7 +616,7 @@ export type CreateInvoicePaymentParams = {
   reference?: string
 }
 
-export type CreateMerchantRequest = {
+export type CreateMerchantParams = {
   name?: string
   display_name?: string
 }
@@ -627,6 +646,17 @@ export type CreatePaymentMethodParams = {
   payment_token?: string
   card?: CardEntry
   billing_details?: BillingDetails
+}
+
+export type CreatePlanMigrationParams = {
+  source_price?: string
+  target_price?: string
+  effective_at?: string
+  notice_days?: number
+  immediate?: boolean
+  acknowledge_short_notice?: boolean
+  fallback_policy?: string
+  archive_source?: boolean
 }
 
 export type CreatePriceParams = {
@@ -707,25 +737,10 @@ export type CreditGrant = {
   replayed: boolean
 }
 
-export type CreditGrantParams = {
-  currency?: string
-  amount?: string
-  source_id?: string
-  source?: string
-  invoker?: string
-  expires_at?: string
-  description?: string
-}
-
 export type CreditLimit = {
   customer_id: string
   currency: string
   amount: string
-}
-
-export type CreditLimitParams = {
-  currency?: string
-  amount?: string
 }
 
 export type CreditTransaction = {
@@ -765,10 +780,6 @@ export type CustomerBillingPolicy = {
   policy_name: string | null
 }
 
-export type CustomerBillingPolicyParams = {
-  policy_name?: string | null
-}
-
 export type CustomerBillingProfile = {
   customer: Customer
   balances: Balance[]
@@ -779,18 +790,14 @@ export type CustomerBillingProfile = {
   product_access: ProductAccessGrant[]
 }
 
-export type CustomerCancelSubscriptionRequest = {
+export type CustomerCancelSubscriptionParams = {
   reason?: string
   signature?: string
 }
 
-export type CustomerChangeTierRequest = {
+export type CustomerChangeTierParams = {
   price_id?: string
   signature?: string
-}
-
-export type CustomerParams = {
-  email?: string | null
 }
 
 export type Dashboard = {
@@ -933,13 +940,12 @@ export type EnsureCatalogParams = {
   owner_subject?: string
 }
 
-export type EntitlementCheck = {
-  entitlements: Record<string, boolean> | null
+export type EnsureCustomerParams = {
+  email?: string | null
 }
 
-export type EntitlementCheckParams = {
-  entitlements?: string[]
-  at?: string
+export type EntitlementCheck = {
+  entitlements: Record<string, boolean> | null
 }
 
 export type EntitlementListParams = {
@@ -1040,7 +1046,7 @@ export type FreeloaderEpisodeSummary = {
   unsanctioned: number
 }
 
-export type GenerateWidgetRequest = {
+export type GenerateDashboardWidgetParams = {
   prompt?: string
   base_query?: MetricsQuery | null
 }
@@ -1065,7 +1071,7 @@ export type HostEvent = {
   delinquency: DelinquencyHostEvent | null
 }
 
-export type InviteTeamMemberRequest = {
+export type InviteTeamMemberParams = {
   email?: string
   role?: string
 }
@@ -1175,20 +1181,6 @@ export type MerchantAPIHost = {
   claim: APIHostClaim | null
 }
 
-export type MerchantBillingImportResult = {
-  merchant_id: string
-  digest: string
-  rows: string
-  already_imported: boolean
-}
-
-export type MerchantConfigurationApplyParams = {
-  application_id?: string
-  expected_revision?: string | null
-  settings?: MerchantSettings
-  display_name?: string
-}
-
 export type MerchantConfigurationReceipt = {
   application_id: string
   revision: string
@@ -1217,7 +1209,7 @@ export type MerchantNotification = {
   read_at: string | null
 }
 
-export type MerchantProfileInput = {
+export type MerchantProfile = {
   display_name?: string
   logo_url?: string
   from_email?: string
@@ -1226,7 +1218,7 @@ export type MerchantProfileInput = {
 }
 
 export type MerchantSettings = {
-  profile?: MerchantProfileInput
+  profile?: MerchantProfile
   collection_threshold?: string
   monthly_floor?: string
   billing_period_boundary?: string
@@ -1238,8 +1230,8 @@ export type MerchantSettings = {
   arrears_delinquency_floor?: string
   checkout_routing?: CheckoutRoutingRule[]
   dunning_policy?: DunningPolicy
-  billing_policies?: BillingPolicyInput[]
-  billing_policy_bindings?: BillingPolicyBindingInput[]
+  billing_policies?: BillingPolicy[]
+  billing_policy_bindings?: BillingPolicyBinding[]
   delegated_invoker_wasted_spend_limits?: BudgetWindow[]
 }
 
@@ -1368,6 +1360,12 @@ export type MetricsSchema = {
   query_shape: string
 }
 
+export type MintCheckoutSessionParams = {
+  price_id?: string
+  price_key?: string
+  success_url?: string
+}
+
 export type NewPriceDraft = {
   product_key: string
   review_text: string
@@ -1459,6 +1457,17 @@ export type OfferListParams = {
   cursors?: Record<string, string>
 }
 
+export type OpenOperationAuthorizationParams = {
+  operation_id?: string
+  customer_id?: string
+  record_owner?: string
+  currency?: string
+  amount?: string
+  claim_reference?: string
+  authorization_body?: string | null
+  authorization_body_sha256?: string
+}
+
 export type OperationAuthorization = {
   operation_id: string
   merchant_id: string
@@ -1479,17 +1488,6 @@ export type OperationAuthorization = {
   released_at: string | null
   settled_at: string | null
   replayed: boolean
-}
-
-export type OperationAuthorizationParams = {
-  operation_id?: string
-  customer_id?: string
-  record_owner?: string
-  currency?: string
-  amount?: string
-  claim_reference?: string
-  authorization_body?: string | null
-  authorization_body_sha256?: string
 }
 
 export type PSP = {
@@ -1548,12 +1546,6 @@ export type PSPRoutingPreview = {
   candidates: PSPRoutingCandidate[]
 }
 
-export type PSPRoutingPreviewParams = {
-  price_id?: string
-  country?: string
-  psp?: string
-}
-
 export type PackagePrice = {
   amount?: string
   package_size?: number
@@ -1568,6 +1560,24 @@ export type PathPageOfPlatformMerchantItem = {
   offset: number
   has_more: boolean
   url: string
+}
+
+export type PayCheckoutSessionParams = {
+  option_id?: string
+  payment_token?: string
+  payment_method_id?: string
+  email?: string
+  name_on_card?: string
+  address1?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+  token_symbol?: string
+  last_four?: string
+  card_type?: string
+  expiry_date?: string
+  card?: CardEntry
 }
 
 export type PayInvoiceParams = {
@@ -1738,17 +1748,6 @@ export type PlanMigrationRailCounts = {
   skipped: number
 }
 
-export type PlanMigrationRequest = {
-  source_price?: string
-  target_price?: string
-  effective_at?: string
-  notice_days?: number
-  immediate?: boolean
-  acknowledge_short_notice?: boolean
-  fallback_policy?: string
-  archive_source?: boolean
-}
-
 export type PlanMigrationResult = {
   batch_id: string | null
   source_price_id: string
@@ -1778,6 +1777,16 @@ export type PlatformMerchantItem = {
 
 export type PortalResponse = {
   url: string
+}
+
+export type PreviewPSPRoutingParams = {
+  price_id?: string
+  country?: string
+  psp?: string
+}
+
+export type PreviewRepriceBatchParams = {
+  price_key?: string
 }
 
 export type Price = {
@@ -1833,11 +1842,6 @@ export type ProductAccessCheck = {
   access: Record<string, boolean> | null
 }
 
-export type ProductAccessCheckParams = {
-  product_ids?: string[]
-  product_keys?: string[]
-}
-
 export type ProductAccessGrant = {
   id: string
   customer_id: string
@@ -1858,28 +1862,14 @@ export type ProductAccessGrant = {
 
 export type ProductArchive = {
   id: string
-  object: string
   product_id: string
   product_key: string
   purchase_action: "none" | "refund" | "review"
-  purchased_since?: string
-  reason?: string
+  purchased_since: string | null
+  reason: string | null
   created_at: string
   complete: boolean
   purchases: ArchivedPurchase[]
-}
-
-export type ProductArchivePurchases = {
-  action?: string
-  purchased_since?: string
-  window?: string
-}
-
-export type ProductArchiveRequest = {
-  product_id?: string
-  product_key?: string
-  purchases?: ProductArchivePurchases
-  reason?: string
 }
 
 export type ProductSummary = {
@@ -1903,17 +1893,6 @@ export type ProviderBillingLifecycleEvidence = {
   windows_closed_at: string
   windows_closed_reference: string
   lifecycle_evidence_body: string | null
-}
-
-export type ProviderBillingObservationParams = {
-  observation_id?: string
-  lifecycle?: ProviderBillingLifecycleEvidence
-  normalized_query?: string
-  query_start?: string
-  query_end?: string
-  raw_body?: string | null
-  records?: ProviderBillingRecord[]
-  refusal?: ProviderBillingObservationRefusal | null
 }
 
 export type ProviderBillingObservationRefusal = {
@@ -1943,24 +1922,6 @@ export type ProviderBillingRecord = {
   bucket_start?: string
   amount?: string
   time_billed_ms?: string
-}
-
-export type PurchaseReview = {
-  id: string
-  status: string
-  product_archive_id: string
-  product_id: string
-  product_key: string
-  payment_id: string
-  customer_id: string
-  amount: string
-  currency: string
-  purchased_at: string
-  detail?: string
-  refund_id?: string
-  notes?: string
-  created_at: string
-  resolved_at?: string
 }
 
 export type RailDefinition = {
@@ -2024,6 +1985,31 @@ export type RebillCycle = {
   attempts: PaymentAttempt[]
 }
 
+export type RecordProviderBillingObservationParams = {
+  observation_id?: string
+  lifecycle?: ProviderBillingLifecycleEvidence
+  normalized_query?: string
+  query_start?: string
+  query_end?: string
+  raw_body?: string | null
+  records?: ProviderBillingRecord[]
+  refusal?: ProviderBillingObservationRefusal | null
+}
+
+export type RecordUsageParams = {
+  customer_id?: string
+  invoker?: string
+  currency?: string
+  event_type?: string
+  dimensions?: Record<string, number>
+  amount?: string
+  resource?: string
+  metadata?: Record<string, unknown>
+  source?: string
+  source_id?: string
+  occurred_at?: string
+}
+
 export type RefundPaymentParams = {
   amount?: string
   full?: boolean
@@ -2035,7 +2021,7 @@ export type ReleaseOperationAuthorizationParams = {
   release_reference?: string
 }
 
-export type RenameMerchantRequest = {
+export type RenameMerchantParams = {
   name?: string
 }
 
@@ -2043,6 +2029,17 @@ export type ReplacePaymentMethodCardParams = {
   payment_token?: string
   card?: CardEntry
   billing_details?: BillingDetails
+}
+
+export type ReportWastedSpendParams = {
+  customer_id?: string
+  invoker?: string
+  invoker_type?: "delegated" | "payer"
+  currency?: string
+  amount?: string
+  source?: string
+  source_id?: string
+  reason?: string
 }
 
 export type Reprice = {
@@ -2090,10 +2087,6 @@ export type RepriceBatchPreview = {
   matched: number
 }
 
-export type RepriceBatchPreviewParams = {
-  price_key?: string
-}
-
 export type RepriceBatchResult = {
   batch_id: string
   to_price_id: string
@@ -2109,22 +2102,17 @@ export type RepriceOutcome = {
   acknowledged_short_notice: boolean
 }
 
-export type ResolveFindingRequest = {
+export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
   override_params?: unknown
-}
-
-export type ResolvePurchaseReviewParams = {
-  decision?: "dismiss" | "refund"
-  notes?: string
 }
 
 export type RetryInvoiceCollectionParams = {
   payment_method_id?: string
 }
 
-export type RetrySubscriptionNowRequest = {
+export type RetrySubscriptionNowParams = {
   payment_method_id?: string
 }
 
@@ -2132,15 +2120,24 @@ export type RevokeCreditGrantParams = {
   reason?: string
 }
 
-export type SetAPIHostRequest = {
+export type SetAPIHostParams = {
   api_host?: string
 }
 
-export type SetAlertWebhookURLRequest = {
+export type SetAlertWebhookURLParams = {
   url?: string
 }
 
-export type SetDashboardRequest = {
+export type SetCreditLimitParams = {
+  currency?: string
+  amount?: string
+}
+
+export type SetCustomerBillingPolicyParams = {
+  policy_name?: string | null
+}
+
+export type SetDashboardParams = {
   widgets?: DashboardWidget[]
 }
 
@@ -2164,12 +2161,26 @@ export type SetRateOverrideParams = {
   allowance?: Allowance
 }
 
+export type SetSpendDelegationParams = {
+  windows?: BudgetWindow[]
+  provenance?: string
+}
+
+export type SetSpendDelegationsParams = {
+  delegations?: SpendDelegation[]
+}
+
 export type SetSubscriptionPaymentMethodParams = {
   payment_method_id?: string
 }
 
-export type SetTeamRoleRequest = {
+export type SetTeamRoleParams = {
   role?: string
+}
+
+export type SetTrustLevelParams = {
+  currency?: string
+  trust_level?: string
 }
 
 export type SolanaCheckoutConfig = {
@@ -2207,15 +2218,6 @@ export type SpendDelegation = {
   scope_key: string
   windows: BudgetWindow[]
   provenance: string
-}
-
-export type SpendDelegationParams = {
-  windows?: BudgetWindow[]
-  provenance?: string
-}
-
-export type SpendDelegationsParams = {
-  delegations?: SpendDelegation[]
 }
 
 export type SpendLimits = {
@@ -2408,11 +2410,6 @@ export type TrustLevel = {
   trust_level: string
 }
 
-export type TrustLevelParams = {
-  currency?: string
-  trust_level?: string
-}
-
 export type UnreadCount = {
   unread_count: number
 }
@@ -2467,20 +2464,6 @@ export type UsageEvent = {
   replayed: boolean
 }
 
-export type UsageEventParams = {
-  customer_id?: string
-  invoker?: string
-  currency?: string
-  event_type?: string
-  dimensions?: Record<string, number>
-  amount?: string
-  resource?: string
-  metadata?: Record<string, unknown>
-  source?: string
-  source_id?: string
-  occurred_at?: string
-}
-
 export type UsageRow = {
   key: string
   event_count: number
@@ -2498,17 +2481,6 @@ export type UserMerchant = {
 export type VerificationPressure = {
   count: number
   max_age_seconds: number
-}
-
-export type WastedSpendParams = {
-  customer_id?: string
-  invoker?: string
-  invoker_type?: "delegated" | "payer"
-  currency?: string
-  amount?: string
-  source?: string
-  source_id?: string
-  reason?: string
 }
 
 export type WastedSpendReport = {

@@ -61,7 +61,7 @@ func MerchantMetricsAsk(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "metrics Q&A unavailable")
 		return
 	}
-	var body billing.AskMetricsRequest
+	var body billing.AskMetricsParams
 	if !r.BindJSON(&body) {
 		return
 	}

@@ -69,7 +69,7 @@ func (c *Client) AuthenticateUser(r *http.Request) (Identity, error) {
 // req.OwnerUserID. A user claim answers to Config.ControlPlane.MerchantCreation.
 // A merchant's own changes afterwards (its name, display name, API host) go
 // through its routes.
-func (c *Client) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantRequest) (*billing.ProvisionMerchantResult, error) {
+func (c *Client) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
 	a, _, err := c.controlPlane()
 	if err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ func (c *Client) FleetTimeseries(ctx context.Context, exclude billing.MerchantID
 
 // ListMerchantRetirementCandidates pages unreserved live merchants with their
 // activity facts; the host owns the dormancy policy over them.
-func (c *Client) ListMerchantRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidatesRequest) (billing.MerchantRetirementCandidatePage, error) {
+func (c *Client) ListMerchantRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error) {
 	a, _, err := c.controlPlane()
 	if err != nil {
 		return billing.MerchantRetirementCandidatePage{}, err

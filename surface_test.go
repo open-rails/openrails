@@ -75,14 +75,14 @@ var embeddedMethods = map[string]string{
 // every field set (they take one of several).
 var routeArguments = map[string][]any{
 	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
-	"CheckProductAccess":    {billing.CustomerID(uuid.New()), billing.ProductAccessCheckParams{ProductKeys: []string{"pro"}}},
-	"CreateCheckoutAttempt": {billing.CreateCheckoutAttemptRequest{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, PriceKey: "pro", IdempotencyKey: "k"}},
-	"CreateCheckoutSession": {billing.CreateCheckoutSessionRequest{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, PriceKey: "pro"}},
+	"CheckProductAccess":    {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
+	"CreateCheckoutAttempt": {billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, PriceKey: "pro", IdempotencyKey: "k"}},
+	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, PriceKey: "pro"}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
-	"GetCheckoutConfig":     {billing.CheckoutConfigQuery{PriceKey: "pro"}},
+	"GetCheckoutConfig":     {billing.GetCheckoutConfigParams{PriceKey: "pro"}},
 	"ListOffers":            {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
-	"ResolvePurchaseReview": {"review", billing.ResolvePurchaseReviewParams{Decision: "dismiss"}},
+	"ArchiveProduct":        {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},
 	"UpdatePrice":           {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
 	"UpdateProduct":         {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
 }
@@ -95,6 +95,10 @@ var verbs = map[string][]string{
 	http.MethodPatch:  {"Update"},
 	http.MethodDelete: {"Delete"},
 }
+
+// documents are the requests that are not named ...Params: what the route
+// stores or runs, sent whole.
+var documents = []string{"SpendDelegation", "DeclaredBilling", "MetricsQuery", "PageRequest", "Application"}
 
 // synonyms are spellings of the seven verbs the API does not use.
 var synonyms = []string{"Retrieve", "Fetch", "Read", "Find", "Lookup", "Search", "Upsert", "Put", "Add", "New", "Make", "Remove", "Destroy", "Modify", "Edit", "Patch"}
@@ -264,6 +268,21 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			if strings.HasPrefix(m.Name, synonym) {
 				t.Errorf("%s: say Get, List, Create, Update, Delete, Set or Ensure, not %s", m.Name, synonym)
 			}
+		}
+
+		// A request struct is named ...Params; a result is a pointer, a
+		// map or a list, never a struct by value.
+		for i := 2; i < m.Type.NumIn(); i++ {
+			in := m.Type.In(i)
+			for in.Kind() == reflect.Pointer || in.Kind() == reflect.Slice {
+				in = in.Elem()
+			}
+			if in.Kind() == reflect.Struct && strings.HasPrefix(in.PkgPath(), "github.com/open-rails/openrails/") && !strings.HasSuffix(in.Name(), "Params") && !slices.Contains(documents, in.Name()) {
+				t.Errorf("%s takes %s: name a request struct ...Params", m.Name, in.Name())
+			}
+		}
+		if out := m.Type.Out(0); out.Kind() == reflect.Struct {
+			t.Errorf("%s returns %s by value: return a pointer", m.Name, out)
 		}
 
 		// A creator's catalog is the same methods on a ForCatalogOwner

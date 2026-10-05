@@ -19,7 +19,7 @@ var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/dashboard", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead,
 		Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetMerchantDashboard)},
 	{Method: PUT, Path: "/v1/merchant/dashboard", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantDashboardUpdate,
-		Request: billing.SetDashboardRequest{}, Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("dashboard_invalid", "service_unavailable"), Handler: h(handlers.PutMerchantDashboard)},
+		Request: billing.SetDashboardParams{}, Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("dashboard_invalid", "service_unavailable"), Handler: h(handlers.PutMerchantDashboard)},
 	{Method: GET, Path: "/v1/merchant/notifications", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead,
 		Query: params(queryOf(handlers.ListMerchantNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.MerchantNotification]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListMerchantNotifications)},
 	{Method: GET, Path: "/v1/merchant/notifications/unread-count", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead,
@@ -38,7 +38,7 @@ var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/findings/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantRepairAlertsRead,
 		Responses: []Reply{{200, billing.Finding{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminGetFinding)},
 	{Method: POST, Path: "/v1/merchant/findings/{id}/resolve", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantFindingsResolve,
-		Request: billing.ResolveFindingRequest{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("invalid_param", "provider_cancel_held", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
+		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("invalid_param", "provider_cancel_held", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
 	{Method: GET, Path: "/v1/me/notifications", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
 		Query: params(queryOf(handlers.MyNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.Notification]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.GetNotifications)},
 	{Method: GET, Path: "/v1/me/notifications/unread-count", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
@@ -50,7 +50,7 @@ var opsRoutes = []Route{
 	// the LLM provider: mounted only with llm.api_key (and, for ask, the
 	// llm.ask_enabled consent).
 	{Method: POST, Path: "/v1/merchant/metrics/ask", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead, When: FeatureMetricsAsk,
-		Request: billing.AskMetricsRequest{}, Responses: []Reply{{200, billing.MetricsAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.MerchantMetricsAsk)},
+		Request: billing.AskMetricsParams{}, Responses: []Reply{{200, billing.MetricsAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.MerchantMetricsAsk)},
 	{Method: POST, Path: "/v1/merchant/dashboard/widgets/generate", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantDashboardUpdate, When: FeatureDashboardGeneration,
-		Request: billing.GenerateWidgetRequest{}, Responses: []Reply{{200, billing.GeneratedWidget{}}}, Errors: codes("dashboard_invalid", "invalid_param", "model_unavailable", "service_unavailable", "widget_generation_invalid"), Handler: h(handlers.GenerateDashboardWidget)},
+		Request: billing.GenerateDashboardWidgetParams{}, Responses: []Reply{{200, billing.GeneratedWidget{}}}, Errors: codes("dashboard_invalid", "invalid_param", "model_unavailable", "service_unavailable", "widget_generation_invalid"), Handler: h(handlers.GenerateDashboardWidget)},
 }

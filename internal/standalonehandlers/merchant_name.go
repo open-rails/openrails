@@ -27,7 +27,7 @@ func MerchantRename(svc MerchantRenamer) func(*httprequest.Request) {
 		if !ok {
 			return
 		}
-		var req billing.RenameMerchantRequest
+		var req billing.RenameMerchantParams
 		if !r.BindJSON(&req) {
 			return
 		}

@@ -28,7 +28,7 @@ var ErrInvalidMerchantSettings = errors.New("invalid merchant settings")
 type merchantSettingsDocument struct {
 	config   models.MerchantConfiguration
 	policies map[string]models.BillingPolicy
-	bindings []billing.BillingPolicyBindingInput
+	bindings []billing.BillingPolicyBinding
 }
 
 // ValidateMerchantSettings checks a settings document as an application of
@@ -214,7 +214,7 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out billing.Merchant
 			DunningPolicy: cfg.DunningPolicy,
 		}
 		if cfg.Profile != nil {
-			out.Profile = &billing.MerchantProfileInput{DisplayName: cfg.Profile.DisplayName, LogoURL: cfg.Profile.LogoURL, FromEmail: cfg.Profile.FromEmail, SupportURL: cfg.Profile.SupportURL, SignupURL: cfg.Profile.SignupURL}
+			out.Profile = &billing.MerchantProfile{DisplayName: cfg.Profile.DisplayName, LogoURL: cfg.Profile.LogoURL, FromEmail: cfg.Profile.FromEmail, SupportURL: cfg.Profile.SupportURL, SignupURL: cfg.Profile.SignupURL}
 		}
 		for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
 			out.DelegatedInvokerWastedSpendLimits = append(out.DelegatedInvokerWastedSpendLimits, billing.BudgetWindow{Key: w.Key, WindowSeconds: int64(w.Window / time.Second), Limit: w.Limit, Currency: w.Currency})

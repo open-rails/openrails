@@ -46,7 +46,7 @@ const (
 	// revoke/grant), so it is a distinct write grant; reads share
 	// merchant:repair-alerts:read (the operator repair surface).
 	MerchantFindingsResolve = "merchant:findings:resolve"
-	// MerchantBillingImport gates POST /v1/import/billing (#737): a bulk
+	// MerchantBillingImport gates POST /v1/merchant/billing-import (#737): a bulk
 	// DeclaredBilling book import writes subscriptions/payments/payment methods
 	// wholesale — owner/automation authority, not a support-role grant.
 	MerchantBillingImport = "merchant:billing:import"

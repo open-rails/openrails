@@ -65,7 +65,7 @@ func TestClientRequestShapes(t *testing.T) {
 		check  func(t *testing.T, body map[string]any)
 	}{
 		{"checkout attempt", func() error {
-			_, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{Customer: who, PriceID: billing.PriceID(uuid.New()), IdempotencyKey: key})
+			_, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{Customer: who, PriceID: billing.PriceID(uuid.New()), IdempotencyKey: key})
 			return err
 		}, http.MethodPost, "/v1/merchant/checkout-attempts", "", func(t *testing.T, b map[string]any) {
 			require.Contains(t, b, "price_id")
@@ -73,21 +73,21 @@ func TestClientRequestShapes(t *testing.T) {
 			require.NotContains(t, b, "mode", "the price selects the operation")
 		}},
 		{"checkout session", func() error {
-			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{Customer: who, PriceKey: "pro-monthly"})
+			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: who, PriceKey: "pro-monthly"})
 			return err
 		}, http.MethodPost, "/v1/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, "pro-monthly", b["price_key"])
 			require.Equal(t, who.ID.String(), b["customer"].(map[string]any)["id"])
 		}},
 		{"checkout config for a price", func() error {
-			_, err := client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{PriceKey: "pro-monthly"})
+			_, err := client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{PriceKey: "pro-monthly"})
 			return err
 		}, http.MethodGet, "/v1/merchant/checkout-config", "price_key=pro-monthly", nil},
 		{"settings carry named policies and tier bindings", func() error {
 			revision := "r1"
-			_, err := client.ApplyMerchantConfiguration(t.Context(), &billing.MerchantConfigurationApplyParams{ApplicationID: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
-				BillingPolicies:       []billing.BillingPolicyInput{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
-				BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "api_line", Tier: "gold"}},
+			_, err := client.ApplyMerchantConfiguration(t.Context(), billing.ApplyMerchantConfigurationParams{ApplicationID: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+				BillingPolicies:       []billing.BillingPolicy{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
+				BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "api_line", Tier: "gold"}},
 			}})
 			return err
 		}, http.MethodPost, "/v1/merchant/configuration/applications", "", func(t *testing.T, b map[string]any) {
@@ -140,7 +140,7 @@ func TestClientRequestShapes(t *testing.T) {
 		}, http.MethodDelete, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
 		{"access check keeps duplicates", func() error {
 			id, _ := billing.ParseProductID(product)
-			got, err := client.CheckProductAccess(t.Context(), customerID, billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{id, id}})
+			got, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{id, id}})
 			if err == nil && !got[product] {
 				err = errors.New("access not decoded")
 			}
@@ -149,7 +149,7 @@ func TestClientRequestShapes(t *testing.T) {
 			require.Equal(t, []any{product, product}, b["product_ids"])
 		}},
 		{"access check by key", func() error {
-			_, err := client.CheckProductAccess(t.Context(), customerID, billing.ProductAccessCheckParams{ProductKeys: []string{"pro plan&x"}})
+			_, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductKeys: []string{"pro plan&x"}})
 			return err
 		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{"pro plan&x"}, b["product_keys"])
@@ -224,19 +224,19 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	// Opaque host strings (request ids, deposit keys, migration prices): only blankness is refused.
 	blankOnly := map[string]func(id string) error{
 		"preview migration source": func(id string) error {
-			_, err := c.PreviewPlanMigration(ctx, billing.PlanMigrationRequest{SourcePrice: id, TargetPrice: "b"})
+			_, err := c.PreviewPlanMigration(ctx, billing.CreatePlanMigrationParams{SourcePrice: id, TargetPrice: "b"})
 			return err
 		},
 		"preview migration target": func(id string) error {
-			_, err := c.PreviewPlanMigration(ctx, billing.PlanMigrationRequest{SourcePrice: "a", TargetPrice: id})
+			_, err := c.PreviewPlanMigration(ctx, billing.CreatePlanMigrationParams{SourcePrice: "a", TargetPrice: id})
 			return err
 		},
 		"create migration source": func(id string) error {
-			_, err := c.CreatePlanMigration(ctx, billing.PlanMigrationRequest{SourcePrice: id, TargetPrice: "b"})
+			_, err := c.CreatePlanMigration(ctx, billing.CreatePlanMigrationParams{SourcePrice: id, TargetPrice: "b"})
 			return err
 		},
 		"capture": func(id string) error {
-			_, err := c.CaptureAdmission(ctx, id, billing.CaptureParams{Amount: 1})
+			_, err := c.CaptureAdmission(ctx, id, billing.CaptureAdmissionParams{Amount: 1})
 			return err
 		},
 		"release": func(id string) error { _, err := c.ReleaseAdmission(ctx, id); return err },
@@ -279,9 +279,9 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ListPaymentMethods(ctx, billing.CustomerID{}, billing.PageRequest{})
 			return err
 		},
-		"invoice profile customer": func() error { _, err := c.GetCustomerInvoiceProfile(ctx, billing.CustomerID{}); return err },
+		"invoice profile customer": func() error { _, err := c.GetInvoiceProfile(ctx, billing.CustomerID{}); return err },
 		"set invoice profile customer": func() error {
-			_, err := c.SetCustomerInvoiceProfile(ctx, billing.CustomerID{}, billing.SetInvoiceProfileParams{IfAbsent: true})
+			_, err := c.SetInvoiceProfile(ctx, billing.CustomerID{}, billing.SetInvoiceProfileParams{IfAbsent: true})
 			return err
 		},
 		"settled payment customer": func() error {
@@ -316,32 +316,32 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"checkout options": func() error {
-			_, err := c.GetCheckoutConfig(ctx, billing.CheckoutConfigQuery{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
+			_, err := c.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
 			return err
 		},
 		"checkout attempt": func() error { _, err := c.GetCheckoutAttempt(ctx, billing.CheckoutAttemptID{}); return err },
 		"confirm checkout": func() error {
-			_, err := c.ConfirmCheckoutAttempt(ctx, billing.CheckoutAttemptID{}, billing.ConfirmCheckoutAttemptRequest{})
+			_, err := c.ConfirmCheckoutAttempt(ctx, billing.CheckoutAttemptID{}, billing.ConfirmCheckoutAttemptParams{})
 			return err
 		},
 		"checkout customer": func() error {
-			_, err := c.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{PriceKey: "k", IdempotencyKey: "k"})
+			_, err := c.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{PriceKey: "k", IdempotencyKey: "k"})
 			return err
 		},
 		"checkout price": func() error {
-			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}})
+			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}})
 			return err
 		},
 		"access check customer": func() error {
-			_, err := c.CheckProductAccess(ctx, billing.CustomerID{}, billing.ProductAccessCheckParams{ProductKeys: []string{"k"}})
+			_, err := c.CheckProductAccess(ctx, billing.CustomerID{}, billing.CheckProductAccessParams{ProductKeys: []string{"k"}})
 			return err
 		},
 		"access check both": func() error {
-			_, err := c.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{}, ProductKeys: []string{}})
+			_, err := c.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{}, ProductKeys: []string{}})
 			return err
 		},
 		"access check neither": func() error {
-			_, err := c.CheckProductAccess(ctx, customerID, billing.ProductAccessCheckParams{})
+			_, err := c.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{})
 			return err
 		},
 		"access list customer": func() error {
@@ -391,20 +391,20 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	zero := billing.CustomerID{}
 	typedCustomerScoped := map[string]func() error{
 		"balance":          func() error { _, err := c.GetBalance(ctx, zero, "USD"); return err },
-		"usage":            func() error { _, err := c.GetUsage(ctx, zero, billing.UsageParams{Currency: "USD"}); return err },
+		"usage":            func() error { _, err := c.GetUsage(ctx, zero, billing.GetUsageParams{Currency: "USD"}); return err },
 		"trust level":      func() error { _, err := c.GetTrustLevel(ctx, zero, "USD"); return err },
-		"set trust level":  func() error { _, err := c.SetTrustLevel(ctx, zero, billing.TrustLevelParams{}); return err },
+		"set trust level":  func() error { _, err := c.SetTrustLevel(ctx, zero, billing.SetTrustLevelParams{}); return err },
 		"credit limit":     func() error { _, err := c.GetCreditLimit(ctx, zero, "USD"); return err },
-		"set credit limit": func() error { _, err := c.SetCreditLimit(ctx, zero, billing.CreditLimitParams{}); return err },
+		"set credit limit": func() error { _, err := c.SetCreditLimit(ctx, zero, billing.SetCreditLimitParams{}); return err },
 		"credit grants":    func() error { _, err := c.ListCreditGrants(ctx, zero, billing.CreditGrantListParams{}); return err },
-		"create credit":    func() error { _, err := c.CreateCreditGrant(ctx, zero, billing.CreditGrantParams{}); return err },
+		"create credit":    func() error { _, err := c.CreateCreditGrant(ctx, zero, billing.CreateCreditGrantParams{}); return err },
 		"transactions": func() error {
 			_, err := c.ListCreditTransactions(ctx, zero, billing.CreditTransactionListParams{})
 			return err
 		},
 		"billing policy": func() error { _, err := c.GetCustomerBillingPolicy(ctx, zero); return err },
 		"set billing policy": func() error {
-			_, err := c.SetCustomerBillingPolicy(ctx, zero, billing.CustomerBillingPolicyParams{})
+			_, err := c.SetCustomerBillingPolicy(ctx, zero, billing.SetCustomerBillingPolicyParams{})
 			return err
 		},
 		"delegations": func() error { _, err := c.ListSpendDelegations(ctx, zero); return err },
@@ -413,7 +413,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"customer":        func() error { _, err := c.GetCustomer(ctx, zero); return err },
-		"ensure customer": func() error { _, err := c.EnsureCustomer(ctx, zero, billing.CustomerParams{}); return err },
+		"ensure customer": func() error { _, err := c.EnsureCustomer(ctx, zero, billing.EnsureCustomerParams{}); return err },
 		"billing profile": func() error { _, err := c.GetCustomerBillingProfile(ctx, zero); return err },
 		"delinquency":     func() error { _, err := c.ListCustomerDelinquency(ctx, zero); return err },
 		"credit grant": func() error {

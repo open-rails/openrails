@@ -55,12 +55,12 @@ func TestCreditTransactionWireContract(t *testing.T) {
 func TestCreditGrantAndBalanceInt64RoundTrip(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, -1, 0, 1, 9007199254740993, math.MaxInt64} {
 		customer := billing.CustomerID(uuid.New())
-		request := billing.CreditGrantParams{Invoker: "host", Currency: "USD", Amount: amount, Source: "bank", SourceID: "payment"}
+		request := billing.CreateCreditGrantParams{Invoker: "host", Currency: "USD", Amount: amount, Source: "bank", SourceID: "payment"}
 		raw, err := json.Marshal(request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got billing.CreditGrantParams
+		var got billing.CreateCreditGrantParams
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestCreditGrantAndBalanceInt64RoundTrip(t *testing.T) {
 			t.Fatalf("balance changed: %s", raw)
 		}
 	}
-	var request billing.CreditGrantParams
+	var request billing.CreateCreditGrantParams
 	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"currency":123}`} {
 		if err := json.Unmarshal([]byte(raw), &request); err == nil {
 			t.Fatalf("accepted invalid wire value %s", raw)
@@ -93,10 +93,10 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 	for _, value := range []any{
 		billing.AdmitParams{EstimatedAmount: 9007199254740993, AccrualRateDeltaPerHour: math.MaxInt64},
 		billing.Admission{Allowed: true, EstimatedAmount: 9007199254740993, StartCapacityAmount: math.MaxInt64, CapturedAmount: &max},
-		billing.UsageEventParams{Amount: math.MaxInt64},
-		billing.WastedSpendParams{Amount: math.MaxInt64},
+		billing.RecordUsageParams{Amount: math.MaxInt64},
+		billing.ReportWastedSpendParams{Amount: math.MaxInt64},
 		billing.WastedSpendReport{RecordedAmount: math.MaxInt64, ChargedAmount: 9007199254740993, PolicyChargedAmount: &max},
-		billing.CaptureParams{Amount: math.MaxInt64},
+		billing.CaptureAdmissionParams{Amount: math.MaxInt64},
 	} {
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -122,7 +122,7 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 		}
 	}
 	// A capture that names no amount is refused, never read as free.
-	var capture billing.CaptureParams
+	var capture billing.CaptureAdmissionParams
 	if err := json.Unmarshal([]byte(`{"usage":{"event_type":"inference"}}`), &capture); err == nil {
 		t.Fatal("capture without an amount decoded")
 	}
@@ -133,7 +133,7 @@ func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
 	for _, value := range []any{
 		billing.BudgetWindow{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"},
 		billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
-		billing.BillingPolicyInput{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
+		billing.BillingPolicy{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
 		billing.MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
 		billing.CreditLimit{CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: max},
 		billing.UsageRow{Key: "api", EventCount: 1, Amount: max},

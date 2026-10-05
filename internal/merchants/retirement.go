@@ -25,7 +25,7 @@ type GroupReleaser func(ctx context.Context, groupID string) error
 
 // ListRetirementCandidates returns one page of candidates. Activity is probed
 // per merchant inside its own scope.
-func (s *Service) ListRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidatesRequest, reservedSlugs []string) (billing.MerchantRetirementCandidatePage, error) {
+func (s *Service) ListRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidateListParams, reservedSlugs []string) (billing.MerchantRetirementCandidatePage, error) {
 	var page billing.MerchantRetirementCandidatePage
 	if s == nil || s.pool == nil {
 		return page, errors.New("merchants: retirement candidates require a DB pool")

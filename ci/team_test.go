@@ -64,7 +64,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			email := "owner-" + id + "@e2e.test"
 			owner, err := core.CreateUser(ctx, iam.NewUser{Email: email, Username: "owner_" + id, Password: authtest.Password, EmailVerified: true})
 			require.NoError(t, err)
-			_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
+			_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
 			require.NoError(t, err)
 			handler, err := standaloneHandler(cp)
 			require.NoError(t, err)

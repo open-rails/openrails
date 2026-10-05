@@ -16,8 +16,8 @@ import (
 // .../preview is the operator's commit gate. The migration is a reprice
 // batch of kind plan_change, read and canceled at /reprice-batches/{id}.
 
-func planMigrationServiceRequest(r *httprequest.Request, b billing.PlanMigrationRequest) (subscriptions.PlanMigrationRequest, bool) {
-	var out subscriptions.PlanMigrationRequest
+func planMigrationServiceRequest(r *httprequest.Request, b billing.CreatePlanMigrationParams) (subscriptions.CreatePlanMigrationParams, bool) {
+	var out subscriptions.CreatePlanMigrationParams
 	if strings.TrimSpace(b.SourcePrice) == "" || strings.TrimSpace(b.TargetPrice) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "source_price and target_price required")
 		return out, false
@@ -45,7 +45,7 @@ func planMigrationServiceRequest(r *httprequest.Request, b billing.PlanMigration
 	if b.NoticeDays > 0 {
 		effective = r.Clock.Now().UTC().Add(time.Duration(b.NoticeDays) * 24 * time.Hour)
 	}
-	out = subscriptions.PlanMigrationRequest{
+	out = subscriptions.CreatePlanMigrationParams{
 		SourcePriceID:          source.ID,
 		TargetPriceID:          target.ID,
 		EffectiveAt:            effective,
@@ -72,7 +72,7 @@ func writePlanMigrationError(r *httprequest.Request, err error) {
 // CreatePlanMigration commits a plan migration: batch + per-subscription
 // rows, source archive, rail pushes, schedule-time notices.
 func CreatePlanMigration(r *httprequest.Request) {
-	var body billing.PlanMigrationRequest
+	var body billing.CreatePlanMigrationParams
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -92,7 +92,7 @@ func CreatePlanMigration(r *httprequest.Request) {
 // per-rail auto/requires-action/skip counts the operator reviews BEFORE
 // committing.
 func PreviewPlanMigration(r *httprequest.Request) {
-	var body billing.PlanMigrationRequest
+	var body billing.CreatePlanMigrationParams
 	if !r.BindJSON(&body) {
 		return
 	}

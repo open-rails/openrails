@@ -14,7 +14,7 @@ import (
 
 // merchantScoped are the route groups, beneath the API root, that act on one
 // merchant's books under a credential.
-var merchantScoped = []string{"/v1/merchant", "/v1/catalog", "/v1/import", "/v1/me", "/v1/customers"}
+var merchantScoped = []string{"/v1/merchant", "/v1/catalog", "/v1/me"}
 
 // ResolveMerchantSelectors makes every merchant-scoped route in the table
 // honor the OpenRails-Merchant selector. A request that names a merchant has

@@ -73,17 +73,17 @@ type FindingRecommendation struct {
 	Alternatives []FindingRecommendation `json:"alternatives"`
 }
 
-// ListFindingsRequest pages the findings queue: most severe first, then
+// FindingListParams pages the findings queue: most severe first, then
 // oldest. Status empty lists the open findings.
-type ListFindingsRequest struct {
+type FindingListParams struct {
 	PageRequest
 	Status   FindingStatus
 	Severity string
 	Type     string
 }
 
-// ResolveFindingRequest resolves one open finding.
-type ResolveFindingRequest struct {
+// ResolveFindingParams resolves one open finding.
+type ResolveFindingParams struct {
 	Outcome FindingOutcome `json:"outcome"`
 	Notes   string         `json:"notes"`
 	// OverrideParams replace the recommendation's params when approving.

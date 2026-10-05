@@ -22,7 +22,7 @@ func (c *Client) GetPayment(ctx context.Context, id billing.PaymentID, requestOp
 }
 
 // ListPayments is one page of the merchant's payments, newest first.
-func (c *Client) ListPayments(ctx context.Context, params billing.ListPaymentsParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Payment], error) {
+func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Payment], error) {
 	q := pageValues(nil, params.Page)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "subscription_id": params.SubscriptionID.String(), "price_id": params.PriceID.String(),
 		"rail": params.Rail, "kind": string(params.Kind), "transaction_id": params.TransactionID})

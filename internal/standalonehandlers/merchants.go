@@ -52,7 +52,7 @@ func MerchantCreate(svc MerchantCreator) func(*httprequest.Request) {
 			r.ErrorJSON(http.StatusUnauthorized, "authentication required")
 			return
 		}
-		var req billing.CreateMerchantRequest
+		var req billing.CreateMerchantParams
 		if !r.BindJSON(&req) {
 			return
 		}

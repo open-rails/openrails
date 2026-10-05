@@ -36,8 +36,8 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 				}
 				return len(f.base.nmi.ledger(""))
 			}
-			request := func(c *customer, method, key string) billing.CreateCheckoutAttemptRequest {
-				return billing.CreateCheckoutAttemptRequest{
+			request := func(c *customer, method, key string) billing.CreateCheckoutAttemptParams {
+				return billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -160,8 +160,8 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	a, b := f.replicas[0], f.replicas[1]
 	price := a.permanent("content:pass")
 	charges := func() int { return len(f.base.nmi.ledger("")) }
-	request := func(c *customer, key, token string) billing.CreateCheckoutAttemptRequest {
-		return billing.CreateCheckoutAttemptRequest{
+	request := func(c *customer, key, token string) billing.CreateCheckoutAttemptParams {
+		return billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: key,
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: token, NameOnCard: "Pass Payer", Zip: "10001", Country: "US"},
 		}
@@ -257,8 +257,8 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 		require.NoError(t, err)
 		return len(subs.Items)
 	}
-	request := func(c *customer, key string) billing.CreateCheckoutAttemptRequest {
-		return billing.CreateCheckoutAttemptRequest{
+	request := func(c *customer, key string) billing.CreateCheckoutAttemptParams {
+		return billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: key,
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
 		}

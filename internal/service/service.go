@@ -73,7 +73,7 @@ var ErrUsageOutsideIngestWindow = money.ErrUsageOutsideIngestWindow
 
 // CaptureAdmission settles an admitted request. The first capture fixes its
 // amount and usage terms; an exact retry returns the original receipt.
-func (s *Service) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureParams) (*billing.CaptureReceipt, error) {
+func (s *Service) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err

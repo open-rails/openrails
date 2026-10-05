@@ -14,7 +14,7 @@ import (
 // one final settlement.
 
 // ProviderBillingObservationMaxBytes bounds the canonical JSON encoding of one
-// ProviderBillingObservationParams in every deployment, so a request accepted
+// RecordProviderBillingObservationParams in every deployment, so a request accepted
 // embedded also fits the HTTP body limit. An adapter whose provider response
 // cannot fit submits ProviderBillingRefusalResponseTooLarge instead.
 const ProviderBillingObservationMaxBytes = 768 << 10
@@ -47,12 +47,12 @@ const (
 	OperationAuthorizationSettled  OperationAuthorizationState = "settled"
 )
 
-// OperationAuthorizationParams is exact host-authored authority for one
+// OpenOperationAuthorizationParams is exact host-authored authority for one
 // provider operation, reserving Amount of the customer's capacity in
 // Currency (USD is the only currency accepted for now). OperationID is also
 // the provider operation's idempotency identity. OpenRails verifies the
 // digest but never parses AuthorizationBody.
-type OperationAuthorizationParams struct {
+type OpenOperationAuthorizationParams struct {
 	OperationID             string     `json:"operation_id"` // canonical, at most 255 bytes
 	CustomerID              CustomerID `json:"customer_id"`
 	RecordOwner             string     `json:"record_owner"` // canonical, at most 255 bytes
@@ -160,9 +160,9 @@ type ProviderBillingObservationRefusal struct {
 	Kind ProviderBillingEvidenceRefusalKind `json:"kind"`
 }
 
-// ProviderBillingObservationParams appends one immutable provider billing read.
+// RecordProviderBillingObservationParams appends one immutable provider billing read.
 // It carries no rated amount; eligible evidence settles inside the same commit.
-type ProviderBillingObservationParams struct {
+type RecordProviderBillingObservationParams struct {
 	OperationID     string                             `json:"-"` // carried by the route path
 	ObservationID   string                             `json:"observation_id"`
 	Lifecycle       ProviderBillingLifecycleEvidence   `json:"lifecycle"`

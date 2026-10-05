@@ -68,7 +68,7 @@ func GenerateDashboardWidget(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeServiceUnavailable, "widget generation unavailable")
 		return
 	}
-	var body billing.GenerateWidgetRequest
+	var body billing.GenerateDashboardWidgetParams
 	if !r.BindJSON(&body) {
 		return
 	}

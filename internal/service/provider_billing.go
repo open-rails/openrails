@@ -14,7 +14,7 @@ import (
 
 // RecordProviderBillingObservation records exact provider/lifecycle facts in an
 // OpenRails-owned transaction. OpenRails alone qualifies, rates, and settles.
-func (s *Service) RecordProviderBillingObservation(ctx context.Context, req billing.ProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
+func (s *Service) RecordProviderBillingObservation(ctx context.Context, req billing.RecordProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (s *Service) RecordProviderBillingObservation(ctx context.Context, req bill
 
 // RecordProviderBillingObservationTx is the host-transaction form. It never
 // calls a provider and accepts no caller-rated amount.
-func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
+func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

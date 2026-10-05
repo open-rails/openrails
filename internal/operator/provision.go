@@ -16,7 +16,7 @@ import (
 // This is the engine mechanism behind a hosted wrapper's "registration is
 // provisioning" flow. Calling it without an attached control plane is a wiring
 // error (call Attach/AttachWithOptions first).
-func ProvisionMerchant(ctx context.Context, a *app.App, req billing.ProvisionMerchantRequest) (*billing.ProvisionMerchantResult, error) {
+func ProvisionMerchant(ctx context.Context, a *app.App, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
 	cp := Get(a)
 	if cp == nil || cp.Core() == nil {
 		return nil, fmt.Errorf("control plane provision: no control plane attached (call Attach first)")

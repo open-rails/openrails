@@ -48,9 +48,9 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CustomerParams{})
+	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.EnsureCustomerParams{})
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "refund@example.test"}, PriceID: price.ID,
 		Entitlement: "content:refunded", OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "security-" + uuid.NewString(), SuccessURL: "https://example.test/success", CancelURL: "https://example.test/cancel",
@@ -95,10 +95,10 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID, now.Add(time.Duration(i+2)*time.Second).Unix()))
 		require.False(t, entitled(), "%s after the refund must not grant again", kind)
 	}
-	access, err := client.CheckProductAccess(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.ProductAccessCheckParams{ProductIDs: []billing.ProductID{product.ID}})
+	access, err := client.CheckProductAccess(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product.ID}})
 	require.NoError(t, err)
 	require.False(t, access[product.ID.String()], "the refunded product is not owned")
-	payments, err := client.ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
+	payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
 	require.NoError(t, err)
 	var charged int
 	for _, p := range payments.Items {

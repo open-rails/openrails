@@ -23,7 +23,7 @@ import (
 // RunCatalogReconciliation reads the active Stripe and NMI accounts completely
 // and verifies stored Solana plans, then persists standing findings. Idempotent
 // and alert-only.
-func (s *Service) RunCatalogReconciliation(ctx context.Context) (*billing.CatalogDriftCheck, error) {
+func (s *Service) RunCatalogReconciliation(ctx context.Context) (*billing.CatalogDriftRefresh, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -83,7 +83,7 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*billing.Catalo
 	if err != nil {
 		return nil, fmt.Errorf("count drift findings: %w", err)
 	}
-	return &billing.CatalogDriftCheck{
+	return &billing.CatalogDriftRefresh{
 		ScannedProducts: pass.ScannedProducts, ScannedPrices: pass.ScannedPrices,
 		ScannedNMIPlans: pass.ScannedNMIPlans, ScannedSolanaPlans: pass.ScannedSolanaPlans,
 		OpenedFindings: pass.NewEvents, ResolvedFindings: pass.ResolvedEvents, OpenFindings: int(open),

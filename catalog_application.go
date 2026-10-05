@@ -53,10 +53,10 @@ func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDri
 	return &out, nil
 }
 
-// CheckCatalogDrift reads every linked PSP's catalog now and records the
+// RefreshCatalogDrift reads every linked PSP's catalog now and records the
 // drift it finds; it changes neither the PSPs nor the catalog.
-func (c *Client) CheckCatalogDrift(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogDriftCheck, error) {
-	var out billing.CatalogDriftCheck
+func (c *Client) RefreshCatalogDrift(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogDriftRefresh, error) {
+	var out billing.CatalogDriftRefresh
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/drift/refresh", struct{}{}, &out, requestOptions...); err != nil {
 		return nil, err
 	}

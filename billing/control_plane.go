@@ -40,8 +40,8 @@ var (
 	ErrMerchantGroupReleasePending = errors.New("merchants: retired merchant group release pending")
 )
 
-// ProvisionMerchantRequest provisions a merchant by name.
-type ProvisionMerchantRequest struct {
+// ProvisionMerchantParams provisions a merchant by name.
+type ProvisionMerchantParams struct {
 	// Slug is the merchant name to claim.
 	Slug string
 	// DisplayName, when set, becomes the merchant's display name.
@@ -148,9 +148,9 @@ type MerchantRetirementCursor struct {
 	MerchantID MerchantID
 }
 
-// MerchantRetirementCandidatesRequest pages live, group-bound, unreserved
+// MerchantRetirementCandidateListParams pages live, group-bound, unreserved
 // merchants created before CreatedBefore, oldest first.
-type MerchantRetirementCandidatesRequest struct {
+type MerchantRetirementCandidateListParams struct {
 	CreatedBefore time.Time
 	After         *MerchantRetirementCursor
 	// Limit is the page size, 1..500.
@@ -193,8 +193,8 @@ type MerchantRetirement struct {
 // The standalone server's merchant account routes: the signed-in user's
 // merchants, the merchant's name, API keys and team.
 
-// CreateMerchantRequest creates a merchant the signed-in user owns.
-type CreateMerchantRequest struct {
+// CreateMerchantParams creates a merchant the signed-in user owns.
+type CreateMerchantParams struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
 }
@@ -205,9 +205,9 @@ type MerchantName struct {
 	Name string     `json:"name"`
 }
 
-// RenameMerchantRequest renames the merchant; the former name keeps
+// RenameMerchantParams renames the merchant; the former name keeps
 // forwarding to it under the deployment's naming policy.
-type RenameMerchantRequest struct {
+type RenameMerchantParams struct {
 	Name string `json:"name"`
 }
 
@@ -223,9 +223,9 @@ type APIKey struct {
 	RevokedAt  *time.Time `json:"revoked_at"`
 }
 
-// CreateAPIKeyRequest mints a key holding one of the merchant roles (viewer,
+// CreateAPIKeyParams mints a key holding one of the merchant roles (viewer,
 // support, owner).
-type CreateAPIKeyRequest struct {
+type CreateAPIKeyParams struct {
 	Name string `json:"name"`
 	Role string `json:"role"`
 }
@@ -255,8 +255,8 @@ type TeamInvite struct {
 	RevokedAt  *time.Time `json:"revoked_at"`
 }
 
-// InviteTeamMemberRequest invites an email address with a role.
-type InviteTeamMemberRequest struct {
+// InviteTeamMemberParams invites an email address with a role.
+type InviteTeamMemberParams struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
 }
@@ -269,7 +269,7 @@ type TeamInviteResult struct {
 	URL    *string     `json:"url"`
 }
 
-// SetTeamRoleRequest changes a member's role.
-type SetTeamRoleRequest struct {
+// SetTeamRoleParams changes a member's role.
+type SetTeamRoleParams struct {
 	Role string `json:"role"`
 }

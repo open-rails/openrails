@@ -12,7 +12,7 @@ import (
 // which PSP a checkout for this price would use, and why every other PSP was
 // passed over, without creating a session.
 func PreviewPSPRouting(r *httprequest.Request) {
-	var req billing.PSPRoutingPreviewParams
+	var req billing.PreviewPSPRoutingParams
 	if !r.BindJSON(&req) {
 		return
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 // ListInvoices is one page of the merchant's invoices, newest period first.
-func (c *Client) ListInvoices(ctx context.Context, params billing.ListInvoicesParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Invoice], error) {
+func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Invoice], error) {
 	q := pageValues(nil, params.Page)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "currency": normalizeCurrency(params.Currency), "status": string(params.Status)})
 	if params.PeriodFrom != nil {
@@ -84,10 +84,10 @@ func (c *Client) RetryInvoiceCollection(ctx context.Context, id billing.InvoiceI
 	return invoiceCall[billing.InvoiceCollection](ctx, c, http.MethodPost, id, "/retry-collection", params, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions)
 }
 
-// GetCustomerInvoiceProfile reads how a customer is invoiced: payment terms,
+// GetInvoiceProfile reads how a customer is invoiced: payment terms,
 // collection method, PO number, tax details and billing contacts. A customer
 // with none is billing.ErrNotFound.
-func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID billing.CustomerID, requestOptions ...RequestOption) (*billing.InvoiceProfile, error) {
+func (c *Client) GetInvoiceProfile(ctx context.Context, customerID billing.CustomerID, requestOptions ...RequestOption) (*billing.InvoiceProfile, error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
@@ -99,10 +99,10 @@ func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID billi
 	return &out, nil
 }
 
-// SetCustomerInvoiceProfile replaces how a customer is invoiced, or with
+// SetInvoiceProfile replaces how a customer is invoiced, or with
 // IfAbsent sets it only when none is set, answering an existing profile
 // unchanged.
-func (c *Client) SetCustomerInvoiceProfile(ctx context.Context, customerID billing.CustomerID, params billing.SetInvoiceProfileParams, requestOptions ...RequestOption) (*billing.InvoiceProfile, error) {
+func (c *Client) SetInvoiceProfile(ctx context.Context, customerID billing.CustomerID, params billing.SetInvoiceProfileParams, requestOptions ...RequestOption) (*billing.InvoiceProfile, error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err

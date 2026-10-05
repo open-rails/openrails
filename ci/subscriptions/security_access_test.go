@@ -62,7 +62,7 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 
 func (c *customer) buyWith(rail, method string, price *billing.Price, kind billing.OfferKind, entitlement string) {
 	c.w.t.Helper()
-	_, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptRequest{
+	_, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: price.ID,
 		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -320,7 +320,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
 			OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -337,7 +337,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, w.auth, psps)
-		cfg, err := r.client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
+		cfg, err := r.client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
 		require.NoError(t, err)
 		found := false
 		for _, psp := range cfg.PSPs {

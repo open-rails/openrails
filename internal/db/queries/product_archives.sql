@@ -1,4 +1,4 @@
--- #1058 product archive operations and their purchase reviews.
+-- Product archive operations and the findings that hold their purchases for review.
 
 -- name: LockProductArchiveKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
@@ -45,21 +45,3 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO NOTHING;
 SELECT id, status, evidence, operator_notes, created_at, resolved_at
 FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text AND subject_key = sqlc.arg(subject_key)::text;
-
--- name: GetPurchaseReviewByID :one
-SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text AND id = sqlc.arg(id)::uuid;
-
--- name: ListPurchaseReviews :many
--- One page of purchase reviews, oldest first, after a (created_at, id) cursor.
-SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
-  AND status = ANY(sqlc.arg(statuses)::text[])
-  AND (sqlc.arg(product_archive_id)::text = '' OR evidence -> 'local' ->> 'product_archive_id' = sqlc.arg(product_archive_id)::text)
-  AND (sqlc.narg(after_at)::timestamptz IS NULL
-       OR (created_at, id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
-ORDER BY created_at, id
-LIMIT sqlc.arg(row_limit)::int;
-

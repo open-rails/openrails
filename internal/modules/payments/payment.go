@@ -366,7 +366,7 @@ func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, ori
 }
 
 // ListPage is one page of payments, newest first.
-func (s *PaymentService) ListPage(ctx context.Context, p billing.ListPaymentsParams) (billing.ListPage[*models.Payment], error) {
+func (s *PaymentService) ListPage(ctx context.Context, p billing.PaymentListParams) (billing.ListPage[*models.Payment], error) {
 	return s.repo.ListPage(ctx, p)
 }
 

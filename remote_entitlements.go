@@ -42,7 +42,7 @@ func (c *Client) DeleteEntitlement(ctx context.Context, customerID billing.Custo
 // CheckProductAccess reports, for each product named by exactly one of
 // params.ProductIDs and params.ProductKeys, whether the customer has access to
 // it now. Keys of the result are the ids or keys the request named.
-func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.ProductAccessCheckParams, requestOptions ...RequestOption) (map[string]bool, error) {
+func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.CheckProductAccessParams, requestOptions ...RequestOption) (map[string]bool, error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err

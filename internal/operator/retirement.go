@@ -20,7 +20,7 @@ import (
 // ListMerchantRetirementCandidates pages live, group-bound merchants created
 // before req.CreatedBefore, excluding the deployment's reserved slugs, each with
 // its current activity fact.
-func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req billing.MerchantRetirementCandidatesRequest) (billing.MerchantRetirementCandidatePage, error) {
+func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error) {
 	cp, dir, err := retirementDirectory(a)
 	if err != nil {
 		return billing.MerchantRetirementCandidatePage{}, err

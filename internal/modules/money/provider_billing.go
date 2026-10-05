@@ -74,7 +74,7 @@ const (
 // bodies. RawBody may be empty when the provider response exceeded its bound.
 type ProviderBillingObservationRefusal = billing.ProviderBillingObservationRefusal
 
-type ProviderBillingObservationInput = billing.ProviderBillingObservationParams
+type ProviderBillingObservationInput = billing.RecordProviderBillingObservationParams
 
 type ProviderBillingQualification struct {
 	OperationID              string

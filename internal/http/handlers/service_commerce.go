@@ -26,7 +26,7 @@ func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (id
 // ServiceCreateCheckoutAttempt handles POST /v1/merchant/checkout-attempts.
 func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input billing.CreateCheckoutAttemptRequest
+	var input billing.CreateCheckoutAttemptParams
 	if !r.BindJSON(&input) {
 		return
 	}
@@ -99,7 +99,7 @@ func ServiceGetCheckoutAttempt(r *httprequest.Request) {
 // /v1/merchant/checkout-attempts/{id}/confirm.
 func ServiceConfirmCheckoutAttempt(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input billing.ConfirmCheckoutAttemptRequest
+	var input billing.ConfirmCheckoutAttemptParams
 	if !r.BindJSON(&input) {
 		return
 	}

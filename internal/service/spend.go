@@ -64,7 +64,7 @@ func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, 
 
 // GetUsage reports a customer's usage in one currency over [From, To),
 // grouped by GroupBy (event_type when empty).
-func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, params billing.UsageParams) (*billing.Usage, error) {
+func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, params billing.GetUsageParams) (*billing.Usage, error) {
 	currency, err := requireCurrency(params.Currency)
 	if err != nil {
 		return nil, err
@@ -144,7 +144,7 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 
 // SetCreditLimit sets how much a customer may owe in arrears in one
 // currency. Merchant-only: a customer cannot raise its own credit line.
-func (s *Service) SetCreditLimit(ctx context.Context, customer identity.CustomerID, params billing.CreditLimitParams) (*billing.CreditLimit, error) {
+func (s *Service) SetCreditLimit(ctx context.Context, customer identity.CustomerID, params billing.SetCreditLimitParams) (*billing.CreditLimit, error) {
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
@@ -199,7 +199,7 @@ func (s *Service) GetCustomerTrustLevel(ctx context.Context, customer identity.C
 
 // SetTrustLevel stores the trust level a customer's admissions use when a
 // request names none; empty clears it.
-func (s *Service) SetTrustLevel(ctx context.Context, customer identity.CustomerID, params billing.TrustLevelParams) (*billing.TrustLevel, error) {
+func (s *Service) SetTrustLevel(ctx context.Context, customer identity.CustomerID, params billing.SetTrustLevelParams) (*billing.TrustLevel, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr

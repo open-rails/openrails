@@ -33,21 +33,21 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		return n
 	}
 
-	_, err := boot("refused", billing.MerchantSettings{BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "missing"}}})
+	_, err := boot("refused", billing.MerchantSettings{BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "missing"}}})
 	require.ErrorContains(t, err, "undeclared policy")
-	_, err = boot("refused", billing.MerchantSettings{Profile: &billing.MerchantProfileInput{LogoURL: "ftp://cdn.example/logo.png"}})
+	_, err = boot("refused", billing.MerchantSettings{Profile: &billing.MerchantProfile{LogoURL: "ftp://cdn.example/logo.png"}})
 	require.ErrorContains(t, err, "profile.logo_url")
 	require.Zero(t, merchants(), "a refused declaration creates no merchant")
 
 	grace, floor, threshold := 7, int64(5_000_000), int64(50_000_000)
 	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"mobius"}}}
 	declared := billing.MerchantSettings{
-		Profile:                    &billing.MerchantProfileInput{FromEmail: "billing@declared.example"},
+		Profile:                    &billing.MerchantProfile{FromEmail: "billing@declared.example"},
 		InvoiceCollectionThreshold: &threshold, InvoiceBillingBoundary: "calendar_month",
 		ArrearsGraceDays: &grace, ArrearsDelinquencyFloor: &floor,
 		CheckoutRouting:                   &routing,
-		BillingPolicies:                   []billing.BillingPolicyInput{{Name: "line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
-		BillingPolicyBindings:             []billing.BillingPolicyBindingInput{{PolicyName: "line"}},
+		BillingPolicies:                   []billing.BillingPolicy{{Name: "line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
+		BillingPolicyBindings:             []billing.BillingPolicyBinding{{PolicyName: "line"}},
 		DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000, Currency: "USD"}},
 	}
 	slug := "declared-" + uuid.NewString()[:8]
@@ -68,13 +68,13 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	require.Equal(t, routing, *s.CheckoutRouting)
 	require.Len(t, s.BillingPolicies, 1)
 	require.Equal(t, int64(200_000_000), s.BillingPolicies[0].OutstandingCapAmount)
-	require.Equal(t, []billing.BillingPolicyBindingInput{{PolicyName: "line"}}, s.BillingPolicyBindings)
+	require.Equal(t, []billing.BillingPolicyBinding{{PolicyName: "line"}}, s.BillingPolicyBindings)
 	require.Equal(t, declared.DelegatedInvokerWastedSpendLimits, s.DelegatedInvokerWastedSpendLimits)
 
 	// The configuration API changes the same document; a restart with the
 	// same declaration does not reassert it over that change.
 	grace = 3
-	_, err = client.ApplyMerchantConfiguration(ctx, &billing.MerchantConfigurationApplyParams{
+	_, err = client.ApplyMerchantConfiguration(ctx, billing.ApplyMerchantConfigurationParams{
 		ApplicationID: uuid.NewString(), ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
 	})
 	require.NoError(t, err)

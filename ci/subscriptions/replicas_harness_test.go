@@ -686,7 +686,7 @@ func (f *fleet) requireExactlyOnce(e *engineCase, renewals, submissions int) {
 	if submissions >= 0 {
 		require.Equal(t, submissions, f.submissions(e), "provider charge requests")
 	}
-	page, err := f.any().client[embedded].ListPayments(t.Context(), billing.ListPaymentsParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 100}})
+	page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentListParams{CustomerID: e.c.cid(), Page: billing.PageRequest{Limit: 100}})
 	require.NoError(t, err)
 	paid := completed(page.Items)
 	require.Len(t, paid, 1+renewals, "one local payment per paid period")

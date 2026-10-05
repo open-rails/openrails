@@ -2,7 +2,6 @@ package openrails
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
@@ -21,10 +20,7 @@ func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...Reques
 // ApplyMerchantConfiguration commits one configuration change against the
 // revision it read: omitted fields keep their stored values, and the same
 // application replays its original receipt.
-func (c *Client) ApplyMerchantConfiguration(ctx context.Context, params *billing.MerchantConfigurationApplyParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error) {
-	if params == nil {
-		return nil, fmt.Errorf("merchant configuration application is required")
-	}
+func (c *Client) ApplyMerchantConfiguration(ctx context.Context, params billing.ApplyMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error) {
 	var out billing.MerchantConfigurationReceipt
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/configuration/applications", params, &out, options...); err != nil {
 		return nil, err
@@ -43,7 +39,7 @@ func (c *Client) GetAPIHost(ctx context.Context, options ...RequestOption) (*bil
 
 // SetAPIHost claims a host for the merchant's public routes: it routes nothing
 // until VerifyAPIHost proves the claim's DNS record. "" releases the host.
-func (c *Client) SetAPIHost(ctx context.Context, req billing.SetAPIHostRequest, options ...RequestOption) (*billing.MerchantAPIHost, error) {
+func (c *Client) SetAPIHost(ctx context.Context, req billing.SetAPIHostParams, options ...RequestOption) (*billing.MerchantAPIHost, error) {
 	var out billing.MerchantAPIHost
 	if err := c.do(ctx, http.MethodPut, "/v1/merchant/api-host", req, &out, options...); err != nil {
 		return nil, err

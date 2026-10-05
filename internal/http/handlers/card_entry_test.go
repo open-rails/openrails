@@ -72,7 +72,7 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 	var update billing.ReplacePaymentMethodCardParams
 	require.Empty(t, bind(`{`+cardBody+`}`, &update).Body.String())
 	require.NotNil(t, update.Card)
-	var pay checkoutsession.CheckoutSessionPayRequest
+	var pay checkoutsession.PayCheckoutSessionParams
 	require.Empty(t, bind(`{"option_id":"option_card",`+cardBody+`}`, &pay).Body.String())
 	require.NotNil(t, pay.Card)
 

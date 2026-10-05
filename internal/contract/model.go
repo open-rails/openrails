@@ -71,7 +71,7 @@ func wireForm(t reflect.Type) (reflect.Type, bool) {
 		return reflect.TypeFor[CardEntry](), true
 	case name == "billing.AmountMap":
 		return reflect.TypeFor[map[string]string](), true
-	case name == "billing.MerchantConfigurationApplyParams":
+	case name == "billing.ApplyMerchantConfigurationParams":
 		// Its codec only enforces strictness; the members are the wire.
 		return t, true
 	case strings.HasPrefix(name, "catalog.Field["):

@@ -91,7 +91,7 @@ func defaultChannels(sev Severity) []ChannelRef {
 // --- webhook CRUD ------------------------------------------------------------
 
 // CreateWebhook validates + persists an outbound webhook sink.
-func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebhookRequest) (billing.AlertWebhook, error) {
+func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebhookParams) (billing.AlertWebhook, error) {
 	ve := &ValidationError{}
 	if strings.TrimSpace(in.URL) == "" {
 		ve.add("url", "required", "url is required")
@@ -201,7 +201,7 @@ func webhookSecretVersion(version int) (int32, error) {
 // SetWebhookURL replaces only the credential, retaining the webhook and all
 // delivery identity. A failed metadata write leaves delivery fail-closed on the
 // version mismatch; retrying the same URL repairs that pending rotation.
-func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebhookID, in billing.SetAlertWebhookURLRequest) (billing.AlertWebhook, error) {
+func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebhookID, in billing.SetAlertWebhookURLParams) (billing.AlertWebhook, error) {
 	id := webhookID.UUID()
 	rawURL := strings.TrimSpace(in.URL)
 	if rawURL == "" || s.outbound.ValidateURL(rawURL) != nil {
@@ -246,7 +246,7 @@ func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebh
 // --- notifications -----------------------------------------------------------
 
 // ListNotifications pages the merchant's inbox, newest first.
-func (s *Service) ListNotifications(ctx context.Context, req billing.ListMerchantNotificationsRequest) (billing.ListPage[billing.MerchantNotification], error) {
+func (s *Service) ListNotifications(ctx context.Context, req billing.MerchantNotificationListParams) (billing.ListPage[billing.MerchantNotification], error) {
 	limit, err := pagination.Limit(req.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.MerchantNotification]{}, err

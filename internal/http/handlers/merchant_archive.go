@@ -13,10 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive"
 )
 
-// ExportMerchantBilling completes the bounded snapshot before publishing HTTP
+// ExportBillingArchive completes the bounded snapshot before publishing HTTP
 // headers. Disk spooling keeps memory bounded and lets preflight or snapshot
 // failures return the ordinary error envelope instead of a partial success.
-func ExportMerchantBilling(r *httprequest.Request) {
+func ExportBillingArchive(r *httprequest.Request) {
 	mid, err := merchant.Require(r.Request.Context())
 	if err != nil || r.State == nil || r.State.DB == nil {
 		writeMerchantArchiveError(r, nil)
@@ -50,7 +50,7 @@ func ExportMerchantBilling(r *httprequest.Request) {
 	}
 }
 
-func ImportMerchantBilling(r *httprequest.Request) {
+func ImportBillingArchive(r *httprequest.Request) {
 	mid, err := merchant.Require(r.Request.Context())
 	if err != nil || r.State == nil || r.State.DB == nil {
 		writeMerchantArchiveError(r, nil)
@@ -61,7 +61,7 @@ func ImportMerchantBilling(r *httprequest.Request) {
 		writeMerchantArchiveError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, billing.MerchantBillingImportResult{
+	r.JSON(http.StatusOK, billing.BillingArchiveImport{
 		MerchantID: mid, Digest: result.Digest, Rows: result.Rows, AlreadyImported: result.Replayed,
 	})
 }

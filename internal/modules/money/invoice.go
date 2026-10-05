@@ -191,7 +191,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// document snapshot. Absent profile keeps the historical defaults
 		// (due at finalize, charge_automatically, no document fields).
 		var profile *CustomerInvoiceProfile
-		if row, perr := q.GetCustomerInvoiceProfile(ctx, gen.GetCustomerInvoiceProfileParams{
+		if row, perr := q.GetInvoiceProfile(ctx, gen.GetInvoiceProfileParams{
 			MerchantID: tenantID, CustomerID: payerID,
 		}); perr == nil {
 			if profile, perr = invoiceProfileFromGen(row); perr != nil {

@@ -98,9 +98,9 @@ type EntitlementLookup struct {
 	Customers map[CustomerID][]EntitlementRecord `json:"customers"`
 }
 
-// EntitlementCheckParams asks which of up to MaxEntitlementChecks keys a
+// CheckEntitlementsParams asks which of up to MaxEntitlementChecks keys a
 // customer holds at At (zero: now).
-type EntitlementCheckParams struct {
+type CheckEntitlementsParams struct {
 	Entitlements []string  `json:"entitlements"`
 	At           time.Time `json:"at,omitzero"`
 }
@@ -168,9 +168,9 @@ type ProductAccessGrant struct {
 // MaxProductAccessChecks bounds one product-access check.
 const MaxProductAccessChecks = 100
 
-// ProductAccessCheckParams asks about up to MaxProductAccessChecks products,
+// CheckProductAccessParams asks about up to MaxProductAccessChecks products,
 // named by exactly one of ProductIDs and ProductKeys.
-type ProductAccessCheckParams struct {
+type CheckProductAccessParams struct {
 	ProductIDs  []ProductID `json:"product_ids"`
 	ProductKeys []string    `json:"product_keys"`
 }

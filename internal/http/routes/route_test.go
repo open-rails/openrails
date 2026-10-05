@@ -3,6 +3,7 @@ package routes
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -25,10 +26,31 @@ const untypedBudget = 2
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
+// groupPaths is where each group's routes live.
+var groupPaths = map[Group][]string{
+	Merchant:     {"/v1/merchant/"},
+	CatalogOwned: {"/v1/catalog/"},
+	Customer:     {"/v1/me/"},
+	ControlPlane: {"/v1/merchant/", "/v1/merchants"},
+	Platform:     {"/v1/platform/"},
+	Webhooks:     {"/v1/webhooks/"},
+}
+
+// pathParams are the names a path parameter takes: a resource's own id is
+// {id}, its customer {customer_id}; the rest name an identity the caller
+// chose, by what it is.
+var pathParams = []string{"id", "customer_id", "key", "meter_key", "request_id", "operation_id", "scope", "scope_key", "entitlement", "user_id", "rail", "account_id"}
+
+var pathParam = regexp.MustCompile(`\{([a-z_]+)\}`)
+
+// documents are the request bodies not named ...Params: what the route
+// stores or runs, sent whole, and the Solana Pay transaction request.
+var documents = []string{"Application", "DeclaredBilling", "InvoiceProfile", "MetricsQuery", "CollectionPaymentMethod", "SolanaPayPostRequest"}
+
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 237)
+	require.Len(t, Catalog(), 235)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()
@@ -36,6 +58,12 @@ func TestCatalogDeclarations(t *testing.T) {
 		require.Regexp(t, pathShape, r.Path, key)
 		require.NotEmpty(t, r.Group, key)
 		require.NotEmpty(t, r.Auth, key)
+		if prefixes, ok := groupPaths[r.Group]; ok {
+			require.True(t, slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(r.Path, prefix) }), "%s: a %s route is under %v", key, r.Group, prefixes)
+		}
+		for _, param := range pathParam.FindAllStringSubmatch(r.Path, -1) {
+			require.Contains(t, pathParams, param[1], "%s: name the path parameter {id}, or add what it is to pathParams", key)
+		}
 		switch r.Auth {
 		case AuthMerchant:
 			require.True(t, strings.HasPrefix(r.Perm, "merchant:"), "%s: a merchant route checks a merchant: permission, not %q", key, r.Perm)
@@ -55,6 +83,9 @@ func TestCatalogDeclarations(t *testing.T) {
 		}
 		if r.Method == GET {
 			require.Nil(t, r.Request, "%s: a GET has no body", key)
+		}
+		if body := reflect.TypeOf(r.Request); body != nil && body.Kind() == reflect.Struct && body.PkgPath() != reflect.TypeOf(Stream{}).PkgPath() {
+			require.True(t, strings.HasSuffix(body.Name(), "Params") || slices.Contains(documents, body.Name()), "%s: name the request %s ...Params", key, body.Name())
 		}
 		require.NotEmpty(t, r.Responses, "%s declares no success", key)
 		seen := map[int]bool{}

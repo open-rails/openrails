@@ -33,7 +33,7 @@ INSERT INTO billing.customer_invoice_profiles (
 )
 ON CONFLICT (merchant_id, customer_id) DO NOTHING;
 
--- name: GetCustomerInvoiceProfile :one
+-- name: GetInvoiceProfile :one
 SELECT * FROM billing.customer_invoice_profiles
 WHERE merchant_id = $1 AND customer_id = $2
 LIMIT 1;

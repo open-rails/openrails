@@ -22,11 +22,11 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 
 	customer := billing.CustomerID(uuid.New())
 	email := "buyer@example.test"
-	declared, err := client.EnsureCustomer(ctx, customer, billing.CustomerParams{Email: &email})
+	declared, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{Email: &email})
 	require.NoError(t, err)
 	require.Equal(t, &email, declared.Email)
 	other := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, other, billing.CustomerParams{})
+	_, err = client.EnsureCustomer(ctx, other, billing.EnsureCustomerParams{})
 	require.NoError(t, err)
 	_, err = client.GetCustomer(ctx, billing.CustomerID(uuid.New()))
 	require.ErrorIs(t, err, billing.ErrNotFound)
@@ -45,7 +45,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.Empty(t, second.Next)
 	require.ElementsMatch(t, []billing.CustomerID{customer, other}, []billing.CustomerID{first.Items[0].ID, second.Items[0].ID})
 
-	grantParams := billing.CreditGrantParams{Currency: "usd", Amount: 1_000_000, Source: "support", SourceID: "grant-1"}
+	grantParams := billing.CreateCreditGrantParams{Currency: "usd", Amount: 1_000_000, Source: "support", SourceID: "grant-1"}
 	grant, err := client.CreateCreditGrant(ctx, customer, grantParams)
 	require.NoError(t, err)
 	require.False(t, grant.Replayed)
@@ -81,7 +81,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	open, err := client.GetAdmission(ctx, requestID)
 	require.NoError(t, err)
 	require.Equal(t, billing.AdmissionOpen, *open.State)
-	capture := billing.CaptureParams{Amount: 250_000, Usage: &billing.CaptureUsage{EventType: "inference"}}
+	capture := billing.CaptureAdmissionParams{Amount: 250_000, Usage: &billing.CaptureUsage{EventType: "inference"}}
 	receipt, err := client.CaptureAdmission(ctx, requestID, capture)
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, receipt.Amount)
@@ -99,7 +99,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	_, err = client.ReleaseAdmission(ctx, requestID)
 	require.ErrorIs(t, err, billing.ErrConflict)
 
-	event, err := client.RecordUsage(ctx, billing.UsageEventParams{
+	event, err := client.RecordUsage(ctx, billing.RecordUsageParams{
 		CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference",
 		Amount: 50_000, Source: "worker", SourceID: "event-1",
 	})
@@ -114,7 +114,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	}
 	require.Equal(t, map[billing.CreditTransactionType]int64{billing.CreditDeposit: 1_000_000, billing.CreditSpend: -300_000}, types)
 
-	usage, err := client.GetUsage(ctx, customer, billing.UsageParams{Currency: "USD", From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour)})
+	usage, err := client.GetUsage(ctx, customer, billing.GetUsageParams{Currency: "USD", From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.Equal(t, billing.UsageByEventType, usage.GroupBy)
 	require.Len(t, usage.Rows, 1)
@@ -122,7 +122,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.EqualValues(t, 2, usage.Rows[0].EventCount)
 	require.EqualValues(t, 300_000, usage.Rows[0].Amount)
 
-	_, err = client.SetTrustLevel(ctx, customer, billing.TrustLevelParams{Currency: "USD", TrustLevel: "trusted"})
+	_, err = client.SetTrustLevel(ctx, customer, billing.SetTrustLevelParams{Currency: "USD", TrustLevel: "trusted"})
 	require.NoError(t, err)
 	trust, err := client.GetTrustLevel(ctx, customer, "USD")
 	require.NoError(t, err)
