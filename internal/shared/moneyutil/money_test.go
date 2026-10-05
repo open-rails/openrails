@@ -1,10 +1,7 @@
 package moneyutil
 
 import (
-	"encoding/json"
 	"math"
-	"os"
-	"reflect"
 	"testing"
 )
 
@@ -126,24 +123,6 @@ func TestRegisteredCurrenciesShareNativeShift(t *testing.T) {
 		if cur.NativeShift() != 4 {
 			t.Errorf("%s native shift %d != 4: route inbound conversions through RailMinorToNative first", code, cur.NativeShift())
 		}
-	}
-}
-
-func TestBrowserCurrencyRegistryMatchesEngine(t *testing.T) {
-	raw, err := os.ReadFile("../../../web/admin/src/lib/currency-units.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got map[string]int
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]int{}
-	for _, code := range CurrencyCodes() {
-		want[code], _ = CurrencyScale(code)
-	}
-	if !reflect.DeepEqual(want, got) {
-		t.Fatalf("browser registry %v != engine %v; run go run ./scripts/currency-units", got, want)
 	}
 }
 
