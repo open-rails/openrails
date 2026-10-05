@@ -47,7 +47,7 @@ are struct tags, so the list covers the YAML and JSON documents too.
 - **Breaking:** removing or renaming a line of `api/go.txt`; changing a
   signature, a field's type or tag, or a constant's value; adding a method to
   an interface a host implements (`EmailSender`, `SMSSender`, `Cache`,
-  `RequestAuthenticator`, `billing.UserDirectory`, `billing.UsernameResolver`);
+  `RequestAuthenticator`);
   moving to a new major version of a module whose types the API exposes (pgx
   v5, go-redis v9, the Vault client).
 

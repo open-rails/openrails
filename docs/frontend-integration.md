@@ -97,7 +97,6 @@ catalog.
 
 ```json
 {
-  "object": "checkout_config",
   "psps": [
     { "psp_id": "psp_...", "key": "mobius", "rail": "nmi", "custodian": "psp", "display_name": "Credit Card",
       "flow": "tokenize", "checkout": true,
@@ -129,7 +128,7 @@ catalog.
   - `wallet` — the buyer's wallet pays; the document's `solana` object carries the
     network and accepted tokens, and `GET /v1/solana/tokens?wallet=` adds a
     wallet's balances.
-- `key` is the selector a merchant checkout attempt sends as `payment.rail`.
+- `key` is what a merchant checkout attempt sends as `payment.psp`.
 - Which of these can sell a given price is answered by the checkout session's
   `options`, or for the merchant by `GetCheckoutConfig` with a price
   (`GET /v1/merchant/checkout-config?price_id=`), see below.
@@ -187,7 +186,7 @@ can live on another host. `@openrails/billing-ui`'s
 ```
 POST /v1/me/checkout-sessions        {"price_id" | "price_key", "success_url"?} → 201 {id, url, expires_at}
 GET  /v1/checkout-sessions/{id}      the offer: plan, amounts, options, saved methods, status
-POST /v1/checkout-sessions/{id}/pay  {"option_id", instrument, billing fields} → {status, next_action, operation, failure}
+POST /v1/checkout-sessions/{id}/pay  {"option_id", instrument, "billing_details"} → {status, next_action, operation, failure}
 ```
 
 The pay body names one of the session's `options` and the instrument its `driver`
@@ -197,10 +196,13 @@ or `token_symbol` (`solana_pay`). Options are listed in the merchant's routing o
 Paying twice with the same attempt charges once; a session takes 10 attempts and is
 payable for 30 minutes.
 
-Render `name_on_card` as one visible input with `autocomplete="cc-name"`.
-OpenRails keeps that full value canonical and projects it onto provider-specific
-first/last fields only at the rail boundary. `first_name` and `last_name` are
-not request fields: a body that names them is refused (`unknown_field`).
+Billing details travel in one object, `billing_details`: `name`, `email`,
+`phone` and `address` (`line1`, `line2`, `city`, `state`, `postal_code`,
+`country`), the same on the pay body, a card save and a merchant checkout
+attempt. Collect the cardholder's name in one visible input with
+`autocomplete="cc-name"`; OpenRails projects it onto provider-specific first and
+last name fields only at the rail boundary. A field the route does not declare
+is refused (`unknown_field`).
 
 The chosen PSP and the reason for it are recorded on the checkout attempt
 (`checkout_attempts.routing_reason`), so support can answer "why did this customer
@@ -307,7 +309,7 @@ Handle in the frontend:
 - **409** — `idempotency_key_reused` (same key, different terms),
   `payment_in_progress` (a retry landed while the original is still running) or
   `provider_outcome_unknown` (read the resource before trying again).
-- **410** — `checkout_session_expired`; create a new one.
+- **410** — `checkout_session_expired` (or `checkout_attempt_expired`); create a new one.
 - **413** — request body over the bucket cap (64 KiB on checkout/subscription/
   payment-method routes). Carries `Retry-After`.
 - **429** — rate limited. Fixed 1-minute windows, counted per IP **and** per

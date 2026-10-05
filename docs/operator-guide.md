@@ -90,7 +90,7 @@ OpenRails' workers converge state around that:
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
-| Worker health check | 5 min | seeds `billing.worker_state`, raises repair alerts when a kind stops completing |
+| Worker health check | 5 min | seeds `billing.worker_state`, raises a critical notification in the merchant inbox when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; the failing dependency is logged, never answered). Readiness requires only
@@ -200,7 +200,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 ### Processor routing
 
 Checkout is one processor at a time, chosen **before** the session exists. A request that
-names a PSP gets that PSP; a request that omits `payment.rail` is routed.
+names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is routed.
 
 - **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
   serve the price.
@@ -241,7 +241,7 @@ checkout_routing:
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.
 - **Worker health**: `billing.worker_state` rows per job kind; the 5-minute
-  checker raises durable repair alerts when a periodic kind stops completing.
+  checker raises a critical merchant notification when a periodic kind stops completing.
 - **Notifications**: reconciliation findings raise deduplicated console
   notifications and, by severity, outbound webhooks / the alert email
   ([merchant-notifications.md](merchant-notifications.md)).

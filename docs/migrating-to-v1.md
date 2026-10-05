@@ -32,6 +32,9 @@ Before the code:
 | A hand-written `ALTER … OWNER` pass after `Migrate` for a shared schema | `Config.SchemaOwner`: `Migrate` hands the schema, and a managed River schema, to that existing role |
 | `CustomerRoutesConfig{Authenticate: fn}` per profile | `CustomerRoutesConfig{Delegated: true}` and one `Deps.AuthenticateCustomer`, which receives the profile's `Prefix` |
 | `Deps.CheckoutCustomer(ctx, string)` | `Deps.CheckoutCustomer` takes a `billing.CustomerID` |
+| `Identity.CustomerID`, the `Deps.CustomerFor` result and `DelegatedPrincipal.MerchantID` as strings | `billing.CustomerID` and `billing.MerchantID` |
+| `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
+| No parser for a merchant's YAML | `openrails.ParseMerchantDeclaration` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | It needs none: the routes are public or addressed by session id |
 | Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.River == openrails.RiverHostOwned`) |
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | Removed: they are the standalone server's own settings. A host that decoded a file into an OpenRails type declares its own struct |
@@ -143,6 +146,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.CheckoutAttemptID`, `chk_` ids, `billing.CheckoutAttempt` |
 | `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
 | `CheckoutPaymentOptions.Card` | Removed: a Client never carries a card |
+| `CheckoutPaymentOptions.Rail` (a PSP key or a rail kind) and its flat `NameOnCard`, `Address1`, `Zip`, … | `billing.CheckoutPaymentOptions` with `PSP` (the PSP key; a rail kind is refused) and `BillingDetails` (`billing.BillingDetails`) |
 | `CreatePaymentMethodSession`, `CreateSolanaCancelSession`, `CreateSolanaTierChangeSession` | Removed |
 
 ### Subscriptions
@@ -168,6 +172,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmission(`, `client.ExtendAdmission(`. The caller's `request_id` is the id |
 | `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; `client.GetUsage(`. Resource revenue is removed |
 | `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | `client.ListSpendDelegations(`, `client.SetSpendDelegations(`, `client.SetSpendDelegation(`, `client.DeleteSpendDelegation(` |
+| `InvokerTypePayer` (`invoker_type: "payer"`) | `billing.InvokerTypeCustomer` (`"customer"`) |
 | `DeclaredTransaction.AmountCents` | `Amount`, in native units (micros for USD) |
 | `DeclaredSubscription.UserEmail`; `DeclaredPaymentMethod.LastFour`, `CardType`, `ExpiryDate`, `InitialTransactionID` | `DeclaredCustomer.Email`; `DeclaredPaymentMethod.Card` (`billing.CardDetails`); `InitialTransactionID` is removed |
 
@@ -197,6 +202,10 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |
 | `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename is `PUT /v1/merchant/name` and a user's merchants `GET /v1/merchants` |
 | `GetUnreadNotificationCount` returned `int64` | It returns `billing.UnreadCount` |
+| `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical entries of `client.ListMerchantNotifications(` |
+| `ListActiveMerchantIDs(ctx, limit, offset)` | `client.ListActiveMerchantIDs(` takes a `billing.PageRequest` and returns a page |
+| `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
+| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | `merchant:operations:read` gates the inbox, findings and worker health |
 
 ## 4. HTTP routes and shapes
 
@@ -222,6 +231,7 @@ fields (`400 unknown_field`), and every error code is in
   review is a finding.
 - `api_host` in a configuration application: release a host with
   `PUT /v1/merchant/api-host` and an empty `api_host`.
+- `GET /v1/merchant/repair-alerts`: read `/v1/merchant/notifications`.
 
 ### Renamed or reshaped
 
@@ -249,9 +259,17 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/merchant/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
+| `GET /v1/platform/merchants` with `limit` and `offset` | A cursor page (`limit`, `cursor`) |
 
 ### Shapes
 
+- **Checkout payment.** A merchant checkout attempt names its PSP as
+  `payment.psp` (the PSP key; `payment.rail` is gone and a rail kind is
+  refused), and a checkout option carries `psp` in place of `selector`. Billing
+  details are one object on the session pay body, the attempt and a card save:
+  `billing_details` with `name`, `email`, `phone` and `address` (`line1`,
+  `line2`, `city`, `state`, `postal_code`, `country`). The flat `name_on_card`,
+  `address1`, `zip`, `last_four`, `card_type` and `expiry_date` are gone.
 - **Cards.** One object wherever a card is shown: `card` with `brand`, `last4`,
   `exp_month`, `exp_year`, each nullable. `last_four`, `card_type` and
   `expiry_date` are gone.
@@ -264,7 +282,17 @@ fields (`400 unknown_field`), and every error code is in
   `active` and `providers` are gone.
 - **Subscriptions.** Cancel, resume and the payment-method switch answer the
   `Subscription` in the request (200). A merchant tier change on CCBill or
-  Solana is 403 `customer_action_required`.
+  Solana is 403 `customer_action_required`. A `TierChange` has no `mode`, `url`
+  or `payment`: a redirect is `next_action.url`.
+- **`object`.** The `object` member is gone from the checkout config, checkout
+  attempts, the currency registry and tier changes.
+- **Invokers and metrics.** `invoker_type` is `customer` or `delegated`. The
+  metrics dimension `payer` is `customer`; `active_payers` and
+  `payers_at_depletion_risk` are `active_customers` and
+  `customers_at_depletion_risk`.
+- **Error codes.** Every refusal carries a registered code; a client that
+  matched on a status-derived code reads [error-codes.md](api/error-codes.md).
+  An expired checkout attempt is 410 `checkout_attempt_expired`.
 - **Payments.** `kind`, `status`, `channel`, `psp_id`, `card`, `failure`; a
   refunded charge reads `refunded` or `partially_refunded` in lists too.
 - **Balance.** `balance_amount`, `held_amount`, `available_amount`,
@@ -274,7 +302,8 @@ fields (`400 unknown_field`), and every error code is in
 - **Notifications.** Unread is `{unread_count}`; marking read answers the
   notification.
 - **Ids.** `psp_`, `chk_`, `cgr_`, `txn_`, `ent_`, `pa_`, `rep_`, `rpb_`, `awh_`,
-  `ntf_`, `fnd_`, `hev_`. A Stripe Checkout session opened before the upgrade
+  `ntf_`, `fnd_`, `hev_`, `par_`, `pop_` (payment operations, as in
+  `TierChange.operation_id`). An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
   carries `checkout_session_id` in its metadata: let open ones expire first.
 
 ### New limits
@@ -301,6 +330,7 @@ calendar ([data retention](operations.md#data-retention)):
 | Offset pages from `listPaymentMethods`, `listPayments`, `listInvoices`, `listSubscriptions` | Cursor pages: pass `cursor`, read `next_cursor` |
 | `setDefaultPaymentMethod`, `usePaymentMethods().setDefault`, `defaultCurrency` | `setCollectionPaymentMethod`, `setCollection`, `collectionCurrency` |
 | `NewCard` with `provider`, `name_on_card` and address fields | `NewCard` with `psp_id` and `billing_details` |
+| `PayRequest` with flat `name_on_card`, `zip`, `country`, `last_four`, … | `PayRequest` with `billing_details` |
 | `SavedPaymentMethod` with `brand`, `last_four`, `default` | `SavedPaymentMethod` with `card` |
 | Solana cancel and tier-change methods | `cancelSubscription` and `changeTier` take an optional `signature` |
 | `cancelSubscription`, `resumeSubscription`, `setSubscriptionPaymentMethod` resolved to nothing | Each resolves to the `Subscription` |

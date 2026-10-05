@@ -16,6 +16,9 @@ Checkout
   (`redirect_to_url`, `solana_pay`); a card challenge is `operation`. Saved
   methods carry `card` (`brand`, `last4`, `exp_month`, `exp_year`) and no
   `default`. Fields OpenRails sends as null read as `undefined`.
+- `PayRequest` carries one `billing_details` (`name`, `email`, `phone`,
+  `address` with `postal_code` and `country`) in place of the flat
+  `name_on_card`, `zip`, `country`, `last_four`, `card_type` and `expiry_date`.
 - Stripe Elements runs on a session inside a `BillingProvider`: the card is
   saved through the customer's client and the session pays it by id.
 - Removed: `createHttpSource`, `CheckoutSourceError`, `checkoutRails`,
@@ -47,6 +50,8 @@ Client
   `auto_renew`; `type`, `recurring.interval` and `active` are gone.
 - `Payment` has `kind`, a typed `status` and the `price` it bought; a
   subscription's status is `canceled`.
+- A `TierChange` has no `mode`, `url` or `payment`: a redirect is
+  `next_action.url`. Generated list fields are `T[]`, never `null`.
 
 ## Hosted checkout sessions
 

@@ -252,7 +252,7 @@ reference: [api/routes.md](api/routes.md).
 | Credit limit / trust level | `PUT /v1/merchant/customers/{customer_id}/credit-limit`, `PUT /v1/merchant/customers/{customer_id}/trust-level` | Settings |
 | Catalog over HTTP | `POST /v1/merchant/catalog/products`, `PATCH /v1/merchant/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
-| Repair alerts / drift findings | `GET /v1/merchant/repair-alerts` | Ops |
+| Operational alerts / findings | `GET /v1/merchant/notifications`, `GET /v1/merchant/findings` | Ops |
 
 A user session needs a recent sign-in for every write here (403
 `step_up_required` otherwise); API keys and service JWTs do not. A manual grant
@@ -329,7 +329,7 @@ Pages: **Customers** (search → profile with grant/revoke and off-channel payme
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
 (products/prices CRUD, archive/restore, durable catalog batch application, drift
-view), **Ops** (findings queue, repair alerts, worker health), **Settings** (profile,
+view), **Ops** (findings queue, the merchant inbox, worker health), **Settings** (profile,
 team, PSPs, API keys, credit limit, trust level), **Dashboard**.
 
 - **API keys** (Settings): mint scoped Bearer keys with fixed roles — `viewer`

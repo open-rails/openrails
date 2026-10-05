@@ -103,7 +103,7 @@ explicit:
 |---|---|
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
 | `Redis`, `Cache` | Shared rate limits and cache; in memory without them. |
-| `Vault`, `ProviderCredentials` | A borrowed Vault client; snapshot credentials for existing PSPs. |
+| `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
 | `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
 | `ConsoleAssets` | A host-built admin console (section 6). |
@@ -219,9 +219,8 @@ the rail's credential slots and settings, refusing a missing required secret:
 | `nmi` | `SECURITY_KEY`, `WEBHOOK_SIGNING_SECRET` | `TOKENIZATION_KEY`, `TOKENIZATION_URL`, `ENDPOINT_DEPLOYMENT` |
 | `ccbill` | `SALT`, `DATALINK_USERNAME`, `DATALINK_PASSWORD` | |
 
-YAML-first hosts keep the merchant in a file and decode it into
-`openrails.MerchantDeclaration` (its fields carry `yaml` tags; refuse unknown
-fields), then set its `Slug`.
+YAML-first hosts keep the merchant in a file: `openrails.ParseMerchantDeclaration`
+parses one merchant strictly (unknown fields refused); set its `Slug`.
 
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving

@@ -656,7 +656,8 @@ across all references.
 - The first transfer of at least the quoted amount that lands by quote expiry
   + 30 min is credited; an excess is credited and flagged `overpaid`.
 - Anything else is recorded with `disposition = 'review'` and a
-  `billing_ledger_repair_required` alert (`solana_pay_<reason>`):
+  critical `ledger_repair_required` notification in the merchant inbox
+  (`solana_pay_<reason>`):
   `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
   `unreadable`, `settle_failed`. Nothing is refunded automatically, and
   underpayments are not added together. A transfer that already settled another
@@ -775,8 +776,8 @@ up. "start" = RunOnStart.
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
 
-The health checker seeds `billing.worker_state` and raises durable repair
-alerts when a periodic kind stops completing. Its per-kind rows are written
+The health checker seeds `billing.worker_state` and raises a critical
+notification in the merchant inbox when a periodic kind stops completing. Its per-kind rows are written
 monotonically: job completions of one kind reach the row in any order, so a
 late write can only add what is newer (timestamps never move back, the error
 text is the newest failure's, a success resets the failure streak only when no

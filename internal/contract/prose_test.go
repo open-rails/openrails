@@ -40,6 +40,8 @@ var (
 	proseCode  = regexp.MustCompile("\\b([1-5]\\d\\d) `?([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b")
 	prosePerm  = regexp.MustCompile(`\b((?:merchant|root)(?::[a-z0-9-]+){2,})`)
 	proseTest  = regexp.MustCompile(`\bTest[A-Z]\w*`)
+	// A constraint, index or trigger named in a code span.
+	proseObject = regexp.MustCompile("`((?:chk|idx|ix|uq|trg|fk)_[a-z0-9_]+|[a-z][a-z0-9_]*_(?:fk|pkey|check|idx))`")
 	// A private tracker id means nothing to a reader of the public docs.
 	proseIssue = regexp.MustCompile("(?:^|[^&\\w`])([a-z]{0,3}#\\d{2,4}\\b|SEC-\\d+)")
 	fileSuffix = []string{"yaml", "yml", "json", "jsonl", "ts", "tsx", "js", "go", "md", "sql", "css", "example"}
@@ -49,12 +51,12 @@ var (
 // route, Go identifier, table, permission and error code (with its status) a
 // document names is in the route catalog, api/go.txt, api/schema.txt or the
 // error-code registry. A rename or a removal fails here until its documents
-// follow. A test a document names exists, and no document cites a tracker
-// issue.
+// follow. A test, constraint or index a document names exists, and no
+// document cites a tracker issue.
 func TestDocsNameWhatExists(t *testing.T) {
 	root := filepath.Join("..", "..")
 	goAPI := readGoAPI(t, filepath.Join(root, "api", "go.txt"))
-	tables := readSchemaNames(t, filepath.Join(root, "api", "schema.txt"))
+	tables, objects := readSchemaNames(t, filepath.Join(root, "api", "schema.txt"))
 
 	tests := readTestNames(t, root)
 
@@ -126,6 +128,11 @@ func TestDocsNameWhatExists(t *testing.T) {
 			for _, m := range prosePerm.FindAllStringSubmatch(line, -1) {
 				if !goAPI["permissions"][m[1]] {
 					t.Errorf("%s: %s is not a permission in api/go.txt", at, m[1])
+				}
+			}
+			for _, m := range proseObject.FindAllStringSubmatch(line, -1) {
+				if !objects[m[1]] {
+					t.Errorf("%s: %s is not in api/schema.txt", at, m[1])
 				}
 			}
 			for _, m := range proseTable.FindAllStringSubmatch(line, -1) {
@@ -349,15 +356,19 @@ func pkgName(sub string) string {
 	return sub
 }
 
-// readSchemaNames is every table and function api/schema.txt lists.
-func readSchemaNames(t *testing.T, file string) map[string]bool {
+// readSchemaNames is every table and function api/schema.txt lists, and
+// every name it lists at all: columns, constraints, indexes and triggers too.
+func readSchemaNames(t *testing.T, file string) (tables, objects map[string]bool) {
 	t.Helper()
 	body, err := os.ReadFile(file)
 	require.NoError(t, err)
-	out := map[string]bool{}
+	tables, objects = map[string]bool{}, map[string]bool{}
 	for _, m := range regexp.MustCompile(`(?m)^(?:table|function|procedure) billing\.(\w+)`).FindAllStringSubmatch(string(body), -1) {
-		out[m[1]] = true
+		tables[m[1]], objects[m[1]] = true, true
 	}
-	require.NotEmpty(t, out)
-	return out
+	for _, m := range regexp.MustCompile(`(?m)^  (?:column|constraint|index CREATE (?:UNIQUE )?INDEX|trigger CREATE (?:CONSTRAINT )?TRIGGER) "?(\w+)`).FindAllStringSubmatch(string(body), -1) {
+		objects[m[1]] = true
+	}
+	require.NotEmpty(t, tables)
+	return tables, objects
 }

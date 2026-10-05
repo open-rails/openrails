@@ -108,7 +108,7 @@ the accepted tokens with current pricing.
 3. OpenRails watches the reference on chain and settles the payment; the session
    then reads `succeeded`.
 
-A merchant checkout attempt (`CreateCheckoutAttempt` with `payment: {rail:
+A merchant checkout attempt (`CreateCheckoutAttempt` with `payment: {psp:
 "solana", token_symbol, flow}`) may instead use `flow: transaction_request`: its
 `solana_pay` link points at `/v1/checkout-attempts/{id}/solana-pay`, where the
 wallet POSTs its account and receives a server-built transaction to sign.

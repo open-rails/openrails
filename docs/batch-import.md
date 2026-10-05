@@ -62,7 +62,7 @@ The book (`DeclaredBilling`) carries four record kinds:
 carries the PSP it came from — the same `psp_id` a pull stamps — because the
 same prune, rollback and uniqueness rules apply to an imported row as to a
 pulled one. State it once for the whole book with `default_psp`, or per row
-with `psp`; either form names a PSP by `{"id": "<uuid>"}` or by its key
+with `psp`; either form names a PSP by `{"id": "psp_…"}` or by its key
 `{"key": "mobius"}`. A row that resolves to neither REFUSES the import, naming
 the row and listing the merchant's known PSPs. There is no unattributed lane.
 

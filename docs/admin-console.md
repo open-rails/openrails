@@ -172,7 +172,7 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 | Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view; cancel (typed confirmation), resume, NMI payment-method change |
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
 | Catalog | `/catalog` | Products/prices, price detail + change wizard, archive/restore, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
-| Ops | `/ops` | Findings queue (approve/ignore), repair alerts, worker health |
+| Ops | `/ops` | Findings queue (approve/ignore), the merchant inbox (ledger repairs and worker stalls arrive there as critical notifications), worker health |
 | Settings | `/settings` | Tabs: Merchant profile, Team, Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), API keys, Customer controls |
 
 **Natural-language features** are fail-closed on the server's `llm:` config and

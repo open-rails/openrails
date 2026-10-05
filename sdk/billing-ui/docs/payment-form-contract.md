@@ -45,9 +45,9 @@ absent, is the exact sum of the line items and `tax`.
 
 The host collects only:
 
-- `name_on_card` — one visible “Name on card” input with `autocomplete="cc-name"`;
-- `country` — a native ISO-3166 country select with `autocomplete="billing country"`;
-- `zip` — a country-aware ZIP/postal input with `autocomplete="billing postal-code"`.
+- the cardholder's name: one visible “Name on card” input with `autocomplete="cc-name"`;
+- the country: a native ISO-3166 country select with `autocomplete="billing country"`;
+- the postal code: a country-aware input with `autocomplete="billing postal-code"`.
 
 Postal code is optional for the 53 ISO-3166 alpha-2 countries and territories
 in the Universal Postal Union's September 2025
@@ -69,8 +69,9 @@ and `cc-csc`, the same layout and field errors, and no gateway script. Its
 request carries `card: {number, exp_month, exp_year, cvc}` in place of
 `payment_token`; the inputs are cleared once the card is sent.
 
-A new-card payment request includes the one-time `payment_token` plus canonical
-`name_on_card`, uppercase ISO country in `country`, and `zip`. Paying with an
+A new-card payment request includes the one-time `payment_token` plus
+`billing_details`: `name`, and `address` with the uppercase ISO `country` and
+`postal_code`. Paying with an
 existing saved method sends only `payment_method_id`; it does not overwrite the
 stored billing identity with empty form values.
 

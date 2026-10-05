@@ -245,7 +245,8 @@ an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.
 
 - Embedded hosts merge them in their own config loader and pass the result as
-  `Config.Merchant` (`PSPConfig.Secrets`).
+  `Config.Merchant` (`openrails.ParseMerchantDeclaration` parses one merchant's
+  YAML; secrets are `PSPConfig.Secrets`).
 - Standalone snapshot custody lists mounted files in `merchant_manifest_overlays`
   (env `MERCHANT_MANIFEST_OVERLAYS`).
 

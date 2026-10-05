@@ -162,9 +162,9 @@ webhook routes return 503 so the provider redelivers; workers retry rather than 
   `credential_custody_transition_required` until the original backend is
   selected again. Choose the backend before publishing credentials, and keep the
   old backend's material while any PSP still references it.
-- **Snapshot identity:** a host that supplies credentials itself
-  (`Deps.ProviderCredentials`) labels the snapshot with
-  `Config.CredentialSnapshotID`. The label is an operator assertion; supply the
+- **Snapshot identity:** a host that supplies credentials itself (the PSP
+  secrets of `Config.Merchant`, or a standalone manifest) labels the snapshot
+  with `Config.CredentialSnapshotID`. The label is an operator assertion; supply the
   same snapshot on every restart.
 - **Solana local keypair:** changing the signer changes the on-chain identity.
   Existing authorizations remain bound to the old key. Prefer Transit custody and

@@ -56,7 +56,7 @@ _ = access[productID]
 attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
     Customer: billing.CheckoutCustomerIdentity{ID: customerID},
     PriceID: price.ID,
-    PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe", PaymentMethodID: methodID},
+    PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: methodID},
     IdempotencyKey: checkoutAttemptKey,
     SuccessURL: successURL,
     CancelURL: cancelURL,
@@ -64,8 +64,8 @@ attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptP
 ```
 
 The server derives one-off or recurring checkout from the selected price.
-`PaymentOptions` selects the payment rail and carries its applicable collection
-inputs. It does not set the price's product or merchant. Browser return URLs
+`PaymentOptions` names the PSP by its key and carries its applicable collection
+inputs; left empty, the merchant's routing picks one. It does not set the price's product or merchant. Browser return URLs
 provide navigation; verified provider events establish payment and access.
 
 ## What a host declares
