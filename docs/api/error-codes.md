@@ -42,6 +42,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `catalog_scope_mismatch` | 403 | `authorization_error` | The catalog scope does not match the authorized merchant and catalog. |
 | `catalog_updates_disabled` | 403 | `invalid_request_error` | Catalog updates over HTTP are disabled in this deployment. |
 | `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
+| `checkout_attempt_expired` | 410 | `invalid_request_error` | The checkout attempt expired before it was paid. |
 | `checkout_offer_unavailable` | 422 | `invalid_request_error` | The purchase is not available. |
 | `checkout_payment_in_progress` | 409 | `invalid_request_error` | A payment on this checkout session is already being processed. |
 | `checkout_request_invalid` | 422 | `invalid_request_error` | The checkout request is invalid. |

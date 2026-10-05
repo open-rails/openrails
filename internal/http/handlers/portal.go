@@ -1,9 +1,10 @@
 package handlers
 
 import (
-	"net/http"
 	"slices"
 	"strings"
+
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -17,17 +18,17 @@ type PortalResponse struct {
 func CreatePortalSession(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "User authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
 		return
 	}
 	customerID, err := r.State.RailCustomerService.GetCustomerID(r.Request.Context(), user.ID, "stripe")
 	if err != nil || strings.TrimSpace(customerID) == "" {
-		r.ErrorJSON(http.StatusNotFound, "stripe customer not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "stripe customer not found")
 		return
 	}
 	returnURL := portalReturnOrigin(r)
 	if returnURL == "" {
-		r.ErrorJSON(http.StatusBadRequest, "return_url unavailable")
+		r.ErrorCode(billing.CodeInvalidParam, "return_url unavailable")
 		return
 	}
 	returnURL += "/account"

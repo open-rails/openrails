@@ -53,7 +53,7 @@ func MerchantRename(svc MerchantRenamer) func(*httprequest.Request) {
 		case errors.Is(err, merchants.ErrInvalidName):
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_name", err.Error()))
 		case errors.Is(err, merchants.ErrMerchantNotFound):
-			r.ErrorJSON(http.StatusNotFound, "merchant not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "merchant not found")
 		default:
 			teamServiceError(r, err, "merchant rename failed")
 		}

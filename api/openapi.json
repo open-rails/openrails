@@ -392,6 +392,7 @@
         "x-openrails-mounted-when": "solana",
         "x-openrails-errors": [
           "catalog_scope_mismatch",
+          "checkout_attempt_expired",
           "invalid_param",
           "resource_conflict",
           "resource_not_found"
@@ -442,6 +443,7 @@
         "x-openrails-auth": "session_id",
         "x-openrails-mounted-when": "solana",
         "x-openrails-errors": [
+          "checkout_attempt_expired",
           "invalid_param",
           "resource_conflict",
           "resource_not_found"
@@ -667,6 +669,7 @@
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
           "authentication_required",
+          "checkout_attempt_expired",
           "invalid_param",
           "resource_access_denied",
           "resource_not_found",
@@ -735,6 +738,7 @@
         "x-openrails-permission": "merchant:checkout:create",
         "x-openrails-errors": [
           "authentication_required",
+          "checkout_attempt_expired",
           "insufficient_funds",
           "invalid_param",
           "resource_access_denied",
@@ -25343,6 +25347,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The checkout attempt already completed or was canceled."
+    },
+    "checkout_attempt_expired": {
+      "status": 410,
+      "type": "invalid_request_error",
+      "meaning": "The checkout attempt expired before it was paid."
     },
     "checkout_offer_unavailable": {
       "status": 422,

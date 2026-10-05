@@ -220,7 +220,7 @@ func nowOrDefault(r *httprequest.Request) time.Time {
 // before the chain confirms it.
 func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID, signature string) {
 	if r.State.SolanaPrepareTierChangeService == nil || r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
+		r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
 	resolved, status, msg := resolveSolanaTierChange(r, subscriptionID, priceID)
@@ -231,7 +231,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 	ctx := r.Request.Context()
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
+		r.ErrorCode(billing.CodeInternalError, "no merchant resolved on request")
 		return
 	}
 	// Confirm derives the new subscription account from the same canonical
@@ -268,7 +268,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 	if resolved.isUpgrade {
 		periodHours, err := safecast.Convert[int64](resolved.newTerms.period)
 		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "the target plan's period is out of range")
+			r.ErrorCode(billing.CodeInternalError, "the target plan's period is out of range")
 			return
 		}
 		out.Action, out.Effective, out.AmountDueNow = "upgrade", "now", resolved.firstChargeMicros

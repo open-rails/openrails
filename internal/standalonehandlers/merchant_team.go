@@ -230,7 +230,7 @@ func teamServiceError(r *httprequest.Request, err error, fallback string) {
 		r.ErrorCode(billing.CodeMerchantUnresolved, "")
 		return
 	}
-	r.ErrorJSON(http.StatusInternalServerError, fallback)
+	r.ErrorCode(billing.CodeInternalError, fallback)
 }
 
 func teamMutationError(r *httprequest.Request, err error, fallback string) {

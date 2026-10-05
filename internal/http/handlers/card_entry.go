@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/config"
@@ -18,7 +20,7 @@ import (
 // is resolved.
 func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) bool {
 	if hasToken {
-		r.ErrorJSON(http.StatusBadRequest, paymentmethods.ErrCardWithToken.Error())
+		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardWithToken.Error())
 		return false
 	}
 	if live := r.State == nil || r.State.Config == nil || !config.IsTestMode(r.State.Config); live && !r.SecureTransport() {
@@ -27,7 +29,7 @@ func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) 
 	}
 	for _, value := range others {
 		if cardguard.ContainsPAN(value) {
-			r.ErrorJSON(http.StatusBadRequest, "a card number is accepted only in the card field")
+			r.ErrorCode(billing.CodeInvalidParam, "a card number is accepted only in the card field")
 			return false
 		}
 	}
@@ -49,9 +51,9 @@ func optionalStrings(values ...*string) []string {
 func writeCardEntryError(r *httprequest.Request, err error) bool {
 	switch {
 	case errors.Is(err, paymentmethods.ErrCardEntryNotEnabled):
-		r.ErrorJSON(http.StatusBadRequest, paymentmethods.ErrCardEntryNotEnabled.Error())
+		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardEntryNotEnabled.Error())
 	case errors.Is(err, paymentmethods.ErrCardWithToken):
-		r.ErrorJSON(http.StatusBadRequest, paymentmethods.ErrCardWithToken.Error())
+		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardWithToken.Error())
 	case errors.Is(err, paymentmethods.ErrCardNotSaved):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeAPI, "card_not_saved", "The card was not saved. Enter it again."))
 	default:

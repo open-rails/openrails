@@ -321,7 +321,7 @@ func (r *Request) BindQuery(data any) bool {
 
 func (r *Request) BindURI(data any) bool {
 	if err := r.t.BindURI(data); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, normaliseBindError(err))
+		r.ErrorCode(billing.CodeInvalidParam, normaliseBindError(err))
 		return false
 	}
 	return true

@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingimport"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -33,11 +35,11 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 	}
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
-		r.ErrorJSON(http.StatusInternalServerError, "merchant unresolved")
+		r.ErrorCode(billing.CodeInternalError, "merchant unresolved")
 		return
 	}
 	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing import unavailable")
+		r.ErrorCode(billing.CodeInternalError, "billing import unavailable")
 		return
 	}
 	res, err := billingimport.Import(r.Request.Context(), billingimport.Options{

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -46,7 +45,7 @@ func GetCheckoutConfig(r *httprequest.Request) {
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to encode checkout configuration")
+		r.ErrorCode(billing.CodeInternalError, "failed to encode checkout configuration")
 		return
 	}
 
@@ -112,24 +111,24 @@ func ServiceGetCheckoutConfig(r *httprequest.Request) {
 func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, bool) {
 	mid, ok := merchant.FromContext(r.Request.Context())
 	if !ok || mid.IsZero() {
-		r.ErrorJSON(http.StatusNotFound, "no merchant for this host")
+		r.ErrorCode(billing.CodeResourceNotFound, "no merchant for this host")
 		return merchants.PublicCheckoutConfig{}, false
 	}
 	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "merchant configuration unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration unavailable")
 		return merchants.PublicCheckoutConfig{}, false
 	}
 	env := config.ExpectedProviderEnvironment(r.State.Config != nil && config.IsTestMode(r.State.Config))
 	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env, pspArmed(r.State.RailConfigs))
 	if err != nil {
 		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("checkout config: PSPs could not be loaded")
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load checkout configuration")
+		r.ErrorCode(billing.CodeInternalError, "failed to load checkout configuration")
 		return merchants.PublicCheckoutConfig{}, false
 	}
 	solana, err := solanaCheckoutConfig(r)
 	if err != nil {
 		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("checkout config: Solana acceptance could not be loaded")
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load solana checkout configuration")
+		r.ErrorCode(billing.CodeInternalError, "failed to load solana checkout configuration")
 		return merchants.PublicCheckoutConfig{}, false
 	}
 	return merchants.PublicCheckoutConfig{Object: "checkout_config", PSPs: psps, Solana: solana}, true

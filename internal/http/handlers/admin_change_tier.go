@@ -70,40 +70,40 @@ func adminTierChangeRequest(
 		return nil, nil, nil, false
 	}
 	if body.PriceID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid price_id")
 		return nil, nil, nil, false
 	}
 
 	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
 		return nil, nil, nil, false
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil || r.State.RepriceService == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
+		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
 		return nil, nil, nil, false
 	}
 
 	subscription, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
+			r.ErrorCode(billing.CodeResourceNotFound, "subscription not found")
 			return nil, nil, nil, false
 		}
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: load subscription")
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
+		r.ErrorCode(billing.CodeInternalError, "failed to retrieve subscription")
 		return nil, nil, nil, false
 	}
 	if subscription.CustomerID == uuid.Nil {
 		log.WithField("subscription_id", subscriptionID).Error("admin tier change: subscription has no customer")
-		r.ErrorJSON(http.StatusInternalServerError, "subscription customer unavailable")
+		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, nil, false
 	}
 	customer, err := r.State.DB.Gen(r.Request.Context()).GetCustomer(r.Request.Context(), gen.GetCustomerParams{MerchantID: subscription.MerchantID, ID: subscription.CustomerID})
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: load customer")
-		r.ErrorJSON(http.StatusInternalServerError, "subscription customer unavailable")
+		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, nil, false
 	}
 	return &checkout.TierChangeRequest{
@@ -120,7 +120,7 @@ func adminTierChangeRequest(
 func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subscription) bool {
 	subscriptionID := subscription.ID
 	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
-		r.ErrorJSON(http.StatusConflict, "only active or past-due subscriptions can change tier")
+		r.ErrorCode(billing.CodeResourceConflict, "only active or past-due subscriptions can change tier")
 		return false
 	}
 	// An engine subscription's service answers its own schedule: the same
@@ -143,11 +143,11 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 	})
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check scheduled reprices")
-		r.ErrorJSON(http.StatusInternalServerError, "failed to check scheduled price changes")
+		r.ErrorCode(billing.CodeInternalError, "failed to check scheduled price changes")
 		return false
 	}
 	if len(reprices.Items) > 0 {
-		r.ErrorJSON(http.StatusConflict, "subscription already has a scheduled price change")
+		r.ErrorCode(billing.CodeResourceConflict, "subscription already has a scheduled price change")
 		return false
 	}
 	return true

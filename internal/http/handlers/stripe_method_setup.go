@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -49,7 +47,7 @@ func GetPaymentMethodSetup(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid setup id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid setup id")
 		return
 	}
 	resolver, ok := stripeSetupResolver(r)
@@ -69,7 +67,7 @@ func ConfirmPaymentMethodSetup(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid setup id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid setup id")
 		return
 	}
 	resolver, ok := stripeSetupResolver(r)
@@ -89,6 +87,6 @@ func stripeSetupResolver(r *httprequest.Request) (intents.StripeEngineServiceRes
 			return resolver, true
 		}
 	}
-	r.ErrorJSON(http.StatusServiceUnavailable, "Stripe card setup unavailable")
+	r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card setup unavailable")
 	return nil, false
 }

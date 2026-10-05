@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
+
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
@@ -789,7 +791,7 @@ func CheckoutSessionRateLimit(rt *app.Runtime, bucket string, perMinute int) rou
 					retryAfter = 60
 				}
 				r.SetHeader("Retry-After", strconv.Itoa(retryAfter))
-				r.AbortJSON(http.StatusTooManyRequests, "Rate limit exceeded")
+				r.AbortCode(billing.CodeRateLimitExceeded, "Rate limit exceeded")
 				return
 			}
 			next(r)

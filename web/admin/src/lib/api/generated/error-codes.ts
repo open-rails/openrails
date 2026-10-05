@@ -37,6 +37,7 @@ export type OpenRailsErrorCode =
   | "catalog_scope_mismatch"
   | "catalog_updates_disabled"
   | "checkout_attempt_closed"
+  | "checkout_attempt_expired"
   | "checkout_offer_unavailable"
   | "checkout_payment_in_progress"
   | "checkout_request_invalid"
@@ -268,6 +269,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   catalog_scope_mismatch: { status: 403, type: "authorization_error", meaning: "The catalog scope does not match the authorized merchant and catalog." },
   catalog_updates_disabled: { status: 403, type: "invalid_request_error", meaning: "Catalog updates over HTTP are disabled in this deployment." },
   checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },
+  checkout_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout attempt expired before it was paid." },
   checkout_offer_unavailable: { status: 422, type: "invalid_request_error", meaning: "The purchase is not available." },
   checkout_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this checkout session is already being processed." },
   checkout_request_invalid: { status: 422, type: "invalid_request_error", meaning: "The checkout request is invalid." },

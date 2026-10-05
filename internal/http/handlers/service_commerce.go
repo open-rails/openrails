@@ -14,7 +14,7 @@ import (
 func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (identity.CustomerID, bool) {
 	id := servicePayer(customerID)
 	if id == nil {
-		r.ErrorJSON(http.StatusBadRequest, "valid customer_id required")
+		r.ErrorCode(billing.CodeInvalidParam, "valid customer_id required")
 		return identity.CustomerID{}, false
 	}
 	if !requireServiceCustomerScope(r, *id) {
@@ -56,7 +56,7 @@ func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 func attemptInScope(r *httprequest.Request, svc *billingservice.Service) (billing.CheckoutAttemptID, bool) {
 	id, err := billing.ParseCheckoutAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid checkout attempt id")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid checkout attempt id")
 		return id, false
 	}
 	owner, err := svc.CheckoutAttemptOwner(r.Request.Context(), id)

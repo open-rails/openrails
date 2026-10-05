@@ -65,12 +65,12 @@ func adminRefundLockKey(paymentID string) int64 {
 func RefundPayment(r *httprequest.Request) {
 	var path paymentPath
 	if err := r.ShouldBindURI(&path); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		r.ErrorCode(billing.CodeInvalidParam, err.Error())
 		return
 	}
 	typedPaymentID, err := billing.ParsePaymentID(path.PaymentID)
 	if err != nil || typedPaymentID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
+		r.ErrorCode(billing.CodeInvalidParam, "invalid payment ID")
 		return
 	}
 	paymentID := typedPaymentID.UUID()
@@ -84,7 +84,7 @@ func RefundPayment(r *httprequest.Request) {
 	}
 	idempotencyKey := strings.TrimSpace(strings.TrimSpace(r.Header("Idempotency-Key")))
 	if idempotencyKey == "" {
-		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
+		r.ErrorCode(billing.CodeInvalidParam, adminRefundIdempotencyHeader+" is required")
 		return
 	}
 	refund, status, err := executeAdminRefund(r.Request.Context(), r, paymentID, req, idempotencyKey)

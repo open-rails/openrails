@@ -29,7 +29,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	}
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+		r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
 		return
 	}
 	// The id pays with the customer's saved cards: only the customer mints one.

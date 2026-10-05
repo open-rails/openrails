@@ -2317,8 +2317,8 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/http/handlers/portal.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "config": "github.com/open-rails/openrails/internal/config",
-      "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "slices": "slices",
       "strings": "strings",
@@ -2328,7 +2328,6 @@
       "billing": "github.com/open-rails/openrails/billing",
       "checkout": "github.com/open-rails/openrails/internal/modules/checkout",
       "errors": "errors",
-      "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
       "strings": "strings"
@@ -2339,7 +2338,6 @@
       "context": "context",
       "errors": "errors",
       "fmt": "fmt",
-      "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
@@ -2360,7 +2358,6 @@
     "internal/http/handlers/stripe_method_setup.go": {
       "api": "github.com/open-rails/openrails/internal/api",
       "billing": "github.com/open-rails/openrails/billing",
-      "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "intents": "github.com/open-rails/openrails/internal/intents"
     },
