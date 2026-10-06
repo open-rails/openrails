@@ -338,8 +338,8 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	require.NoError(t, err)
 	var productID, psp, subscription uuid.UUID
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT id FROM billing.products WHERE merchant_id = $1 AND key = $2`), w.merchant, product.Key).Scan(&productID))
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key) VALUES ($1, 'stripe', 'acct_retention', 'stripe') RETURNING id`), w.merchant).Scan(&psp))
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, rail, psp_id) VALUES ($1, $2, $3, 'stripe', $4) RETURNING id`),
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key, environment) VALUES ($1, 'stripe', 'acct_retention', 'stripe', 'live') RETURNING id`), w.merchant).Scan(&psp))
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, rail, psp_id, status, collection_policy, started_at) VALUES ($1, $2, $3, 'stripe', $4, 'pending', 'provider', now()) RETURNING id`),
 		w.merchant, customer.UUID(), productID, psp).Scan(&subscription))
 
 	// Subscription history: 400 changes past 25 months, 3 just inside it, and
@@ -507,7 +507,7 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	var psp, account uuid.UUID
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key) VALUES ($1, 'stripe', 'acct_retention', 'stripe') RETURNING id`), w.merchant).Scan(&psp))
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key, environment) VALUES ($1, 'stripe', 'acct_retention', 'stripe', 'live') RETURNING id`), w.merchant).Scan(&psp))
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT id FROM billing.ledger_accounts WHERE merchant_id = $1 AND customer_id = $2 AND account_type = 'customer_balance' AND currency = 'USD'`),
 		w.merchant, customer.UUID()).Scan(&account))
 
@@ -518,9 +518,9 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 		body, err := json.Marshal(payload)
 		require.NoError(t, err)
 		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.provider_intents
-			(merchant_id, rail, psp_id, intent_type, idempotency_key, origin, status, payload, executed_at, created_at, updated_at)
+			(merchant_id, rail, psp_id, intent_type, idempotency_key, origin, status, payload, executed_at, next_attempt_at, created_at, updated_at)
 			VALUES ($1, 'stripe', $2, $3, $4, 'system', $5, $6::jsonb,
-			        CASE WHEN $5 = 'succeeded' THEN now() - $7::interval END, now() - $7::interval, now() - $7::interval)
+			        CASE WHEN $5 = 'succeeded' THEN now() - $7::interval END, now() - $7::interval, now() - $7::interval, now() - $7::interval)
 			RETURNING id`), w.merchant, psp, kind, kind+":"+uuid.NewString(), status, string(body), ago).Scan(&id))
 		return id
 	}
@@ -545,8 +545,8 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	// one an intent that is kept) and a recent one naming the deleted intent.
 	logEntry := func(of uuid.UUID, ago time.Duration) uuid.UUID {
 		var id uuid.UUID
-		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.provider_mutation_logs (merchant_id, rail, psp_id, provider_intent_id, phase, created_at)
-			VALUES ($1, 'stripe', $2, $3, 'succeeded', now() - $4::interval) RETURNING id`), w.merchant, psp, of, ago).Scan(&id))
+		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.provider_mutation_logs (merchant_id, rail, psp_id, provider_intent_id, phase, attempt, created_at)
+			VALUES ($1, 'stripe', $2, $3, 'succeeded', 0, now() - $4::interval) RETURNING id`), w.merchant, psp, of, ago).Scan(&id))
 		return id
 	}
 	oldLog, oldLogOfKept, youngLog := logEntry(oldCancel, old), logEntry(collection, old), logEntry(oldCancel, young)
@@ -573,9 +573,9 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 		for n := range 3 {
 			w.exec(`INSERT INTO billing.cost_observations
 				(merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at, raw_body_available, raw_body_bytes, raw_body_digest,
-				 covers_lifetime, refusal_kind, qualification_reason, observed_at)
+				 covers_lifetime, has_negative_record, refusal_kind, qualification_reason, observed_at)
 				VALUES ($1, $2, $3, 'q', now() - interval '400 days', now() - interval '399 days', false, ''::bytea, sha256(''::bytea),
-				        false, 'response_too_large', 'provider_evidence_refused', now() - interval '398 days')`, w.merchant, id, fmt.Sprintf("obs-%d", n))
+				        false, false, 'response_too_large', 'provider_evidence_refused', now() - interval '398 days')`, w.merchant, id, fmt.Sprintf("obs-%d", n))
 		}
 	}
 	operation("closed-long-ago", retention.CostObservations+10*day)

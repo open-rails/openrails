@@ -156,12 +156,12 @@ func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	require.Equal(t, psp, route, "a PSP-held card charges through its PSP")
 
 	var custodian uuid.UUID
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id)
-		VALUES ($1, 'vault', 'basis_theory', $2, 'bt-e2e') RETURNING id`), merchant, env).Scan(&custodian))
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id, archived, settings)
+		VALUES ($1, 'vault', 'basis_theory', $2, 'bt-e2e', false, '{}') RETURNING id`), merchant, env).Scan(&custodian))
 	insert := func(pspID *uuid.UUID) (uuid.UUID, error) {
 		var id uuid.UUID
-		err := w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.payment_methods (merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_method_ref)
-			VALUES ($1, $2, 'nmi', $3, 'basis_theory', $4, $5) RETURNING id`), merchant, c.cid().UUID(), pspID, custodian, "tok_"+uuid.NewString()).Scan(&id)
+		err := w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.payment_methods (merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_method_ref, charge_via)
+			VALUES ($1, $2, 'nmi', $3, 'basis_theory', $4, $5, 'pan_proxy') RETURNING id`), merchant, c.cid().UUID(), pspID, custodian, "tok_"+uuid.NewString()).Scan(&id)
 		return id, err
 	}
 	_, err = insert(&psp)

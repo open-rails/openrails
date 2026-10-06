@@ -156,7 +156,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, blocked.Created, "a former name is not claimable by another merchant")
 	var pgErr *pgconn.PgError
-	_, err = f.pool.Exec(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1)", acme)
+	_, err = f.pool.Exec(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug, status) VALUES ($1, 'active')", acme)
 	require.ErrorAs(t, err, &pgErr, "the database guards the namespace for every writer")
 	require.Equal(t, "merchant_slug_aliases_pkey", pgErr.ConstraintName)
 	require.ErrorIs(t, operatorRename(ctx, cp, platform.MerchantID, acme), billing.ErrMerchantNameTaken)

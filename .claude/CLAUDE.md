@@ -109,6 +109,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   `openrails.merchant_id`, `openrails.subscription_decision`, `openrails.retention_table`,
   `openrails.billing_restore_id`, `openrails.catalog_batch_merchant_id`. Never `app.*`
   (the host's) or the schema name; they are string literals the schema rewriter never moves.
+- Instants end in `_at`. A surrogate id defaults to `uuidv7()`; `created_at`, `updated_at`
+  and a table's own creation instant to `now()`. No other column defaults to a value every
+  writer supplies (one stated exception: `payments.money_movement` fails closed to `'none'`).
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries (`TestNoInlineSQL`), and
   `TestQueryAudit` plans every one.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
