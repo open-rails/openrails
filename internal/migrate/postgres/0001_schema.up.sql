@@ -21,9 +21,9 @@ CREATE FUNCTION billing.current_merchant_id() RETURNS uuid
     LANGUAGE sql STABLE
     SET search_path TO 'billing', 'pg_catalog'
     AS $$
-    SELECT NULLIF(current_setting('app.merchant_id', true), '')::uuid
+    SELECT NULLIF(current_setting('openrails.merchant_id', true), '')::uuid
 $$;
-COMMENT ON FUNCTION billing.current_merchant_id() IS 'The request''s merchant from the app.merchant_id GUC, or NULL when unset. Used only by explicitly scoped SQL and restore transaction guards. Merely setting it does not filter other queries; their merchant predicates are mandatory.';
+COMMENT ON FUNCTION billing.current_merchant_id() IS 'The request''s merchant from the openrails.merchant_id GUC, or NULL when unset. Used only by explicitly scoped SQL and restore transaction guards. Merely setting it does not filter other queries; their merchant predicates are mandatory.';
 REVOKE ALL ON FUNCTION billing.current_merchant_id() FROM PUBLIC;
 
 -- Financial facts are immutable to ordinary DML, the schema owner included.
@@ -45,20 +45,20 @@ END;
 $$;
 
 -- Retention is the one path that deletes an append-only fact. The cleanup job
--- names the table in openrails.retention for its transaction, and the row must
+-- names the table in openrails.retention_table for its transaction, and the row must
 -- be older than the period the trigger declares: TG_ARGV[0] is the timestamp
 -- column the period counts from, TG_ARGV[1] the period.
 CREATE FUNCTION billing.guard_retention_delete() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    IF current_setting('openrails.retention', true) IS NOT DISTINCT FROM TG_TABLE_NAME::text
+    IF current_setting('openrails.retention_table', true) IS NOT DISTINCT FROM TG_TABLE_NAME::text
        AND (to_jsonb(OLD)->>TG_ARGV[0])::timestamptz < now() - TG_ARGV[1]::interval THEN
         RETURN OLD;
     END IF;
     RAISE EXCEPTION '% rows are deleted only by retention, % after %', TG_TABLE_NAME, TG_ARGV[1], TG_ARGV[0] USING ERRCODE='23514';
 END;
 $$;
-COMMENT ON FUNCTION billing.guard_retention_delete() IS 'Refuses every DELETE except the retention sweep''s: the transaction names the table in openrails.retention and the row is past the period the trigger declares.';
+COMMENT ON FUNCTION billing.guard_retention_delete() IS 'Refuses every DELETE except the retention sweep''s: the transaction names the table in openrails.retention_table and the row is past the period the trigger declares.';
 
 -- Monthly range partitions, named <table>_yYYYYmMM on UTC month bounds. Both
 -- functions work from the calendar and the catalog; neither reads a row.
@@ -351,7 +351,7 @@ BEGIN
     IF p_merchant IS DISTINCT FROM billing.current_merchant_id() THEN RETURN false; END IF;
     RETURN EXISTS (SELECT 1 FROM billing.maintenance_runs r
         WHERE r.merchant_id=p_merchant AND r.kind='billing_restore' AND r.status='running'
-        AND r.id::text=current_setting('app.billing_restore_id',true)
+        AND r.id::text=current_setting('openrails.billing_restore_id',true)
         AND r.xmin=pg_current_xact_id_if_assigned()::xid);
 END;
 $$;
@@ -495,7 +495,7 @@ BEGIN
            OR (to_jsonb(NEW)-ARRAY['status','finished_at','summary','run_class']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['status','finished_at','summary','run_class'])
            OR NOT EXISTS (SELECT 1 FROM billing.maintenance_runs r WHERE r.id=OLD.id AND r.merchant_id=OLD.merchant_id
                AND r.xmin=pg_current_xact_id_if_assigned()::xid)
-           OR OLD.id::text IS DISTINCT FROM current_setting('app.billing_restore_id',true)
+           OR OLD.id::text IS DISTINCT FROM current_setting('openrails.billing_restore_id',true)
            OR NEW.summary->>'digest' IS NULL OR NEW.summary->>'digest' !~ '^[0-9a-f]{64}$'
            OR jsonb_typeof(NEW.summary->'rows') IS DISTINCT FROM 'number'
            OR (NEW.summary->>'rows')::numeric < 0
@@ -533,7 +533,7 @@ BEGIN
     SELECT id INTO receipt FROM billing.maintenance_runs WHERE merchant_id=p_merchant AND kind='billing_restore' AND status='completed';
     IF receipt IS NOT NULL THEN RETURN receipt; END IF;
     INSERT INTO billing.maintenance_runs(merchant_id,kind,actor) VALUES(p_merchant,'billing_restore','merchantarchive') RETURNING id INTO receipt;
-    PERFORM set_config('app.billing_restore_id',receipt::text,true);
+    PERFORM set_config('openrails.billing_restore_id',receipt::text,true);
     RETURN receipt;
 END;
 $$;
@@ -547,7 +547,7 @@ BEGIN
     END IF;
     PERFORM billing.check_billing_restore_ledger(p_merchant);
     UPDATE billing.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
-        WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('app.billing_restore_id',true);
+        WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
 END;
 $$;
 REVOKE ALL ON FUNCTION billing.finish_billing_restore(uuid,text,bigint) FROM PUBLIC;
@@ -1050,7 +1050,7 @@ DECLARE mid uuid;
 BEGIN
     IF TG_OP='UPDATE' AND NEW IS NOT DISTINCT FROM OLD THEN RETURN NEW; END IF;
     IF TG_OP='DELETE' THEN mid := OLD.merchant_id; ELSE mid := NEW.merchant_id; END IF;
-    IF current_setting('app.catalog_batch',true) IS DISTINCT FROM mid::text THEN
+    IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text THEN
         -- A legacy raw writer may already hold a child-row lock. Do not wait
         -- behind a merchant-first transaction while holding that child: refuse
         -- with a retryable serialization conflict instead of deadlocking.
@@ -1568,7 +1568,7 @@ CREATE FUNCTION billing.subscriptions_record_status_transition() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
-    decision text := nullif(current_setting('billing.decision', true), '');
+    decision text := nullif(current_setting('openrails.subscription_decision', true), '');
 BEGIN
     IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     IF TG_OP = 'INSERT' THEN

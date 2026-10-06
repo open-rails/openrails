@@ -167,7 +167,7 @@ FROM billing.month_partitions(sqlc.arg(table_name)::name) m;
 -- declares (billing.guard_retention_delete). Their sweeps count the period on
 -- the database clock, the one the trigger reads.
 -- name: DeclareRetentionSweep :exec
-SELECT set_config('openrails.retention', sqlc.arg(table_name)::text, true);
+SELECT set_config('openrails.retention_table', sqlc.arg(table_name)::text, true);
 
 -- name: DeleteSubscriptionTransitionsPastRetention :execrows
 DELETE FROM billing.subscription_status_transitions

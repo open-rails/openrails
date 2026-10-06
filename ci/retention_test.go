@@ -360,7 +360,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	requireRefused(t, err)
 	tx, err := w.pool.Begin(ctx)
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, `SELECT set_config('openrails.retention', 'subscription_status_transitions', true)`)
+	_, err = tx.Exec(ctx, `SELECT set_config('openrails.retention_table', 'subscription_status_transitions', true)`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, w.q(`DELETE FROM billing.subscription_status_transitions WHERE merchant_id = $1 AND to_status = 'past_due'`), w.merchant)
 	requireRefused(t, err)
@@ -368,7 +368,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	// Naming another table opens nothing here.
 	tx, err = w.pool.Begin(ctx)
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, `SELECT set_config('openrails.retention', 'maintenance_runs', true)`)
+	_, err = tx.Exec(ctx, `SELECT set_config('openrails.retention_table', 'maintenance_runs', true)`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, w.q(`DELETE FROM billing.subscription_status_transitions WHERE merchant_id = $1 AND to_status = 'active'`), w.merchant)
 	requireRefused(t, err)

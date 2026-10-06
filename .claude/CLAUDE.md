@@ -105,6 +105,10 @@ through `host-four`; these are placeholders, not customer or repository names.
 - There is NO row-level security: tenant isolation is the explicit `merchant_id` (or
   `psp_id`) predicate on every tenant query, plus composite foreign keys and
   `PRIMARY KEY (merchant_id, id)` on tenant tables.
+- Session settings (GUCs) are `openrails.<what the value holds>`:
+  `openrails.merchant_id`, `openrails.subscription_decision`, `openrails.retention_table`,
+  `openrails.billing_restore_id`, `openrails.catalog_batch_merchant_id`. Never `app.*`
+  (the host's) or the schema name; they are string literals the schema rewriter never moves.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries (`TestNoInlineSQL`), and
   `TestQueryAudit` plans every one.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,

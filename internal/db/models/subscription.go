@@ -48,7 +48,7 @@ const (
 type Subscription struct {
 	CollectionPolicy CollectionPolicy `json:"collection_policy"`
 	ID               uuid.UUID        `json:"id"`
-	// MerchantID is the owning merchant (#336): lets workers pin app.merchant_id when
+	// MerchantID is the owning merchant (#336): lets workers pin openrails.merchant_id when
 	// writing on this subscription's behalf.
 	MerchantID uuid.UUID `json:"merchant_id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).

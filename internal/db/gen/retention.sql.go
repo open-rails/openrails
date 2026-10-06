@@ -14,7 +14,7 @@ import (
 
 const declareRetentionSweep = `-- name: DeclareRetentionSweep :exec
 
-SELECT set_config('openrails.retention', $1::text, true)
+SELECT set_config('openrails.retention_table', $1::text, true)
 `
 
 // Row retention. Each statement deletes one bounded batch, oldest first, of

@@ -66,6 +66,17 @@ SELECT x::shop.payment_status FROM shop.payments WHERE note = $1;`
 	}
 }
 
+// Session settings are openrails.<name> string literals, never schema
+// references: no relocation touches them, even into a schema named openrails.
+func TestRewriteKeepsSettingNames(t *testing.T) {
+	const in = `SELECT set_config('openrails.merchant_id', $1, true), current_setting('openrails.subscription_decision', true) FROM billing.subscriptions;`
+	for _, schema := range []string{"shop", "openrails"} {
+		got, err := Rewrite(in, schema)
+		require.NoError(t, err)
+		require.Equal(t, strings.Replace(in, "billing.subscriptions", schema+".subscriptions", 1), got)
+	}
+}
+
 func TestRelocatorCachesPerStatement(t *testing.T) {
 	require.Nil(t, New(""))
 	require.Nil(t, New(config.DefaultSchema))

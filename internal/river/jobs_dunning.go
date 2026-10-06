@@ -215,7 +215,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		merchantID := billing.MerchantID(mid)
 		progress.Mark(ctx, "dunning merchant "+merchantID.String())
 		// The pin AND the proof it took: every read and write below runs under
-		// this merchant's app.merchant_id, exactly as a request would.
+		// this merchant's openrails.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
 			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now(), w.EngineCollections != nil)
 			if err != nil {

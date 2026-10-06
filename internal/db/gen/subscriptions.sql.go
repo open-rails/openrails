@@ -2273,7 +2273,7 @@ WHERE subscriptions.merchant_id = $26::uuid AND id = $1
   AND row_version = $28
   AND deleted_at IS NULL
   -- The status-transition audit records this decision's name (0021).
-  AND set_config('billing.decision', $29::text, true) IS NOT NULL
+  AND set_config('openrails.subscription_decision', $29::text, true) IS NOT NULL
 `
 
 type UpdateSubscriptionDecidedParams struct {

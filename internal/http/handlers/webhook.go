@@ -95,7 +95,7 @@ func Webhook(r *httprequest.Request) {
 }
 
 // pinWebhookMerchantConn pins the resolved merchant's DB connection (the
-// app.merchant_id GUC) on the request for the rest of the dispatch, and returns
+// openrails.merchant_id GUC) on the request for the rest of the dispatch, and returns
 // the release the caller must defer.
 //
 // The webhook surfaces resolve their merchant INSIDE the handler — from the URL

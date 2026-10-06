@@ -6,7 +6,7 @@ import (
 )
 
 // pin puts this call on a merchant-scoped connection for its whole duration, so
-// every read it makes shares one session carrying `app.merchant_id`.
+// every read it makes shares one session carrying `openrails.merchant_id`.
 //
 // It is on EVERY exported method that reaches the database, not only the ones a
 // host was told to wrap. There is no privileged pool (or#868): under the

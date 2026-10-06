@@ -198,7 +198,7 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	since := now.Add(-RateCeilingWindow).UTC()
 	types := DestructiveIntentTypes()
 	// Both counts take their scope (merchant or actor) as an argument, so this
-	// root pool needs no app.merchant_id; GenDirectory is the right accessor.
+	// root pool needs no openrails.merchant_id; GenDirectory is the right accessor.
 	q := c.db.GenDirectory()
 
 	merchantCount, err := q.CountDestructiveIntentsForMerchantSince(ctx, gen.CountDestructiveIntentsForMerchantSinceParams{
@@ -260,7 +260,7 @@ func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.T
 
 	// The same definer reader the anti-theft leg uses, with the system origin
 	// set (migration 0028 generalized 0024's system-only function). It takes the
-	// merchant as an argument, so the root pool needs no app.merchant_id.
+	// merchant as an argument, so the root pool needs no openrails.merchant_id.
 	count, err := c.db.GenDirectory().CountDestructiveIntentsForMerchantSince(ctx,
 		gen.CountDestructiveIntentsForMerchantSinceParams{
 			MerchantID:  p.MerchantID,

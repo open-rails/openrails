@@ -95,7 +95,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND row_version = sqlc.arg(expected_version)
   AND deleted_at IS NULL
   -- The status-transition audit records this decision's name (0021).
-  AND set_config('billing.decision', sqlc.arg(decision)::text, true) IS NOT NULL;
+  AND set_config('openrails.subscription_decision', sqlc.arg(decision)::text, true) IS NOT NULL;
 
 -- name: GetSubscriptionByID :one
 SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1

@@ -11,7 +11,7 @@ import (
 
 // MerchantDBConnMW is the framework-neutral analogue of MerchantDBConn (issue #282).
 // It pins a merchant-scoped DB connection for the request, sets the
-// `app.merchant_id` GUC, runs the rest of the chain, then releases the connection
+// `openrails.merchant_id` GUC, runs the rest of the chain, then releases the connection
 // (resetting the GUC) on the way out. See db.WithMerchantConn for what the
 // pin does and does not scope.
 func MerchantDBConnMW(database *db.DB) router.Middleware {

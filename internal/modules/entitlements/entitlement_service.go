@@ -38,7 +38,7 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 		return fmt.Errorf("entitlement service not initialized")
 	}
 	// Run inside a merchant-scoped transaction (db.MerchantTx sets the
-	// app.merchant_id GUC from the context as the first statement). This is
+	// openrails.merchant_id GUC from the context as the first statement). This is
 	// the shared chokepoint for merchant-owned entitlement writes/reads.
 	return s.db.MerchantTx(ctx, fn)
 }

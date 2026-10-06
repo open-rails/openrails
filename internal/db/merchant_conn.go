@@ -15,7 +15,7 @@ type merchantPgxConnKey struct{}
 
 // WithMerchantConn arranges for the request to run on a single merchant-scoped
 // connection: it puts a LAZY pinned connection in the context carrying the
-// `app.merchant_id` session GUC (set on first use — see lazyMerchantPgxConn).
+// `openrails.merchant_id` session GUC (set on first use — see lazyMerchantPgxConn).
 // Every subsequent Qx(ctx)/Gen(ctx) on the returned context resolves to that
 // connection. The session value supports explicit current_merchant_id()
 // predicates and stored functions; it does not filter arbitrary SQL. Tenant

@@ -90,7 +90,7 @@ func TestIndexUseProbe(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, s := range []string{
-			`SELECT set_config('app.merchant_id', '` + AuditMerchantID + `', false)`,
+			`SELECT set_config('openrails.merchant_id', '` + AuditMerchantID + `', false)`,
 			`SET search_path = billing, public`,
 		} {
 			if _, err := conn.Exec(ctx, s); err != nil {

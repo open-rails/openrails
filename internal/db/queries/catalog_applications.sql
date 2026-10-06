@@ -15,7 +15,7 @@ INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_vers
 VALUES (sqlc.arg(merchant_id)::uuid,sqlc.arg(application_id)::text,sqlc.arg(schema_version)::bigint,sqlc.arg(request_sha256)::bytea,sqlc.arg(base_revision)::bigint,sqlc.arg(applied_revision)::bigint,sqlc.arg(result)::jsonb);
 
 -- name: SetCatalogBatchMerchant :exec
-SELECT set_config('app.catalog_batch',sqlc.arg(merchant_id)::text,true);
+SELECT set_config('openrails.catalog_batch_merchant_id',sqlc.arg(merchant_id)::text,true);
 
 -- name: LockCatalogApplicationPSP :one
 SELECT * FROM billing.psps WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid FOR SHARE NOWAIT;

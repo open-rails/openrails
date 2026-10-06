@@ -20,7 +20,7 @@ import (
 // functions and queries that explicitly call current_merchant_id(). It does not
 // filter arbitrary SQL. Merchant isolation is enforced by scoped predicates and
 // composite relationships, independently of the PostgreSQL login's privileges.
-const MerchantGUC = "app.merchant_id"
+const MerchantGUC = "openrails.merchant_id"
 
 // Qx returns the queryable handle that sqlc-generated queries
 // (and annotated raw-pgx operations) use to preserve transaction and session scope.
@@ -28,7 +28,7 @@ const MerchantGUC = "app.merchant_id"
 // Resolution order:
 //  1. an open pgx transaction this DB is scoped to (NewWithPgxTx),
 //  2. the request's pinned merchant-scoped connection (WithMerchantConn) — it
-//     carries the app.merchant_id GUC for explicit predicates and stored functions,
+//     carries the openrails.merchant_id GUC for explicit predicates and stored functions,
 //  3. the base pool. Choosing a handle never authorizes a merchant operation;
 //     callers must supply their verified merchant scope to tenant queries.
 
@@ -213,7 +213,7 @@ func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id billing.MerchantI
 // for the post-mortem).
 //
 // It satisfies gen.DBTX directly: the first Exec/Query/QueryRow (or
-// pgxBegin) acquires a pool connection, sets the app.merchant_id session GUC
+// pgxBegin) acquires a pool connection, sets the openrails.merchant_id session GUC
 // on it, and pins it until release().
 type lazyMerchantPgxConn struct {
 	pool     *pgxpool.Pool

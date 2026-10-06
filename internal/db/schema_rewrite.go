@@ -196,7 +196,7 @@ func (p *Pool) Begin(ctx context.Context) (pgx.Tx, error) {
 }
 
 // MerchantTx runs hand-written pool queries inside a transaction whose
-// app.merchant_id GUC is pinned to the target merchant. Use this for direct Pool
+// openrails.merchant_id GUC is pinned to the target merchant. Use this for direct Pool
 // stores that touch merchant-owned tables but do not have a *DB.
 func (p *Pool) MerchantTx(ctx context.Context, id billing.MerchantID, fn func(context.Context, pgx.Tx) error) error {
 	if p == nil {
