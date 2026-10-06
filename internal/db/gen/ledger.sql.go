@@ -583,11 +583,11 @@ GROUP BY transfer_type
 `
 
 type SumLedgerMovementsByCustomerInPeriodParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	PeriodFrom time.Time
-	PeriodTo   time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
 }
 
 type SumLedgerMovementsByCustomerInPeriodRow struct {
@@ -603,8 +603,8 @@ func (q *Queries) SumLedgerMovementsByCustomerInPeriod(ctx context.Context, arg 
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 	)
 	if err != nil {
 		return nil, err

@@ -36,8 +36,8 @@ type CardUpdate struct {
 	Kind                                    CardUpdateKind
 	// EventRef names the notice or operation; a replay records nothing.
 	EventRef string
-	// At is when the change was learned; zero is the database's now.
-	At time.Time
+	// OccurredAt is when the change was learned; zero is the database's now.
+	OccurredAt time.Time
 }
 
 // RecordCardUpdate records u once.
@@ -46,9 +46,9 @@ func RecordCardUpdate(ctx context.Context, q *gen.Queries, u CardUpdate) error {
 		MerchantID: u.MerchantID, PaymentMethodID: u.PaymentMethodID, CustomerID: u.CustomerID, PspID: u.PSPID,
 		Source: string(u.Source), Kind: string(u.Kind), EventRef: u.EventRef,
 	}
-	if !u.At.IsZero() {
-		at := u.At.UTC()
-		p.At = &at
+	if !u.OccurredAt.IsZero() {
+		at := u.OccurredAt.UTC()
+		p.OccurredAt = &at
 	}
 	return q.InsertPaymentMethodUpdate(ctx, p)
 }

@@ -16,8 +16,8 @@ export interface InvoiceFilters {
   customer_id?: string
   currency?: string
   status?: string
-  period_from?: string
-  period_to?: string
+  period_starts_after?: string
+  period_starts_before?: string
 }
 
 export const listInvoices = (

@@ -39,9 +39,9 @@ type SolanaSubscription struct {
 	// subscribe time; a mismatch on pull means ghost-plan recreation.
 	PlanCreatedAtFingerprint int64 `json:"plan_created_at_fingerprint"`
 
-	LastPulledPeriodStart *time.Time `json:"last_pulled_period_start,omitempty"`
-	LastSignature         *string    `json:"last_signature,omitempty"`
-	NextPullAt            time.Time  `json:"next_pull_at"`
+	LastPulledPeriodStartsAt *time.Time `json:"last_pulled_period_starts_at,omitempty"`
+	LastSignature            *string    `json:"last_signature,omitempty"`
+	NextPullAt               time.Time  `json:"next_pull_at"`
 
 	Status string `json:"status"`
 

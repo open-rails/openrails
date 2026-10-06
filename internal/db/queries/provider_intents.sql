@@ -90,7 +90,7 @@ WITH due AS (
     SELECT id FROM billing.provider_intents
     WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
-            OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
+            OR (status = 'in_flight' AND lease_expires_at IS NOT NULL AND lease_expires_at <= sqlc.arg(now)::timestamptz)
           )
       AND (intent_type = 'subscription_collection' OR status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
@@ -99,7 +99,7 @@ WITH due AS (
 )
 UPDATE billing.provider_intents pi
 SET status = 'in_flight',
-    claimed_until = sqlc.arg(lease_until)::timestamptz,
+    lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
     attempts = pi.attempts + 1,
     updated_at = now()
 FROM due
@@ -115,13 +115,13 @@ RETURNING pi.*;
 -- name: ClaimProviderIntentByID :one
 UPDATE billing.provider_intents pi
 SET status = 'in_flight',
-    claimed_until = sqlc.arg(lease_until)::timestamptz,
+    lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
     attempts = pi.attempts + 1,
     updated_at = now()
 WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = sqlc.arg(id)
   AND (
         pi.status IN ('pending', 'failed_retryable')
-        OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= sqlc.arg(now)::timestamptz)
+        OR (pi.status = 'in_flight' AND pi.lease_expires_at IS NOT NULL AND pi.lease_expires_at <= sqlc.arg(now)::timestamptz)
       )
   AND (pi.intent_type = 'subscription_collection' OR pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
 RETURNING pi.*;
@@ -134,13 +134,13 @@ WITH due AS (
     SELECT id FROM billing.provider_intents
     WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'unknown_needs_verify'
       AND next_attempt_at <= sqlc.arg(now)::timestamptz
-      AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
+      AND (lease_expires_at IS NULL OR lease_expires_at <= sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
 )
 UPDATE billing.provider_intents pi
-SET claimed_until = sqlc.arg(lease_until)::timestamptz,
+SET lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
     updated_at = now()
 FROM due
 WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
@@ -151,38 +151,38 @@ RETURNING pi.*;
 -- verifier or resolver.
 -- name: ClaimUnknownProviderIntentByID :one
 UPDATE billing.provider_intents
-SET claimed_until = sqlc.arg(lease_until)::timestamptz,
+SET lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
   AND status = 'unknown_needs_verify'
-  AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
+  AND (lease_expires_at IS NULL OR lease_expires_at <= sqlc.arg(now)::timestamptz)
 RETURNING *;
 
 -- Releases a resolver lease after rejected evidence, leaving the operation
 -- exactly as it was.
 -- name: ReleaseUnknownProviderIntentClaim :one
 UPDATE billing.provider_intents
-SET claimed_until = NULL,
+SET lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'unknown_needs_verify'
-  AND claimed_until IS NOT NULL
+  AND lease_expires_at IS NOT NULL
 RETURNING next_attempt_at;
 
 -- Renews a live claim while its handler runs (xs-007 row 32): the executor
--- beats this every lease/4, so claimed_until measures SILENCE from a dead
+-- beats this every lease/4, so lease_expires_at measures SILENCE from a dead
 -- executor rather than how long a provider call may take. Renewal is refused
 -- once the lease has lapsed — by then another executor may hold the row, and a
 -- late beat must not steal it back. Only the claim's own (status, attempts)
 -- fencing token renews. Returns rows affected (0 = lost).
 -- name: RenewProviderIntentClaim :execrows
 UPDATE billing.provider_intents
-SET claimed_until = sqlc.arg(lease_until)::timestamptz,
+SET lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
   AND status = sqlc.arg(status)::text
   AND attempts = sqlc.arg(attempts)::int
-  AND claimed_until IS NOT NULL
-  AND claimed_until > sqlc.arg(now)::timestamptz;
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > sqlc.arg(now)::timestamptz;
 
 -- =====================================================================
 -- Outcome transitions (always release the lease)
@@ -203,7 +203,7 @@ SET status = 'succeeded',
         ELSE sqlc.narg(result_evidence)::jsonb
     END,
     last_failure_reason = NULL,
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection');
@@ -213,7 +213,7 @@ UPDATE billing.provider_intents
 SET status = 'failed_retryable',
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at'
@@ -230,7 +230,7 @@ SET status = 'unknown_needs_verify',
       || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 
@@ -249,7 +249,7 @@ SET status = 'failed_terminal',
                   THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
         ELSE sqlc.narg(result_evidence)::jsonb
     END,
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete','subscription_collection');
@@ -264,7 +264,7 @@ SET status = 'pending',
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'in_flight'
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
@@ -276,7 +276,7 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
@@ -307,7 +307,7 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type
 UPDATE billing.provider_intents pi
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
@@ -461,7 +461,7 @@ SET status = sqlc.arg(status)::text,
     result_evidence = sqlc.arg(evidence)::jsonb,
     last_failure_reason = NULLIF(sqlc.arg(reason)::text, ''),
     executed_at = CASE WHEN sqlc.arg(status)::text = 'succeeded' THEN sqlc.arg(now)::timestamptz ELSE executed_at END,
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('invoice_collection', 'manual_rebill', 'subscription_collection')
@@ -654,7 +654,7 @@ SET status=sqlc.arg(status)::text,
     result_evidence=sqlc.arg(evidence)::jsonb,
     last_failure_reason=CASE WHEN sqlc.arg(status)::text='succeeded' THEN NULL ELSE sqlc.narg(reason)::text END,
     executed_at=CASE WHEN sqlc.arg(status)::text='succeeded' THEN sqlc.arg(now)::timestamptz ELSE executed_at END,
-    claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
+    lease_expires_at=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('nmi_upgrade','stripe_tier_change')
   AND status IN ('in_flight','unknown_needs_verify');
@@ -676,7 +676,7 @@ FOR UPDATE;
 UPDATE billing.provider_intents
 SET status=sqlc.arg(status)::text, result_evidence=sqlc.arg(evidence)::jsonb,
     last_failure_reason=sqlc.narg(reason)::text, executed_at=sqlc.arg(now)::timestamptz,
-    claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
+    lease_expires_at=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type='nmi_sale' AND status IN ('in_flight','unknown_needs_verify');
 
@@ -703,7 +703,7 @@ FOR UPDATE;
 UPDATE billing.provider_intents
 SET status=sqlc.arg(status)::text, result_evidence=sqlc.arg(evidence)::jsonb,
     last_failure_reason=sqlc.narg(reason)::text, executed_at=sqlc.arg(now)::timestamptz,
-    claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
+    lease_expires_at=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type='initial_membership' AND status IN ('in_flight','unknown_needs_verify');
 -- name: GetUnresolvedSubscriptionCollection :one
@@ -756,7 +756,7 @@ ORDER BY id LIMIT 2;
 UPDATE billing.provider_intents pi
 SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
@@ -778,10 +778,10 @@ WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uui
 
 -- name: RecoverAbandonedProviderIntentByID :execrows
 UPDATE billing.provider_intents
-SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = sqlc.arg(now)::timestamptz,
+SET status = 'unknown_needs_verify', lease_expires_at = NULL, next_attempt_at = sqlc.arg(now)::timestamptz,
     last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz);
+  AND status = 'in_flight' AND (lease_expires_at IS NULL OR lease_expires_at <= sqlc.arg(now)::timestamptz);
 
 -- A qualified provider notification may advance a readback, never a write or
 -- another executor's live lease. Admission and retry authorization are untouched.
@@ -857,7 +857,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.provider_intents
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
       AND status = sqlc.arg(status)::text AND attempts = sqlc.arg(attempts)::int
-      AND claimed_until > sqlc.arg(held_until)::timestamptz
+      AND lease_expires_at > sqlc.arg(held_until)::timestamptz
 );
 
 -- name: GetLatestProviderIntentIDForSubscription :one

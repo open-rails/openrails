@@ -49,15 +49,15 @@ type PaymentSettledEvent struct {
 }
 
 type DelinquencyHostEvent struct {
-	CustomerID      CustomerID `json:"customer_id"`
-	Currency        string     `json:"currency"`
-	FromState       string     `json:"from_state"`
-	ToState         string     `json:"to_state"`
-	OverdueSince    *time.Time `json:"overdue_since,omitempty"`
-	OverdueAmount   int64      `json:"overdue_amount,string"`
-	OverdueInvoices int64      `json:"overdue_invoices"`
-	GraceDays       int64      `json:"grace_days"`
-	AmountFloor     int64      `json:"amount_floor,string"`
+	CustomerID       CustomerID `json:"customer_id"`
+	Currency         string     `json:"currency"`
+	FromState        string     `json:"from_state"`
+	ToState          string     `json:"to_state"`
+	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
+	OverdueAmount    int64      `json:"overdue_amount,string"`
+	OverdueInvoices  int64      `json:"overdue_invoices"`
+	GraceDays        int64      `json:"grace_days"`
+	AmountFloor      int64      `json:"amount_floor,string"`
 }
 
 // HostEvent has exactly one payload, selected by Type. Acknowledgment is a

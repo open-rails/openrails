@@ -55,8 +55,8 @@ type RunRecord struct {
 	MerchantID  uuid.UUID       `json:"tenant_id"`
 	Mode        Mode            `json:"mode"`
 	Providers   []string        `json:"providers"`
-	WindowSince *time.Time      `json:"window_since,omitempty"`
-	WindowUntil *time.Time      `json:"window_until,omitempty"`
+	WindowStartsAt *time.Time      `json:"window_starts_at,omitempty"`
+	WindowEndsAt *time.Time      `json:"window_ends_at,omitempty"`
 	StartedAt   time.Time       `json:"started_at"`
 	FinishedAt  *time.Time      `json:"finished_at,omitempty"`
 	Status      string          `json:"status"`
@@ -157,8 +157,8 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 		MerchantID:  tid.UUID(),
 		Mode:        string(mode),
 		Rails:       names,
-		WindowSince: since,
-		WindowUntil: until,
+		WindowStartsAt: since,
+		WindowEndsAt: until,
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -689,8 +689,8 @@ func runRecordFromRow(row gen.BillingMaintenanceRun) RunRecord {
 		MerchantID:  row.MerchantID,
 		Mode:        Mode(row.Mode),
 		Providers:   row.Rails,
-		WindowSince: row.WindowSince,
-		WindowUntil: row.WindowUntil,
+		WindowStartsAt: row.WindowStartsAt,
+		WindowEndsAt: row.WindowEndsAt,
 		StartedAt:   row.StartedAt,
 		FinishedAt:  row.FinishedAt,
 		Status:      row.Status,

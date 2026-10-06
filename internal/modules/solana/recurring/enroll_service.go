@@ -192,7 +192,7 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 	row.SubscriptionID = sub.ID
 	row.MerchantID = in.MerchantID.UUID()
 	row.NextPullAt = periodEnd
-	row.LastPulledPeriodStart = &now
+	row.LastPulledPeriodStartsAt = &now
 	row.LastSignature = &sig
 	row.Status = models.SolanaSubscriptionActive
 	if err := s.repo.Upsert(ctx, row); err != nil {

@@ -97,7 +97,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			}
 		}
 	}
-	data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID), PeriodStart: &effects.PeriodStart, PeriodEnd: &effects.PeriodEnd}
+	data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID), PeriodStartsAt: &effects.PeriodStart, PeriodEndsAt: &effects.PeriodEnd}
 	if effects.Downgrade {
 		data.DowngradeApplied, data.NewProduct = true, effects.ProductName
 	} else if due, err := renewalReceiptDue(ctx, d, sub, effects.PeriodStart); err != nil || !due {

@@ -240,8 +240,8 @@ export type Invoice = {
   customer_id: string
   currency: string
   invoice_number: string | null
-  period_from: string
-  period_to: string
+  period_starts_at: string
+  period_ends_at: string
   usage_total: string
   deposits_total: string
   owed_accrued: string
@@ -345,13 +345,13 @@ export type NotificationData = {
   old_amount?: string
   new_amount?: string
   effective_at?: string
-  period_start?: string
-  period_end?: string
+  period_starts_at?: string
+  period_ends_at?: string
   downgrade_applied?: boolean
   new_product?: string
   overdue_amount?: string
   overdue_invoices?: number
-  overdue_since?: string
+  overdue_started_at?: string
   from_state?: string
   to_state?: string
   invoice_id?: string

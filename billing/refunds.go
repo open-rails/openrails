@@ -73,28 +73,28 @@ const (
 
 // ArchiveProductParams archives one product (ProductID or ProductKey) and
 // applies PurchaseAction (empty: none) to its one-time purchases made at or
-// after PurchasedSince, or within WindowSeconds before the operation was first
+// after PurchaseWindowStartsAt, or within WindowSeconds before the operation was first
 // accepted. The window is fixed at first acceptance; retries with the same
 // IdempotencyKey evaluate the same purchases and never refund twice.
 type ArchiveProductParams struct {
-	ProductID      ProductID      `json:"product_id,omitzero"`
-	ProductKey     string         `json:"product_key,omitempty"`
-	PurchaseAction PurchaseAction `json:"purchase_action,omitempty"`
-	PurchasedSince time.Time      `json:"purchased_since,omitzero"`
-	WindowSeconds  int64          `json:"window_seconds,omitempty"`
-	Reason         string         `json:"reason,omitempty"`
-	IdempotencyKey string         `json:"-"`
+	ProductID              ProductID      `json:"product_id,omitzero"`
+	ProductKey             string         `json:"product_key,omitempty"`
+	PurchaseAction         PurchaseAction `json:"purchase_action,omitempty"`
+	PurchaseWindowStartsAt time.Time      `json:"purchase_window_starts_at,omitzero"`
+	WindowSeconds          int64          `json:"window_seconds,omitempty"`
+	Reason                 string         `json:"reason,omitempty"`
+	IdempotencyKey         string         `json:"-"`
 }
 
 // ProductArchive is the durable result of ArchiveProduct.
 type ProductArchive struct {
-	ID             ProductArchiveID `json:"id"`
-	ProductID      ProductID        `json:"product_id"`
-	ProductKey     string           `json:"product_key"`
-	PurchaseAction PurchaseAction   `json:"purchase_action"`
-	PurchasedSince *time.Time       `json:"purchased_since"`
-	Reason         *string          `json:"reason"`
-	CreatedAt      time.Time        `json:"created_at"`
+	ID                     ProductArchiveID `json:"id"`
+	ProductID              ProductID        `json:"product_id"`
+	ProductKey             string           `json:"product_key"`
+	PurchaseAction         PurchaseAction   `json:"purchase_action"`
+	PurchaseWindowStartsAt *time.Time       `json:"purchase_window_starts_at"`
+	Reason                 *string          `json:"reason"`
+	CreatedAt              time.Time        `json:"created_at"`
 	// Complete is false while qualifying purchases remain unprocessed; retry
 	// the same operation to continue.
 	Complete  bool               `json:"complete"`

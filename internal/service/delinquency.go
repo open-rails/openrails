@@ -31,9 +31,9 @@ func delinquencyFromSnapshot(r DelinquencySnapshot) billing.Delinquency {
 		CustomerID: billing.CustomerID(r.CustomerID), Currency: r.Currency, State: billing.DelinquencyState(r.State),
 		OverdueAmount: r.OverdueAmount, OverdueInvoices: r.OverdueInvoices, EnteredAt: r.EnteredAt.UTC(), EvaluatedAt: r.EvaluatedAt.UTC(),
 	}
-	if r.OverdueSince != nil {
-		since := r.OverdueSince.UTC()
-		out.OverdueSince = &since
+	if r.OverdueStartedAt != nil {
+		since := r.OverdueStartedAt.UTC()
+		out.OverdueStartedAt = &since
 	}
 	return out
 }
@@ -99,6 +99,6 @@ func (s *Service) ListDelinquency(ctx context.Context, params billing.Delinquenc
 		items = append(items, delinquencyFromSnapshot(r))
 	}
 	return pagination.Cut(items, limit, func(d billing.Delinquency) any {
-		return delinquency.RosterPosition{Since: *d.OverdueSince, Customer: d.CustomerID.UUID(), Currency: d.Currency}
+		return delinquency.RosterPosition{Since: *d.OverdueStartedAt, Customer: d.CustomerID.UUID(), Currency: d.Currency}
 	}), nil
 }

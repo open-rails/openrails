@@ -40,4 +40,4 @@ whose period starts less than that interval after the membership start or the
 last receipted renewal creates no `premium_renewed` notification. Hourly and
 daily members therefore get at most one receipt a day; weekly and longer
 cadences get one per renewal. `0` sends a receipt for every renewal. Receipts
-carry `subscription_id`, `period_start` and `period_end`.
+carry `subscription_id`, `period_starts_at` and `period_ends_at`.

@@ -35,7 +35,7 @@ func (w *world) cardUpdates(vault string) []string {
 	w.t.Helper()
 	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT u.source || '/' || u.kind FROM billing.payment_method_updates u
 		JOIN billing.payment_methods pm ON pm.merchant_id = u.merchant_id AND pm.id = u.payment_method_id
-		WHERE pm.rail_customer_ref = $1 ORDER BY u.at, u.id`), vault)
+		WHERE pm.rail_customer_ref = $1 ORDER BY u.occurred_at, u.id`), vault)
 	require.NoError(w.t, err)
 	var out []string
 	for rows.Next() {

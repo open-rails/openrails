@@ -36,7 +36,7 @@ func solanaSubscriptionFromGen(s gen.BillingSolanaSubscription) *models.SolanaSu
 		MerchantAddress:          s.MerchantAddress,
 		Mint:                     s.Mint,
 		PlanCreatedAtFingerprint: s.PlanCreatedAtFingerprint,
-		LastPulledPeriodStart:    s.LastPulledPeriodStart,
+		LastPulledPeriodStartsAt: s.LastPulledPeriodStartsAt,
 		LastSignature:            s.LastSignature,
 		NextPullAt:               s.NextPullAt,
 		Status:                   s.Status,
@@ -81,7 +81,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 		MerchantAddress:          s.MerchantAddress,
 		Mint:                     s.Mint,
 		PlanCreatedAtFingerprint: s.PlanCreatedAtFingerprint,
-		LastPulledPeriodStart:    s.LastPulledPeriodStart,
+		LastPulledPeriodStartsAt: s.LastPulledPeriodStartsAt,
 		LastSignature:            s.LastSignature,
 		NextPullAt:               s.NextPullAt,
 		Status:                   s.Status,
@@ -192,12 +192,12 @@ func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.U
 		return scopeErr
 	}
 	return r.db.Gen(ctx).AdvanceSolanaSubscriptionAfterPull(ctx, gen.AdvanceSolanaSubscriptionAfterPullParams{
-		MerchantID:            scopeMerchantID.UUID(),
-		ID:                    id,
-		LastPulledPeriodStart: &ps,
-		LastSignature:         &signature,
-		NextPullAt:            nextPullAt.UTC(),
-		UpdatedAt:             time.Now().UTC(),
+		MerchantID:               scopeMerchantID.UUID(),
+		ID:                       id,
+		LastPulledPeriodStartsAt: &ps,
+		LastSignature:            &signature,
+		NextPullAt:               nextPullAt.UTC(),
+		UpdatedAt:                time.Now().UTC(),
 	})
 }
 

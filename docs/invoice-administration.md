@@ -4,7 +4,7 @@ The console's **Invoices** page and the customer **Invoice profile** section use
 
 ## Reads and permissions
 
-- `GET /v1/merchant/invoices`: requires `merchant:invoices:read`. Filters: `customer_id`, `currency`, `status`, `period_from`, and `period_to`. Period filters select invoice period starts in the half-open range `[period_from, period_to)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
+- `GET /v1/merchant/invoices`: requires `merchant:invoices:read`. Filters: `customer_id`, `currency`, `status`, `period_starts_after`, and `period_starts_before`. Period filters select `period_starts_at` in the half-open range `[period_starts_after, period_starts_before)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
 - `GET /v1/merchant/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. The customer's cards for a retry are read from `GET /v1/merchant/customers/{customer_id}/payment-methods`.
 - `GET /v1/merchant/invoices/{id}/payments`: payment/collection history, a cursor page, with the same read permission.
 - `GET` / `PUT /v1/merchant/customers/{customer_id}/invoice-profile`: existing customer-settings read/update permissions. `GET` answers `404` when the customer has none; `PUT` with `If-None-Match: *` only creates one. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.

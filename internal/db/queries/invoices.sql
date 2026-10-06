@@ -41,14 +41,14 @@ ORDER BY p.customer_id, p.currency;
 -- Idempotency key is per (payer, period, currency): one invoice per currency (#474).
 SELECT * FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2
-  AND period_from = $3 AND period_to = $4 AND currency = sqlc.arg(currency)
+  AND period_starts_at = $3 AND period_ends_at = $4 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
 -- name: InsertInvoice :exec
 INSERT INTO billing.invoices (
     id, merchant_id, customer_id, currency,
     invoice_number,
-    period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
+    period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid,
     closing_balance, subtotal_amount, total_amount, amount_paid, amount_due,
     line_items, money_movements, status, collection_method,
     issued_at, due_at, paid_at, voided_at, uncollectible_at,
@@ -95,16 +95,16 @@ WHERE merchant_id = $1
   AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL
   AND status = 'pending'
-  AND invoice_at >= sqlc.arg(period_from)::timestamptz
-  AND invoice_at < sqlc.arg(period_to)::timestamptz;
+  AND invoice_at >= sqlc.arg(period_starts_at)::timestamptz
+  AND invoice_at < sqlc.arg(period_ends_at)::timestamptz;
 
 -- name: SumPendingInvoiceItemAmountInPeriod :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM billing.invoice_items
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending'
-  AND invoice_at >= sqlc.arg(period_from)::timestamptz
-  AND invoice_at < sqlc.arg(period_to)::timestamptz;
+  AND invoice_at >= sqlc.arg(period_starts_at)::timestamptz
+  AND invoice_at < sqlc.arg(period_ends_at)::timestamptz;
 
 -- name: ListInvoiceThresholdCandidates :many
 --
@@ -113,7 +113,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 -- threshold, else the payer's own credit line. Resolved in SQL through the same
 -- most-specific-wins rungs the admission path uses (money_settings.tier supplies
 -- the tier rung), so a per-payer trigger costs no extra round trip.
-SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from, MIN(s.created_at)::timestamptz AS period_anchor
+SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_starts_at, MIN(s.created_at)::timestamptz AS period_anchor
 FROM billing.money_settings s
 JOIN billing.invoice_items ii
   ON ii.merchant_id = s.merchant_id
@@ -148,7 +148,7 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
 ) >= COALESCE(
     pol.threshold,
     CASE WHEN sqlc.arg(min_threshold)::bigint > 0 THEN sqlc.arg(min_threshold)::bigint ELSE s.credit_limit_amount END)
-ORDER BY period_from ASC;
+ORDER BY period_starts_at ASC;
 
 -- name: ListChargeableOpenInvoices :many
 SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
@@ -272,8 +272,8 @@ SELECT COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
 FROM billing.invoice_items
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending'
-  AND invoice_at >= sqlc.arg(period_from)::timestamptz
-  AND invoice_at < sqlc.arg(period_to)::timestamptz
+  AND invoice_at >= sqlc.arg(period_starts_at)::timestamptz
+  AND invoice_at < sqlc.arg(period_ends_at)::timestamptz
 GROUP BY 1
 ORDER BY 1 ASC;
 

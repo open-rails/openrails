@@ -44,7 +44,7 @@ const (
 	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at, #1116)
 	FamCheckouts      Family = "checkouts"       // flow over checkouts, one per checkout_id (first attempt)
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
-	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month, #1120)
+	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at, #1120)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -403,7 +403,7 @@ var families = map[Family]familySpec{
 	FamNMIHistory: {
 		Kind:     "flow",
 		From:     `billing.nmi_history_months h`,
-		TimeExpr: `h.month`,
+		TimeExpr: `h.month_at`,
 		DimExprs: map[string]string{
 			"psp":      `COALESCE('psp_' || h.psp_id::text, '')`,
 			"nmi_kind": `h.kind`,
@@ -430,7 +430,7 @@ const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner
 			WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
 			WHEN EXISTS (SELECT 1 FROM billing.payment_method_updates u
 				WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id AND u.kind = 'updated'
-				AND u.at >= COALESCE(c.missed_at, f.attempted_at) AND u.at <= w.attempted_at) THEN 'updated_card'
+				AND u.occurred_at >= COALESCE(c.missed_at, f.attempted_at) AND u.occurred_at <= w.attempted_at) THEN 'updated_card'
 			WHEN w.kind = 'customer_retry' THEN 'customer_retry'
 			ELSE 'dunning_retry' END AS recovered_by
 	FROM billing.rebill_cycles c

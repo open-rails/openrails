@@ -13,7 +13,7 @@ import (
 )
 
 const getProviderBillingObservation = `-- name: GetProviderBillingObservation :one
-SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end,
+SELECT merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at,
        raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
        has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
 FROM billing.cost_observations
@@ -33,8 +33,8 @@ type GetProviderBillingObservationRow struct {
 	OperationID             string
 	ObservationID           string
 	NormalizedQuery         string
-	QueryStart              time.Time
-	QueryEnd                time.Time
+	QueryStartsAt           time.Time
+	QueryEndsAt             time.Time
 	RawBodyAvailable        bool
 	RawBodyDigest           []byte
 	NormalizedRecordsDigest []byte
@@ -57,8 +57,8 @@ func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProv
 		&i.OperationID,
 		&i.ObservationID,
 		&i.NormalizedQuery,
-		&i.QueryStart,
-		&i.QueryEnd,
+		&i.QueryStartsAt,
+		&i.QueryEndsAt,
 		&i.RawBodyAvailable,
 		&i.RawBodyDigest,
 		&i.NormalizedRecordsDigest,
@@ -73,7 +73,7 @@ func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProv
 }
 
 const getProviderBillingQualificationForUpdate = `-- name: GetProviderBillingQualificationForUpdate :one
-SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
+SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_starts_at, provider_lifetime_ends_at, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
 FROM billing.cost_qualifications
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
@@ -93,8 +93,8 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 		&i.OperationID,
 		&i.Provider,
 		&i.ProviderResourceID,
-		&i.ProviderLifetimeStart,
-		&i.ProviderLifetimeEnd,
+		&i.ProviderLifetimeStartsAt,
+		&i.ProviderLifetimeEndsAt,
 		&i.ProviderAbsentAt,
 		&i.ProviderAbsenceReference,
 		&i.BillingStopReference,
@@ -116,7 +116,7 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 }
 
 const getProviderBillingQualificationWithAuthorization = `-- name: GetProviderBillingQualificationWithAuthorization :one
-SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_start, q.provider_lifetime_end, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest
+SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_starts_at, q.provider_lifetime_ends_at, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest
 FROM billing.cost_qualifications q
 JOIN billing.operation_authorizations a
   ON a.merchant_id = q.merchant_id
@@ -143,8 +143,8 @@ func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.C
 		&i.BillingCostQualification.OperationID,
 		&i.BillingCostQualification.Provider,
 		&i.BillingCostQualification.ProviderResourceID,
-		&i.BillingCostQualification.ProviderLifetimeStart,
-		&i.BillingCostQualification.ProviderLifetimeEnd,
+		&i.BillingCostQualification.ProviderLifetimeStartsAt,
+		&i.BillingCostQualification.ProviderLifetimeEndsAt,
 		&i.BillingCostQualification.ProviderAbsentAt,
 		&i.BillingCostQualification.ProviderAbsenceReference,
 		&i.BillingCostQualification.BillingStopReference,
@@ -190,8 +190,8 @@ INSERT INTO billing.cost_observations (
     operation_id,
     observation_id,
     normalized_query,
-    query_start,
-    query_end,
+    query_starts_at,
+    query_ends_at,
     raw_body_available,
     raw_body_bytes,
     raw_body_digest,
@@ -223,7 +223,7 @@ INSERT INTO billing.cost_observations (
     $17::timestamptz
 )
 ON CONFLICT (merchant_id, operation_id, observation_id) DO NOTHING
-RETURNING merchant_id, operation_id, observation_id, normalized_query, query_start, query_end, raw_body_available, raw_body_bytes, raw_body_digest, normalized_records_bytes, normalized_records_digest, cost_amount, has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
+RETURNING merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at, raw_body_available, raw_body_bytes, raw_body_digest, normalized_records_bytes, normalized_records_digest, cost_amount, has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
 `
 
 type InsertProviderBillingObservationParams struct {
@@ -231,8 +231,8 @@ type InsertProviderBillingObservationParams struct {
 	OperationID             string
 	ObservationID           string
 	NormalizedQuery         string
-	QueryStart              time.Time
-	QueryEnd                time.Time
+	QueryStartsAt           time.Time
+	QueryEndsAt             time.Time
 	RawBodyAvailable        bool
 	RawBodyBytes            []byte
 	RawBodyDigest           []byte
@@ -252,8 +252,8 @@ func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg Inse
 		arg.OperationID,
 		arg.ObservationID,
 		arg.NormalizedQuery,
-		arg.QueryStart,
-		arg.QueryEnd,
+		arg.QueryStartsAt,
+		arg.QueryEndsAt,
 		arg.RawBodyAvailable,
 		arg.RawBodyBytes,
 		arg.RawBodyDigest,
@@ -272,8 +272,8 @@ func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg Inse
 		&i.OperationID,
 		&i.ObservationID,
 		&i.NormalizedQuery,
-		&i.QueryStart,
-		&i.QueryEnd,
+		&i.QueryStartsAt,
+		&i.QueryEndsAt,
 		&i.RawBodyAvailable,
 		&i.RawBodyBytes,
 		&i.RawBodyDigest,
@@ -296,8 +296,8 @@ INSERT INTO billing.cost_qualifications (
     operation_id,
     provider,
     provider_resource_id,
-    provider_lifetime_start,
-    provider_lifetime_end,
+    provider_lifetime_starts_at,
+    provider_lifetime_ends_at,
     provider_absent_at,
     provider_absence_reference,
     billing_stop_reference,
@@ -323,7 +323,7 @@ INSERT INTO billing.cost_qualifications (
     $14::bigint
 )
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
-RETURNING merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
+RETURNING merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_starts_at, provider_lifetime_ends_at, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
 `
 
 type InsertProviderBillingQualificationParams struct {
@@ -331,8 +331,8 @@ type InsertProviderBillingQualificationParams struct {
 	OperationID              string
 	Provider                 string
 	ProviderResourceID       string
-	ProviderLifetimeStart    time.Time
-	ProviderLifetimeEnd      time.Time
+	ProviderLifetimeStartsAt time.Time
+	ProviderLifetimeEndsAt   time.Time
 	ProviderAbsentAt         time.Time
 	ProviderAbsenceReference string
 	BillingStopReference     string
@@ -350,8 +350,8 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 		arg.OperationID,
 		arg.Provider,
 		arg.ProviderResourceID,
-		arg.ProviderLifetimeStart,
-		arg.ProviderLifetimeEnd,
+		arg.ProviderLifetimeStartsAt,
+		arg.ProviderLifetimeEndsAt,
 		arg.ProviderAbsentAt,
 		arg.ProviderAbsenceReference,
 		arg.BillingStopReference,
@@ -367,8 +367,8 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 		&i.OperationID,
 		&i.Provider,
 		&i.ProviderResourceID,
-		&i.ProviderLifetimeStart,
-		&i.ProviderLifetimeEnd,
+		&i.ProviderLifetimeStartsAt,
+		&i.ProviderLifetimeEndsAt,
 		&i.ProviderAbsentAt,
 		&i.ProviderAbsenceReference,
 		&i.BillingStopReference,
@@ -400,7 +400,7 @@ SET state = $1::text,
     updated_at = $7::timestamptz
 WHERE merchant_id = $8::uuid
   AND operation_id = $9::text
-RETURNING merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
+RETURNING merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_starts_at, provider_lifetime_ends_at, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
 `
 
 type UpdateProviderBillingQualificationParams struct {
@@ -433,8 +433,8 @@ func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg Up
 		&i.OperationID,
 		&i.Provider,
 		&i.ProviderResourceID,
-		&i.ProviderLifetimeStart,
-		&i.ProviderLifetimeEnd,
+		&i.ProviderLifetimeStartsAt,
+		&i.ProviderLifetimeEndsAt,
 		&i.ProviderAbsentAt,
 		&i.ProviderAbsenceReference,
 		&i.BillingStopReference,

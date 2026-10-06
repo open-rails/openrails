@@ -1168,17 +1168,17 @@ func (p *lifePass) unverifiedFindings(ctx context.Context, scope Scope, now time
 	for _, r := range rows {
 		b := accounts[r.PspID]
 		if b == nil {
-			b = &backlog{oldest: r.Since}
+			b = &backlog{oldest: r.UnverifiedAt}
 			accounts[r.PspID] = b
 		}
 		b.count++
-		if r.Since.Before(b.oldest) {
-			b.oldest = r.Since
+		if r.UnverifiedAt.Before(b.oldest) {
+			b.oldest = r.UnverifiedAt
 		}
-		if now.Sub(r.Since) < unverifiedUnresolvedAfter {
+		if now.Sub(r.UnverifiedAt) < unverifiedUnresolvedAfter {
 			continue
 		}
-		evidence := map[string]any{"subscription_id": billing.SubscriptionID(r.ID).String(), "rail": r.Rail, "unverified_since": r.Since.UTC(), "reads": r.Reads}
+		evidence := map[string]any{"subscription_id": billing.SubscriptionID(r.ID).String(), "rail": r.Rail, "unverified_since": r.UnverifiedAt.UTC(), "reads": r.Reads}
 		if r.LastReadAt != nil {
 			evidence["last_read_at"] = r.LastReadAt.UTC()
 		}
@@ -1186,7 +1186,7 @@ func (p *lifePass) unverifiedFindings(ctx context.Context, scope Scope, now time
 			Type: findingUnverifiedUnresolved, Shape: ShapeMismatch, Class: ClassAdmin, Severity: SeverityHigh,
 			SubjectKey: "subscription:" + r.ID.String(), Provider: "self", Evidence: evidence,
 			RecommendedAction: fmt.Sprintf("Subscription %s has been unverified since %s: provider reads found no payment, decline or cancellation to settle it. Access is held. Check the schedule at %s and record the outcome.",
-				billing.SubscriptionID(r.ID), r.Since.UTC().Format(time.RFC3339), r.Rail),
+				billing.SubscriptionID(r.ID), r.UnverifiedAt.UTC().Format(time.RFC3339), r.Rail),
 		})
 	}
 	if !scope.IsGlobal() {

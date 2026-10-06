@@ -135,7 +135,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
 | `CheckCatalogDrift` | `client.RefreshCatalogDrift(` |
-| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchasedSince` and `WindowSeconds` |
+| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchaseWindowStartsAt` and `WindowSeconds` |
 
 ### Checkout
 
@@ -192,6 +192,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
+| `Invoice.PeriodFrom`, `PeriodTo`; `InvoiceListParams.PeriodFrom`, `PeriodTo` | `PeriodStartsAt`, `PeriodEndsAt`; the list filters are `PeriodStartsAfter` (inclusive) and `PeriodStartsBefore` (exclusive) |
 
 ### PSPs, configuration and operations
 
@@ -319,6 +320,14 @@ fields (`400 unknown_field`), and every error code is in
   `owed_amount`, `billing_mode`.
 - **Entitlements.** `ent_` ids, `starts_at`, `ends_at`; `/v1/me/entitlements` is
   a page.
+- **Instants end in `_at`.** Invoices: `period_starts_at`, `period_ends_at`,
+  and the list filters `period_starts_after`, `period_starts_before` (were
+  `period_from`, `period_to`). Delinquency, its host event and its
+  notifications: `overdue_started_at` (was `overdue_since`). The renewal
+  notification: `period_starts_at`, `period_ends_at` (were `period_start`,
+  `period_end`). Product archives: `purchase_window_starts_at` (was
+  `purchased_since`). Cost observations: `query_starts_at`, `query_ends_at`;
+  lifecycle evidence: `provider_lifetime_starts_at`, `provider_lifetime_ends_at`.
 - **Notifications.** Unread is `{unread_count}`; marking read answers the
   notification.
 - **Ids.** `psp_`, `chk_`, `cgr_`, `txn_`, `ent_`, `pa_`, `rep_`, `rpb_`, `awh_`,
@@ -387,4 +396,5 @@ up there.
 | `payments.rail` holding `manual` or `admin` | `payments.channel` (`rail`, `manual`); `rail` is null off-channel |
 | `catalogs`; `products.catalog_id`, `catalog_applications.catalog_id` | Removed: a merchant has one catalog, `billing.products` keyed by `merchant_id` |
 | `entitlements.start_at`, `end_at` | `starts_at`, `ends_at` |
+| Instant columns without `_at`: `invoices.period_from`, `period_to`; `metered_rating_watermarks.period_from`, `rated_through`; `customer_delinquency.overdue_since`; `maintenance_runs.window_since`, `window_until`; `nmi_bulk_checkpoints.since`, `until`; `nmi_history_months.month`; `payment_method_updates.at`; `product_archive_operations.purchased_since`; `provider_intents.claimed_until`; `solana_pay_references.settle_until`, `watch_until`; `solana_subscriptions.last_pulled_period_start`; `subscription_status_transitions.from_paid_through`, `to_paid_through`; `subscription_verifications.since`; `cost_observations.query_start`, `query_end`; `cost_qualifications.provider_lifetime_start`, `provider_lifetime_end` | In the same order: `period_starts_at`, `period_ends_at`; `period_starts_at`, `rated_through_at`; `overdue_started_at`; `window_starts_at`, `window_ends_at`; `window_starts_at`, `window_ends_at`; `month_at`; `occurred_at`; `purchase_window_starts_at`; `lease_expires_at`; `expires_at`, `watch_ends_at`; `last_pulled_period_starts_at`; `from_current_period_ends_at`, `to_current_period_ends_at`; `unverified_at`; `query_starts_at`, `query_ends_at`; `provider_lifetime_starts_at`, `provider_lifetime_ends_at`. Every `timestamptz` column ends in `_at` |
 | Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |

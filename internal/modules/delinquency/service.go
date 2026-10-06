@@ -56,14 +56,14 @@ const PassBatch = 5000
 
 // Snapshot is one payer's delinquency state in one currency.
 type Snapshot struct {
-	CustomerID      uuid.UUID  `json:"customer_id"`
-	Currency        string     `json:"currency"`
-	State           State      `json:"state"`
-	OverdueSince    *time.Time `json:"overdue_since,omitempty"`
-	OverdueAmount   int64      `json:"overdue_amount"`
-	OverdueInvoices int        `json:"overdue_invoices"`
-	EnteredAt       time.Time  `json:"entered_at"`
-	EvaluatedAt     time.Time  `json:"evaluated_at"`
+	CustomerID       uuid.UUID  `json:"customer_id"`
+	Currency         string     `json:"currency"`
+	State            State      `json:"state"`
+	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
+	OverdueAmount    int64      `json:"overdue_amount"`
+	OverdueInvoices  int        `json:"overdue_invoices"`
+	EnteredAt        time.Time  `json:"entered_at"`
+	EvaluatedAt      time.Time  `json:"evaluated_at"`
 }
 
 // Transition is one observed state change, already recorded and signalled.
@@ -213,9 +213,9 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 		}
 		candidates[key{r.CustomerID, r.Currency}] = candidate{
 			exposure: Exposure{
-				OverdueSince:    r.OverdueSince.UTC(),
-				OverdueAmount:   r.OverdueAmount,
-				OverdueInvoices: int(r.OverdueInvoices),
+				OverdueStartedAt: r.OverdueStartedAt.UTC(),
+				OverdueAmount:    r.OverdueAmount,
+				OverdueInvoices:  int(r.OverdueInvoices),
 			},
 			policy: effective,
 		}
@@ -254,7 +254,7 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 
 	var since *time.Time
 	if state != StateCurrent {
-		t := exposure.OverdueSince.UTC()
+		t := exposure.OverdueStartedAt.UTC()
 		since = &t
 	}
 
@@ -263,14 +263,14 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		row, err := q.UpsertCustomerDelinquency(ctx, gen.UpsertCustomerDelinquencyParams{
-			MerchantID:      tid.UUID(),
-			CustomerID:      customerID,
-			Currency:        currency,
-			State:           string(state),
-			OverdueSince:    since,
-			OverdueAmount:   exposure.OverdueAmount,
-			OverdueInvoices: int64(exposure.OverdueInvoices),
-			Now:             now,
+			MerchantID:       tid.UUID(),
+			CustomerID:       customerID,
+			Currency:         currency,
+			State:            string(state),
+			OverdueStartedAt: since,
+			OverdueAmount:    exposure.OverdueAmount,
+			OverdueInvoices:  int64(exposure.OverdueInvoices),
+			Now:              now,
 		})
 		if err != nil {
 			return err
@@ -297,8 +297,8 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 			"grace_days":       policy.GraceDays,
 			"amount_floor":     policy.AmountFloor,
 		}
-		if row.OverdueSince != nil {
-			payload["overdue_since"] = row.OverdueSince.UTC().Format(time.RFC3339)
+		if row.OverdueStartedAt != nil {
+			payload["overdue_started_at"] = row.OverdueStartedAt.UTC().Format(time.RFC3339)
 		}
 		data, err := json.Marshal(payload)
 		if err != nil {
@@ -354,8 +354,8 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 		FromState: t.From.String(), ToState: t.To.String(),
 	}
 	if exposure.Owes() {
-		since := exposure.OverdueSince.UTC()
-		data.OverdueSince = &since
+		since := exposure.OverdueStartedAt.UTC()
+		data.OverdueStartedAt = &since
 	}
 	if err := subscriptions.NewNotificationQueueRepo(s.db).Create(ctx, &models.NotificationQueue{
 		ID:         uuidutil.NewV7(),
@@ -428,9 +428,9 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 			return err
 		}
 		delinquent = Classify(policy, Exposure{
-			OverdueSince:    live.OverdueSince.UTC(),
-			OverdueAmount:   live.OverdueAmount,
-			OverdueInvoices: int(live.OverdueInvoices),
+			OverdueStartedAt: live.OverdueStartedAt.UTC(),
+			OverdueAmount:    live.OverdueAmount,
+			OverdueInvoices:  int(live.OverdueInvoices),
 		}, now) == StateDelinquent
 		return nil
 	})
@@ -487,7 +487,7 @@ func (s *Service) List(ctx context.Context, state State, after *RosterPosition, 
 	}
 	params := gen.ListDelinquentCustomersParams{MerchantID: tid.UUID(), State: filter, RowLimit: int64(limit)}
 	if after != nil {
-		params.AfterSince, params.AfterCustomer, params.AfterCurrency = &after.Since, &after.Customer, &after.Currency
+		params.AfterOverdueStartedAt, params.AfterCustomer, params.AfterCurrency = &after.Since, &after.Customer, &after.Currency
 	}
 	var rows []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -504,14 +504,14 @@ func snapshots(rows []gen.BillingCustomerDelinquency) []Snapshot {
 	out := make([]Snapshot, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, Snapshot{
-			CustomerID:      r.CustomerID,
-			Currency:        r.Currency,
-			State:           ParseState(r.State),
-			OverdueSince:    r.OverdueSince,
-			OverdueAmount:   r.OverdueAmount,
-			OverdueInvoices: int(r.OverdueInvoices),
-			EnteredAt:       r.EnteredAt,
-			EvaluatedAt:     r.EvaluatedAt,
+			CustomerID:       r.CustomerID,
+			Currency:         r.Currency,
+			State:            ParseState(r.State),
+			OverdueStartedAt: r.OverdueStartedAt,
+			OverdueAmount:    r.OverdueAmount,
+			OverdueInvoices:  int(r.OverdueInvoices),
+			EnteredAt:        r.EnteredAt,
+			EvaluatedAt:      r.EvaluatedAt,
 		})
 	}
 	return out

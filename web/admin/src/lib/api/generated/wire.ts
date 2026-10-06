@@ -149,7 +149,7 @@ export type ArchiveProductParams = {
   product_id?: string
   product_key?: string
   purchase_action?: "none" | "refund" | "review"
-  purchased_since?: string
+  purchase_window_starts_at?: string
   window_seconds?: number
   reason?: string
 }
@@ -862,7 +862,7 @@ export type Delinquency = {
   customer_id: string
   currency: string
   state: "current" | "delinquent" | "grace"
-  overdue_since: string | null
+  overdue_started_at: string | null
   overdue_amount: string
   overdue_invoices: number
   entered_at: string
@@ -874,7 +874,7 @@ export type DelinquencyHostEvent = {
   currency: string
   from_state: string
   to_state: string
-  overdue_since?: string
+  overdue_started_at?: string
   overdue_amount: string
   overdue_invoices: number
   grace_days: number
@@ -1052,8 +1052,8 @@ export type Invoice = {
   customer_id: string
   currency: string
   invoice_number: string | null
-  period_from: string
-  period_to: string
+  period_starts_at: string
+  period_ends_at: string
   usage_total: string
   deposits_total: string
   owed_accrued: string
@@ -1369,13 +1369,13 @@ export type NotificationData = {
   old_amount?: string
   new_amount?: string
   effective_at?: string
-  period_start?: string
-  period_end?: string
+  period_starts_at?: string
+  period_ends_at?: string
   downgrade_applied?: boolean
   new_product?: string
   overdue_amount?: string
   overdue_invoices?: number
-  overdue_since?: string
+  overdue_started_at?: string
   from_state?: string
   to_state?: string
   invoice_id?: string
@@ -1805,7 +1805,7 @@ export type ProductArchive = {
   product_id: string
   product_key: string
   purchase_action: "none" | "refund" | "review"
-  purchased_since: string | null
+  purchase_window_starts_at: string | null
   reason: string | null
   created_at: string
   complete: boolean
@@ -1825,8 +1825,8 @@ export type ProductSummary = {
 export type ProviderBillingLifecycleEvidence = {
   provider: string
   provider_resource_id: string
-  provider_lifetime_start: string
-  provider_lifetime_end: string
+  provider_lifetime_starts_at: string
+  provider_lifetime_ends_at: string
   provider_absent_at: string
   provider_absence_reference: string
   billing_stop_reference: string
@@ -1929,8 +1929,8 @@ export type RecordProviderBillingObservationParams = {
   observation_id?: string
   lifecycle?: ProviderBillingLifecycleEvidence
   normalized_query?: string
-  query_start?: string
-  query_end?: string
+  query_starts_at?: string
+  query_ends_at?: string
   raw_body?: string | null
   records?: ProviderBillingRecord[]
   refusal?: ProviderBillingObservationRefusal | null

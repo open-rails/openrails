@@ -121,7 +121,7 @@ func Decide(ref gen.BillingSolanaPayReference, sessionOpen bool, expected uint64
 		return Review, ReasonSettleFailed
 	case ref.Status == ReferenceConfirmed:
 		return Review, ReasonAlreadyPaid
-	case landed.After(ref.SettleUntil):
+	case landed.After(ref.ExpiresAt):
 		return Review, ReasonLate
 	case !sessionOpen:
 		return Review, ReasonSessionClosed
@@ -155,7 +155,7 @@ func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID 
 	}
 	row, err := l.db.Gen(ctx).RegisterSolanaPayReference(ctx, gen.RegisterSolanaPayReferenceParams{
 		MerchantID: mid.UUID(), Reference: reference, CheckoutAttemptID: sessionID, Kind: string(kind),
-		SettleUntil: settle, WatchUntil: watch, Now: now,
+		ExpiresAt: settle, WatchEndsAt: watch, Now: now,
 	})
 	if err != nil {
 		return row, err

@@ -21,7 +21,7 @@ INSERT INTO billing.maintenance_runs (
     $4::text, $5::text, $6::boolean,
     $7::jsonb, $8::bigint, $9::text
 )
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type CreateDestructiveRunParams struct {
@@ -61,8 +61,8 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
@@ -88,7 +88,7 @@ SET status = $1::text,
     finished_at = $2::timestamptz,
     affected = $3::jsonb
 WHERE merchant_id = $4::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $5::uuid
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type FinishDestructiveRunParams struct {
@@ -116,8 +116,8 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
@@ -138,7 +138,7 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 }
 
 const getDestructiveRun = `-- name: GetDestructiveRun :one
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $2::uuid
 `
 
@@ -158,8 +158,8 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
@@ -180,7 +180,7 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 }
 
 const listDestructiveRuns = `-- name: ListDestructiveRuns :many
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid
   AND kind IN ('prune','converge_enforce','merchant_purge')
   AND ($2::text IS NULL OR kind = $2::text)
@@ -211,8 +211,8 @@ func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRu
 			&i.PspID,
 			&i.Mode,
 			&i.Rails,
-			&i.WindowSince,
-			&i.WindowUntil,
+			&i.WindowStartsAt,
+			&i.WindowEndsAt,
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Status,
@@ -424,7 +424,7 @@ WHERE merchant_id = $3::uuid
   AND kind IN ('prune','converge_enforce','merchant_purge')
   AND id = $4::uuid
   AND status <> 'reversed'
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type MarkDestructiveRunReversedParams struct {
@@ -450,8 +450,8 @@ func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestru
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,

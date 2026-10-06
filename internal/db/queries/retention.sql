@@ -59,7 +59,7 @@ FROM (
     (SELECT DISTINCT nh.merchant_id AS mid
        FROM billing.nmi_history_months nh
       WHERE (sqlc.narg(after)::uuid IS NULL OR nh.merchant_id > sqlc.narg(after)::uuid)
-        AND nh.month < sqlc.arg(attempt_cutoff)::timestamptz
+        AND nh.month_at < sqlc.arg(attempt_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT st.merchant_id AS mid

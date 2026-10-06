@@ -12,7 +12,7 @@ import (
 )
 
 const getConflictingInitialEnrollmentOperation = `-- name: GetConflictingInitialEnrollmentOperation :one
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id FROM billing.provider_intents i
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id FROM billing.provider_intents i
 JOIN billing.products accepted ON accepted.merchant_id=i.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=i.merchant_id AND existing.id::text=i.payload->'terms'->>'product_id'
 WHERE i.merchant_id=$2::uuid AND i.intent_type='initial_membership'
@@ -44,7 +44,7 @@ func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, 
 		&i.Status,
 		&i.Attempts,
 		&i.NextAttemptAt,
-		&i.ClaimedUntil,
+		&i.LeaseExpiresAt,
 		&i.Origin,
 		&i.OriginReason,
 		&i.Actor,

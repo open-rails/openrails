@@ -9,10 +9,10 @@
 
 -- name: CreateReconciliationRun :one
 INSERT INTO billing.maintenance_runs (
-    merchant_id, kind, mode, rails, window_since, window_until, started_at, status
+    merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
 ) VALUES (
     sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode), sqlc.arg(rails),
-    sqlc.narg(window_since), sqlc.narg(window_until), now(), 'running'
+    sqlc.narg(window_starts_at), sqlc.narg(window_ends_at), now(), 'running'
 )
 RETURNING *;
 
@@ -1033,7 +1033,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 -- instant they became unverified, oldest first, capped (or#837).
 -- name: ListUnverifiedSubscriptions :many
 SELECT s.id, s.psp_id, s.rail,
-       COALESCE(v.since, s.updated_at)::timestamptz AS since,
+       COALESCE(v.unverified_at, s.updated_at)::timestamptz AS unverified_at,
        COALESCE(v.reads, 0)::int AS reads, v.last_read_at
 FROM billing.subscriptions s
 LEFT JOIN billing.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
@@ -1051,7 +1051,7 @@ SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
        count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,
        count(*) FILTER (WHERE s.status = 'awaiting_method')::bigint AS awaiting_method,
        count(*) FILTER (WHERE s.status = 'unverified')::bigint AS unverified,
-       COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(COALESCE(v.since, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
+       COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(COALESCE(v.unverified_at, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
 FROM billing.subscriptions s
 LEFT JOIN billing.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -1127,11 +1127,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.a
 
 -- Resumes an interrupted bulk read, or starts one.
 -- name: StartNMIBulkCheckpoint :one
-INSERT INTO billing.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(since)::timestamptz,
-        sqlc.arg(until)::timestamptz, 1, sqlc.arg(until)::timestamptz)
+INSERT INTO billing.nmi_bulk_checkpoints (merchant_id, psp_id, window_starts_at, window_ends_at, next_page, started_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(window_starts_at)::timestamptz,
+        sqlc.arg(window_ends_at)::timestamptz, 1, sqlc.arg(window_ends_at)::timestamptz)
 ON CONFLICT (merchant_id, psp_id) DO UPDATE SET merchant_id = EXCLUDED.merchant_id
-RETURNING since, until, next_page;
+RETURNING window_starts_at, window_ends_at, next_page;
 
 -- name: SetNMIBulkCheckpointPage :exec
 UPDATE billing.nmi_bulk_checkpoints SET next_page = sqlc.arg(next_page)::bigint

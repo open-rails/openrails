@@ -13,7 +13,7 @@ import (
 )
 
 const getProductArchiveByID = `-- name: GetProductArchiveByID :one
-SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
+SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
 FROM billing.product_archive_operations o
 JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = $1::uuid AND o.id = $2::uuid
@@ -25,14 +25,14 @@ type GetProductArchiveByIDParams struct {
 }
 
 type GetProductArchiveByIDRow struct {
-	ID             uuid.UUID
-	ProductID      uuid.UUID
-	ProductKey     string
-	PurchaseAction string
-	PurchasedSince *time.Time
-	Reason         string
-	CreatedAt      time.Time
-	RequestSha256  []byte
+	ID                     uuid.UUID
+	ProductID              uuid.UUID
+	ProductKey             string
+	PurchaseAction         string
+	PurchaseWindowStartsAt *time.Time
+	Reason                 string
+	CreatedAt              time.Time
+	RequestSha256          []byte
 }
 
 func (q *Queries) GetProductArchiveByID(ctx context.Context, arg GetProductArchiveByIDParams) (GetProductArchiveByIDRow, error) {
@@ -43,7 +43,7 @@ func (q *Queries) GetProductArchiveByID(ctx context.Context, arg GetProductArchi
 		&i.ProductID,
 		&i.ProductKey,
 		&i.PurchaseAction,
-		&i.PurchasedSince,
+		&i.PurchaseWindowStartsAt,
 		&i.Reason,
 		&i.CreatedAt,
 		&i.RequestSha256,
@@ -52,7 +52,7 @@ func (q *Queries) GetProductArchiveByID(ctx context.Context, arg GetProductArchi
 }
 
 const getProductArchiveByKey = `-- name: GetProductArchiveByKey :one
-SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
+SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
 FROM billing.product_archive_operations o
 JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = $1::uuid AND o.idempotency_key = $2::text
@@ -64,14 +64,14 @@ type GetProductArchiveByKeyParams struct {
 }
 
 type GetProductArchiveByKeyRow struct {
-	ID             uuid.UUID
-	ProductID      uuid.UUID
-	ProductKey     string
-	PurchaseAction string
-	PurchasedSince *time.Time
-	Reason         string
-	CreatedAt      time.Time
-	RequestSha256  []byte
+	ID                     uuid.UUID
+	ProductID              uuid.UUID
+	ProductKey             string
+	PurchaseAction         string
+	PurchaseWindowStartsAt *time.Time
+	Reason                 string
+	CreatedAt              time.Time
+	RequestSha256          []byte
 }
 
 func (q *Queries) GetProductArchiveByKey(ctx context.Context, arg GetProductArchiveByKeyParams) (GetProductArchiveByKeyRow, error) {
@@ -82,7 +82,7 @@ func (q *Queries) GetProductArchiveByKey(ctx context.Context, arg GetProductArch
 		&i.ProductID,
 		&i.ProductKey,
 		&i.PurchaseAction,
-		&i.PurchasedSince,
+		&i.PurchaseWindowStartsAt,
 		&i.Reason,
 		&i.CreatedAt,
 		&i.RequestSha256,
@@ -126,19 +126,19 @@ func (q *Queries) GetPurchaseReviewBySubject(ctx context.Context, arg GetPurchas
 }
 
 const insertProductArchive = `-- name: InsertProductArchive :exec
-INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchased_since, reason)
+INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchase_window_starts_at, reason)
 VALUES ($1::uuid, $2::text, $3::bytea, $4::uuid,
         $5::text, $6::timestamptz, $7::text)
 `
 
 type InsertProductArchiveParams struct {
-	MerchantID     uuid.UUID
-	IdempotencyKey string
-	RequestSha256  []byte
-	ProductID      uuid.UUID
-	PurchaseAction string
-	PurchasedSince *time.Time
-	Reason         string
+	MerchantID             uuid.UUID
+	IdempotencyKey         string
+	RequestSha256          []byte
+	ProductID              uuid.UUID
+	PurchaseAction         string
+	PurchaseWindowStartsAt *time.Time
+	Reason                 string
 }
 
 func (q *Queries) InsertProductArchive(ctx context.Context, arg InsertProductArchiveParams) error {
@@ -148,7 +148,7 @@ func (q *Queries) InsertProductArchive(ctx context.Context, arg InsertProductArc
 		arg.RequestSha256,
 		arg.ProductID,
 		arg.PurchaseAction,
-		arg.PurchasedSince,
+		arg.PurchaseWindowStartsAt,
 		arg.Reason,
 	)
 	return err
@@ -194,9 +194,9 @@ ORDER BY pay.purchased_at, pay.id
 `
 
 type ListProductArchivePurchasesParams struct {
-	MerchantID     uuid.UUID
-	ProductID      uuid.UUID
-	PurchasedSince time.Time
+	MerchantID             uuid.UUID
+	ProductID              uuid.UUID
+	PurchaseWindowStartsAt time.Time
 }
 
 type ListProductArchivePurchasesRow struct {
@@ -212,7 +212,7 @@ type ListProductArchivePurchasesRow struct {
 // Subscription payments stay with their grandfathered subscriptions; rows
 // without money movement qualify only for off-rail channels.
 func (q *Queries) ListProductArchivePurchases(ctx context.Context, arg ListProductArchivePurchasesParams) ([]ListProductArchivePurchasesRow, error) {
-	rows, err := q.db.Query(ctx, listProductArchivePurchases, arg.MerchantID, arg.ProductID, arg.PurchasedSince)
+	rows, err := q.db.Query(ctx, listProductArchivePurchases, arg.MerchantID, arg.ProductID, arg.PurchaseWindowStartsAt)
 	if err != nil {
 		return nil, err
 	}

@@ -69,7 +69,7 @@ func (q *Queries) LockLiveMerchantForSecretWrite(ctx context.Context, id uuid.UU
 }
 
 const lockMerchantSecretCleanupRun = `-- name: LockMerchantSecretCleanupRun :one
-SELECT r.id, r.merchant_id, r.kind, r.actor, r.psp_id, r.mode, r.rails, r.window_since, r.window_until, r.started_at, r.finished_at, r.status, r.dry_run, r.coverage, r.expected_rows, r.affected, r.reversed_at, r.reversed_by, r.note, r.summary, r.error, r.inventory_manifest, r.inventory_total_rows, r.run_class FROM billing.maintenance_runs r
+SELECT r.id, r.merchant_id, r.kind, r.actor, r.psp_id, r.mode, r.rails, r.window_starts_at, r.window_ends_at, r.started_at, r.finished_at, r.status, r.dry_run, r.coverage, r.expected_rows, r.affected, r.reversed_at, r.reversed_by, r.note, r.summary, r.error, r.inventory_manifest, r.inventory_total_rows, r.run_class FROM billing.maintenance_runs r
 JOIN billing.merchants m ON m.id=r.merchant_id
 WHERE r.merchant_id=$1::uuid AND r.id=$2::uuid
   AND r.kind='merchant_purge' AND m.deleted_at IS NOT NULL
@@ -93,8 +93,8 @@ func (q *Queries) LockMerchantSecretCleanupRun(ctx context.Context, arg LockMerc
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,

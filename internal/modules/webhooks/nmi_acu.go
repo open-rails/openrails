@@ -115,7 +115,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 				notices = append(notices, asked...)
 			}
 			if err := paymentmethods.RecordCardUpdate(ctx, q, paymentmethods.CardUpdate{MerchantID: mid.UUID(), PaymentMethodID: m.ID, CustomerID: m.CustomerID,
-				PSPID: m.PspID, Source: paymentmethods.UpdateNMIACU, Kind: kind, EventRef: s.Data.EventID, At: now}); err != nil {
+				PSPID: m.PspID, Source: paymentmethods.UpdateNMIACU, Kind: kind, EventRef: s.Data.EventID, OccurredAt: now}); err != nil {
 				return err
 			}
 		}

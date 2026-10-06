@@ -132,5 +132,5 @@ SELECT EXISTS (
       AND nq.customer_id = sqlc.arg(customer_id)::uuid
       AND nq.event_type = 'premium_renewed'
       AND nq.data->>'subscription_id' = sqlc.arg(subscription_id)::text
-      AND (nq.data->>'period_start')::timestamptz > sqlc.arg(since)::timestamptz
+      AND (nq.data->>'period_starts_at')::timestamptz > sqlc.arg(since)::timestamptz
 )::boolean AS found;

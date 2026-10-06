@@ -409,7 +409,7 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id,
 		Now:        now.UTC(),
-		LeaseUntil: leaseUntil.UTC(),
+		LeaseExpiresAt: leaseUntil.UTC(),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -446,7 +446,7 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
 		MerchantID: scopeMerchantID.UUID(),
 		Now:        now.UTC(),
-		LeaseUntil: leaseUntil.UTC(),
+		LeaseExpiresAt: leaseUntil.UTC(),
 		BatchSize:  batch,
 	})
 }
@@ -466,7 +466,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 	}
 	n, err := s.db.Gen(ctx).RenewProviderIntentClaim(ctx, gen.RenewProviderIntentClaimParams{
 		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Status: status, Attempts: attempts, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		ID:         id, Status: status, Attempts: attempts, Now: now.UTC(), LeaseExpiresAt: leaseUntil.UTC(),
 	})
 	if err != nil {
 		return false, err
@@ -487,7 +487,7 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 	return s.db.Gen(ctx).ClaimDueVerifyProviderIntents(ctx, gen.ClaimDueVerifyProviderIntentsParams{
 		MerchantID: scopeMerchantID.UUID(),
 		Now:        now.UTC(),
-		LeaseUntil: leaseUntil.UTC(),
+		LeaseExpiresAt: leaseUntil.UTC(),
 		BatchSize:  batch,
 	})
 }
@@ -501,7 +501,7 @@ func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUn
 	}
 	row, err := s.db.Gen(ctx).ClaimUnknownProviderIntentByID(ctx, gen.ClaimUnknownProviderIntentByIDParams{
 		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		ID:         id, Now: now.UTC(), LeaseExpiresAt: leaseUntil.UTC(),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return gen.BillingProviderIntent{}, false, nil

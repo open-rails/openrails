@@ -99,7 +99,7 @@ func canonicalWireFixtures() map[string]any {
 			CollectionCurrencies: []string{"USD"}, CreatedAt: when,
 		},
 		"page_invoices.json": billing.ListPage[billing.Invoice]{Next: "cursor-2", Items: []billing.Invoice{{
-			ID: invoiceFixture, CustomerID: customerFixture, Currency: "USD", PeriodFrom: when, PeriodTo: when, TotalAmount: maxMoney, AmountDue: maxMoney,
+			ID: invoiceFixture, CustomerID: customerFixture, Currency: "USD", PeriodStartsAt: when, PeriodEndsAt: when, TotalAmount: maxMoney, AmountDue: maxMoney,
 			LineItems: []billing.InvoiceLineItem{{EventType: "tokens", Amount: maxMoney, Count: 3, Dimensions: map[string]int64{"input": 2}}}, MoneyMovements: billing.AmountMap{"usage": maxMoney},
 			Tax: map[string]any{}, BillingContacts: []billing.InvoiceContact{{Name: "Ops", Email: "ops@example.test"}},
 			Status: billing.InvoiceOpen, CollectionMethod: billing.CollectChargeAutomatically, DueAt: &when,

@@ -190,8 +190,8 @@ type BillingCostObservation struct {
 	OperationID             string
 	ObservationID           string
 	NormalizedQuery         string
-	QueryStart              time.Time
-	QueryEnd                time.Time
+	QueryStartsAt           time.Time
+	QueryEndsAt             time.Time
 	RawBodyAvailable        bool
 	RawBodyBytes            []byte
 	RawBodyDigest           []byte
@@ -211,8 +211,8 @@ type BillingCostQualification struct {
 	OperationID              string
 	Provider                 string
 	ProviderResourceID       string
-	ProviderLifetimeStart    time.Time
-	ProviderLifetimeEnd      time.Time
+	ProviderLifetimeStartsAt time.Time
+	ProviderLifetimeEndsAt   time.Time
 	ProviderAbsentAt         time.Time
 	ProviderAbsenceReference string
 	BillingStopReference     string
@@ -314,10 +314,10 @@ type BillingCustomerDelinquency struct {
 	Currency   string
 	State      string
 	// The oldest overdue due_at behind this state — the clock the grace window is measured on, not the moment we noticed.
-	OverdueSince    *time.Time
-	EnteredAt       time.Time
-	OverdueAmount   int64
-	OverdueInvoices int64
+	OverdueStartedAt *time.Time
+	EnteredAt        time.Time
+	OverdueAmount    int64
+	OverdueInvoices  int64
 	// Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.
 	TransitionSeq int64
 	EvaluatedAt   time.Time
@@ -457,8 +457,8 @@ type BillingInvoice struct {
 	CustomerID     uuid.UUID
 	Currency       string
 	InvoiceNumber  *string
-	PeriodFrom     time.Time
-	PeriodTo       time.Time
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
 	UsageTotal     int64
 	DepositsTotal  int64
 	OwedAccrued    int64
@@ -603,19 +603,19 @@ type BillingLedgerTransfer struct {
 
 // Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent.
 type BillingMaintenanceRun struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Kind        string
-	Actor       string
-	PspID       *uuid.UUID
-	Mode        string
-	Rails       []string
-	WindowSince *time.Time
-	WindowUntil *time.Time
-	StartedAt   time.Time
-	FinishedAt  *time.Time
-	Status      string
-	DryRun      bool
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	Kind           string
+	Actor          string
+	PspID          *uuid.UUID
+	Mode           string
+	Rails          []string
+	WindowStartsAt *time.Time
+	WindowEndsAt   *time.Time
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	Status         string
+	DryRun         bool
 	// The coverage proof authorizing a destructive run, retained unchanged for audit and undo.
 	Coverage []byte
 	// The operator-confirmed or planned affected row count.
@@ -739,10 +739,10 @@ type BillingMeteredRatingWatermark struct {
 	CustomerID uuid.UUID
 	Currency   string
 	// Meter accrual source key (metered:<meter>[:rate_card:<id>][:dim:<value>]).
-	Source       string
-	PeriodFrom   time.Time
-	RatedThrough time.Time
-	// Micros already accrued for [period_from, rated_through); the sweep accrues only the delta above this.
+	Source         string
+	PeriodStartsAt time.Time
+	RatedThroughAt time.Time
+	// Micros already accrued for [period_starts_at, rated_through_at); the sweep accrues only the delta above this.
 	AccruedAmount int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -765,19 +765,19 @@ type BillingMoneySetting struct {
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
 type BillingNmiBulkCheckpoint struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	Since      time.Time
-	Until      time.Time
-	NextPage   int32
-	StartedAt  time.Time
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	WindowStartsAt time.Time
+	WindowEndsAt   time.Time
+	NextPage       int32
+	StartedAt      time.Time
 }
 
-// Authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
+// Authorizations NMI answered per PSP, month_at (the month's first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
 type BillingNmiHistoryMonth struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
-	Month          time.Time
+	MonthAt        time.Time
 	Kind           string
 	Category       string
 	Reason         string
@@ -988,7 +988,7 @@ type BillingPaymentMethodUpdate struct {
 	Source          string
 	Kind            string
 	EventRef        string
-	At              time.Time
+	OccurredAt      time.Time
 	CreatedAt       time.Time
 }
 
@@ -1058,15 +1058,15 @@ type BillingProduct struct {
 
 // Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.
 type BillingProductArchiveOperation struct {
-	MerchantID     uuid.UUID
-	ID             uuid.UUID
-	IdempotencyKey string
-	RequestSha256  []byte
-	ProductID      uuid.UUID
-	PurchaseAction string
-	PurchasedSince *time.Time
-	Reason         string
-	CreatedAt      time.Time
+	MerchantID             uuid.UUID
+	ID                     uuid.UUID
+	IdempotencyKey         string
+	RequestSha256          []byte
+	ProductID              uuid.UUID
+	PurchaseAction         string
+	PurchaseWindowStartsAt *time.Time
+	Reason                 string
+	CreatedAt              time.Time
 }
 
 // Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.
@@ -1087,7 +1087,7 @@ type BillingProviderIntent struct {
 	Attempts       int32
 	NextAttemptAt  time.Time
 	// Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.
-	ClaimedUntil *time.Time
+	LeaseExpiresAt *time.Time
 	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
 	Origin       string
 	OriginReason *string
@@ -1299,15 +1299,15 @@ type BillingSolanaPayReceipt struct {
 	CreatedAt         time.Time
 }
 
-// One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
+// One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by expires_at; confirmed = one signature credited (or mirrored); expired = nothing credited by expires_at. Purchase references stay watched until watch_ends_at so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
 type BillingSolanaPayReference struct {
 	MerchantID        uuid.UUID
 	Reference         string
 	CheckoutAttemptID uuid.UUID
 	Kind              string
 	Status            string
-	SettleUntil       time.Time
-	WatchUntil        time.Time
+	ExpiresAt         time.Time
+	WatchEndsAt       time.Time
 	NextPollAt        time.Time
 	Signature         *string
 	SeenUntil         *string
@@ -1331,7 +1331,7 @@ type BillingSolanaSubscription struct {
 	MerchantAddress          string
 	Mint                     string
 	PlanCreatedAtFingerprint int64
-	LastPulledPeriodStart    *time.Time
+	LastPulledPeriodStartsAt *time.Time
 	LastSignature            *string
 	NextPullAt               time.Time
 	Status                   string
@@ -1414,18 +1414,18 @@ type BillingSubscriptionStatusTransition struct {
 	FromStatus     *string
 	ToStatus       string
 	// The subscription's cancel_type at transition time (meaningful for to_status=canceled).
-	CancelType      *string
-	OccurredAt      time.Time
-	Decision        *string
-	FromPaidThrough *time.Time
-	ToPaidThrough   *time.Time
+	CancelType              *string
+	OccurredAt              time.Time
+	Decision                *string
+	FromCurrentPeriodEndsAt *time.Time
+	ToCurrentPeriodEndsAt   *time.Time
 }
 
-// One row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.
+// One row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. unverified_at dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.
 type BillingSubscriptionVerification struct {
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
-	Since          time.Time
+	UnverifiedAt   time.Time
 	Reads          int32
 	LastReadAt     *time.Time
 	LastError      *string

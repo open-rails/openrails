@@ -291,7 +291,7 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 `Client.ArchiveProduct` (`POST /v1/merchant/catalog/product-archives`, catalog
 update plus payment refund permission) archives a product — never deletes it —
 and applies the host's policy to its one-time purchases at or after
-`PurchasedSince` (or within `WindowSeconds` of first acceptance), chosen by
+`PurchaseWindowStartsAt` (or within `WindowSeconds` of first acceptance), chosen by
 `PurchaseAction`:
 
 - `none`: archive only.

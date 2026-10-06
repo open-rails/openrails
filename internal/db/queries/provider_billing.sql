@@ -6,8 +6,8 @@ INSERT INTO billing.cost_qualifications (
     operation_id,
     provider,
     provider_resource_id,
-    provider_lifetime_start,
-    provider_lifetime_end,
+    provider_lifetime_starts_at,
+    provider_lifetime_ends_at,
     provider_absent_at,
     provider_absence_reference,
     billing_stop_reference,
@@ -21,8 +21,8 @@ INSERT INTO billing.cost_qualifications (
     sqlc.arg(operation_id)::text,
     sqlc.arg(provider)::text,
     sqlc.arg(provider_resource_id)::text,
-    sqlc.arg(provider_lifetime_start)::timestamptz,
-    sqlc.arg(provider_lifetime_end)::timestamptz,
+    sqlc.arg(provider_lifetime_starts_at)::timestamptz,
+    sqlc.arg(provider_lifetime_ends_at)::timestamptz,
     sqlc.arg(provider_absent_at)::timestamptz,
     sqlc.arg(provider_absence_reference)::text,
     sqlc.arg(billing_stop_reference)::text,
@@ -57,8 +57,8 @@ INSERT INTO billing.cost_observations (
     operation_id,
     observation_id,
     normalized_query,
-    query_start,
-    query_end,
+    query_starts_at,
+    query_ends_at,
     raw_body_available,
     raw_body_bytes,
     raw_body_digest,
@@ -75,8 +75,8 @@ INSERT INTO billing.cost_observations (
     sqlc.arg(operation_id)::text,
     sqlc.arg(observation_id)::text,
     sqlc.arg(normalized_query)::text,
-    sqlc.arg(query_start)::timestamptz,
-    sqlc.arg(query_end)::timestamptz,
+    sqlc.arg(query_starts_at)::timestamptz,
+    sqlc.arg(query_ends_at)::timestamptz,
     sqlc.arg(raw_body_available)::boolean,
     sqlc.arg(raw_body_bytes)::bytea,
     sqlc.arg(raw_body_digest)::bytea,
@@ -96,7 +96,7 @@ RETURNING *;
 -- author the settlement, so the stored bytes (up to 768 KB each) are never
 -- read back.
 -- name: GetProviderBillingObservation :one
-SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end,
+SELECT merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at,
        raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
        has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
 FROM billing.cost_observations

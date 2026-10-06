@@ -40,8 +40,8 @@ const columns: ColumnDef<Invoice, unknown>[] = [
     header: "Period",
     cell: ({ row }) => (
       <span>
-        {formatDate(row.original.period_from)} –{" "}
-        {formatDate(row.original.period_to)}
+        {formatDate(row.original.period_starts_at)} –{" "}
+        {formatDate(row.original.period_ends_at)}
       </span>
     ),
   },
@@ -60,7 +60,7 @@ const columns: ColumnDef<Invoice, unknown>[] = [
 export function InvoicesPage() {
   const [params, setParams] = useSearchParams()
   const filters: InvoiceFilters = Object.fromEntries(
-    ["customer_id", "currency", "status", "period_from", "period_to"].flatMap(
+    ["customer_id", "currency", "status", "period_starts_after", "period_starts_before"].flatMap(
       (key) => (params.get(key) ? [[key, params.get(key)!]] : [])
     )
   )
@@ -170,8 +170,8 @@ function InvoiceFiltersForm({
         <Input
           id="invoice-from"
           type="date"
-          value={draft.period_from ?? ""}
-          onChange={(e) => setFilter("period_from", e.target.value)}
+          value={draft.period_starts_after ?? ""}
+          onChange={(e) => setFilter("period_starts_after", e.target.value)}
         />
       </div>
       <div>
@@ -179,8 +179,8 @@ function InvoiceFiltersForm({
         <Input
           id="invoice-to"
           type="date"
-          value={draft.period_to ?? ""}
-          onChange={(e) => setFilter("period_to", e.target.value)}
+          value={draft.period_starts_before ?? ""}
+          onChange={(e) => setFilter("period_starts_before", e.target.value)}
         />
       </div>
       <div className="flex gap-2 md:col-span-5">

@@ -14,35 +14,35 @@ import (
 
 const advanceMeteredRatingWatermark = `-- name: AdvanceMeteredRatingWatermark :exec
 UPDATE billing.metered_rating_watermarks
-SET rated_through = GREATEST(rated_through, $1::timestamptz),
+SET rated_through_at = GREATEST(rated_through_at, $1::timestamptz),
     accrued_amount = accrued_amount + $2::bigint,
     updated_at = $3::timestamptz
 WHERE merchant_id = $4::uuid AND customer_id = $5::uuid
   AND currency = $6::text AND source = $7::text
-  AND period_from = $8::timestamptz
+  AND period_starts_at = $8::timestamptz
 `
 
 type AdvanceMeteredRatingWatermarkParams struct {
-	RatedThrough time.Time
-	AccruedDelta int64
-	Now          time.Time
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	Currency     string
-	Source       string
-	PeriodFrom   time.Time
+	RatedThroughAt time.Time
+	AccruedDelta   int64
+	Now            time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	Source         string
+	PeriodStartsAt time.Time
 }
 
 func (q *Queries) AdvanceMeteredRatingWatermark(ctx context.Context, arg AdvanceMeteredRatingWatermarkParams) error {
 	_, err := q.db.Exec(ctx, advanceMeteredRatingWatermark,
-		arg.RatedThrough,
+		arg.RatedThroughAt,
 		arg.AccruedDelta,
 		arg.Now,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 		arg.Source,
-		arg.PeriodFrom,
+		arg.PeriodStartsAt,
 	)
 	return err
 }
@@ -124,23 +124,23 @@ func (q *Queries) ListPayerArrearsRateCards(ctx context.Context, arg ListPayerAr
 
 const lockMeteredRatingWatermark = `-- name: LockMeteredRatingWatermark :one
 INSERT INTO billing.metered_rating_watermarks (
-    merchant_id, customer_id, currency, source, period_from, rated_through, accrued_amount, created_at, updated_at
+    merchant_id, customer_id, currency, source, period_starts_at, rated_through_at, accrued_amount, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::text, $4::text,
     $5::timestamptz, $5::timestamptz, 0, $6::timestamptz, $6::timestamptz
 )
-ON CONFLICT (merchant_id, customer_id, currency, source, period_from)
+ON CONFLICT (merchant_id, customer_id, currency, source, period_starts_at)
 DO UPDATE SET updated_at = billing.metered_rating_watermarks.updated_at
 RETURNING accrued_amount
 `
 
 type LockMeteredRatingWatermarkParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	Source     string
-	PeriodFrom time.Time
-	Now        time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	Source         string
+	PeriodStartsAt time.Time
+	Now            time.Time
 }
 
 // ON CONFLICT DO UPDATE takes the row lock, serializing concurrent sweeps.
@@ -150,7 +150,7 @@ func (q *Queries) LockMeteredRatingWatermark(ctx context.Context, arg LockMetere
 		arg.CustomerID,
 		arg.Currency,
 		arg.Source,
-		arg.PeriodFrom,
+		arg.PeriodStartsAt,
 		arg.Now,
 	)
 	var accrued_amount int64

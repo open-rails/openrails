@@ -77,7 +77,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason)::text,
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid

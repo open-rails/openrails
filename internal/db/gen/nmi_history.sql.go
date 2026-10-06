@@ -14,11 +14,11 @@ import (
 
 const deleteNMIHistoryMonthsBefore = `-- name: DeleteNMIHistoryMonthsBefore :execrows
 DELETE FROM billing.nmi_history_months
-WHERE (merchant_id, psp_id, month, kind, category, reason) IN (
-    SELECT h.merchant_id, h.psp_id, h.month, h.kind, h.category, h.reason
+WHERE (merchant_id, psp_id, month_at, kind, category, reason) IN (
+    SELECT h.merchant_id, h.psp_id, h.month_at, h.kind, h.category, h.reason
     FROM billing.nmi_history_months h
     WHERE h.merchant_id = $1::uuid
-      AND h.month < $2::timestamptz
+      AND h.month_at < $2::timestamptz
     LIMIT $3::int
 )
 `
@@ -41,7 +41,7 @@ func (q *Queries) DeleteNMIHistoryMonthsBefore(ctx context.Context, arg DeleteNM
 const deleteNMIHistoryMonthsFrom = `-- name: DeleteNMIHistoryMonthsFrom :exec
 DELETE FROM billing.nmi_history_months
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
-  AND month >= $3::timestamptz
+  AND month_at >= $3::timestamptz
 `
 
 type DeleteNMIHistoryMonthsFromParams struct {
@@ -57,10 +57,10 @@ func (q *Queries) DeleteNMIHistoryMonthsFrom(ctx context.Context, arg DeleteNMIH
 }
 
 const insertNMIHistoryMonths = `-- name: InsertNMIHistoryMonths :exec
-INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month, kind, category, reason, authorizations)
-SELECT $1::uuid, $2::uuid, c.month, c.kind, c.category, c.reason, c.authorizations
+INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month_at, kind, category, reason, authorizations)
+SELECT $1::uuid, $2::uuid, c.month_at, c.kind, c.category, c.reason, c.authorizations
 FROM unnest($3::timestamptz[], $4::text[], $5::text[],
-    $6::text[], $7::bigint[]) AS c(month, kind, category, reason, authorizations)
+    $6::text[], $7::bigint[]) AS c(month_at, kind, category, reason, authorizations)
 `
 
 type InsertNMIHistoryMonthsParams struct {

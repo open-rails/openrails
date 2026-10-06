@@ -565,14 +565,14 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 			VALUES ($1, $2, $3, 'host', $4, 'USD', 1000, 'claim-' || $1, 'body'::bytea, sha256('body'::bytea), $5, $6, $7, now() - interval '400 days')`,
 			id, w.merchant, customer.UUID(), account, state, reference, releasedAt)
 		w.exec(`INSERT INTO billing.cost_qualifications
-			(merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at,
+			(merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_starts_at, provider_lifetime_ends_at, provider_absent_at,
 			 provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference,
 			 lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds)
 			VALUES ($1, $2, 'cloud', 'resource-' || $2, now() - interval '400 days', now() - interval '399 days', now() - interval '399 days',
 			        'absent', 'stopped', now() - interval '399 days', 'closed', 'evidence'::bytea, sha256('evidence'::bytea), 60)`, w.merchant, id)
 		for n := range 3 {
 			w.exec(`INSERT INTO billing.cost_observations
-				(merchant_id, operation_id, observation_id, normalized_query, query_start, query_end, raw_body_available, raw_body_bytes, raw_body_digest,
+				(merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at, raw_body_available, raw_body_bytes, raw_body_digest,
 				 covers_lifetime, refusal_kind, qualification_reason, observed_at)
 				VALUES ($1, $2, $3, 'q', now() - interval '400 days', now() - interval '399 days', false, ''::bytea, sha256(''::bytea),
 				        false, 'response_too_large', 'provider_evidence_refused', now() - interval '398 days')`, w.merchant, id, fmt.Sprintf("obs-%d", n))

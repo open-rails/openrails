@@ -55,7 +55,7 @@ func TestMonthlyInvoicesCoverActivePayersOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, invoices.Items, 1)
 	inv := invoices.Items[0]
-	require.True(t, inv.PeriodFrom.Equal(from) && inv.PeriodTo.Equal(to), "%v-%v", inv.PeriodFrom, inv.PeriodTo)
+	require.True(t, inv.PeriodStartsAt.Equal(from) && inv.PeriodEndsAt.Equal(to), "%v-%v", inv.PeriodStartsAt, inv.PeriodEndsAt)
 	require.Equal(t, int64(5_000_000), inv.DepositsTotal)
 	invoices, err = client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: dormant.cid()})
 	require.NoError(t, err)

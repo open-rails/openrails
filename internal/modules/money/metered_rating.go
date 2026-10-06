@@ -453,17 +453,17 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 		q := gen.New(tx)
 		advance := gen.AdvanceMeteredRatingWatermarkParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource,
-			PeriodFrom: periodFrom.UTC(), RatedThrough: ratedThrough.UTC(), Now: now,
+			PeriodStartsAt: periodFrom.UTC(), RatedThroughAt: ratedThrough.UTC(), Now: now,
 		}
 		alreadyAccrued, err := q.LockMeteredRatingWatermark(ctx, gen.LockMeteredRatingWatermarkParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource, PeriodFrom: periodFrom.UTC(), Now: now,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource, PeriodStartsAt: periodFrom.UTC(), Now: now,
 		})
 		if err != nil {
 			return err
 		}
 		delta := ratedPrefix - alreadyAccrued
 		if delta <= 0 {
-			// Everything in this prefix is already billed; just advance rated_through.
+			// Everything in this prefix is already billed; just advance rated_through_at.
 			return q.AdvanceMeteredRatingWatermark(ctx, advance)
 		}
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {

@@ -66,18 +66,18 @@ const (
 	DelinquencyDelinquent DelinquencyState = "delinquent"
 )
 
-// Delinquency is a customer's arrears standing in one currency. OverdueSince
+// Delinquency is a customer's arrears standing in one currency. OverdueStartedAt
 // is the oldest overdue due date, null when current; EnteredAt is when the
 // state began.
 type Delinquency struct {
-	CustomerID      CustomerID       `json:"customer_id"`
-	Currency        string           `json:"currency"`
-	State           DelinquencyState `json:"state"`
-	OverdueSince    *time.Time       `json:"overdue_since"`
-	OverdueAmount   int64            `json:"overdue_amount,string"`
-	OverdueInvoices int              `json:"overdue_invoices"`
-	EnteredAt       time.Time        `json:"entered_at"`
-	EvaluatedAt     time.Time        `json:"evaluated_at"`
+	CustomerID       CustomerID       `json:"customer_id"`
+	Currency         string           `json:"currency"`
+	State            DelinquencyState `json:"state"`
+	OverdueStartedAt *time.Time       `json:"overdue_started_at"`
+	OverdueAmount    int64            `json:"overdue_amount,string"`
+	OverdueInvoices  int              `json:"overdue_invoices"`
+	EnteredAt        time.Time        `json:"entered_at"`
+	EvaluatedAt      time.Time        `json:"evaluated_at"`
 }
 
 // DelinquencyListParams lists the overdue customers, oldest debt first:

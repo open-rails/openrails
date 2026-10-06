@@ -763,7 +763,7 @@ func (q *Queries) GetPaymentMethodForShare(ctx context.Context, arg GetPaymentMe
 }
 
 const insertPaymentMethodUpdate = `-- name: InsertPaymentMethodUpdate :exec
-INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
+INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, occurred_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::text, COALESCE($8::timestamptz, now()))
 ON CONFLICT DO NOTHING
@@ -777,7 +777,7 @@ type InsertPaymentMethodUpdateParams struct {
 	Source          string
 	Kind            string
 	EventRef        string
-	At              *time.Time
+	OccurredAt      *time.Time
 }
 
 // #1115: idempotent on (source, event_ref, method); at defaults to now.
@@ -790,7 +790,7 @@ func (q *Queries) InsertPaymentMethodUpdate(ctx context.Context, arg InsertPayme
 		arg.Source,
 		arg.Kind,
 		arg.EventRef,
-		arg.At,
+		arg.OccurredAt,
 	)
 	return err
 }

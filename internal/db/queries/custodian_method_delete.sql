@@ -47,7 +47,7 @@ FOR UPDATE;
 -- name: CompleteCustodianMethodDelete :execrows
 UPDATE billing.provider_intents
 SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
-    claimed_until = NULL, executed_at = sqlc.arg(now)::timestamptz,
+    lease_expires_at = NULL, executed_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')

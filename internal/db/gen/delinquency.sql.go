@@ -13,7 +13,7 @@ import (
 )
 
 const getCustomerDelinquency = `-- name: GetCustomerDelinquency :one
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = $3
@@ -33,7 +33,7 @@ func (q *Queries) GetCustomerDelinquency(ctx context.Context, arg GetCustomerDel
 		&i.CustomerID,
 		&i.Currency,
 		&i.State,
-		&i.OverdueSince,
+		&i.OverdueStartedAt,
 		&i.EnteredAt,
 		&i.OverdueAmount,
 		&i.OverdueInvoices,
@@ -46,7 +46,7 @@ func (q *Queries) GetCustomerDelinquency(ctx context.Context, arg GetCustomerDel
 }
 
 const getOverdueInvoiceAggregate = `-- name: GetOverdueInvoiceAggregate :one
-SELECT COALESCE(MIN(due_at), $1::timestamptz) AS overdue_since,
+SELECT COALESCE(MIN(due_at), $1::timestamptz) AS overdue_started_at,
        COALESCE(SUM(amount_due), 0)::bigint AS overdue_amount,
        COUNT(*)::bigint AS overdue_invoices
 FROM billing.invoices
@@ -67,16 +67,16 @@ type GetOverdueInvoiceAggregateParams struct {
 }
 
 type GetOverdueInvoiceAggregateRow struct {
-	OverdueSince    *time.Time
-	OverdueAmount   int64
-	OverdueInvoices int64
+	OverdueStartedAt *time.Time
+	OverdueAmount    int64
+	OverdueInvoices  int64
 }
 
 // One payer's overdue aggregate — the live recompute the admission gate runs
 // before it agrees with a stored `delinquent`, so a payer who has since settled
 // is never refused on a stale projection.
 //
-// overdue_since is COALESCEd to `now` so the row is total: it means nothing when
+// overdue_started_at is COALESCEd to `now` so the row is total: it means nothing when
 // overdue_invoices = 0, and every caller reads the count first.
 func (q *Queries) GetOverdueInvoiceAggregate(ctx context.Context, arg GetOverdueInvoiceAggregateParams) (GetOverdueInvoiceAggregateRow, error) {
 	row := q.db.QueryRow(ctx, getOverdueInvoiceAggregate,
@@ -86,12 +86,12 @@ func (q *Queries) GetOverdueInvoiceAggregate(ctx context.Context, arg GetOverdue
 		arg.Currency,
 	)
 	var i GetOverdueInvoiceAggregateRow
-	err := row.Scan(&i.OverdueSince, &i.OverdueAmount, &i.OverdueInvoices)
+	err := row.Scan(&i.OverdueStartedAt, &i.OverdueAmount, &i.OverdueInvoices)
 	return i, err
 }
 
 const listCustomerDelinquency = `-- name: ListCustomerDelinquency :many
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND customer_id = $2
 ORDER BY currency
@@ -117,7 +117,7 @@ func (q *Queries) ListCustomerDelinquency(ctx context.Context, arg ListCustomerD
 			&i.CustomerID,
 			&i.Currency,
 			&i.State,
-			&i.OverdueSince,
+			&i.OverdueStartedAt,
 			&i.EnteredAt,
 			&i.OverdueAmount,
 			&i.OverdueInvoices,
@@ -186,23 +186,23 @@ func (q *Queries) ListDelinquencyWorkMerchants(ctx context.Context, arg ListDeli
 }
 
 const listDelinquentCustomers = `-- name: ListDelinquentCustomers :many
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND state <> 'current'
   AND ($2::text IS NULL OR state = $2::text)
   AND ($3::timestamptz IS NULL
-   OR (overdue_since, customer_id, currency) > ($3::timestamptz, $4::uuid, $5::text))
-ORDER BY overdue_since, customer_id, currency
+   OR (overdue_started_at, customer_id, currency) > ($3::timestamptz, $4::uuid, $5::text))
+ORDER BY overdue_started_at, customer_id, currency
 LIMIT $6
 `
 
 type ListDelinquentCustomersParams struct {
-	MerchantID    uuid.UUID
-	State         *string
-	AfterSince    *time.Time
-	AfterCustomer *uuid.UUID
-	AfterCurrency *string
-	RowLimit      int64
+	MerchantID            uuid.UUID
+	State                 *string
+	AfterOverdueStartedAt *time.Time
+	AfterCustomer         *uuid.UUID
+	AfterCurrency         *string
+	RowLimit              int64
 }
 
 // The operator's roster: who is overdue, worst first. `current` rows are never
@@ -211,7 +211,7 @@ func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquen
 	rows, err := q.db.Query(ctx, listDelinquentCustomers,
 		arg.MerchantID,
 		arg.State,
-		arg.AfterSince,
+		arg.AfterOverdueStartedAt,
 		arg.AfterCustomer,
 		arg.AfterCurrency,
 		arg.RowLimit,
@@ -228,7 +228,7 @@ func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquen
 			&i.CustomerID,
 			&i.Currency,
 			&i.State,
-			&i.OverdueSince,
+			&i.OverdueStartedAt,
 			&i.EnteredAt,
 			&i.OverdueAmount,
 			&i.OverdueInvoices,
@@ -248,10 +248,10 @@ func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquen
 }
 
 const listNonCurrentDelinquency = `-- name: ListNonCurrentDelinquency :many
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND state <> 'current'
-ORDER BY overdue_since, customer_id, currency
+ORDER BY overdue_started_at, customer_id, currency
 LIMIT $2
 `
 
@@ -277,7 +277,7 @@ func (q *Queries) ListNonCurrentDelinquency(ctx context.Context, arg ListNonCurr
 			&i.CustomerID,
 			&i.Currency,
 			&i.State,
-			&i.OverdueSince,
+			&i.OverdueStartedAt,
 			&i.EnteredAt,
 			&i.OverdueAmount,
 			&i.OverdueInvoices,
@@ -299,7 +299,7 @@ func (q *Queries) ListNonCurrentDelinquency(ctx context.Context, arg ListNonCurr
 const listOverdueInvoiceAggregates = `-- name: ListOverdueInvoiceAggregates :many
 SELECT i.customer_id,
        i.currency,
-       MIN(i.due_at)::timestamptz AS overdue_since,
+       MIN(i.due_at)::timestamptz AS overdue_started_at,
        COALESCE(SUM(i.amount_due), 0)::bigint AS overdue_amount,
        COUNT(*)::bigint AS overdue_invoices,
        -- -1 = NO OVERRIDE (fall back to the merchant-wide policy). An explicit
@@ -340,13 +340,13 @@ type ListOverdueInvoiceAggregatesParams struct {
 }
 
 type ListOverdueInvoiceAggregatesRow struct {
-	CustomerID      uuid.UUID
-	Currency        string
-	OverdueSince    time.Time
-	OverdueAmount   int64
-	OverdueInvoices int64
-	GraceDays       int32
-	AmountFloor     int64
+	CustomerID       uuid.UUID
+	Currency         string
+	OverdueStartedAt time.Time
+	OverdueAmount    int64
+	OverdueInvoices  int64
+	GraceDays        int32
+	AmountFloor      int64
 }
 
 // The ENTER leg of the evaluation: per (payer, currency), how much is overdue
@@ -374,7 +374,7 @@ func (q *Queries) ListOverdueInvoiceAggregates(ctx context.Context, arg ListOver
 		if err := rows.Scan(
 			&i.CustomerID,
 			&i.Currency,
-			&i.OverdueSince,
+			&i.OverdueStartedAt,
 			&i.OverdueAmount,
 			&i.OverdueInvoices,
 			&i.GraceDays,
@@ -399,7 +399,7 @@ WITH previous AS (
       AND currency = $3::text
 ), upserted AS (
     INSERT INTO billing.customer_delinquency AS d (
-        merchant_id, customer_id, currency, state, overdue_since, overdue_amount,
+        merchant_id, customer_id, currency, state, overdue_started_at, overdue_amount,
         overdue_invoices, entered_at, transition_seq, evaluated_at, created_at, updated_at)
     VALUES (
         $1::uuid, $2::uuid, $3::text, $4::text,
@@ -408,17 +408,17 @@ WITH previous AS (
         $8::timestamptz, $8::timestamptz, $8::timestamptz)
     ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE
     SET state = EXCLUDED.state,
-        overdue_since = EXCLUDED.overdue_since,
+        overdue_started_at = EXCLUDED.overdue_started_at,
         overdue_amount = EXCLUDED.overdue_amount,
         overdue_invoices = EXCLUDED.overdue_invoices,
         entered_at = CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN EXCLUDED.entered_at ELSE d.entered_at END,
         transition_seq = d.transition_seq + (CASE WHEN d.state IS DISTINCT FROM EXCLUDED.state THEN 1 ELSE 0 END),
         evaluated_at = EXCLUDED.evaluated_at,
         updated_at = EXCLUDED.updated_at
-    RETURNING d.state, d.overdue_since, d.overdue_amount, d.overdue_invoices, d.entered_at, d.transition_seq
+    RETURNING d.state, d.overdue_started_at, d.overdue_amount, d.overdue_invoices, d.entered_at, d.transition_seq
 )
 SELECT upserted.state,
-       upserted.overdue_since,
+       upserted.overdue_started_at,
        upserted.overdue_amount,
        upserted.overdue_invoices,
        upserted.entered_at,
@@ -428,24 +428,24 @@ FROM upserted
 `
 
 type UpsertCustomerDelinquencyParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	Currency        string
-	State           string
-	OverdueSince    *time.Time
-	OverdueAmount   int64
-	OverdueInvoices int64
-	Now             time.Time
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	Currency         string
+	State            string
+	OverdueStartedAt *time.Time
+	OverdueAmount    int64
+	OverdueInvoices  int64
+	Now              time.Time
 }
 
 type UpsertCustomerDelinquencyRow struct {
-	State           string
-	OverdueSince    *time.Time
-	OverdueAmount   int64
-	OverdueInvoices int64
-	EnteredAt       time.Time
-	TransitionSeq   int64
-	PreviousState   string
+	State            string
+	OverdueStartedAt *time.Time
+	OverdueAmount    int64
+	OverdueInvoices  int64
+	EnteredAt        time.Time
+	TransitionSeq    int64
+	PreviousState    string
 }
 
 // One evaluation, atomic, returning BOTH the state that was there and the state
@@ -460,7 +460,7 @@ func (q *Queries) UpsertCustomerDelinquency(ctx context.Context, arg UpsertCusto
 		arg.CustomerID,
 		arg.Currency,
 		arg.State,
-		arg.OverdueSince,
+		arg.OverdueStartedAt,
 		arg.OverdueAmount,
 		arg.OverdueInvoices,
 		arg.Now,
@@ -468,7 +468,7 @@ func (q *Queries) UpsertCustomerDelinquency(ctx context.Context, arg UpsertCusto
 	var i UpsertCustomerDelinquencyRow
 	err := row.Scan(
 		&i.State,
-		&i.OverdueSince,
+		&i.OverdueStartedAt,
 		&i.OverdueAmount,
 		&i.OverdueInvoices,
 		&i.EnteredAt,

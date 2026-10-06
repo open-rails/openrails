@@ -29,13 +29,13 @@ func RenderRunTable(w io.Writer, run RunRecord, findings []FindingRecord) error 
 		fmt.Fprintf(w, " finished=%s", run.FinishedAt.Format("2006-01-02 15:04:05 MST"))
 	}
 	fmt.Fprintln(w)
-	if run.WindowSince != nil || run.WindowUntil != nil {
+	if run.WindowStartsAt != nil || run.WindowEndsAt != nil {
 		fmt.Fprintf(w, "  window:")
-		if run.WindowSince != nil {
-			fmt.Fprintf(w, " since=%s", run.WindowSince.Format("2006-01-02"))
+		if run.WindowStartsAt != nil {
+			fmt.Fprintf(w, " since=%s", run.WindowStartsAt.Format("2006-01-02"))
 		}
-		if run.WindowUntil != nil {
-			fmt.Fprintf(w, " until=%s", run.WindowUntil.Format("2006-01-02"))
+		if run.WindowEndsAt != nil {
+			fmt.Fprintf(w, " until=%s", run.WindowEndsAt.Format("2006-01-02"))
 		}
 		fmt.Fprintln(w)
 	}

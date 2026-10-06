@@ -118,8 +118,8 @@ FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
-  AND created_at >= sqlc.arg(period_from)::timestamptz
-  AND created_at < sqlc.arg(period_to)::timestamptz
+  AND created_at >= sqlc.arg(period_starts_at)::timestamptz
+  AND created_at < sqlc.arg(period_ends_at)::timestamptz
 GROUP BY transfer_type;
 
 -- ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must

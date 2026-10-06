@@ -165,7 +165,7 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 	}
 	if granted != nil {
 		start, end := granted.Start, granted.End
-		data.PeriodStart, data.PeriodEnd = &start, &end
+		data.PeriodStartsAt, data.PeriodEndsAt = &start, &end
 		if kind == lifecycle.NoticeRenewed {
 			due, err := renewalReceiptDue(ctx, d, sub, start)
 			if err != nil || !due {

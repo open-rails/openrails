@@ -94,8 +94,8 @@ type Invoice struct {
 	CustomerID     CustomerID        `json:"customer_id"`
 	Currency       string            `json:"currency"`
 	InvoiceNumber  *string           `json:"invoice_number"`
-	PeriodFrom     time.Time         `json:"period_from"`
-	PeriodTo       time.Time         `json:"period_to"`
+	PeriodStartsAt time.Time         `json:"period_starts_at"`
+	PeriodEndsAt   time.Time         `json:"period_ends_at"`
 	UsageTotal     int64             `json:"usage_total,string"`
 	DepositsTotal  int64             `json:"deposits_total,string"`
 	OwedAccrued    int64             `json:"owed_accrued,string"`
@@ -177,13 +177,14 @@ type InvoicePayment struct {
 }
 
 // InvoiceListParams selects invoices, newest period first; every filter is
-// optional. PeriodFrom and PeriodTo bound the invoice's period start.
+// optional. PeriodStartsAfter (inclusive) and PeriodStartsBefore (exclusive)
+// bound the invoice's period_starts_at.
 type InvoiceListParams struct {
-	CustomerID CustomerID
-	Currency   string
-	Status     InvoiceStatus
-	PeriodFrom *time.Time
-	PeriodTo   *time.Time
+	CustomerID         CustomerID
+	Currency           string
+	Status             InvoiceStatus
+	PeriodStartsAfter  *time.Time
+	PeriodStartsBefore *time.Time
 	PageRequest
 }
 

@@ -400,7 +400,7 @@ const supersedeUnfiredProviderIntentsForRun = `-- name: SupersedeUnfiredProvider
 UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = $1::text,
-    claimed_until = NULL,
+    lease_expires_at = NULL,
     updated_at = now()
 WHERE merchant_id = $2::uuid
   AND destructive_run_id = $3::uuid

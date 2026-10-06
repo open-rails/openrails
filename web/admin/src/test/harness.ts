@@ -172,7 +172,7 @@ export const aPaymentMethod = (id: string, overrides: Partial<PaymentMethod> = {
 })
 export const anInvoice = (id: string, overrides: Partial<Invoice> = {}): Invoice => ({
   id, customer_id: "cus_1", currency: "USD", invoice_number: null,
-  period_from: "2026-09-01T00:00:00Z", period_to: "2026-10-01T00:00:00Z",
+  period_starts_at: "2026-09-01T00:00:00Z", period_ends_at: "2026-10-01T00:00:00Z",
   usage_total: "0", deposits_total: "0", owed_accrued: "0", owed_paid: "0", closing_balance: "0",
   subtotal_amount: "0", total_amount: "0", amount_paid: "0", amount_due: "0",
   line_items: [], money_movements: null, po_number: null, tax: null, billing_contacts: [],

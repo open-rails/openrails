@@ -682,7 +682,7 @@ func invoiceCycleHours(invoice *models.Invoice) int {
 	if invoice == nil {
 		return 0
 	}
-	cycleHours := collection.CycleHoursBetween(invoice.PeriodFrom, invoice.PeriodTo)
+	cycleHours := collection.CycleHoursBetween(invoice.PeriodStartsAt, invoice.PeriodEndsAt)
 	if cycleHours > 0 && cycleHours < collection.MinRetryCycleHours {
 		return collection.MinRetryCycleHours
 	}

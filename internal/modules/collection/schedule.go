@@ -153,7 +153,7 @@ func BillingCycleHoursOf(price *models.Price) int {
 
 // CycleHoursBetween returns a billing period's length in HOURS — the invoice
 // consumer's analogue of BillingCycleHoursOf. An invoice's REAL cycle is its
-// statement period (period_from → period_to), so a weekly statement is dunned
+// statement period (period_starts_at → period_ends_at), so a weekly statement is dunned
 // on the weekly offsets and an annual one on the monthly offsets, instead of
 // every invoice being dunned on a hardcoded month (or#828).
 //

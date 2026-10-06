@@ -64,13 +64,13 @@ WHERE merchant_id = $1
 `
 
 type AttachPendingInvoiceItemsToInvoiceParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	InvoiceID  *uuid.UUID
-	Now        time.Time
-	Currency   string
-	PeriodFrom time.Time
-	PeriodTo   time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	InvoiceID      *uuid.UUID
+	Now            time.Time
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
 }
 
 func (q *Queries) AttachPendingInvoiceItemsToInvoice(ctx context.Context, arg AttachPendingInvoiceItemsToInvoiceParams) (int64, error) {
@@ -80,8 +80,8 @@ func (q *Queries) AttachPendingInvoiceItemsToInvoice(ctx context.Context, arg At
 		arg.InvoiceID,
 		arg.Now,
 		arg.Currency,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 	)
 	if err != nil {
 		return 0, err
@@ -201,18 +201,18 @@ func (q *Queries) FailClaimedInvoicePaymentAttempt(ctx context.Context, arg Fail
 }
 
 const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2
-  AND period_from = $3 AND period_to = $4 AND currency = $5
+  AND period_starts_at = $3 AND period_ends_at = $4 AND currency = $5
 LIMIT 1
 `
 
 type GetInvoiceByPeriodParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	PeriodFrom time.Time
-	PeriodTo   time.Time
-	Currency   string
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
+	Currency       string
 }
 
 // Idempotency key is per (payer, period, currency): one invoice per currency (#474).
@@ -220,8 +220,8 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 	row := q.db.QueryRow(ctx, getInvoiceByPeriod,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 		arg.Currency,
 	)
 	var i BillingInvoice
@@ -231,8 +231,8 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 		&i.CustomerID,
 		&i.Currency,
 		&i.InvoiceNumber,
-		&i.PeriodFrom,
-		&i.PeriodTo,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.UsageTotal,
 		&i.DepositsTotal,
 		&i.OwedAccrued,
@@ -270,7 +270,7 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 }
 
 const getInvoiceForPayer = `-- name: GetInvoiceForPayer :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 `
@@ -290,8 +290,8 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 		&i.CustomerID,
 		&i.Currency,
 		&i.InvoiceNumber,
-		&i.PeriodFrom,
-		&i.PeriodTo,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.UsageTotal,
 		&i.DepositsTotal,
 		&i.OwedAccrued,
@@ -329,7 +329,7 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 }
 
 const getInvoiceForPayerForUpdate = `-- name: GetInvoiceForPayerForUpdate :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE
@@ -350,8 +350,8 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 		&i.CustomerID,
 		&i.Currency,
 		&i.InvoiceNumber,
-		&i.PeriodFrom,
-		&i.PeriodTo,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.UsageTotal,
 		&i.DepositsTotal,
 		&i.OwedAccrued,
@@ -492,7 +492,7 @@ const insertInvoice = `-- name: InsertInvoice :exec
 INSERT INTO billing.invoices (
     id, merchant_id, customer_id, currency,
     invoice_number,
-    period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
+    period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid,
     closing_balance, subtotal_amount, total_amount, amount_paid, amount_due,
     line_items, money_movements, status, collection_method,
     issued_at, due_at, paid_at, voided_at, uncollectible_at,
@@ -519,8 +519,8 @@ type InsertInvoiceParams struct {
 	MerchantID        uuid.UUID
 	CustomerID        uuid.UUID
 	Currency          string
-	PeriodFrom        time.Time
-	PeriodTo          time.Time
+	PeriodStartsAt    time.Time
+	PeriodEndsAt      time.Time
 	UsageTotal        int64
 	DepositsTotal     int64
 	OwedAccrued       int64
@@ -556,8 +556,8 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 		arg.UsageTotal,
 		arg.DepositsTotal,
 		arg.OwedAccrued,
@@ -774,7 +774,7 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 }
 
 const listEncodedInvoiceAttemptsForArchive = `-- name: ListEncodedInvoiceAttemptsForArchive :many
-SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.channel, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, l.amount AS ledger_amount,
+SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.channel, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
@@ -847,7 +847,7 @@ func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg 
 			&i.BillingProviderIntent.Status,
 			&i.BillingProviderIntent.Attempts,
 			&i.BillingProviderIntent.NextAttemptAt,
-			&i.BillingProviderIntent.ClaimedUntil,
+			&i.BillingProviderIntent.LeaseExpiresAt,
 			&i.BillingProviderIntent.Origin,
 			&i.BillingProviderIntent.OriginReason,
 			&i.BillingProviderIntent.Actor,
@@ -1018,7 +1018,7 @@ func (q *Queries) ListInvoicePaymentsPage(ctx context.Context, arg ListInvoicePa
 }
 
 const listInvoiceThresholdCandidates = `-- name: ListInvoiceThresholdCandidates :many
-SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from, MIN(s.created_at)::timestamptz AS period_anchor
+SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_starts_at, MIN(s.created_at)::timestamptz AS period_anchor
 FROM billing.money_settings s
 JOIN billing.invoice_items ii
   ON ii.merchant_id = s.merchant_id
@@ -1053,7 +1053,7 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
 ) >= COALESCE(
     pol.threshold,
     CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END)
-ORDER BY period_from ASC
+ORDER BY period_starts_at ASC
 `
 
 type ListInvoiceThresholdCandidatesParams struct {
@@ -1063,10 +1063,10 @@ type ListInvoiceThresholdCandidatesParams struct {
 }
 
 type ListInvoiceThresholdCandidatesRow struct {
-	CustomerID   uuid.UUID
-	Currency     string
-	PeriodFrom   time.Time
-	PeriodAnchor time.Time
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodAnchor   time.Time
 }
 
 // or#897: the trigger amount is the BOUND billing policy's
@@ -1086,7 +1086,7 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 		if err := rows.Scan(
 			&i.CustomerID,
 			&i.Currency,
-			&i.PeriodFrom,
+			&i.PeriodStartsAt,
 			&i.PeriodAnchor,
 		); err != nil {
 			return nil, err
@@ -1156,7 +1156,7 @@ SET status = 'uncollectible',
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('open', 'past_due')
   AND collection_intent_id IS NULL
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
 `
 
 type MarkInvoiceUncollectibleForPayerParams struct {
@@ -1180,8 +1180,8 @@ func (q *Queries) MarkInvoiceUncollectibleForPayer(ctx context.Context, arg Mark
 		&i.CustomerID,
 		&i.Currency,
 		&i.InvoiceNumber,
-		&i.PeriodFrom,
-		&i.PeriodTo,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.UsageTotal,
 		&i.DepositsTotal,
 		&i.OwedAccrued,
@@ -1493,11 +1493,11 @@ ORDER BY 1 ASC
 `
 
 type SumPendingInvoiceItemAmountBySourceInPeriodParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	PeriodFrom time.Time
-	PeriodTo   time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
 }
 
 type SumPendingInvoiceItemAmountBySourceInPeriodRow struct {
@@ -1515,8 +1515,8 @@ func (q *Queries) SumPendingInvoiceItemAmountBySourceInPeriod(ctx context.Contex
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 	)
 	if err != nil {
 		return nil, err
@@ -1546,11 +1546,11 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 `
 
 type SumPendingInvoiceItemAmountInPeriodParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	PeriodFrom time.Time
-	PeriodTo   time.Time
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	PeriodStartsAt time.Time
+	PeriodEndsAt   time.Time
 }
 
 func (q *Queries) SumPendingInvoiceItemAmountInPeriod(ctx context.Context, arg SumPendingInvoiceItemAmountInPeriodParams) (int64, error) {
@@ -1558,8 +1558,8 @@ func (q *Queries) SumPendingInvoiceItemAmountInPeriod(ctx context.Context, arg S
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAt,
+		arg.PeriodEndsAt,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -1575,7 +1575,7 @@ SET status = 'voided',
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('draft', 'open', 'past_due')
   AND collection_intent_id IS NULL
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
 `
 
 type VoidInvoiceForPayerParams struct {
@@ -1599,8 +1599,8 @@ func (q *Queries) VoidInvoiceForPayer(ctx context.Context, arg VoidInvoiceForPay
 		&i.CustomerID,
 		&i.Currency,
 		&i.InvoiceNumber,
-		&i.PeriodFrom,
-		&i.PeriodTo,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.UsageTotal,
 		&i.DepositsTotal,
 		&i.OwedAccrued,
