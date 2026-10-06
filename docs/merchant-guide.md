@@ -62,10 +62,8 @@ response with exactly the same document. For a guarded application a changed
 revision is a conflict, not permission to refresh the precondition and overwrite
 intervening edits; overwriting them is what a declarative document is for.
 
-The default target is the merchant-owned catalog. An explicit catalog ID must be
-inside the authenticated merchant and caller's authority; pruning never implicitly
-includes other creator catalogs. Meter/rate-card dependency checks still apply;
-prune does not delete historical billing definitions or customer rate overrides.
+Meter/rate-card dependency checks still apply; prune does not delete historical
+billing definitions or customer rate overrides.
 
 For bootstrap, the trusted local operator path (`openrails apply-catalog`) applies
 the same document with local authority.
@@ -73,7 +71,7 @@ the same document with local authority.
 ### Authoring the catalog
 
 One application selects one authorized merchant outside the document and includes
-`schema_version`, optional `catalog_id`, `prune`, `products` and supported
+`schema_version`, `prune`, `products` and supported
 `meters`, plus `application_id` and `expected_revision` together for a guarded
 application. See `config/catalog.example.yaml`.
 

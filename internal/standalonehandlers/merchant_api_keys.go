@@ -138,7 +138,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				"name is required (max 120 chars)"))
 			return
 		}
-		role, ok := merchantRole(r, req.Role, controlplane.MerchantAPIKeyRoles())
+		role, ok := merchantRole(r, req.Role, controlplane.MerchantRoles())
 		if !ok {
 			return
 		}

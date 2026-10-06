@@ -418,7 +418,6 @@ BEGIN
                   'catalog_applications',
                   'catalog_meters',
                   'catalog_rate_cards',
-                  'catalogs',
                   'checkout_attempts',
                   'checkout_sessions',
                   'cost_observations',
@@ -1065,64 +1064,11 @@ BEGIN
     IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
 END $$;
 
-CREATE FUNCTION billing.guard_catalog_identity() RETURNS trigger
+CREATE FUNCTION billing.guard_product_identity() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    IF TG_OP='DELETE' OR NEW.id IS DISTINCT FROM OLD.id
-       OR NEW.merchant_id IS DISTINCT FROM OLD.merchant_id
-       OR NEW.owner_subject IS DISTINCT FROM OLD.owner_subject THEN
-        RAISE EXCEPTION 'catalog identity and ownership are immutable' USING ERRCODE='23514';
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
--- Catalog ownership is business data within one merchant; it grants no authority.
-CREATE TABLE billing.catalogs (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL REFERENCES billing.merchants(id) ON DELETE RESTRICT,
-    owner_subject text COLLATE "C",
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT catalogs_pkey PRIMARY KEY (merchant_id, id),
-    CONSTRAINT catalogs_owner_subject_nonempty_check CHECK (owner_subject IS NULL OR owner_subject <> '')
-);
-COMMENT ON TABLE billing.catalogs IS 'Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.';
-
-CREATE UNIQUE INDEX catalogs_merchant_id_key ON billing.catalogs (merchant_id) WHERE owner_subject IS NULL;
-CREATE UNIQUE INDEX catalogs_owner_subject_key ON billing.catalogs (merchant_id, owner_subject) WHERE owner_subject IS NOT NULL;
-CREATE INDEX catalogs_created_at_id_idx ON billing.catalogs (merchant_id, created_at, id);
-
-CREATE TRIGGER immutable_catalog_identity BEFORE UPDATE OR DELETE ON billing.catalogs
-FOR EACH ROW EXECUTE FUNCTION billing.guard_catalog_identity();
-CREATE TRIGGER catalog_authored_catalog BEFORE INSERT OR UPDATE OR DELETE ON billing.catalogs FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write();
-
-CREATE FUNCTION billing.ensure_default_catalog(p_merchant uuid) RETURNS uuid
-LANGUAGE sql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-    INSERT INTO billing.catalogs (merchant_id)
-    VALUES (p_merchant)
-    ON CONFLICT (merchant_id) WHERE owner_subject IS NULL
-    DO UPDATE SET updated_at=billing.catalogs.updated_at
-    RETURNING id;
-$$;
-REVOKE ALL ON FUNCTION billing.ensure_default_catalog(uuid) FROM PUBLIC;
-
-CREATE FUNCTION billing.assign_product_catalog() RETURNS trigger
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-BEGIN
-    IF NEW.catalog_id IS NULL THEN
-        NEW.catalog_id := billing.ensure_default_catalog(NEW.merchant_id);
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-CREATE FUNCTION billing.guard_product_catalog_identity() RETURNS trigger
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-BEGIN
-    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.merchant_id IS DISTINCT FROM OLD.merchant_id
-       OR NEW.catalog_id IS DISTINCT FROM OLD.catalog_id THEN
-        RAISE EXCEPTION 'product catalog identity is immutable' USING ERRCODE='23514';
+    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.merchant_id IS DISTINCT FROM OLD.merchant_id THEN
+        RAISE EXCEPTION 'product identity is immutable' USING ERRCODE='23514';
     END IF;
     RETURN NEW;
 END;
@@ -1189,8 +1135,6 @@ CREATE TABLE billing.products (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
-    catalog_id uuid NOT NULL,
-    CONSTRAINT products_catalog_id_fkey FOREIGN KEY (merchant_id, catalog_id) REFERENCES billing.catalogs(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT products_entitlement_hours_nonnegative_check CHECK (NOT jsonb_path_exists(coalesce(entitlements_spec, '{}'::jsonb), '$.* ? (@.type() == "number" && @ < 0)'))
 );
 COMMENT ON TABLE billing.products IS 'Product definitions that can be purchased or subscribed to';
@@ -1206,7 +1150,6 @@ CREATE INDEX products_archived_idx ON billing.products USING btree (archived);
 CREATE INDEX products_key_idx ON billing.products USING btree (key);
 CREATE INDEX products_created_at_id_idx ON billing.products (merchant_id, created_at DESC, id DESC);
 CREATE INDEX products_tier_group_idx ON billing.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
-CREATE INDEX products_catalog_id_idx ON billing.products(merchant_id,catalog_id);
 CREATE INDEX products_entitlements_spec_idx
 ON billing.products USING gin (entitlements_spec)
 WHERE NOT archived;
@@ -1214,10 +1157,8 @@ WHERE NOT archived;
 ALTER TABLE ONLY billing.products
     ADD CONSTRAINT products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
-CREATE TRIGGER assign_product_catalog BEFORE INSERT ON billing.products
-FOR EACH ROW EXECUTE FUNCTION billing.assign_product_catalog();
-CREATE TRIGGER immutable_product_catalog_identity BEFORE UPDATE ON billing.products
-FOR EACH ROW EXECUTE FUNCTION billing.guard_product_catalog_identity();
+CREATE TRIGGER immutable_product_identity BEFORE UPDATE ON billing.products
+FOR EACH ROW EXECUTE FUNCTION billing.guard_product_identity();
 CREATE TRIGGER trg_products_guard_tier_group BEFORE UPDATE OF tier_group ON billing.products
     FOR EACH ROW EXECUTE FUNCTION billing.products_guard_tier_group();
 CREATE TRIGGER catalog_authored_product BEFORE INSERT OR UPDATE OR DELETE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write();
@@ -1432,19 +1373,15 @@ CREATE TRIGGER catalog_authored_rate_card BEFORE INSERT OR UPDATE OR DELETE ON b
 CREATE TABLE billing.catalog_applications (
     merchant_id uuid NOT NULL REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     application_id text NOT NULL CHECK (length(application_id) BETWEEN 1 AND 128),
-    catalog_id uuid NOT NULL,
     schema_version bigint NOT NULL,
     request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256)=32),
     base_revision bigint NOT NULL CHECK (base_revision >= 0),
     applied_revision bigint NOT NULL CHECK (applied_revision = base_revision + 1),
     result jsonb NOT NULL CHECK (octet_length(result::text) <= 16384),
     applied_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (merchant_id,application_id),
-    FOREIGN KEY (merchant_id,catalog_id) REFERENCES billing.catalogs(merchant_id,id) ON DELETE RESTRICT
+    PRIMARY KEY (merchant_id,application_id)
 );
 COMMENT ON TABLE billing.catalog_applications IS 'Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL. Retention: permanent, never pruned.';
-
-CREATE INDEX catalog_applications_catalog_id_idx ON billing.catalog_applications USING btree (merchant_id, catalog_id);
 
 CREATE TRIGGER immutable_catalog_application_receipt BEFORE UPDATE OR DELETE ON billing.catalog_applications FOR EACH ROW EXECUTE FUNCTION billing.guard_catalog_application_receipt();
 

@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -43,15 +42,12 @@ func (s *Service) CheckProductKeys(ctx context.Context, userID string, keys []st
 	if err != nil {
 		return nil, err
 	}
-	if owner, ok := catalogscope.FromContext(ctx); ok && (owner.MerchantID != mid || owner.CatalogID == uuid.Nil) {
-		return nil, errors.New("invalid catalog scope")
-	}
 	customer, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
 	err = s.withTx(ctx, func(ctx context.Context, repo *ProductAccessGrantRepo) error {
-		rows, err := repo.db.Gen(ctx).CheckProductAccessKeys(ctx, gen.CheckProductAccessKeysParams{MerchantID: mid.UUID(), CustomerID: customer, ProductKeys: unique, CatalogID: catalogscope.QueryID(ctx), AtTime: s.now().UTC()})
+		rows, err := repo.db.Gen(ctx).CheckProductAccessKeys(ctx, gen.CheckProductAccessKeysParams{MerchantID: mid.UUID(), CustomerID: customer, ProductKeys: unique, AtTime: s.now().UTC()})
 		if err != nil {
 			return err
 		}

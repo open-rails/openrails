@@ -569,7 +569,6 @@ export const cancelReprice = (id: string) =>
 
 export interface CatalogApplicationReceipt {
   application_id: string
-  catalog_id: string
   base_revision: number
   applied_revision: number
   replayed: boolean

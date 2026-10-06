@@ -144,7 +144,7 @@ export const render = (node: ReactNode, queryClient = client()) =>
 
 const WHEN = "2026-09-18T00:00:00Z"
 export const aProduct = (id: string, tierRank = 0, overrides: Partial<Product> = {}): Product => ({
-  id, catalog_id: "cat_1", key: id, display_name: id, description: "", entitlements_spec: null, tier_group: "plans",
+  id, key: id, display_name: id, description: "", entitlements_spec: null, tier_group: "plans",
   tier_rank: tierRank, archived: false, prices: [], created_at: WHEN, updated_at: WHEN,
   ...overrides,
 })

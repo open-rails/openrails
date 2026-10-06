@@ -3,7 +3,6 @@ package openrails
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,8 +28,7 @@ type Client struct {
 	baseURL      string
 	merchantID   billing.MerchantID
 	merchantSlug string
-	catalogOwner string
-	// derived marks a Client made from another (With, ForCatalogOwner): it
+	// derived marks a Client made from another (With): it
 	// shares the engine and transport and does not own their lifecycle.
 	derived bool
 	client  *http.Client
@@ -416,9 +414,6 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // assertions, credentials, cancellation and timeouts. consume owns response
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error, requestOptions ...RequestOption) error {
-	if c.catalogOwner != "" && path != "/v1/catalog" && !strings.HasPrefix(path, "/v1/catalog/") {
-		return &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeResourceAccessDenied, Message: "catalog-scoped clients only support catalog operations"}}
-	}
 	target, err := c.requestTarget(requestOptions)
 	if err != nil {
 		return err
@@ -470,9 +465,6 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		}
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
-	if c.catalogOwner != "" {
-		req.Header.Set("OpenRails-Catalog-Owner", base64.RawURLEncoding.EncodeToString([]byte(c.catalogOwner)))
-	}
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}

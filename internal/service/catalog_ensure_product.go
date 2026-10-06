@@ -7,31 +7,19 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // EnsureProduct creates the full declaration only if absent. Reuse never
 // updates labels, tier entitlements or lifecycle; those are explicit updates.
 func (s *Service) EnsureProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
-	owned, err := catalogOwnerRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned && (req.EntitlementsSpec != nil || req.TierGroup != nil || req.TierRank != 0) {
-		return nil, catalog.ErrOwnerOperation
-	}
-	if owned && !req.CatalogID.IsZero() && req.CatalogID.UUID() != *catalogscope.QueryID(ctx) {
-		return nil, catalog.ErrOwnerScope
-	}
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
-		return scoped.ensureProduct(ctx, req, owned)
+		return scoped.ensureProduct(ctx, req)
 	})
 }
 
-func (s *Service) ensureProduct(ctx context.Context, req billing.CreateProductParams, owned bool) (*billing.Product, error) {
+func (s *Service) ensureProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
 	req.Key = strings.TrimSpace(req.Key)
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	if req.Key == "" || req.DisplayName == "" {
@@ -53,17 +41,6 @@ func (s *Service) ensureProduct(ctx context.Context, req billing.CreateProductPa
 		if err := lockCatalogKey(ctx, tx, mid, "product", req.Key); err != nil {
 			return err
 		}
-		if req.CatalogID.IsZero() {
-			if owned {
-				req.CatalogID = billing.CatalogID(*catalogscope.QueryID(ctx))
-			} else {
-				row, err := catalog.NewCatalogRepo(scoped.catalogTx).Ensure(ctx, nil)
-				if err != nil {
-					return err
-				}
-				req.CatalogID = billing.CatalogID(row.ID)
-			}
-		}
 		var err error
 		product, err = scoped.GetProductByKey(ctx, req.Key)
 		if errors.Is(err, billing.ErrNotFound) {
@@ -81,13 +58,7 @@ func (s *Service) ensureProduct(ctx context.Context, req billing.CreateProductPa
 				}
 			}
 		}
-		if err != nil {
-			return err
-		}
-		if product.CatalogID != req.CatalogID {
-			return ErrCatalogConflict
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err

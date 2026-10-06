@@ -30,11 +30,7 @@ export type OpenRailsErrorCode =
   | "card_requires_https"
   | "catalog_application_conflict"
   | "catalog_declared"
-  | "catalog_not_found"
-  | "catalog_owner_forbidden"
-  | "catalog_owner_required"
   | "catalog_revision_conflict"
-  | "catalog_scope_mismatch"
   | "catalog_updates_disabled"
   | "checkout_attempt_closed"
   | "checkout_attempt_expired"
@@ -62,6 +58,7 @@ export type OpenRailsErrorCode =
   | "currency_unsupported"
   | "custodian_capture_unavailable"
   | "customer_action_required"
+  | "customer_email_required"
   | "customer_not_found"
   | "customer_payment_unsupported"
   | "customer_session_required"
@@ -76,6 +73,8 @@ export type OpenRailsErrorCode =
   | "delegated_token_revoked"
   | "delegated_verification_unavailable"
   | "email_unverified"
+  | "finding_action_failed"
+  | "finding_not_actionable"
   | "hold_not_found"
   | "host_event_not_found"
   | "host_merchant_mismatch"
@@ -146,6 +145,7 @@ export type OpenRailsErrorCode =
   | "payment_method_update_retry_required"
   | "payment_method_update_unsupported"
   | "payment_not_found"
+  | "payment_not_refundable"
   | "payment_not_retryable"
   | "payment_provider_rejected"
   | "permanent_grant_forbidden"
@@ -174,6 +174,7 @@ export type OpenRailsErrorCode =
   | "rate_card_product_not_found"
   | "rate_limit_exceeded"
   | "rebill_terms_committed"
+  | "refund_failed"
   | "refund_rail_unavailable"
   | "refund_unsupported"
   | "rename_too_soon"
@@ -199,6 +200,8 @@ export type OpenRailsErrorCode =
   | "service_credential_merchant_unresolved"
   | "service_credential_resource_scope_denied"
   | "service_unavailable"
+  | "solana_rpc_unavailable"
+  | "solana_transaction_refused"
   | "spend_delegation_not_found"
   | "step_up_required"
   | "step_up_unavailable"
@@ -212,9 +215,12 @@ export type OpenRailsErrorCode =
   | "tier_change_idempotency_key_required"
   | "tier_change_in_flight"
   | "tier_change_period_unknown"
+  | "tier_change_provider_conflict"
   | "tier_change_refused"
   | "tier_change_renewal_due"
   | "tier_change_requires_linked_plan"
+  | "tier_change_target_inactive"
+  | "tier_change_unsupported_on_rail"
   | "trial_unsupported_on_rail"
   | "unknown_field"
   | "unknown_role"
@@ -262,11 +268,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   card_requires_https: { status: 400, type: "invalid_request_error", meaning: "Card data is accepted only over HTTPS." },
   catalog_application_conflict: { status: 409, type: "invalid_request_error", meaning: "The application id already committed with different content." },
   catalog_declared: { status: 405, type: "invalid_request_error", meaning: "The catalog is declared by the host; change the declaration and restart." },
-  catalog_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog does not exist." },
-  catalog_owner_forbidden: { status: 403, type: "authorization_error", meaning: "A catalog owner cannot change merchant-wide catalog settings." },
-  catalog_owner_required: { status: 403, type: "authorization_error", meaning: "The catalog owner could not be established from the credential or selector." },
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
-  catalog_scope_mismatch: { status: 403, type: "authorization_error", meaning: "The catalog scope does not match the authorized merchant and catalog." },
   catalog_updates_disabled: { status: 403, type: "invalid_request_error", meaning: "Catalog updates over HTTP are disabled in this deployment." },
   checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },
   checkout_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout attempt expired before it was paid." },
@@ -294,6 +296,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   currency_unsupported: { status: 400, type: "invalid_request_error", meaning: "The currency is not in OpenRails' registry." },
   custodian_capture_unavailable: { status: 503, type: "api_error", meaning: "The card custodian cannot capture cards right now." },
   customer_action_required: { status: 403, type: "authorization_error", meaning: "Only the customer may take this action, through their own step." },
+  customer_email_required: { status: 400, type: "invalid_request_error", meaning: "The rail needs the customer's verified email and username." },
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
@@ -308,6 +311,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   delegated_token_revoked: { status: 401, type: "authentication_error", meaning: "The delegated access token was revoked." },
   delegated_verification_unavailable: { status: 503, type: "api_error", meaning: "Delegated tokens cannot be verified right now; retry." },
   email_unverified: { status: 403, type: "authorization_error", meaning: "Creating a merchant needs a verified email." },
+  finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
+  finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_merchant_mismatch: { status: 403, type: "authorization_error", meaning: "The credential's merchant is not the one this host serves." },
@@ -378,6 +383,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_method_update_retry_required: { status: 409, type: "invalid_request_error", meaning: "The card was not updated; tokenize it again." },
   payment_method_update_unsupported: { status: 400, type: "invalid_request_error", meaning: "This payment method cannot be updated through OpenRails." },
   payment_not_found: { status: 404, type: "invalid_request_error", meaning: "The payment or payment operation does not exist." },
+  payment_not_refundable: { status: 400, type: "invalid_request_error", meaning: "The payment is not a completed rail charge, or the amount exceeds what remains refundable." },
   payment_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The resource is not payable now." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permanent_grant_forbidden: { status: 403, type: "authorization_error", meaning: "A grant with no end needs merchant:access:grant-permanent." },
@@ -406,6 +412,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   rate_card_product_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card names a product that does not exist." },
   rate_limit_exceeded: { status: 429, type: "rate_limit_error", meaning: "Too many requests; Retry-After says when to try again." },
   rebill_terms_committed: { status: 409, type: "invalid_request_error", meaning: "An accepted recurring payment owns the pending price terms." },
+  refund_failed: { status: 502, type: "api_error", meaning: "The provider refused the refund." },
   refund_rail_unavailable: { status: 409, type: "invalid_request_error", meaning: "The payment's rail cannot accept a refund right now." },
   refund_unsupported: { status: 400, type: "invalid_request_error", meaning: "The payment's rail has no automatic refund." },
   rename_too_soon: { status: 429, type: "invalid_request_error", meaning: "The merchant was renamed too recently." },
@@ -431,6 +438,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   service_credential_merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The service credential's issuer owns no merchant." },
   service_credential_resource_scope_denied: { status: 403, type: "authorization_error", meaning: "The service credential is scoped to other resources." },
   service_unavailable: { status: 503, type: "api_error", meaning: "A dependency is temporarily unavailable; retry." },
+  solana_rpc_unavailable: { status: 502, type: "api_error", meaning: "The Solana RPC endpoints did not answer; retry." },
+  solana_transaction_refused: { status: 400, type: "invalid_request_error", meaning: "The wallet transaction could not be prepared or confirmed; the message says why." },
   spend_delegation_not_found: { status: 404, type: "invalid_request_error", meaning: "The spend delegation does not exist." },
   step_up_required: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in; metadata carries the challenge." },
   step_up_unavailable: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in and this credential cannot prove one." },
@@ -444,9 +453,12 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   tier_change_idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "A tier change needs an Idempotency-Key." },
   tier_change_in_flight: { status: 409, type: "invalid_request_error", meaning: "Another unresolved tier change owns the subscription; metadata.operation_id names it." },
   tier_change_period_unknown: { status: 422, type: "invalid_request_error", meaning: "The subscription has no valid current period." },
+  tier_change_provider_conflict: { status: 409, type: "invalid_request_error", meaning: "The provider's copy of the subscription is missing or differs; reconcile it first." },
   tier_change_refused: { status: 409, type: "invalid_request_error", meaning: "The tier change was refused and not executed." },
   tier_change_renewal_due: { status: 409, type: "invalid_request_error", meaning: "The current period ended or its renewal is unresolved; the renewal settles first." },
-  tier_change_requires_linked_plan: { status: 409, type: "invalid_request_error", meaning: "The target price has no linked provider plan of the same amount and cycle." },
+  tier_change_requires_linked_plan: { status: 409, type: "invalid_request_error", meaning: "The target price has no plan on the subscription's PSP that this change can use." },
+  tier_change_target_inactive: { status: 422, type: "invalid_request_error", meaning: "The target price or its product is archived." },
+  tier_change_unsupported_on_rail: { status: 400, type: "invalid_request_error", meaning: "The subscription's rail cannot make this tier change." },
   trial_unsupported_on_rail: { status: 400, type: "invalid_request_error", meaning: "This rail cannot run a trial first phase." },
   unknown_field: { status: 400, type: "invalid_request_error", meaning: "The JSON body names a field the route does not accept; param is the field." },
   unknown_role: { status: 400, type: "invalid_request_error", meaning: "The role is not one this merchant defines." },

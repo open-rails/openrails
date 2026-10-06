@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -74,13 +73,12 @@ func TestCredentialPermissionGlob(t *testing.T) {
 // The roles' permissions are read from the running AuthKit catalog; the
 // e2e TestMerchantRolePermissionsInTheRunningCatalog covers them.
 func TestMerchantRoleCatalog(t *testing.T) {
-	for _, name := range []string{" OWNER ", "viewer", "support", "creator"} {
+	for _, name := range []string{" OWNER ", "viewer", "support"} {
 		role, ok := MerchantRole(name)
 		require.True(t, ok, name)
 		require.Equal(t, MerchantType, role.Persona())
 	}
 	_, ok := MerchantRole("superadmin")
 	require.False(t, ok)
-	require.Equal(t, []iam.Role{MerchantViewer, MerchantSupport, MerchantOwner}, MerchantAPIKeyRoles(), "machine keys cannot resolve a creator subject")
-	require.Equal(t, []string{"creator", "viewer", "support", "owner"}, RoleNames(MerchantRoles()), "the wire shows bare role names")
+	require.Equal(t, []string{"viewer", "support", "owner"}, RoleNames(MerchantRoles()), "the wire shows bare role names")
 }

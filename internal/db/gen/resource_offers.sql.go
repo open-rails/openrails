@@ -76,19 +76,18 @@ CROSS JOIN LATERAL (
  FROM billing.products product
  JOIN billing.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
  WHERE product.merchant_id=$4::uuid
-  AND ($5::uuid IS NULL OR product.catalog_id=$5::uuid)
   AND NOT product.archived AND NOT price.archived
   AND product.entitlements_spec ? wanted.entitlement
-  AND (($6::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
-    OR ($6::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
-    OR ($6::text='recurring' AND price.auto_renew))
+  AND (($5::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
+    OR ($5::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
+    OR ($5::text='recurring' AND price.auto_renew))
   AND (wanted.after_id='00000000-0000-0000-0000-000000000000'::uuid OR
-    (price.currency<>$7::text, price.currency, price.id) >
-    (wanted.after_currency<>$7::text, wanted.after_currency, wanted.after_id))
- ORDER BY price.currency<>$7::text, price.currency, price.id
- LIMIT $8::int
+    (price.currency<>$6::text, price.currency, price.id) >
+    (wanted.after_currency<>$6::text, wanted.after_currency, wanted.after_id))
+ ORDER BY price.currency<>$6::text, price.currency, price.id
+ LIMIT $7::int
 ) offer
-ORDER BY wanted.entitlement, offer.currency<>$7::text, offer.currency, offer.price_id
+ORDER BY wanted.entitlement, offer.currency<>$6::text, offer.currency, offer.price_id
 `
 
 type ListOffersForEntitlementsParams struct {
@@ -96,7 +95,6 @@ type ListOffersForEntitlementsParams struct {
 	AfterCurrencies   []string
 	AfterIds          []uuid.UUID
 	MerchantID        uuid.UUID
-	CatalogID         *uuid.UUID
 	Kind              string
 	PreferredCurrency string
 	PageLimit         int32
@@ -124,7 +122,6 @@ func (q *Queries) ListOffersForEntitlements(ctx context.Context, arg ListOffersF
 		arg.AfterCurrencies,
 		arg.AfterIds,
 		arg.MerchantID,
-		arg.CatalogID,
 		arg.Kind,
 		arg.PreferredCurrency,
 		arg.PageLimit,

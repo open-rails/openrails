@@ -13,7 +13,6 @@ import (
 type Product struct {
 	ID          uuid.UUID `json:"id"`
 	MerchantID  uuid.UUID `json:"merchant_id"`
-	CatalogID   uuid.UUID `json:"catalog_id"`
 	Key         string    `json:"key"`
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
@@ -329,7 +328,7 @@ func (p *Product) Summary() *billing.ProductSummary {
 // View is the product as the API shows it, without its prices.
 func (p *Product) View() billing.Product {
 	return billing.Product{
-		ID: billing.ProductID(p.ID), CatalogID: billing.CatalogID(p.CatalogID), Key: p.Key,
+		ID: billing.ProductID(p.ID), Key: p.Key,
 		DisplayName: p.DisplayName, Description: p.Description, EntitlementsSpec: p.EntitlementsSpec,
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,

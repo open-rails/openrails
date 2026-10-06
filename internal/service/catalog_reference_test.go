@@ -7,11 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/catalogscope"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,62 +71,4 @@ func TestStripeCatalogReferencePreflight(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Creator-scoped callers may manage only their own catalog's ordinary fields:
-// provider/entitlement/tier authority is refused before any side effect.
-func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
-	mid := billing.MerchantID(uuid.New())
-	ctx, err := catalogscope.WithOwner(merchant.WithID(t.Context(), mid), catalogscope.Scope{MerchantID: mid, CatalogID: uuid.New(), OwnerSubject: "作者/opaque subject?x=1"})
-	require.NoError(t, err)
-	svc := &Service{} // unwired: any DB/provider access would panic
-	tier, rank := "premium", 1
-	product, price := billing.ProductID(uuid.New()), billing.PriceID(uuid.New())
-	for name, call := range map[string]func() error{
-		"create entitlements": func() error {
-			_, err := svc.CreateProduct(ctx, billing.CreateProductParams{EntitlementsSpec: map[string]*int{}})
-			return err
-		},
-		"create tier": func() error {
-			_, err := svc.CreateProduct(ctx, billing.CreateProductParams{TierGroup: &tier})
-			return err
-		},
-		"patch entitlements": func() error {
-			_, err := svc.patchProduct(ctx, product, UpdateProductRequest{SetEntitlements: true})
-			return err
-		},
-		"patch tier rank": func() error {
-			_, err := svc.patchProduct(ctx, product, UpdateProductRequest{TierRank: &rank})
-			return err
-		},
-		"skip product sync": func() error {
-			_, err := svc.patchProduct(ctx, product, UpdateProductRequest{SkipRailSync: true})
-			return err
-		},
-		"choose PSP": func() error {
-			_, err := svc.CreatePrice(ctx, billing.CreatePriceParams{PSPs: []string{"stripe"}})
-			return err
-		},
-		"attach PSP": func() error {
-			_, err := svc.CreatePrice(ctx, billing.CreatePriceParams{PSPLinks: map[string]map[string]string{}})
-			return err
-		},
-		"link PSP": func() error {
-			_, err := svc.patchPrice(ctx, price, UpdatePriceRequest{PSPLinks: map[string]map[string]string{"stripe": {}}})
-			return err
-		},
-		"skip price sync": func() error {
-			_, err := svc.patchPrice(ctx, price, UpdatePriceRequest{SkipRailSync: true})
-			return err
-		},
-		"verify provider":   func() error { _, err := svc.VerifyPriceSync(ctx, uuid.New()); return err },
-		"reconcile price":   func() error { _, err := svc.ReconcilePrice(ctx, uuid.New(), ReconcileOptions{}); return err },
-		"reconcile product": func() error { _, err := svc.ReconcileProduct(ctx, uuid.New(), ReconcileOptions{}); return err },
-	} {
-		require.ErrorIs(t, call(), catalog.ErrOwnerOperation, name)
-	}
-	_, err = svc.CreateProduct(ctx, billing.CreateProductParams{CatalogID: billing.CatalogID(uuid.New())})
-	require.ErrorIs(t, err, catalog.ErrOwnerScope, "a creator cannot target another catalog")
-	_, err = svc.GetProduct(merchant.WithID(ctx, billing.MerchantID(uuid.New())), billing.ProductID(uuid.New()))
-	require.ErrorIs(t, err, catalog.ErrOwnerScope, "changing the merchant must not widen a captured owner scope")
 }

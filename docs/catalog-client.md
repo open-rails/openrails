@@ -2,13 +2,11 @@
 
 The same `*openrails.Client` comes from `openrails.New` (in process) and
 `openrails.NewRemote`. Catalog operations are flat methods on it with typed IDs
-(`billing.ProductID`, `billing.PriceID`, `billing.CatalogID`); each noun has one
+(`billing.ProductID`, `billing.PriceID`); each noun has one
 shape (`billing.Product`, `billing.Price`, `billing.Meter`) in Go and on the wire.
 
 ```go
-owner, err := client.ForCatalogOwner(authorID)
-if err != nil { return err }
-price, err := owner.CreatePrice(ctx, billing.CreatePriceParams{
+price, err := client.CreatePrice(ctx, billing.CreatePriceParams{
     ProductData: &billing.CreatePriceProduct{
         Key:         "post-" + billingKey,
         DisplayName: title,
@@ -25,8 +23,8 @@ Exactly one of `ProductID`, `ProductKey` and `ProductData` names the product.
 set labels deliberately through `UpdateProduct`.
 
 The inline operation commits its product and price together. Concurrent
-identical requests return the same product and price. A key owned by another
-catalog or an offer key with different financial terms is a conflict; invalid
+identical requests return the same product and price. An offer key with
+different financial terms is a conflict; invalid
 initial prices leave no orphan product. A price's terms never change: a new
 amount is a new price, and the same key with new terms archives its
 predecessor, so past checkouts stay valid.
@@ -71,7 +69,6 @@ provide navigation; verified provider events establish payment and access.
 ## What a host declares
 
 Declare the merchant in `Config.Merchant`, and a host whose `catalog.yaml` is the
-truth in `Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else,
-creator scoping through `client.ForCatalogOwner(subject)` included, is a Client
-method. See [embedding](embedded-integration.md) and the
+truth in `Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else is
+a Client method. See [embedding](embedded-integration.md) and the
 [merchant guide](merchant-guide.md).

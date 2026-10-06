@@ -31,8 +31,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   catalog mounts the route and generates `api/openapi.json`, the TypeScript wire types
   of billing-ui and the console, and `docs/api/routes.md` / `error-codes.md`.
 - Route groups: checkout, customer (`/v1/me`), one merchant group (`/v1/merchant`,
-  gated by permission, `Config.HTTP.Merchant`), creator catalogs (`/v1/catalog`),
-  webhooks, and the standalone control plane and platform.
+  gated by permission, `Config.HTTP.Merchant`), webhooks, and the standalone control
+  plane and platform.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).

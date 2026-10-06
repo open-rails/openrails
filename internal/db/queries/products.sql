@@ -2,12 +2,11 @@
 
 -- name: CreateProduct :execrows
 INSERT INTO billing.products (
-    id, merchant_id, catalog_id, key, display_name, description, entitlements_spec,
+    id, merchant_id, key, display_name, description, entitlements_spec,
     tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
-    sqlc.narg(catalog_id)::uuid,
     $2, $3, sqlc.narg(description), sqlc.narg(entitlements_spec),
     sqlc.narg(tier_group),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),
@@ -17,27 +16,26 @@ INSERT INTO billing.products (
 );
 
 -- name: GetProductByID :one
-SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetProductByKey :one
-SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1;
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1;
 
 -- name: ListProductsByIDs :many
-SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListActiveProducts :many
-SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived;
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived;
 
 -- name: ListAllProducts :many
 SELECT * FROM billing.products
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid
 ;
 
 -- name: ListProductsFiltered :many
 -- One keyset page, newest first: rows after (after_at, after_id).
 SELECT * FROM billing.products
 WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid)
   AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
@@ -54,5 +52,5 @@ UPDATE billing.products SET
     tier_rank = COALESCE(sqlc.narg(tier_rank)::int, tier_rank),
     archived = COALESCE(sqlc.narg(archived)::boolean, archived),
     updated_at = now()
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 RETURNING *;

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -29,7 +30,7 @@ func NewPriceService(db *db.DB) *PriceService {
 }
 
 func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
-	if _, _, err := queryCatalogScope(ctx); err != nil {
+	if _, err := merchant.Require(ctx); err != nil {
 		return err
 	}
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -42,7 +43,7 @@ func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
 }
 
 func (s *PriceService) createRow(ctx context.Context, price *models.Price) error {
-	mid, catalogID, err := queryCatalogScope(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
@@ -57,7 +58,6 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 	rows, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  price.ID,
 		MerchantID:          price.MerchantID,
-		CatalogID:           catalogID,
 		ProductID:           price.ProductID,
 		Archived:            price.Archived,
 		Amount:              price.Amount,
@@ -80,12 +80,12 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 }
 
 func (s *PriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error) {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	row, err := s.db.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, ID: id})
+	row, err := s.db.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -99,11 +99,11 @@ func (s *PriceService) GetWithProductByIDs(ctx context.Context, ids []uuid.UUID)
 	if len(ids) == 0 {
 		return out, nil
 	}
-	queryMerchant, catalogID, err := queryCatalogScope(ctx)
+	queryMerchant, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, Ids: ids})
+	rows, err := s.db.Gen(ctx).ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), Ids: ids})
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (s *PriceService) pricesFromGen(ctx context.Context, rows []gen.BillingPric
 }
 
 func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
@@ -146,7 +146,7 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 	// Archived included. The catalog converge relies on this to reconcile
 	// already-archived historical prices instead of re-creating them;
 	// GetActiveByProductID is the non-archived variant.
-	rows, err := s.db.Gen(ctx).ListPricesByProduct(ctx, gen.ListPricesByProductParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, ProductID: productID})
+	rows, err := s.db.Gen(ctx).ListPricesByProduct(ctx, gen.ListPricesByProductParams{MerchantID: queryMerchant.UUID(), ProductID: productID})
 	if err != nil {
 		return nil, err
 	}
@@ -154,12 +154,12 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 }
 
 func (s *PriceService) GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	rows, err := s.db.Gen(ctx).ListActivePricesByProductOrdered(ctx, gen.ListActivePricesByProductOrderedParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, ProductID: productID})
+	rows, err := s.db.Gen(ctx).ListActivePricesByProductOrdered(ctx, gen.ListActivePricesByProductOrderedParams{MerchantID: queryMerchant.UUID(), ProductID: productID})
 	if err != nil {
 		return nil, err
 	}
@@ -167,12 +167,12 @@ func (s *PriceService) GetActiveByProductID(ctx context.Context, productID uuid.
 }
 
 func (s *PriceService) GetAllActive(ctx context.Context) ([]*models.Price, error) {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	rows, err := s.db.Gen(ctx).ListAllActivePricesWithProduct(ctx, gen.ListAllActivePricesWithProductParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID})
+	rows, err := s.db.Gen(ctx).ListAllActivePricesWithProduct(ctx, queryMerchant.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -188,12 +188,12 @@ func (s *PriceService) GetAllActive(ctx context.Context) ([]*models.Price, error
 }
 
 func (s *PriceService) GetAll(ctx context.Context) ([]*models.Price, error) {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	rows, err := s.db.Gen(ctx).ListAllPricesWithProduct(ctx, gen.ListAllPricesWithProductParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID})
+	rows, err := s.db.Gen(ctx).ListAllPricesWithProduct(ctx, queryMerchant.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,6 @@ func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice,
 
 // PriceFilter contains optional filters for listing prices
 type PriceFilter struct {
-	CatalogID *uuid.UUID // Optional administrator selector; owner scope always wins.
 	Archived  *bool
 	Currency  string
 	ProductID *uuid.UUID
@@ -232,13 +231,9 @@ type PriceFilter struct {
 
 // List returns one keyset page of prices, newest first.
 func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billing.PageRequest) (billing.ListPage[*models.Price], error) {
-	queryMerchant, _, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return billing.ListPage[*models.Price]{}, queryScopeErr
-	}
-	catalogID, err := selectCatalogFilter(ctx, s.db, filter.CatalogID)
-	if err != nil {
-		return billing.ListPage[*models.Price]{}, err
 	}
 	limit, err := pagination.Limit(page)
 	if err != nil {
@@ -252,7 +247,7 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 	if filter.Currency != "" {
 		currency = &filter.Currency
 	}
-	rows, err := s.db.Gen(ctx).ListPricesFiltered(ctx, gen.ListPricesFilteredParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID,
+	rows, err := s.db.Gen(ctx).ListPricesFiltered(ctx, gen.ListPricesFilteredParams{MerchantID: queryMerchant.UUID(),
 		Archived: filter.Archived, Currency: currency, ProductID: filter.ProductID, AutoRenew: filter.AutoRenew,
 		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
 	if err != nil {
@@ -273,7 +268,7 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 }
 
 func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string) (*models.Price, error) {
-	mid, catalogID, err := queryCatalogScope(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +283,7 @@ func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string)
 	// Archived prices must still resolve here so grandfathered subscriptions
 	// keep billing.
 	row, err := s.db.Gen(ctx).GetPriceByNMIPlan(ctx, gen.GetPriceByNMIPlanParams{
-		MerchantID: mid.UUID(), CatalogID: catalogID, PspID: pspID,
+		MerchantID: mid.UUID(), PspID: pspID,
 		Rail:   rail,
 		PlanID: nmiPlanID,
 	})
@@ -304,7 +299,7 @@ func (s *PriceService) GetByCCBillPriceID(ctx context.Context, recurringBillingO
 	if ccbillPriceID == "" {
 		objectKind, ccbillPriceID = "flex", normalize.Trim(flexID)
 	}
-	mid, catalogID, err := queryCatalogScope(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +307,7 @@ func (s *PriceService) GetByCCBillPriceID(ctx context.Context, recurringBillingO
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).GetPriceWithProductByCCBillPriceID(ctx, gen.GetPriceWithProductByCCBillPriceIDParams{ObjectKind: objectKind, MerchantID: mid.UUID(), CatalogID: catalogID, PspID: pspID, CcbillPriceID: ccbillPriceID})
+	rows, err := s.db.Gen(ctx).GetPriceWithProductByCCBillPriceID(ctx, gen.GetPriceWithProductByCCBillPriceIDParams{ObjectKind: objectKind, MerchantID: mid.UUID(), PspID: pspID, CcbillPriceID: ccbillPriceID})
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +329,7 @@ func (s *PriceService) GetByCCBillPriceID(ctx context.Context, recurringBillingO
 }
 
 func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error) {
-	mid, catalogID, err := queryCatalogScope(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +337,7 @@ func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID str
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.db.Gen(ctx).GetPriceWithProductByStripePriceID(ctx, gen.GetPriceWithProductByStripePriceIDParams{MerchantID: mid.UUID(), CatalogID: catalogID, PspID: pspID, StripePriceID: stripePriceID})
+	row, err := s.db.Gen(ctx).GetPriceWithProductByStripePriceID(ctx, gen.GetPriceWithProductByStripePriceIDParams{MerchantID: mid.UUID(), PspID: pspID, StripePriceID: stripePriceID})
 	if err != nil {
 		return nil, err
 	}
@@ -389,12 +384,12 @@ func (s *PriceService) Activate(ctx context.Context, id uuid.UUID) error {
 
 // SetArchived sets the archived lifecycle flag on a price.
 func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
 	}
 
-	rows, err := s.db.Gen(ctx).UpdatePriceStatus(ctx, gen.UpdatePriceStatusParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID,
+	rows, err := s.db.Gen(ctx).UpdatePriceStatus(ctx, gen.UpdatePriceStatusParams{MerchantID: queryMerchant.UUID(),
 		ID:       id,
 		Archived: archived,
 	})
@@ -419,12 +414,12 @@ func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived b
 // price (the same substance, matched by matchPrice, now declared under a
 // different key string).
 func (s *PriceService) SetKey(ctx context.Context, id uuid.UUID, key string) error {
-	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
 	}
 
-	rows, err := s.db.Gen(ctx).UpdatePriceKey(ctx, gen.UpdatePriceKeyParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID,
+	rows, err := s.db.Gen(ctx).UpdatePriceKey(ctx, gen.UpdatePriceKeyParams{MerchantID: queryMerchant.UUID(),
 		ID:  id,
 		Key: key,
 	})
@@ -441,13 +436,8 @@ func (s *PriceService) SetKey(ctx context.Context, id uuid.UUID, key string) err
 // pgx.ErrNoRows if the key names no live price. At most one such row can
 // exist per (merchant, key) — enforced by prices_key_key.
 func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID, key string) (*models.Price, error) {
-	catalogID, err := queryCatalogMerchant(ctx, merchantID)
-	if err != nil {
-		return nil, err
-	}
 	row, err := s.db.Gen(ctx).GetCurrentPriceByKey(ctx, gen.GetCurrentPriceByKeyParams{
 		MerchantID: merchantID,
-		CatalogID:  catalogID,
 		Key:        key,
 	})
 	if err != nil {
@@ -459,13 +449,8 @@ func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID
 // ListChainByKey returns every row (archived + current) that has ever been
 // named by this key — the version chain.
 func (s *PriceService) ListChainByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error) {
-	catalogID, err := queryCatalogMerchant(ctx, merchantID)
-	if err != nil {
-		return nil, err
-	}
 	rows, err := s.db.Gen(ctx).ListPriceChainByKey(ctx, gen.ListPriceChainByKeyParams{
 		MerchantID: merchantID,
-		CatalogID:  catalogID,
 		Key:        key,
 	})
 	if err != nil {
@@ -478,13 +463,8 @@ func (s *PriceService) ListChainByKey(ctx context.Context, merchantID uuid.UUID,
 // #773's "all prior versions of key K", the reprice_all_prior_versions bulk
 // target set.
 func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error) {
-	catalogID, err := queryCatalogMerchant(ctx, merchantID)
-	if err != nil {
-		return nil, err
-	}
 	rows, err := s.db.Gen(ctx).ListPriorVersionsByKey(ctx, gen.ListPriorVersionsByKeyParams{
 		MerchantID: merchantID,
-		CatalogID:  catalogID,
 		Key:        key,
 	})
 	if err != nil {
@@ -505,13 +485,8 @@ func (s *PriceService) RecordAuthoredKeyMovement(ctx context.Context, merchantID
 // exactly once per genuine movement (new row, reactivation, or repoint), never
 // on a true no-op (same key, same already-current substance).
 func (s *PriceService) RecordKeyMovement(ctx context.Context, merchantID, priceID uuid.UUID, key string, effectiveAt time.Time) error {
-	catalogID, err := queryCatalogMerchant(ctx, merchantID)
-	if err != nil {
-		return err
-	}
 	rows, err := s.db.Gen(ctx).InsertPriceKeyMovement(ctx, gen.InsertPriceKeyMovementParams{
 		MerchantID:  merchantID,
-		CatalogID:   catalogID,
 		Key:         key,
 		PriceID:     priceID,
 		EffectiveAt: effectiveAt,
@@ -528,11 +503,11 @@ func (s *PriceService) RecordKeyMovement(ctx context.Context, merchantID, priceI
 // CurrentByProducts returns the current (non-archived) prices of each
 // product, cheapest first.
 func (s *PriceService) CurrentByProducts(ctx context.Context, productIDs []uuid.UUID) (map[uuid.UUID][]*models.Price, error) {
-	queryMerchant, catalogID, err := queryCatalogScope(ctx)
+	queryMerchant, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListCurrentPricesByProducts(ctx, gen.ListCurrentPricesByProductsParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, ProductIds: productIDs})
+	rows, err := s.db.Gen(ctx).ListCurrentPricesByProducts(ctx, gen.ListCurrentPricesByProductsParams{MerchantID: queryMerchant.UUID(), ProductIds: productIDs})
 	if err != nil {
 		return nil, err
 	}
@@ -550,10 +525,6 @@ func (s *PriceService) CurrentByProducts(ctx context.Context, productIDs []uuid.
 // ListKeyMovements returns one keyset page of a key's movement history,
 // most recent first.
 func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error) {
-	catalogID, err := queryCatalogMerchant(ctx, merchantID)
-	if err != nil {
-		return billing.ListPage[*models.PriceKeyMovement]{}, err
-	}
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return billing.ListPage[*models.PriceKeyMovement]{}, err
@@ -564,7 +535,6 @@ func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUI
 	}
 	rows, err := s.db.Gen(ctx).ListPriceKeyMovements(ctx, gen.ListPriceKeyMovementsParams{
 		MerchantID: merchantID,
-		CatalogID:  catalogID,
 		Key:        key,
 		AfterAt:    afterAt,
 		AfterID:    afterID,

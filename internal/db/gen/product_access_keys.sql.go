@@ -28,7 +28,6 @@ SELECT candidate.product_key::text AS product_key, p.id AS product_id, EXISTS (
 FROM unnest($4::text[]) AS candidate(product_key)
 LEFT JOIN billing.products p ON p.merchant_id = $1::uuid
  AND p.key = candidate.product_key
- AND ($5::uuid IS NULL OR p.catalog_id = $5::uuid)
 `
 
 type CheckProductAccessKeysParams struct {
@@ -36,7 +35,6 @@ type CheckProductAccessKeysParams struct {
 	CustomerID  uuid.UUID
 	AtTime      time.Time
 	ProductKeys []string
-	CatalogID   *uuid.UUID
 }
 
 type CheckProductAccessKeysRow struct {
@@ -53,7 +51,6 @@ func (q *Queries) CheckProductAccessKeys(ctx context.Context, arg CheckProductAc
 		arg.CustomerID,
 		arg.AtTime,
 		arg.ProductKeys,
-		arg.CatalogID,
 	)
 	if err != nil {
 		return nil, err

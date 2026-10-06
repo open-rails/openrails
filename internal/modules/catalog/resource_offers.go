@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -43,13 +44,13 @@ func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListPa
 	if len(preferred) > 16 || !utf8.ValidString(preferred) || strings.ContainsRune(preferred, 0) {
 		return nil, apperr.Invalidf("invalid preferred_currency")
 	}
-	mid, catalogID, err := queryCatalogScope(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	result := make(billing.OfferPages, len(keys))
 	scopes := make(map[string]string, len(keys))
-	arg := gen.ListOffersForEntitlementsParams{MerchantID: mid.UUID(), CatalogID: catalogID, Kind: string(params.Kind), PreferredCurrency: preferred, PageLimit: int32(params.Limit + 1)}
+	arg := gen.ListOffersForEntitlementsParams{MerchantID: mid.UUID(), Kind: string(params.Kind), PreferredCurrency: preferred, PageLimit: int32(params.Limit + 1)}
 	for _, key := range keys {
 		if strings.TrimSpace(key) == "" || len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
 			return nil, apperr.Invalidf("invalid entitlement key")
@@ -58,7 +59,7 @@ func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListPa
 			continue
 		}
 		result[key] = billing.ListPage[billing.Offer]{Items: []billing.Offer{}}
-		rawScope, _ := json.Marshal([]any{mid.String(), catalogID, key, params.Kind, preferred})
+		rawScope, _ := json.Marshal([]any{mid.String(), key, params.Kind, preferred})
 		digest := sha256.Sum256(rawScope)
 		scopes[key] = hex.EncodeToString(digest[:])
 		after, afterCurrency := uuid.Nil, ""

@@ -39,11 +39,11 @@ another kind's prefix is `400 invalid_param`.
 | Prefix | Resource | Prefix | Resource |
 |---|---|---|---|
 | `prod_` | product | `price_` | price |
-| `cat_` | catalog | `sub_` | subscription |
-| `pay_` | payment | `pm_` | payment method |
-| `inv_` | invoice | `psp_` | PSP |
-| `chk_` | checkout attempt | `ocs_` | checkout session |
-| `att_` | payment attempt | `cyc_` | rebill cycle |
+| `sub_` | subscription | `pay_` | payment |
+| `pm_` | payment method | `inv_` | invoice |
+| `psp_` | PSP | `chk_` | checkout attempt |
+| `ocs_` | checkout session | `att_` | payment attempt |
+| `cyc_` | rebill cycle | | |
 | `cgr_` | credit grant | `txn_` | credit transaction |
 | `ent_` | entitlement | `pa_` | product access |
 | `rep_` | reprice | `rpb_` | reprice batch |

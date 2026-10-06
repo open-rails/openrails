@@ -23,6 +23,14 @@ unbounded-many ListDeclarativeBillingPolicyBindings # billing_policy_bindings: d
 unbounded-many ListCatalogMeters                # catalog_meters: operator-declared, units per merchant
 unbounded-many ListDefaultCatalogRateCards      # catalog_rate_cards: declared default cards only; payer overrides excluded by the query
 unbounded-many ListMerchantSecretNames          # merchant_secrets: operator-declared credentials
+unbounded-many ListActiveProducts               # products: operator-declared catalog
+unbounded-many ListAllProducts                  # products: operator-declared catalog
+unbounded-many ListAllActivePricesWithProduct   # prices+products: operator-declared catalog
+unbounded-many ListAllPricesWithProduct         # prices+products: operator-declared catalog
+unbounded-many ListCurrentPricesByProducts      # prices+products: current prices of the named products
+unbounded-many ListLiveCatalogProducts          # products: the catalog dump, operator-declared
+unbounded-many ListLiveCatalogPricesWithPSPLinks # prices+bindings: the catalog dump, operator-declared
+unbounded-many ListCatalogProductRateCards      # catalog_rate_cards: declared product cards; payer overrides excluded by the query
 
 # Optional admin filters (`$n IS NULL OR col = $n`) on a paged listing: absent on
 # most calls so no index serves them generically; merchant index bounds the scan,

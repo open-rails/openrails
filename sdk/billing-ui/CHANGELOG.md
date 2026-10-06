@@ -53,6 +53,9 @@ Client
 - A `TierChange` has no `mode`, `url` or `payment`: a redirect is
   `next_action.url`. Generated list fields are `T[]`, never `null`.
 - A subscription's `access` windows are `starts_at` and `ends_at`.
+- A `Product` has no `catalog_id`. A refusal's code fixes its status:
+  `changeTier` answers a registered code for each condition, and a declined
+  tier-change charge is `card_declined` with `decline_reason`.
 
 ## Hosted checkout sessions
 

@@ -216,19 +216,6 @@ func TestIntegrationGate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Kind: billingauth.User, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
 
-	_, err = authorize(staff, allow, resolved("/v1/catalog"), billing.MerchantCatalogOwnRead)
-	requireGate(t, err, http.StatusForbidden)
-	owned := staff
-	owned.CustomerID = billing.CustomerID(uuid.New())
-	p, err = authorize(owned, allow, resolved("/v1/catalog"), billing.MerchantCatalogOwnRead)
-	require.NoError(t, err)
-	require.Equal(t, owned.CustomerID.String(), p.Subject, "personal catalogs key on the canonical customer, never the issuer subject")
-	withOwner := resolved("/v1/catalog")
-	withOwner.Header.Set("OpenRails-Catalog-Owner", "b3duZXI")
-	p, err = authorize(staff, allow, withOwner, billing.MerchantCatalogOwnRead)
-	require.NoError(t, err)
-	require.Empty(t, p.Subject, "an explicit owner leaves the live administrator check to the route")
-
 	machine := billingauth.Identity{Kind: billingauth.Machine, Issuer: "i", Permissions: []string{billing.MerchantCatalogRead}}
 	p, err = authorize(machine, allow, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
 	require.NoError(t, err)

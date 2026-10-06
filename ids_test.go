@@ -19,7 +19,6 @@ func TestTypedIDsHaveOneWireSpelling(t *testing.T) {
 		parse  func(string) (wireID, error)
 		of     func(uuid.UUID) wireID
 	}{
-		{billing.CatalogIDPrefix, func(s string) (wireID, error) { return billing.ParseCatalogID(s) }, func(u uuid.UUID) wireID { return billing.CatalogID(u) }},
 		{billing.ProductIDPrefix, func(s string) (wireID, error) { return billing.ParseProductID(s) }, func(u uuid.UUID) wireID { return billing.ProductID(u) }},
 		{billing.PriceIDPrefix, func(s string) (wireID, error) { return billing.ParsePriceID(s) }, func(u uuid.UUID) wireID { return billing.PriceID(u) }},
 		{billing.SubscriptionIDPrefix, func(s string) (wireID, error) { return billing.ParseSubscriptionID(s) }, func(u uuid.UUID) wireID { return billing.SubscriptionID(u) }},

@@ -92,7 +92,6 @@ var Tables = map[string]Table{
 	"custodians":                  {Class: State},
 	"psps":                        {Class: State},
 	"psp_customers":               {Class: State},
-	"catalogs":                    {Class: State},
 	"products":                    {Class: State},
 	"prices":                      {Class: State},
 	"price_psp_bindings":          {Class: State},

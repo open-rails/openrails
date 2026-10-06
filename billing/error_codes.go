@@ -85,7 +85,6 @@ const (
 	CodeHostMerchantMismatch                  = "host_merchant_mismatch"
 	CodeMerchantContextMismatch               = "merchant_context_mismatch"
 	CodeInvokerScopedPrincipal                = "invoker_scoped_principal"
-	CodeCatalogOwnerRequired                  = "catalog_owner_required"
 	CodeStepUpRequired                        = "step_up_required"
 	CodeStepUpUnavailable                     = "step_up_unavailable"
 	CodeAuthenticationUnavailable             = "authentication_unavailable"
@@ -166,7 +165,6 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeDelegatedMerchantUnresolved, 403, authz, "The delegated token's issuer resolves to no merchant."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
-	{CodeCatalogOwnerRequired, 403, authz, "The catalog owner could not be established from the credential or selector."},
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
@@ -293,9 +291,6 @@ var errorCodes = []ErrorCode{
 	{"trial_unsupported_on_rail", 400, invalid, "This rail cannot run a trial first phase."},
 	{"product_tier_group_conflict", 409, invalid, "A customer holds live subscriptions to more than one product of the tier group."},
 	{"product_tier_group_in_use", 409, invalid, "The tier group cannot change while a subscription has a plan change in flight."},
-	{"catalog_not_found", 404, invalid, "The catalog does not exist."},
-	{"catalog_owner_forbidden", 403, authz, "A catalog owner cannot change merchant-wide catalog settings."},
-	{"catalog_scope_mismatch", 403, authz, "The catalog scope does not match the authorized merchant and catalog."},
 	{"catalog_updates_disabled", 403, invalid, "Catalog updates over HTTP are disabled in this deployment."},
 	{"catalog_declared", 405, invalid, "The catalog is declared by the host; change the declaration and restart."},
 	{"catalog_application_conflict", 409, invalid, "The application id already committed with different content."},

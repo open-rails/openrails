@@ -198,43 +198,6 @@ func TestCatalogPatchSemantics(t *testing.T) {
 	}
 }
 
-// A creator's catalog: the creator writes products and prices in its own
-// catalog, created on its first write; the merchant finds it by owner; a
-// creator cannot set merchant-wide fields.
-func TestCreatorCatalog(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	for _, tp := range []topology{embedded, remote} {
-		subject := "creator/" + uuid.NewString()[:8]
-		owner, err := w.client[tp].ForCatalogOwner(subject)
-		require.NoError(t, err)
-		product, err := owner.CreateProduct(t.Context(), billing.CreateProductParams{Key: "c-" + uuid.NewString()[:8], DisplayName: "Creator post"})
-		require.NoError(t, err)
-		_, err = owner.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 3_000_000, Currency: "USD"})
-		require.NoError(t, err)
-		_, err = owner.CreateProduct(t.Context(), billing.CreateProductParams{Key: "c-" + uuid.NewString()[:8], DisplayName: "x", EntitlementsSpec: map[string]*int{"content:x": nil}})
-		requireCode(t, err, http.StatusForbidden, "catalog_owner_forbidden")
-
-		catalogs, err := w.client[tp].ListCatalogs(t.Context(), billing.CatalogListParams{OwnerSubject: subject})
-		require.NoError(t, err)
-		require.Len(t, catalogs.Items, 1)
-		require.Equal(t, product.CatalogID, catalogs.Items[0].ID)
-		ensured, err := w.client[tp].EnsureCatalog(t.Context(), billing.EnsureCatalogParams{OwnerSubject: subject})
-		require.NoError(t, err)
-		require.Equal(t, product.CatalogID, ensured.ID, "ensure returns the existing catalog")
-		got, err := w.client[tp].GetCatalog(t.Context(), ensured.ID)
-		require.NoError(t, err)
-		require.Equal(t, subject, *got.OwnerSubject)
-
-		own, err := owner.ListProducts(t.Context(), billing.ProductListParams{})
-		require.NoError(t, err)
-		require.Len(t, own.Items, 1, "a creator sees its own catalog only")
-		require.Len(t, own.Items[0].Prices, 1)
-		_, err = owner.ListCatalogs(t.Context(), billing.CatalogListParams{})
-		require.ErrorIs(t, err, billing.ErrDenied, "a creator client reaches its catalog only")
-	}
-}
-
 // Meters, their rate card and customer overrides: one RateOverride shape
 // whether listed by meter or by customer; deletes answer 204.
 func TestMetersAndRateOverrides(t *testing.T) {

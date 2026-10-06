@@ -34,7 +34,7 @@ that keeps merchant UUIDs uses `ForMerchantID`, or one client per merchant
 
 Both transports send exactly one `OpenRails-Merchant` header: a slug
 (`OpenRails-Merchant: alpha`) or a stable id (`OpenRails-Merchant: id:<uuid>`).
-Every merchant-scoped route (`/v1/merchant`, `/v1/catalog`, `/v1/me`) honors
+Every merchant-scoped route (`/v1/merchant`, `/v1/me`) honors
 it the same way: the server resolves the selector, authorizes
 the credential for that merchant, and only then pins it, before acquiring a
 merchant database connection or running business logic.
@@ -63,7 +63,6 @@ client, err := openrails.NewRemote(baseURL,
     }))
 ```
 
-Catalog owner (`ForCatalogOwner`) and customer selection are independent of
-merchant selection. In hosted platform billing the hosted merchant may be the
+Customer selection is independent of merchant selection. In hosted platform billing the hosted merchant may be the
 customer while the platform is the selling merchant; never substitute one for
 the other.

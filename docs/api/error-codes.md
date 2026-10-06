@@ -35,11 +35,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `card_requires_https` | 400 | `invalid_request_error` | Card data is accepted only over HTTPS. |
 | `catalog_application_conflict` | 409 | `invalid_request_error` | The application id already committed with different content. |
 | `catalog_declared` | 405 | `invalid_request_error` | The catalog is declared by the host; change the declaration and restart. |
-| `catalog_not_found` | 404 | `invalid_request_error` | The catalog does not exist. |
-| `catalog_owner_forbidden` | 403 | `authorization_error` | A catalog owner cannot change merchant-wide catalog settings. |
-| `catalog_owner_required` | 403 | `authorization_error` | The catalog owner could not be established from the credential or selector. |
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
-| `catalog_scope_mismatch` | 403 | `authorization_error` | The catalog scope does not match the authorized merchant and catalog. |
 | `catalog_updates_disabled` | 403 | `invalid_request_error` | Catalog updates over HTTP are disabled in this deployment. |
 | `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
 | `checkout_attempt_expired` | 410 | `invalid_request_error` | The checkout attempt expired before it was paid. |
@@ -67,6 +63,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `currency_unsupported` | 400 | `invalid_request_error` | The currency is not in OpenRails' registry. |
 | `custodian_capture_unavailable` | 503 | `api_error` | The card custodian cannot capture cards right now. |
 | `customer_action_required` | 403 | `authorization_error` | Only the customer may take this action, through their own step. |
+| `customer_email_required` | 400 | `invalid_request_error` | The rail needs the customer's verified email and username. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
@@ -81,6 +78,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `delegated_token_revoked` | 401 | `authentication_error` | The delegated access token was revoked. |
 | `delegated_verification_unavailable` | 503 | `api_error` | Delegated tokens cannot be verified right now; retry. |
 | `email_unverified` | 403 | `authorization_error` | Creating a merchant needs a verified email. |
+| `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
+| `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_merchant_mismatch` | 403 | `authorization_error` | The credential's merchant is not the one this host serves. |
@@ -151,6 +150,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_method_update_retry_required` | 409 | `invalid_request_error` | The card was not updated; tokenize it again. |
 | `payment_method_update_unsupported` | 400 | `invalid_request_error` | This payment method cannot be updated through OpenRails. |
 | `payment_not_found` | 404 | `invalid_request_error` | The payment or payment operation does not exist. |
+| `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permanent_grant_forbidden` | 403 | `authorization_error` | A grant with no end needs merchant:access:grant-permanent. |
@@ -179,6 +179,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `rate_card_product_not_found` | 404 | `invalid_request_error` | The rate card names a product that does not exist. |
 | `rate_limit_exceeded` | 429 | `rate_limit_error` | Too many requests; Retry-After says when to try again. |
 | `rebill_terms_committed` | 409 | `invalid_request_error` | An accepted recurring payment owns the pending price terms. |
+| `refund_failed` | 502 | `api_error` | The provider refused the refund. |
 | `refund_rail_unavailable` | 409 | `invalid_request_error` | The payment's rail cannot accept a refund right now. |
 | `refund_unsupported` | 400 | `invalid_request_error` | The payment's rail has no automatic refund. |
 | `rename_too_soon` | 429 | `invalid_request_error` | The merchant was renamed too recently. |
@@ -204,6 +205,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `service_credential_merchant_unresolved` | 403 | `authorization_error` | The service credential's issuer owns no merchant. |
 | `service_credential_resource_scope_denied` | 403 | `authorization_error` | The service credential is scoped to other resources. |
 | `service_unavailable` | 503 | `api_error` | A dependency is temporarily unavailable; retry. |
+| `solana_rpc_unavailable` | 502 | `api_error` | The Solana RPC endpoints did not answer; retry. |
+| `solana_transaction_refused` | 400 | `invalid_request_error` | The wallet transaction could not be prepared or confirmed; the message says why. |
 | `spend_delegation_not_found` | 404 | `invalid_request_error` | The spend delegation does not exist. |
 | `step_up_required` | 403 | `authorization_error` | The operation needs a recent sign-in; metadata carries the challenge. |
 | `step_up_unavailable` | 403 | `authorization_error` | The operation needs a recent sign-in and this credential cannot prove one. |
@@ -217,9 +220,12 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `tier_change_idempotency_key_required` | 400 | `invalid_request_error` | A tier change needs an Idempotency-Key. |
 | `tier_change_in_flight` | 409 | `invalid_request_error` | Another unresolved tier change owns the subscription; metadata.operation_id names it. |
 | `tier_change_period_unknown` | 422 | `invalid_request_error` | The subscription has no valid current period. |
+| `tier_change_provider_conflict` | 409 | `invalid_request_error` | The provider's copy of the subscription is missing or differs; reconcile it first. |
 | `tier_change_refused` | 409 | `invalid_request_error` | The tier change was refused and not executed. |
 | `tier_change_renewal_due` | 409 | `invalid_request_error` | The current period ended or its renewal is unresolved; the renewal settles first. |
-| `tier_change_requires_linked_plan` | 409 | `invalid_request_error` | The target price has no linked provider plan of the same amount and cycle. |
+| `tier_change_requires_linked_plan` | 409 | `invalid_request_error` | The target price has no plan on the subscription's PSP that this change can use. |
+| `tier_change_target_inactive` | 422 | `invalid_request_error` | The target price or its product is archived. |
+| `tier_change_unsupported_on_rail` | 400 | `invalid_request_error` | The subscription's rail cannot make this tier change. |
 | `trial_unsupported_on_rail` | 400 | `invalid_request_error` | This rail cannot run a trial first phase. |
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
 | `unknown_role` | 400 | `invalid_request_error` | The role is not one this merchant defines. |

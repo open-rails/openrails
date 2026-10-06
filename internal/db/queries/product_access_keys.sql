@@ -15,5 +15,4 @@ SELECT candidate.product_key::text AS product_key, p.id AS product_id, EXISTS (
 ) AS has_access
 FROM unnest(sqlc.arg(product_keys)::text[]) AS candidate(product_key)
 LEFT JOIN billing.products p ON p.merchant_id = sqlc.arg(merchant_id)::uuid
- AND p.key = candidate.product_key
- AND (sqlc.narg(catalog_id)::uuid IS NULL OR p.catalog_id = sqlc.narg(catalog_id)::uuid);
+ AND p.key = candidate.product_key;

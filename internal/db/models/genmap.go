@@ -173,7 +173,6 @@ func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 	m := &Product{
 		ID:          p.ID,
 		MerchantID:  p.MerchantID,
-		CatalogID:   p.CatalogID,
 		Key:         p.Key,
 		DisplayName: p.DisplayName,
 		Description: DerefStr(p.Description),

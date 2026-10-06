@@ -20,7 +20,6 @@ import (
 // keptUnchosen are non-unique indexes a generic plan on the probe's data
 // need not choose, kept for the plan a real deployment makes.
 var keptUnchosen = map[string]string{
-	"catalogs_created_at_id_idx":                               "a merchant's catalogs in page order; a creator platform holds one per creator",
 	"subscriptions_grace_ends_at_idx":                          "dunning past grace across merchants",
 	"subscriptions_next_retry_at_rail_idx":                     "dunning due across merchants",
 	"subscriptions_current_period_ends_at_next_retry_at_idx":   "a merchant's engine renewals due",
@@ -284,7 +283,7 @@ func fill(ctx context.Context, conn *pgx.Conn, merchants int) error {
 		size[t] = 1000
 	}
 	// A merchant has a PSP or two and one custodian of each kind.
-	for t, per := range map[string]int{"psps": 2, "custodians": 1, "catalogs": 1, "merchant_configurations": 1} {
+	for t, per := range map[string]int{"psps": 2, "custodians": 1, "merchant_configurations": 1} {
 		size[t] = per * merchants
 	}
 	n := func(table string) int {

@@ -9,17 +9,11 @@ INSERT INTO billing.price_key_movements (
     (owned_price.archived OR catalog_product.archived)
 FROM billing.prices owned_price JOIN billing.products catalog_product
   ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
-WHERE owned_price.merchant_id=sqlc.arg(merchant_id)::uuid AND owned_price.id=sqlc.arg(price_id)::uuid
-  AND (sqlc.narg(catalog_id)::uuid IS NULL OR catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid);
+WHERE owned_price.merchant_id=sqlc.arg(merchant_id)::uuid AND owned_price.id=sqlc.arg(price_id)::uuid;
 
 -- name: ListPriceKeyMovements :many
 SELECT * FROM billing.price_key_movements
-WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR EXISTS (
- SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product
- ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
- WHERE owned_price.merchant_id=price_key_movements.merchant_id AND owned_price.id=price_key_movements.price_id
- AND catalog_product.catalog_id=sqlc.narg(catalog_id)::uuid))
- AND merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text
  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (effective_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY effective_at DESC, id DESC
 LIMIT sqlc.arg(fetch_limit)::int;

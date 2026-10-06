@@ -108,15 +108,10 @@ const listCatalogProductRateCards = `-- name: ListCatalogProductRateCards :many
 SELECT rc.product_id::uuid AS product_id, rc.ordinal, rc.meter_key, rc.payment_term, rc.filter, rc.allowance, rc.price
 FROM billing.catalog_rate_cards rc
 JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
-WHERE rc.merchant_id = $1::uuid AND p.catalog_id = $2::uuid
+WHERE rc.merchant_id = $1::uuid
   AND rc.customer_id IS NULL
 ORDER BY rc.product_id, rc.ordinal
 `
-
-type ListCatalogProductRateCardsParams struct {
-	MerchantID uuid.UUID
-	CatalogID  uuid.UUID
-}
 
 type ListCatalogProductRateCardsRow struct {
 	ProductID   uuid.UUID
@@ -128,8 +123,8 @@ type ListCatalogProductRateCardsRow struct {
 	Price       []byte
 }
 
-func (q *Queries) ListCatalogProductRateCards(ctx context.Context, arg ListCatalogProductRateCardsParams) ([]ListCatalogProductRateCardsRow, error) {
-	rows, err := q.db.Query(ctx, listCatalogProductRateCards, arg.MerchantID, arg.CatalogID)
+func (q *Queries) ListCatalogProductRateCards(ctx context.Context, merchantID uuid.UUID) ([]ListCatalogProductRateCardsRow, error) {
+	rows, err := q.db.Query(ctx, listCatalogProductRateCards, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,14 +217,9 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.aut
        p.archived
 FROM billing.prices p
 JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
-WHERE p.merchant_id = $1::uuid AND product.catalog_id = $2::uuid AND NOT p.archived
+WHERE p.merchant_id = $1::uuid AND NOT p.archived
 ORDER BY p.product_id, p.amount, p.currency
 `
-
-type ListLiveCatalogPricesWithPSPLinksParams struct {
-	MerchantID uuid.UUID
-	CatalogID  uuid.UUID
-}
 
 type ListLiveCatalogPricesWithPSPLinksRow struct {
 	ProductID           uuid.UUID
@@ -244,8 +234,8 @@ type ListLiveCatalogPricesWithPSPLinksRow struct {
 	Archived            bool
 }
 
-func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, arg ListLiveCatalogPricesWithPSPLinksParams) ([]ListLiveCatalogPricesWithPSPLinksRow, error) {
-	rows, err := q.db.Query(ctx, listLiveCatalogPricesWithPSPLinks, arg.MerchantID, arg.CatalogID)
+func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchantID uuid.UUID) ([]ListLiveCatalogPricesWithPSPLinksRow, error) {
+	rows, err := q.db.Query(ctx, listLiveCatalogPricesWithPSPLinks, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,14 +269,9 @@ const listLiveCatalogProducts = `-- name: ListLiveCatalogProducts :many
 SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec,
        tier_group, tier_rank, archived
 FROM billing.products
-WHERE merchant_id = $1::uuid AND catalog_id = $2::uuid AND NOT archived
+WHERE merchant_id = $1::uuid AND NOT archived
 ORDER BY COALESCE(tier_group, ''), tier_rank, key
 `
-
-type ListLiveCatalogProductsParams struct {
-	MerchantID uuid.UUID
-	CatalogID  uuid.UUID
-}
 
 type ListLiveCatalogProductsRow struct {
 	ID               uuid.UUID
@@ -299,8 +284,8 @@ type ListLiveCatalogProductsRow struct {
 	Archived         bool
 }
 
-func (q *Queries) ListLiveCatalogProducts(ctx context.Context, arg ListLiveCatalogProductsParams) ([]ListLiveCatalogProductsRow, error) {
-	rows, err := q.db.Query(ctx, listLiveCatalogProducts, arg.MerchantID, arg.CatalogID)
+func (q *Queries) ListLiveCatalogProducts(ctx context.Context, merchantID uuid.UUID) ([]ListLiveCatalogProductsRow, error) {
+	rows, err := q.db.Query(ctx, listLiveCatalogProducts, merchantID)
 	if err != nil {
 		return nil, err
 	}

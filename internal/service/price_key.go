@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
@@ -43,9 +42,6 @@ func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req billing
 // row for that key. Used wherever checkout/API accept a price_key alongside a
 // price UUID.
 func (s *Service) GetPriceByKey(ctx context.Context, key string) (*billing.Price, error) {
-	if err := catalog.ValidateOwnerScope(ctx); err != nil {
-		return nil, err
-	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -88,9 +84,6 @@ func (s *Service) SetPriceKey(ctx context.Context, id billing.PriceID, key strin
 }
 
 func (s *Service) setPriceKey(ctx context.Context, id billing.PriceID, key string) (*billing.Price, error) {
-	if err := catalog.ValidateOwnerScope(ctx); err != nil {
-		return nil, err
-	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -146,9 +139,6 @@ func (s *Service) setPriceKey(ctx context.Context, id billing.PriceID, key strin
 // ListPriceKeyHistory returns one page of a price key's history, most recent
 // first: when the key moved to which price, or was retired.
 func (s *Service) ListPriceKeyHistory(ctx context.Context, key string, page billing.PageRequest) (billing.ListPage[billing.PriceKeyMovement], error) {
-	if err := catalog.ValidateOwnerScope(ctx); err != nil {
-		return billing.ListPage[billing.PriceKeyMovement]{}, err
-	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, pinErr

@@ -24,7 +24,7 @@ WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id IS NULL;
 SELECT rc.product_id::uuid AS product_id, rc.ordinal, rc.meter_key, rc.payment_term, rc.filter, rc.allowance, rc.price
 FROM billing.catalog_rate_cards rc
 JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
-WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND p.catalog_id = sqlc.arg(catalog_id)::uuid
+WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid
   AND rc.customer_id IS NULL
 ORDER BY rc.product_id, rc.ordinal;
 
@@ -70,7 +70,7 @@ SELECT catalog_revision FROM billing.merchants WHERE id = sqlc.arg(merchant_id):
 SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec,
        tier_group, tier_rank, archived
 FROM billing.products
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND catalog_id = sqlc.arg(catalog_id)::uuid AND NOT archived
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived
 ORDER BY COALESCE(tier_group, ''), tier_rank, key;
 
 -- name: ListLiveCatalogPricesWithPSPLinks :many
@@ -88,5 +88,5 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.aut
        p.archived
 FROM billing.prices p
 JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND product.catalog_id = sqlc.arg(catalog_id)::uuid AND NOT p.archived
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT p.archived
 ORDER BY p.product_id, p.amount, p.currency;

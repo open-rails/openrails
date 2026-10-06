@@ -17,7 +17,7 @@ func TestRequiresRecentSignIn(t *testing.T) {
 		billing.MerchantCreditsGrant: true, billing.MerchantBillingImport: true,
 		billing.MerchantBillingExport: true, billing.MerchantCredentialsManage: true,
 		billing.MerchantMembersManage: true, billing.MerchantAccessGrantPermanent: true,
-		billing.MerchantPaymentsRead: false, billing.MerchantCatalogOwnRead: false,
+		billing.MerchantPaymentsRead: false, billing.MerchantCatalogRead: false,
 		billing.MerchantDashboardUpdate: false, billing.MerchantHostEventsAcknowledge: false,
 	} {
 		require.Equal(t, want, billing.RequiresRecentSignIn(perm), perm)

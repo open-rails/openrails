@@ -39,8 +39,6 @@ var (
 	MerchantOwner = merchantPersona.Owner
 	CustomerOwner = customerPersona.Owner
 
-	MerchantCreator = merchantRole("creator",
-		billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate)
 	MerchantSupport = merchantRole("support",
 		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,
 		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
@@ -79,7 +77,6 @@ var catalogPerms = func() map[string]iam.Perm {
 		billing.MerchantSettingsRead, billing.MerchantSettingsUpdate,
 		billing.MerchantPSPsRead, billing.MerchantPSPsUpdate,
 		billing.MerchantCatalogRead, billing.MerchantCatalogUpdate,
-		billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate,
 		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,
 		billing.MerchantInvoicesRead, billing.MerchantInvoicesUpdate, billing.MerchantInvoicesCollect,
 		billing.MerchantCheckoutCreate,
@@ -105,15 +102,9 @@ func merchantRole(name string, perms ...string) iam.Role {
 	return merchantPersona.Role(name, grants...)
 }
 
-// MerchantRoles are the merchant team roles, least privilege first. Creator
-// is subject-bound: a merchant-scoped machine key cannot supply that identity.
-func MerchantRoles() []iam.Role {
-	return []iam.Role{MerchantCreator, MerchantViewer, MerchantSupport, MerchantOwner}
-}
-
-// MerchantAPIKeyRoles are the roles a merchant API key may hold, least
+// MerchantRoles are the roles a teammate or merchant API key may hold, least
 // privilege first.
-func MerchantAPIKeyRoles() []iam.Role {
+func MerchantRoles() []iam.Role {
 	return []iam.Role{MerchantViewer, MerchantSupport, MerchantOwner}
 }
 

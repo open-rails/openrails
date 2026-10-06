@@ -218,9 +218,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 			mw = append(mw, e.AdminLimiter.AdminRateLimitMW(route.Limit))
 		}
 		mw = append(mw, conn...)
-		if route.Group == CatalogOwned {
-			mw = append(mw, ownerCatalogScopeMW(e.Runtime, e.Gate))
-		}
 	case AuthOperator:
 		mw = []router.Middleware{e.platformPermissionMW(route.Perm)}
 	default:
@@ -397,13 +394,13 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
 }
 
-// RegisterMerchantRoutes mounts the merchant API and creator-owned catalogs,
-// each route gated by its merchant permission, on a router rooted at /v1.
+// RegisterMerchantRoutes mounts the merchant API, each route gated by its
+// merchant permission, on a router rooted at /v1.
 func RegisterMerchantRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient)
 	}
-	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Group == Merchant || r.Group == CatalogOwned })
+	newEnv(rt, opts).mount(rr, "/v1", in(Merchant))
 }
 
 // RegisterMerchantRoutesUnder mounts the merchant routes under prefix, on a

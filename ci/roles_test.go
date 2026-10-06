@@ -16,7 +16,7 @@ import (
 )
 
 // The merchant roles' authority is AuthKit's running catalog, not a copy:
-// support, viewer and creator hold no owner authority, and a non-user
+// support and viewer hold no owner authority, and a non-user
 // credential hands out only a role its grants cover.
 func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 	f := newFixture(t)
@@ -34,7 +34,6 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		return out
 	}
 	require.Equal(t, []string{billing.MerchantAll}, held(controlplane.MerchantOwner))
-	require.ElementsMatch(t, []string{billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate}, held(controlplane.MerchantCreator))
 	for _, p := range held(controlplane.MerchantViewer) {
 		require.True(t, strings.HasSuffix(p, ":read"), "viewer is read-only: %s", p)
 	}
@@ -44,7 +43,7 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		billing.MerchantMembersRead, billing.MerchantMembersManage, billing.MerchantBillingImport,
 		billing.MerchantBillingExport, billing.MerchantAdmissionsCreate, billing.MerchantCheckoutCreate,
 	}
-	for _, role := range []iam.Role{controlplane.MerchantCreator, controlplane.MerchantSupport, controlplane.MerchantViewer} {
+	for _, role := range []iam.Role{controlplane.MerchantSupport, controlplane.MerchantViewer} {
 		grants := held(role)
 		for _, p := range ownerOnly {
 			require.False(t, (&controlplane.ResolvedServiceCredential{Permissions: grants}).HasPermission(p), "%s must not hold %s", role, p)

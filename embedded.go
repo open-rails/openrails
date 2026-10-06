@@ -109,7 +109,7 @@ func (c *Client) Start(ctx context.Context) error {
 // Close stops the workers and closes the engine, leaving the host's pool,
 // Redis and Vault clients open. On a remote client it releases idle
 // connections. Only the Client that New or NewRemote returned closes: one
-// derived from it (With, ForCatalogOwner) shares its engine and transport, and
+// derived from it (With) shares its engine and transport, and
 // Close on it changes nothing and returns an error.
 func (c *Client) Close(ctx context.Context) error {
 	if c == nil {

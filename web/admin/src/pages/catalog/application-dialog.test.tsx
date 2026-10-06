@@ -12,7 +12,6 @@ let writesAllowed: boolean
 const receipt = (replayed = false) =>
   Response.json({
     application_id: "applied",
-    catalog_id: "cat-one",
     base_revision: 7,
     applied_revision: 8,
     replayed,

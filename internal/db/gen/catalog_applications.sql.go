@@ -23,7 +23,7 @@ func (q *Queries) AdvanceCatalogRevision(ctx context.Context, merchantID uuid.UU
 }
 
 const getCatalogApplication = `-- name: GetCatalogApplication :one
-SELECT merchant_id, application_id, catalog_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
+SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
 `
 
 type GetCatalogApplicationParams struct {
@@ -37,7 +37,6 @@ func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogAppli
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ApplicationID,
-		&i.CatalogID,
 		&i.SchemaVersion,
 		&i.RequestSha256,
 		&i.BaseRevision,
@@ -59,32 +58,14 @@ func (q *Queries) GetCatalogRevision(ctx context.Context, merchantID uuid.UUID) 
 	return catalog_revision, err
 }
 
-const getDefaultApplicationCatalog = `-- name: GetDefaultApplicationCatalog :one
-SELECT id, merchant_id, owner_subject, created_at, updated_at FROM billing.catalogs WHERE merchant_id=$1::uuid AND owner_subject IS NULL
-`
-
-func (q *Queries) GetDefaultApplicationCatalog(ctx context.Context, merchantID uuid.UUID) (BillingCatalog, error) {
-	row := q.db.QueryRow(ctx, getDefaultApplicationCatalog, merchantID)
-	var i BillingCatalog
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.OwnerSubject,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const insertCatalogApplication = `-- name: InsertCatalogApplication :exec
-INSERT INTO billing.catalog_applications (merchant_id,application_id,catalog_id,schema_version,request_sha256,base_revision,applied_revision,result)
-VALUES ($1::uuid,$2::text,$3::uuid,$4::bigint,$5::bytea,$6::bigint,$7::bigint,$8::jsonb)
+INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result)
+VALUES ($1::uuid,$2::text,$3::bigint,$4::bytea,$5::bigint,$6::bigint,$7::jsonb)
 `
 
 type InsertCatalogApplicationParams struct {
 	MerchantID      uuid.UUID
 	ApplicationID   string
-	CatalogID       uuid.UUID
 	SchemaVersion   int64
 	RequestSha256   []byte
 	BaseRevision    int64
@@ -96,7 +77,6 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 	_, err := q.db.Exec(ctx, insertCatalogApplication,
 		arg.MerchantID,
 		arg.ApplicationID,
-		arg.CatalogID,
 		arg.SchemaVersion,
 		arg.RequestSha256,
 		arg.BaseRevision,
@@ -143,6 +123,15 @@ func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalog
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const lockCatalogKey = `-- name: LockCatalogKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+func (q *Queries) LockCatalogKey(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockCatalogKey, lockKey)
+	return err
 }
 
 const lockCatalogRevision = `-- name: LockCatalogRevision :one

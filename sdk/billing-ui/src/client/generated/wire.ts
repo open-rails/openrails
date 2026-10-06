@@ -504,7 +504,6 @@ export type Price = {
 
 export type Product = {
   id: string
-  catalog_id: string
   key: string
   display_name: string
   description: string

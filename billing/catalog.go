@@ -6,29 +6,12 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// Catalog is one collection of a merchant's products: the merchant's own
-// (OwnerSubject null) or a creator's, named by the host's opaque subject.
-type Catalog struct {
-	ID           CatalogID `json:"id"`
-	OwnerSubject *string   `json:"owner_subject"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-// CatalogListParams lists the merchant's catalogs; OwnerSubject selects one
-// creator's.
-type CatalogListParams struct {
-	PageRequest
-	OwnerSubject string
-}
-
 // Product is something a customer buys: what owning it grants
 // (EntitlementsSpec) and, in Prices, its current prices. A product in a tier
 // group is one tier of a plan family, ranked by TierRank. Archived products
 // keep their purchases and subscribers but are not sold.
 type Product struct {
-	ID        ProductID `json:"id"`
-	CatalogID CatalogID `json:"catalog_id"`
+	ID ProductID `json:"id"`
 	// Key is the product's merchant-unique name.
 	Key         string `json:"key"`
 	DisplayName string `json:"display_name"`
@@ -46,11 +29,9 @@ type Product struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CreateProductParams creates a product. CatalogID selects a creator's
-// catalog; zero is the merchant's own. Archived creates it retired, for a
+// CreateProductParams creates a product. Archived creates it retired, for a
 // historical plan that still has subscribers.
 type CreateProductParams struct {
-	CatalogID        CatalogID       `json:"catalog_id,omitzero"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description,omitempty"`
@@ -77,7 +58,6 @@ type UpdateProductParams struct {
 // archived products.
 type ProductListParams struct {
 	PageRequest
-	CatalogID CatalogID
 	Archived  *bool
 	TierGroup string
 }
@@ -200,13 +180,11 @@ type CreatePriceParams struct {
 }
 
 // CreatePriceProduct creates the price's product when no product holds Key;
-// an existing product under Key is reused unchanged. CatalogID selects a
-// creator's catalog.
+// an existing product under Key is reused unchanged.
 type CreatePriceProduct struct {
-	CatalogID   CatalogID `json:"catalog_id,omitzero"`
-	Key         string    `json:"key"`
-	DisplayName string    `json:"display_name"`
-	Description string    `json:"description,omitempty"`
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description,omitempty"`
 }
 
 // UpdatePriceParams changes what about a price can change; omitted fields are
@@ -228,7 +206,6 @@ type GetPriceParams struct {
 // PriceListParams filters ListPrices. Nil Archived and AutoRenew list both.
 type PriceListParams struct {
 	PageRequest
-	CatalogID CatalogID
 	ProductID ProductID
 	Currency  string
 	AutoRenew *bool
@@ -241,9 +218,4 @@ type PriceKeyMovement struct {
 	EffectiveAt time.Time `json:"effective_at"`
 	Archived    bool      `json:"archived"`
 	Price       Price     `json:"price"`
-}
-
-// EnsureCatalogParams names the creator whose catalog EnsureCatalog returns.
-type EnsureCatalogParams struct {
-	OwnerSubject string `json:"owner_subject"`
 }

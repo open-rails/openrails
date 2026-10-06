@@ -248,7 +248,7 @@ in the background, with `Ready` failing until it commits. While declared, writes
 to the merchant's catalog (products, prices, meters, rate cards,
 `ApplyCatalog`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
 from every caller, the host included: the next boot would overwrite them.
-Creator-owned catalogs and negotiated customer rates stay writable.
+Negotiated customer rates stay writable.
 
 **Catalog authoring** (no `Config.Catalog`): storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
@@ -261,57 +261,6 @@ immutable financial versions; changing a price never silently reprices existing
 subscriptions. For dynamic products with host-owned Stripe credentials use
 `SecretBackend: openrails.SecretBackendSnapshot` with the account in
 `Config.Merchant`; rotate by updating configuration and constructing a new engine.
-
-### Creator-owned catalogs
-
-One merchant may have a default catalog and catalogs owned by opaque host
-subjects. Ordinary Client calls continue to create products in the default
-catalog unless an authorized administrator supplies `CreateProductParams.CatalogID`.
-Product and price keys remain unique within the merchant.
-
-For a creator, pass an identity obtained from your authenticated user:
-
-```go
-author, err := client.ForCatalogOwner(verifiedSubject)
-if err != nil { return err }
-product, err := author.CreateProduct(ctx, billing.CreateProductParams{
-    Key: "post-" + postID, DisplayName: title,
-})
-```
-
-The subject is a nonempty opaque string; it need not be a UUID or email. The
-library owns its catalog mapping and enforces creator scope on product/price
-reads, lists, edits, archiving and price-key history. Prices inherit their
-catalog from the product, and a purchased product cannot be moved to another
-catalog through an ordinary update. Content ACLs and authentication remain yours.
-
-`ForCatalogOwner` returns a catalog-only client. The server verifies its credential
-and requires administrator authority to select a different subject; a scoped
-client cannot switch owner or invoke merchant-wide operations. It
-supports product display/archive and price terms, not entitlement/tier definitions,
-raw provider bindings, provider selection, meters or bulk publishing. The engine
-selects applicable configured providers for creator prices. It does not create
-separate merchants, provider accounts, payout policies or checkout authority.
-
-HTTP hosts mount these endpoints with `HTTP.Merchant: true`, under
-`/v1/catalog`, with the same product, price and offer routes as
-`/v1/merchant/catalog`. A creator's first write creates its catalog. Native personal operations use the explicitly mapped canonical
-`Identity.CustomerID` as the owner key. Explicitly selecting a different owner
-requires the existing live catalog administrator check. Advanced delegated gates
-must return a verified `Principal.Subject`
-and authorize the narrow owner permission. If Subject is absent, the library
-uses only that Gate result's `UserContext.UserID`; both absent is a refusal.
-An owner ID in a body, query or ambient host context never supplies authority.
-`ForCatalogOwner` sends the subject in the `OpenRails-Catalog-Owner` header; a
-subject other than the credential's own needs administrator permission.
-
-Administrators keep `/v1/merchant/catalog/*` and use `EnsureCatalog`,
-`GetCatalog`, and `ListCatalogs` (`OwnerSubject` selects one creator's) under
-`/v1/merchant/catalogs`. Verify the admin
-permission separately; never impersonate another creator by constructing a
-CatalogClient from an owner read out of a product or content row. The optional
-OpenRails control-plane adapter includes a `creator` role with only the two owner
-grants; it is not assigned automatically.
 
 ### 6. Authentication and HTTP
 
@@ -366,7 +315,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | (always) | Capability discovery and signature-checked provider callbacks |
 | `Checkout` | Products, prices, checkout config and reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page. The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
 | `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`) |
-| `Merchant` | The merchant API (`/v1/merchant/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
+| `Merchant` | The merchant API (`/v1/merchant/*`), each route gated by its merchant permission; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
 slug). An advanced, delegated audience mounts a profile under its own `Prefix`
@@ -404,7 +353,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `HasEntitlement`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
 | Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |

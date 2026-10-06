@@ -22,7 +22,7 @@ func (s *Service) catalogDatabase() *db.DB {
 }
 
 // createPriceWithProduct owns the local product/price transaction. A natural
-// product key reuses an existing same-catalog product without changing labels;
+// product key reuses an existing product without changing labels;
 // each explicitly keyed immutable price can be retried concurrently.
 func (s *Service) createPriceWithProduct(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	if !req.ProductID.IsZero() || req.ProductKey != "" {
@@ -34,7 +34,6 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req billing.Create
 	if data.Key == "" || data.DisplayName == "" {
 		return nil, apperr.Invalidf("product_data requires key and display_name")
 	}
-	requested := data.CatalogID
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -49,7 +48,7 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req billing.Create
 		scoped := *s
 		scoped.catalogTx = s.catalogDatabase().NewWithPgxTx(tx)
 		scoped.localCatalogOnly = true
-		product, err := scoped.EnsureProduct(ctx, billing.CreateProductParams{CatalogID: requested, Key: data.Key, DisplayName: data.DisplayName, Description: data.Description})
+		product, err := scoped.EnsureProduct(ctx, billing.CreateProductParams{Key: data.Key, DisplayName: data.DisplayName, Description: data.Description})
 		if err != nil {
 			return err
 		}

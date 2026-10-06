@@ -54,7 +54,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Public: `/v1/products`, `/v1/prices`, `/v1/currencies`, `/v1/checkout-config`, `/v1/capabilities` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: `Authorization: DPoP <delegated token>` with a fresh `DPoP` proof, or a certificate-bound delegated bearer ([auth](../auth.md)) |
-| Merchant: `/v1/merchant/*`, `/v1/catalog/*` | `Authorization: Bearer` with an API key (`openrails_st_…`), a service JWT or a user session |
+| Merchant: `/v1/merchant/*` | `Authorization: Bearer` with an API key (`openrails_st_…`), a service JWT or a user session |
 | Control plane: `/v1/merchants`, the team and API-key routes | a signed-in user (standalone) |
 | Platform: `/v1/platform/*` | an operator session holding the root permission (standalone) |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
@@ -214,13 +214,6 @@ and archives the old one. `PATCH` on a price moves a key, archives or restores,
 and merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/merchant/catalog/drift` lists the open drift
 findings, each with the `psp_id` that was compared.
-
-A creator's own catalog uses `/v1/catalog` with the same product, price and
-offer routes, under `merchant:catalog:read-own` and
-`merchant:catalog:update-own`; it is created by the creator's first write. The
-owner is the credential's own subject, or the `OpenRails-Catalog-Owner` header
-an administrator sets (`Client.ForCatalogOwner`). Creators cannot set
-entitlements, tier groups or PSP links.
 
 ## PSPs
 

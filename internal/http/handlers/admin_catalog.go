@@ -30,14 +30,12 @@ func writeCatalogError(r *httprequest.Request, err error) {
 
 // ProductListQuery filters ListProducts.
 type ProductListQuery struct {
-	CatalogID billing.CatalogID `form:"catalog_id"`
-	Archived  *bool             `form:"archived"`
-	TierGroup string            `form:"tier_group"`
+	Archived  *bool  `form:"archived"`
+	TierGroup string `form:"tier_group"`
 }
 
 // PriceListQuery filters ListPrices.
 type PriceListQuery struct {
-	CatalogID billing.CatalogID `form:"catalog_id"`
 	ProductID billing.ProductID `form:"product_id"`
 	Currency  string            `form:"currency"`
 	AutoRenew *bool             `form:"auto_renew"`
@@ -106,7 +104,7 @@ func ListProducts(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, CatalogID: query.CatalogID, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup)})
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup)})
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -220,7 +218,7 @@ func ListPrices(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, CatalogID: query.CatalogID, ProductID: query.ProductID,
+	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, ProductID: query.ProductID,
 		Currency: query.Currency, AutoRenew: query.AutoRenew, Archived: query.Archived})
 	if err != nil {
 		writeCatalogError(r, err)
