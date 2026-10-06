@@ -1231,7 +1231,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			}
 			observedInstrument := charge.FreezeInstrument(method, subscription.PspID)
 			if method.CustodianID != nil {
-				handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
+				handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: models.DerefStr(method.RailMethodRef)}
 				if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
 					return err
 				}
@@ -1243,7 +1243,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			if err != nil {
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.Rail != string(subscription.Rail) || method.RailCustomerRef == "" || method.RailMethodRef == "" || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method, charge.AgreementRecurring) != nil {
+			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || method.ParkReason != nil || method.StoredCredentialRecurringRef == nil || method.Rail != string(subscription.Rail) || method.RailCustomerRef == nil || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method, charge.AgreementRecurring) != nil {
 				return fmt.Errorf("resume engine: payment method is unavailable")
 			}
 		}

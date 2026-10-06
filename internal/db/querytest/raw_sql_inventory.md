@@ -21,7 +21,7 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 ### Session state, advisory locks, and wrappers
 
 - `internal/db/db_pgx.go`, `internal/controlplane/customer.go`: `set_config`
-  of the `app.merchant_id` session setting. Keep raw because this is session
+  of the `openrails.merchant_id` session setting. Keep raw because this is session
   state, not a domain query.
 - `internal/db/schema_rewrite.go`: wrapper methods rewrite already-authored SQL
   before delegating to pgx/sqlc. Keep raw wrapper calls.

@@ -679,7 +679,7 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != "" {
+		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != nil {
 			return charge.ErrInstrumentChanged
 		}
 		if err = p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {

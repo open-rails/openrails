@@ -171,7 +171,7 @@ func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.Bil
 		return Parked("basistheory client is read-only (mode=readonly)")
 	}
 
-	jobRef := strings.TrimSpace(batch.JobRef)
+	jobRef := strings.TrimSpace(models.DerefStr(batch.JobRef))
 	var uploadURL string
 	if jobRef == "" {
 		// The BT-IDEMPOTENCY-KEY is the intent's own key: a create whose

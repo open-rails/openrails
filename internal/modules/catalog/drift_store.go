@@ -56,7 +56,7 @@ func PersistDrift(ctx context.Context, database *db.DB, desired []models.Catalog
 		}
 		open := make(map[driftKey]gen.BillingReconciliationFinding, len(rows))
 		for _, r := range rows {
-			open[driftKey{driftPSP(r.PspID), string(models.CatalogDriftKindOf(r.FindingType)), r.OpenrailsResourceType, driftText(r.OpenrailsResourceID), driftText(r.ExternalResourceID), driftText(r.Field)}] = r
+			open[driftKey{driftPSP(r.PspID), string(models.CatalogDriftKindOf(r.FindingType)), driftText(r.OpenrailsResourceType), driftText(r.OpenrailsResourceID), driftText(r.ExternalResourceID), driftText(r.Field)}] = r
 		}
 		seen := make(map[driftKey]bool, len(desired))
 		for _, e := range desired {
@@ -108,7 +108,7 @@ func covers(coverage []DriftCoverage, row gen.BillingReconciliationFinding) bool
 		if c.PSPID != driftPSP(row.PspID) {
 			continue
 		}
-		if c.Resource == nil || (string(c.Resource.Type) == row.OpenrailsResourceType && c.Resource.ID == driftText(row.OpenrailsResourceID)) {
+		if c.Resource == nil || (string(c.Resource.Type) == driftText(row.OpenrailsResourceType) && c.Resource.ID == driftText(row.OpenrailsResourceID)) {
 			return true
 		}
 	}

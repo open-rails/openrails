@@ -47,7 +47,7 @@ type GetCustomerCreditGrantRow struct {
 	Currency          string
 	Amount            int64
 	SourceType        string
-	SourceID          string
+	SourceID          *string
 	Reason            *string
 	StartsAt          time.Time
 	EndsAt            *time.Time
@@ -137,7 +137,7 @@ type ListCustomerCreditGrantsRow struct {
 	Currency          string
 	Amount            int64
 	SourceType        string
-	SourceID          string
+	SourceID          *string
 	Reason            *string
 	StartsAt          time.Time
 	EndsAt            *time.Time

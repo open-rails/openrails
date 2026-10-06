@@ -549,7 +549,7 @@ SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
        count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,
        count(*) FILTER (WHERE s.status = 'awaiting_method')::bigint AS awaiting_method,
        count(*) FILTER (WHERE s.status = 'unverified')::bigint AS unverified,
-       COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(COALESCE(v.since, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
+       COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(COALESCE(v.unverified_at, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
 FROM billing.subscriptions s
 LEFT JOIN billing.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
 WHERE s.merchant_id = $2::uuid
@@ -649,20 +649,20 @@ const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
 
 INSERT INTO billing.maintenance_runs (
-    merchant_id, kind, mode, rails, window_since, window_until, started_at, status
+    merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
 ) VALUES (
-    $1, 'reconciliation', $2, $3,
+    $1, 'reconciliation', $2::text, $3,
     $4, $5, now(), 'running'
 )
-RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type CreateReconciliationRunParams struct {
-	MerchantID  uuid.UUID
-	Mode        string
-	Rails       []string
-	WindowSince *time.Time
-	WindowUntil *time.Time
+	MerchantID     uuid.UUID
+	Mode           string
+	Rails          []string
+	WindowStartsAt *time.Time
+	WindowEndsAt   *time.Time
 }
 
 // #107 phase 2: reconciliation runs + findings persistence, the engine's
@@ -677,8 +677,8 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		arg.MerchantID,
 		arg.Mode,
 		arg.Rails,
-		arg.WindowSince,
-		arg.WindowUntil,
+		arg.WindowStartsAt,
+		arg.WindowEndsAt,
 	)
 	var i BillingMaintenanceRun
 	err := row.Scan(
@@ -689,8 +689,8 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
@@ -780,7 +780,7 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 }
 
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT 1
@@ -797,8 +797,8 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (BillingMainte
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
@@ -866,7 +866,7 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (B
 }
 
 const getReconciliationRun = `-- name: GetReconciliationRun :one
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=billing.current_merchant_id()
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=billing.current_merchant_id()
 `
 
 func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (BillingMaintenanceRun, error) {
@@ -880,8 +880,8 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Billi
 		&i.PspID,
 		&i.Mode,
 		&i.Rails,
-		&i.WindowSince,
-		&i.WindowUntil,
+		&i.WindowStartsAt,
+		&i.WindowEndsAt,
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
@@ -1728,7 +1728,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 }
 
 const listReconciliationRuns = `-- name: ListReconciliationRuns :many
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $1
@@ -1756,8 +1756,8 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 			&i.PspID,
 			&i.Mode,
 			&i.Rails,
-			&i.WindowSince,
-			&i.WindowUntil,
+			&i.WindowStartsAt,
+			&i.WindowEndsAt,
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Status,
@@ -1909,7 +1909,7 @@ type ListSubscriptionVaultRefsParams struct {
 
 type ListSubscriptionVaultRefsRow struct {
 	ID              uuid.UUID
-	RailCustomerRef string
+	RailCustomerRef *string
 }
 
 func (q *Queries) ListSubscriptionVaultRefs(ctx context.Context, arg ListSubscriptionVaultRefsParams) ([]ListSubscriptionVaultRefsRow, error) {
@@ -2096,7 +2096,7 @@ type ListUnknownSubscriptionsRow struct {
 	Rail                  string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
-	RailSubscriptionID    string
+	RailSubscriptionID    *string
 }
 
 // #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
@@ -2138,7 +2138,7 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 const listUnverifiedNMISubscriptionIDs = `-- name: ListUnverifiedNMISubscriptionIDs :many
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 ORDER BY current_period_ends_at NULLS FIRST
 LIMIT $2::bigint
 `
@@ -2173,7 +2173,7 @@ const listUnverifiedSubscriptionIDsForPSP = `-- name: ListUnverifiedSubscription
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
   AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 ORDER BY current_period_ends_at NULLS FIRST
 `
 
@@ -2206,7 +2206,7 @@ const listUnverifiedSubscriptionIDsIn = `-- name: ListUnverifiedSubscriptionIDsI
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 `
 
 type ListUnverifiedSubscriptionIDsInParams struct {
@@ -2236,7 +2236,7 @@ func (q *Queries) ListUnverifiedSubscriptionIDsIn(ctx context.Context, arg ListU
 
 const listUnverifiedSubscriptions = `-- name: ListUnverifiedSubscriptions :many
 SELECT s.id, s.psp_id, s.rail,
-       COALESCE(v.since, s.updated_at)::timestamptz AS since,
+       COALESCE(v.unverified_at, s.updated_at)::timestamptz AS unverified_at,
        COALESCE(v.reads, 0)::int AS reads, v.last_read_at
 FROM billing.subscriptions s
 LEFT JOIN billing.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
@@ -2255,12 +2255,12 @@ type ListUnverifiedSubscriptionsParams struct {
 }
 
 type ListUnverifiedSubscriptionsRow struct {
-	ID         uuid.UUID
-	PspID      uuid.UUID
-	Rail       string
-	Since      time.Time
-	Reads      int32
-	LastReadAt *time.Time
+	ID           uuid.UUID
+	PspID        uuid.UUID
+	Rail         string
+	UnverifiedAt time.Time
+	Reads        int32
+	LastReadAt   *time.Time
 }
 
 // LIFE life.unverified.* (#1094/#1096): unverified subscriptions with the
@@ -2278,7 +2278,7 @@ func (q *Queries) ListUnverifiedSubscriptions(ctx context.Context, arg ListUnver
 			&i.ID,
 			&i.PspID,
 			&i.Rail,
-			&i.Since,
+			&i.UnverifiedAt,
 			&i.Reads,
 			&i.LastReadAt,
 		); err != nil {
@@ -2491,8 +2491,8 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	ID              uuid.UUID
 	CustomerID      uuid.UUID
 	Rail            string
-	RailCustomerRef string
-	RailMethodRef   string
+	RailCustomerRef *string
+	RailMethodRef   *string
 	CardBrand       *string
 	CardLast4       *string
 	CardExpMonth    *int16
@@ -2714,7 +2714,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	ProductID                uuid.UUID
 	Status                   string
 	Rail                     string
-	RailSubscriptionID       string
+	RailSubscriptionID       *string
 	PaymentMethodID          *uuid.UUID
 	CurrentPeriodStartsAt    *time.Time
 	CurrentPeriodEndsAt      *time.Time
@@ -2806,7 +2806,7 @@ INSERT INTO billing.subscriptions (
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
-       $3, $4,
+       $3, NULLIF($4::text, ''),
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
@@ -2816,7 +2816,7 @@ JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM billing.subscriptions s
-      WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4
+      WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4::text
         AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
         -- or#893: every writer resolves a PSP now, including the declared
@@ -3035,24 +3035,24 @@ func (q *Queries) SetNMIBulkCheckpointPage(ctx context.Context, arg SetNMIBulkCh
 }
 
 const startNMIBulkCheckpoint = `-- name: StartNMIBulkCheckpoint :one
-INSERT INTO billing.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
+INSERT INTO billing.nmi_bulk_checkpoints (merchant_id, psp_id, window_starts_at, window_ends_at, next_page, started_at)
 VALUES ($1::uuid, $2::uuid, $3::timestamptz,
         $4::timestamptz, 1, $4::timestamptz)
 ON CONFLICT (merchant_id, psp_id) DO UPDATE SET merchant_id = EXCLUDED.merchant_id
-RETURNING since, until, next_page
+RETURNING window_starts_at, window_ends_at, next_page
 `
 
 type StartNMIBulkCheckpointParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	Since      time.Time
-	Until      time.Time
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	WindowStartsAt time.Time
+	WindowEndsAt   time.Time
 }
 
 type StartNMIBulkCheckpointRow struct {
-	Since    time.Time
-	Until    time.Time
-	NextPage int32
+	WindowStartsAt time.Time
+	WindowEndsAt   time.Time
+	NextPage       int32
 }
 
 // Resumes an interrupted bulk read, or starts one.
@@ -3060,11 +3060,11 @@ func (q *Queries) StartNMIBulkCheckpoint(ctx context.Context, arg StartNMIBulkCh
 	row := q.db.QueryRow(ctx, startNMIBulkCheckpoint,
 		arg.MerchantID,
 		arg.PspID,
-		arg.Since,
-		arg.Until,
+		arg.WindowStartsAt,
+		arg.WindowEndsAt,
 	)
 	var i StartNMIBulkCheckpointRow
-	err := row.Scan(&i.Since, &i.Until, &i.NextPage)
+	err := row.Scan(&i.WindowStartsAt, &i.WindowEndsAt, &i.NextPage)
 	return i, err
 }
 
@@ -3138,7 +3138,7 @@ INSERT INTO billing.reconciliation_findings (
     CASE WHEN $5::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
     $8, $8, $9::uuid,
     -- A pull finding carries its PSP's rail (the psps FK checks they agree).
-    COALESCE((SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid), '')
+    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid)
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,

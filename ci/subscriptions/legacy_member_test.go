@@ -171,7 +171,7 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 2)
 	for _, s := range subs.Items {
-		if s.RailSubscriptionID == railSub {
+		if str(s.RailSubscriptionID) == railSub {
 			return s.ID, railSub, ent
 		}
 	}

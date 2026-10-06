@@ -15,7 +15,7 @@ import (
 const completeCustodianMethodDelete = `-- name: CompleteCustodianMethodDelete :execrows
 UPDATE billing.provider_intents
 SET status = 'succeeded', result_evidence = $1::jsonb,
-    claimed_until = NULL, executed_at = $2::timestamptz,
+    lease_expires_at = NULL, executed_at = $2::timestamptz,
     updated_at = $2::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = $3::uuid AND id = $4::uuid
   AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')
@@ -79,7 +79,7 @@ const countNativeVaultAliases = `-- name: CountNativeVaultAliases :one
 SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
   AND custodian='psp' AND rail_customer_ref=$3::text
-  AND rail_customer_ref<>'' AND id<>$4::uuid
+  AND id<>$4::uuid
 `
 
 type CountNativeVaultAliasesParams struct {
@@ -158,7 +158,7 @@ UPDATE billing.payment_methods
 SET park_reason = 'delete:' || $1::uuid::text,
     parked_at = $2::timestamptz, updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND park_reason NOT LIKE 'delete:%'
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 `
 
 type FencePaymentMethodDeletionParams struct {
@@ -182,7 +182,7 @@ func (q *Queries) FencePaymentMethodDeletion(ctx context.Context, arg FencePayme
 }
 
 const listMethodDeletesForArchive = `-- name: ListMethodDeletesForArchive :many
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND status = 'succeeded'
   AND idempotency_key IN ('hyperswitch_method_delete:' || $2::uuid::text,
                           'nmi_vault_delete:' || $2::uuid::text)
@@ -217,7 +217,7 @@ func (q *Queries) ListMethodDeletesForArchive(ctx context.Context, arg ListMetho
 			&i.Status,
 			&i.Attempts,
 			&i.NextAttemptAt,
-			&i.ClaimedUntil,
+			&i.LeaseExpiresAt,
 			&i.Origin,
 			&i.OriginReason,
 			&i.Actor,
@@ -273,7 +273,7 @@ func (q *Queries) LockCustodianDeletionAccount(ctx context.Context, arg LockCust
 }
 
 const lockCustodianMethodDelete = `-- name: LockCustodianMethodDelete :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND intent_type = 'hyperswitch_method_delete'
 FOR UPDATE
@@ -300,7 +300,7 @@ func (q *Queries) LockCustodianMethodDelete(ctx context.Context, arg LockCustodi
 		&i.Status,
 		&i.Attempts,
 		&i.NextAttemptAt,
-		&i.ClaimedUntil,
+		&i.LeaseExpiresAt,
 		&i.Origin,
 		&i.OriginReason,
 		&i.Actor,
@@ -329,7 +329,7 @@ func (q *Queries) LockCustodianMethodHandle(ctx context.Context, lockKey string)
 }
 
 const lockNativeMethodDelete = `-- name: LockNativeMethodDelete :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND intent_type = 'nmi_vault_delete'
 FOR UPDATE
@@ -356,7 +356,7 @@ func (q *Queries) LockNativeMethodDelete(ctx context.Context, arg LockNativeMeth
 		&i.Status,
 		&i.Attempts,
 		&i.NextAttemptAt,
-		&i.ClaimedUntil,
+		&i.LeaseExpiresAt,
 		&i.Origin,
 		&i.OriginReason,
 		&i.Actor,

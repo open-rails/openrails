@@ -106,7 +106,7 @@ LIMIT sqlc.arg(batch_size)::int;
 -- name: UnblockSubscriptionReprice :execrows
 UPDATE billing.subscription_reprices SET
     status = 'scheduled',
-    blocked_reason = ''
+    blocked_reason = NULL
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'blocked';
 
 -- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice.

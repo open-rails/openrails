@@ -14,7 +14,7 @@ func TestClassify(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	policy := Policy{GraceDays: 7, AmountFloor: 1_000_000}
 	overdue := func(age time.Duration, amount int64, invoices int) Exposure {
-		return Exposure{OverdueSince: now.Add(-age), OverdueAmount: amount, OverdueInvoices: invoices}
+		return Exposure{OverdueStartedAt: now.Add(-age), OverdueAmount: amount, OverdueInvoices: invoices}
 	}
 	cases := []struct {
 		name   string

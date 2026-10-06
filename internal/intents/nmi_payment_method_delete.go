@@ -258,7 +258,7 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 		if err != nil {
 			return err
 		}
-		if intent.PspID == nil || !charge.ChargeableOn(row, *intent.PspID) || row.CustomerID != customer || row.Custodian != models.CustodianPSP || row.RailCustomerRef != p.RailCustomerRef || row.RailMethodRef != p.RailMethodRef || row.ParkReason != "delete:"+intent.ID.String() {
+		if intent.PspID == nil || !charge.ChargeableOn(row, *intent.PspID) || row.CustomerID != customer || row.Custodian != models.CustodianPSP || models.DerefStr(row.RailCustomerRef) != p.RailCustomerRef || models.DerefStr(row.RailMethodRef) != p.RailMethodRef || models.DerefStr(row.ParkReason) != "delete:"+intent.ID.String() {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if err := deletionMethodUnused(ctx, q, intent.MerchantID, p.PaymentMethodID, 1); err != nil {
@@ -334,7 +334,7 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		if current.Status != StatusInFlight && current.Status != StatusUnknownNeedsVerify {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		if method.CustomerID != customer || !charge.ChargeableOn(method, *current.PspID) || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.Rail != current.Rail || method.RailCustomerRef != p.RailCustomerRef || method.RailMethodRef != p.RailMethodRef {
+		if method.CustomerID != customer || !charge.ChargeableOn(method, *current.PspID) || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.Rail != current.Rail || models.DerefStr(method.RailCustomerRef) != p.RailCustomerRef || models.DerefStr(method.RailMethodRef) != p.RailMethodRef {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})

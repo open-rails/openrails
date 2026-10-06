@@ -59,7 +59,7 @@ FROM (
     (SELECT DISTINCT nh.merchant_id AS mid
        FROM billing.nmi_history_months nh
       WHERE (sqlc.narg(after)::uuid IS NULL OR nh.merchant_id > sqlc.narg(after)::uuid)
-        AND nh.month < sqlc.arg(attempt_cutoff)::timestamptz
+        AND nh.month_at < sqlc.arg(attempt_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT st.merchant_id AS mid
@@ -167,7 +167,7 @@ FROM billing.month_partitions(sqlc.arg(table_name)::name) m;
 -- declares (billing.guard_retention_delete). Their sweeps count the period on
 -- the database clock, the one the trigger reads.
 -- name: DeclareRetentionSweep :exec
-SELECT set_config('openrails.retention', sqlc.arg(table_name)::text, true);
+SELECT set_config('openrails.retention_table', sqlc.arg(table_name)::text, true);
 
 -- name: DeleteSubscriptionTransitionsPastRetention :execrows
 DELETE FROM billing.subscription_status_transitions

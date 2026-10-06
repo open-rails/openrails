@@ -515,8 +515,8 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 	}
 
 	out.PaymentMethodID = &existing.ID
-	out.FromRailCustomerRef = existing.RailCustomerRef
-	out.FromRailMethodRef = existing.RailMethodRef
+	out.FromRailCustomerRef = models.DerefStr(existing.RailCustomerRef)
+	out.FromRailMethodRef = models.DerefStr(existing.RailMethodRef)
 
 	if !strings.EqualFold(existing.Rail, p.sourceRail) {
 		out.Outcome, out.Reason = OutcomeBlocked, ReasonRailMismatch
@@ -527,7 +527,7 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 		return out, nil
 	}
 	if existing.CustodianID != nil && *existing.CustodianID == p.custodian.ID {
-		if existing.RailMethodRef == token {
+		if models.DerefStr(existing.RailMethodRef) == token {
 			out.Outcome = OutcomeAlreadyMigrated
 			return out, nil
 		}

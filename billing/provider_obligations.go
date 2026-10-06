@@ -124,8 +124,8 @@ const (
 type ProviderBillingLifecycleEvidence struct {
 	Provider                 string    `json:"provider"`
 	ProviderResourceID       string    `json:"provider_resource_id"`
-	ProviderLifetimeStart    time.Time `json:"provider_lifetime_start"`
-	ProviderLifetimeEnd      time.Time `json:"provider_lifetime_end"`
+	ProviderLifetimeStartsAt time.Time `json:"provider_lifetime_starts_at"`
+	ProviderLifetimeEndsAt   time.Time `json:"provider_lifetime_ends_at"`
 	ProviderAbsentAt         time.Time `json:"provider_absent_at"`
 	ProviderAbsenceReference string    `json:"provider_absence_reference"`
 	BillingStopReference     string    `json:"billing_stop_reference"`
@@ -167,8 +167,8 @@ type RecordProviderBillingObservationParams struct {
 	ObservationID   string                             `json:"observation_id"`
 	Lifecycle       ProviderBillingLifecycleEvidence   `json:"lifecycle"`
 	NormalizedQuery string                             `json:"normalized_query"`
-	QueryStart      time.Time                          `json:"query_start"`
-	QueryEnd        time.Time                          `json:"query_end"`
+	QueryStartsAt   time.Time                          `json:"query_starts_at"`
+	QueryEndsAt     time.Time                          `json:"query_ends_at"`
 	RawBody         []byte                             `json:"raw_body"`
 	Records         []ProviderBillingRecord            `json:"records"`
 	Refusal         *ProviderBillingObservationRefusal `json:"refusal"`

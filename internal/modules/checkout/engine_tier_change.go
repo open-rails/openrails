@@ -107,7 +107,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != terms.CustomerID || !charge.ChargeableOn(method, terms.PSPID) || method.Rail != string(existingSub.Rail) || method.ParkReason != "" {
+		if method.CustomerID != terms.CustomerID || !charge.ChargeableOn(method, terms.PSPID) || method.Rail != string(existingSub.Rail) || method.ParkReason != nil {
 			return charge.ErrInstrumentChanged
 		}
 		var binding *charge.HyperSwitchBinding

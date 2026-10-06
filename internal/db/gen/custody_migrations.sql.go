@@ -188,10 +188,10 @@ INSERT INTO billing.custody_migrations (
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::text,
     $5::text, $6::uuid,
-    $7::text, $8::text, $9::uuid,
+    NULLIF($7::text, ''), NULLIF($8::text, ''), $9::uuid,
     $10::text, $11::uuid, $12::text,
     $13::uuid,
-    $14::timestamptz, $15::text, $16::text
+    $14::timestamptz, $15::text, NULLIF($16::text, '')
 )
 RETURNING id, merchant_id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id, from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id, to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at
 `
@@ -265,9 +265,9 @@ UPDATE billing.payment_methods SET
     rail_method_ref = $3::text,
     fingerprint = COALESCE(NULLIF($4::text, ''), fingerprint),
     charge_via = COALESCE(NULLIF($5::text, ''), 'pan_proxy'),
-    network_token_id = $6::text,
-    network_token_status = $7::text,
-    network_token_par = $8::text,
+    network_token_id = NULLIF($6::text, ''),
+    network_token_status = NULLIF($7::text, ''),
+    network_token_par = NULLIF($8::text, ''),
     psp_id = NULL,
     card_brand = COALESCE($9::text, card_brand),
     card_last4 = COALESCE($10::text, card_last4),

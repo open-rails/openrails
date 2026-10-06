@@ -4,7 +4,7 @@
 
 -- name: CreateMerchantWebhook :one
 INSERT INTO billing.merchant_webhooks (id, merchant_id, name, destination_host, secret_version, format, enabled)
-VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(name), sqlc.arg(destination_host), sqlc.arg(secret_version)::integer, sqlc.arg(format), sqlc.arg(enabled))
+VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, NULLIF(sqlc.arg(name)::text, ''), sqlc.arg(destination_host), sqlc.arg(secret_version)::integer, sqlc.arg(format), sqlc.arg(enabled))
 RETURNING *;
 
 -- name: RotateMerchantWebhookURL :one
@@ -34,7 +34,7 @@ DELETE FROM billing.merchant_webhooks WHERE merchant_webhooks.merchant_id = sqlc
 -- A given id makes the write idempotent: a second write of it is a no-op.
 -- name: CreateMerchantNotification :execrows
 INSERT INTO billing.notifications (merchant_id, id, recipient_kind, event_type, severity, title, body, link, data)
-VALUES (sqlc.arg(merchant_id)::uuid, COALESCE(sqlc.narg(id)::uuid, uuidv7()), 'merchant', 'operator.alert', sqlc.arg(severity)::text, sqlc.arg(title)::text, sqlc.arg(body)::text, sqlc.arg(link)::text, COALESCE(sqlc.narg(data)::jsonb, '{}'::jsonb))
+VALUES (sqlc.arg(merchant_id)::uuid, COALESCE(sqlc.narg(id)::uuid, uuidv7()), 'merchant', 'operator.alert', sqlc.arg(severity)::text, sqlc.arg(title)::text, sqlc.arg(body)::text, NULLIF(sqlc.arg(link)::text, ''), COALESCE(sqlc.narg(data)::jsonb, '{}'::jsonb))
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
 -- name: ListMerchantNotifications :many

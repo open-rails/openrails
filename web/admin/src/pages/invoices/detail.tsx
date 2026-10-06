@@ -185,8 +185,8 @@ export function InvoiceDetail({ invoice }: { invoice: Invoice }) {
         </CardHeader>
         <CardContent className="grid gap-3 text-sm md:grid-cols-2">
           <p>
-            Period: {formatDate(invoice.period_from)} –{" "}
-            {formatDate(invoice.period_to)}
+            Period: {formatDate(invoice.period_starts_at)} –{" "}
+            {formatDate(invoice.period_ends_at)}
           </p>
           <p>Issued: {formatDate(invoice.issued_at)}</p>
           <p>Due: {formatDate(invoice.due_at)}</p>

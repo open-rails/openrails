@@ -18,7 +18,7 @@ func TestDelinquencyWire(t *testing.T) {
 	entered := time.Date(2026, 9, 16, 12, 0, 0, 123456789, time.FixedZone("x", 3600))
 	since := entered.Add(-time.Hour)
 	raw, err := json.Marshal(delinquencyFromSnapshot(DelinquencySnapshot{
-		CustomerID: customer, Currency: "USD", State: delinquency.StateDelinquent, OverdueSince: &since,
+		CustomerID: customer, Currency: "USD", State: delinquency.StateDelinquent, OverdueStartedAt: &since,
 		OverdueAmount: 9007199254740993, OverdueInvoices: 2, EnteredAt: entered, EvaluatedAt: entered,
 	}))
 	require.NoError(t, err)
@@ -27,5 +27,5 @@ func TestDelinquencyWire(t *testing.T) {
 	require.Equal(t, customer.String(), wire["customer_id"])
 	require.Equal(t, "9007199254740993", wire["overdue_amount"])
 	require.Equal(t, "2026-09-16T11:00:00.123456789Z", wire["entered_at"])
-	require.Equal(t, "2026-09-16T10:00:00.123456789Z", wire["overdue_since"])
+	require.Equal(t, "2026-09-16T10:00:00.123456789Z", wire["overdue_started_at"])
 }

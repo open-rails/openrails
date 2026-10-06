@@ -22,6 +22,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -189,7 +190,7 @@ func (s *Store) Get(ctx context.Context, id string, now time.Time) (Session, err
 	if err != nil {
 		return Session{}, err
 	}
-	out := Session{ID: id, CustomerID: row.CustomerID, PriceID: row.PriceID, SuccessURL: row.SuccessUrl, Origin: row.Origin,
+	out := Session{ID: id, CustomerID: row.CustomerID, PriceID: row.PriceID, SuccessURL: models.DerefStr(row.SuccessUrl), Origin: models.DerefStr(row.Origin),
 		Attempt: row.Attempt, AttemptID: row.AttemptID, ExpiresAt: row.ExpiresAt}
 	if err := json.Unmarshal(row.Offer, &out.Offer); err != nil {
 		return Session{}, fmt.Errorf("decode checkout offer: %w", err)

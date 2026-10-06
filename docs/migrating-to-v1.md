@@ -135,7 +135,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
 | `CheckCatalogDrift` | `client.RefreshCatalogDrift(` |
-| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchasedSince` and `WindowSeconds` |
+| `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchaseWindowStartsAt` and `WindowSeconds` |
 
 ### Checkout
 
@@ -192,6 +192,8 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
+| `Subscription.RailSubscriptionID`, `SpendDelegation.Provenance`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |
+| `Invoice.PeriodFrom`, `PeriodTo`; `InvoiceListParams.PeriodFrom`, `PeriodTo` | `PeriodStartsAt`, `PeriodEndsAt`; the list filters are `PeriodStartsAfter` (inclusive) and `PeriodStartsBefore` (exclusive) |
 
 ### PSPs, configuration and operations
 
@@ -319,6 +321,17 @@ fields (`400 unknown_field`), and every error code is in
   `owed_amount`, `billing_mode`.
 - **Entitlements.** `ent_` ids, `starts_at`, `ends_at`; `/v1/me/entitlements` is
   a page.
+- **Absent is null.** `Subscription.rail_subscription_id` (an engine-collected
+  subscription has none), `SpendDelegation.provenance`, `CreditGrant.source_id`
+  and `AlertWebhook.name` are `null` when absent, no longer `""`.
+- **Instants end in `_at`.** Invoices: `period_starts_at`, `period_ends_at`,
+  and the list filters `period_starts_after`, `period_starts_before` (were
+  `period_from`, `period_to`). Delinquency, its host event and its
+  notifications: `overdue_started_at` (was `overdue_since`). The renewal
+  notification: `period_starts_at`, `period_ends_at` (were `period_start`,
+  `period_end`). Product archives: `purchase_window_starts_at` (was
+  `purchased_since`). Cost observations: `query_starts_at`, `query_ends_at`;
+  lifecycle evidence: `provider_lifetime_starts_at`, `provider_lifetime_ends_at`.
 - **Notifications.** Unread is `{unread_count}`; marking read answers the
   notification.
 - **Ids.** `psp_`, `chk_`, `cgr_`, `txn_`, `ent_`, `pa_`, `rep_`, `rpb_`, `awh_`,
@@ -387,4 +400,10 @@ up there.
 | `payments.rail` holding `manual` or `admin` | `payments.channel` (`rail`, `manual`); `rail` is null off-channel |
 | `catalogs`; `products.catalog_id`, `catalog_applications.catalog_id` | Removed: a merchant has one catalog, `billing.products` keyed by `merchant_id` |
 | `entitlements.start_at`, `end_at` | `starts_at`, `ends_at` |
+| Instant columns without `_at`: `invoices.period_from`, `period_to`; `metered_rating_watermarks.period_from`, `rated_through`; `customer_delinquency.overdue_since`; `maintenance_runs.window_since`, `window_until`; `nmi_bulk_checkpoints.since`, `until`; `nmi_history_months.month`; `payment_method_updates.at`; `product_archive_operations.purchased_since`; `provider_intents.claimed_until`; `solana_pay_references.settle_until`, `watch_until`; `solana_subscriptions.last_pulled_period_start`; `subscription_status_transitions.from_paid_through`, `to_paid_through`; `subscription_verifications.since`; `cost_observations.query_start`, `query_end`; `cost_qualifications.provider_lifetime_start`, `provider_lifetime_end` | In the same order: `period_starts_at`, `period_ends_at`; `period_starts_at`, `rated_through_at`; `overdue_started_at`; `window_starts_at`, `window_ends_at`; `window_starts_at`, `window_ends_at`; `month_at`; `occurred_at`; `purchase_window_starts_at`; `lease_expires_at`; `expires_at`, `watch_ends_at`; `last_pulled_period_starts_at`; `from_current_period_ends_at`, `to_current_period_ends_at`; `unverified_at`; `query_starts_at`, `query_ends_at`; `provider_lifetime_starts_at`, `provider_lifetime_ends_at`. Every `timestamptz` column ends in `_at` |
+| Session settings `app.merchant_id`, `app.billing_restore_id`, `app.catalog_batch`, `billing.decision`, `openrails.retention` | One namespace: `openrails.merchant_id`, `openrails.billing_restore_id`, `openrails.catalog_batch_merchant_id`, `openrails.subscription_decision`, `openrails.retention_table`. A host that sets the merchant for `billing.current_merchant_id()` sets `openrails.merchant_id` |
+| Column defaults: `CURRENT_TIMESTAMP` beside `now()`; defaults on columns every OpenRails writer sets (statuses, amounts and counters, flags, jsonb documents, fact times such as `payments.purchased_at`, `subscriptions.started_at`, `grants.starts_at`) | Ids default to `uuidv7()` and creation times to `now()`; every other column without a default in `api/schema.txt` must be named by a raw `INSERT` (`merchants.status`, `grants.event`, `subscriptions.status`, `collection_policy`, `started_at`, …). `payments.money_movement` keeps its fail-closed `'none'` |
+| `products.tier_group`, `subscriptions.tier_group` as `varchar(100)` | `text`; `products_tier_group_check` bounds a group name to 1–100 characters, and an empty name is stored as NULL (no group) |
+| `''` for an absent value, with `DEFAULT ''`: `subscriptions.rail_subscription_id`; `payment_methods.rail_customer_ref`, `rail_method_ref`, `stored_credential_recurring_ref`, `stored_credential_unscheduled_ref`, `fingerprint`, `network_token_id`, `network_token_status`, `network_token_par`, `park_reason`; `checkout_sessions.success_url`, `origin`; `grants.source_id`; `custody_migrations.from_rail_customer_ref`, `from_rail_method_ref`, `reason`; `invoker_spend_limits.provenance`; `maintenance_runs.actor`, `mode`; `merchant_webhooks.name`; `notifications.severity`, `title`, `body`, `link`; `product_archive_operations.reason`; `reconciliation_findings.rail`, `openrails_resource_type`; `reprice_batches.fallback_policy`; `subscription_reprices.blocked_reason`; `account_updater_batches.job_ref`, `failure_reason` | NULL when absent, no default; a CHECK refuses `''`. A query that matched `= ''` matches `IS NULL`, and `<> ''` becomes `IS NOT NULL`. `payment_attempts.step` and `nmi_history_months.reason` keep `''` (part of a key) |
 | Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |
+| PostgreSQL-generated and placeholder names: `admission_operations_check`, `_check1`, `_check2`, `admission_operations_merchant_id_customer_id_fkey`, `catalog_applications_check`, `product_archive_operations_check`, `product_archive_operations_merchant_id_idempotency_key_key`, `product_archive_operations_merchant_id_product_id_fkey`, `maintenance_runs_x_check`; indexes and checks named after a renamed column | Named by the same convention, e.g. `admission_operations_state_fields_check`, `product_archive_operations_idempotency_key_key`, `maintenance_runs_kind_check`, `invoices_customer_id_period_starts_at_id_idx` |

@@ -133,9 +133,9 @@ func (s *ProviderCancelScheduler) ScheduleNMIDelete(ctx context.Context, userID 
 		PspID:          sub.PspID,
 		Payload: NMIDeletePayload{
 			UserID:             userID,
-			RailSubscriptionID: sub.RailSubscriptionID,
+			RailSubscriptionID: models.DerefStr(sub.RailSubscriptionID),
 		},
-		IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, sub.RailSubscriptionID),
+		IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, models.DerefStr(sub.RailSubscriptionID)),
 		NextAttemptAt:  runAt.UTC(),
 		Origin:         s.origin,
 		OriginReason:   s.reason,

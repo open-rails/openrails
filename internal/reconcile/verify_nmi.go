@@ -265,7 +265,7 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 	}
 	out := map[uuid.UUID]string{}
 	for _, row := range rows {
-		out[row.ID] = strings.TrimSpace(row.RailCustomerRef)
+		out[row.ID] = strings.TrimSpace(models.DerefStr(row.RailCustomerRef))
 	}
 	return out, nil
 }
@@ -473,11 +473,11 @@ type bulkCheckpoint struct {
 
 // loadCheckpoint resumes an interrupted bulk read, or starts a new one.
 func loadCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID, since, until time.Time) (bulkCheckpoint, error) {
-	row, err := database.Gen(ctx).StartNMIBulkCheckpoint(ctx, gen.StartNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp, Since: since, Until: until})
+	row, err := database.Gen(ctx).StartNMIBulkCheckpoint(ctx, gen.StartNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp, WindowStartsAt: since, WindowEndsAt: until})
 	if err != nil {
 		return bulkCheckpoint{since: since, until: until, next: 1}, fmt.Errorf("verify: bulk checkpoint: %w", err)
 	}
-	return bulkCheckpoint{since: row.Since, until: row.Until, next: int(row.NextPage)}, nil
+	return bulkCheckpoint{since: row.WindowStartsAt, until: row.WindowEndsAt, next: int(row.NextPage)}, nil
 }
 
 func saveCheckpoint(ctx context.Context, database *db.DB, mid billing.MerchantID, psp uuid.UUID, next int) error {

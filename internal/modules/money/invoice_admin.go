@@ -32,7 +32,7 @@ func (s *MoneyService) ListInvoices(ctx context.Context, p billing.InvoiceListPa
 	if err != nil {
 		return out, err
 	}
-	params := gen.ListInvoicesPageParams{MerchantID: mid.UUID(), PeriodFrom: p.PeriodFrom, PeriodTo: p.PeriodTo, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)}
+	params := gen.ListInvoicesPageParams{MerchantID: mid.UUID(), PeriodStartsAfter: p.PeriodStartsAfter, PeriodStartsBefore: p.PeriodStartsBefore, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)}
 	if !p.CustomerID.IsZero() {
 		id := p.CustomerID.UUID()
 		params.CustomerID = &id
@@ -57,7 +57,7 @@ func (s *MoneyService) ListInvoices(ctx context.Context, p billing.InvoiceListPa
 			}
 			invoices = append(invoices, *inv)
 		}
-		out = pagination.Cut(invoices, limit, func(inv models.Invoice) any { return pagination.TimeID{At: inv.PeriodFrom, ID: inv.ID} })
+		out = pagination.Cut(invoices, limit, func(inv models.Invoice) any { return pagination.TimeID{At: inv.PeriodStartsAt, ID: inv.ID} })
 		return nil
 	})
 	return out, err

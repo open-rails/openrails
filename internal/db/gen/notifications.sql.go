@@ -513,7 +513,7 @@ SELECT EXISTS (
       AND nq.customer_id = $1::uuid
       AND nq.event_type = 'premium_renewed'
       AND nq.data->>'subscription_id' = $2::text
-      AND (nq.data->>'period_start')::timestamptz > $3::timestamptz
+      AND (nq.data->>'period_starts_at')::timestamptz > $3::timestamptz
 )::boolean AS found
 `
 

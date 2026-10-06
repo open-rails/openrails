@@ -174,7 +174,7 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	r := reason
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
 		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
-		Kind: g.Kind, SourceType: g.SourceType, SourceID: g.SourceID, PaymentID: g.PaymentID,
+		Kind: g.Kind, SourceType: g.SourceType, SourceID: sourceIDOf(g), PaymentID: g.PaymentID,
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
 		StartsAt: effective, EndsAt: nil, Amount: g.Amount, Currency: g.Currency, Reason: &r,
 	})
@@ -214,12 +214,12 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		standing := false
 		var standingSubID uuid.UUID
 		if SourceType(g.SourceType) == Subscription {
-			if subID, perr := uuid.Parse(g.SourceID); perr == nil {
+			if subID, perr := uuid.Parse(sourceIDOf(g)); perr == nil {
 				standing, err = l.q.SubscriptionProjectsStandingAccess(ctx, gen.SubscriptionProjectsStandingAccessParams{
 					MerchantID: l.merchant, ID: subID,
 				})
 				if err != nil {
-					return fmt.Errorf("grants: standing-access check for %s: %w", g.SourceID, err)
+					return fmt.Errorf("grants: standing-access check for %s: %w", sourceIDOf(g), err)
 				}
 				standingSubID = subID
 			}
@@ -256,7 +256,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 			// grant by grant_id. A grant's source_id is free text; a window's is
 			// the source's uuid, else the grant's own id.
 			entSourceID := gid
-			if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
+			if parsed, perr := uuid.Parse(sourceIDOf(g)); perr == nil {
 				entSourceID = parsed
 			}
 			if err := l.q.MaterializeEntitlement(ctx, gen.MaterializeEntitlementParams{
@@ -351,7 +351,7 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 	}
 	for i := range all {
 		g := all[i]
-		if g.Event != "grant" || Kind(g.Kind) != kind || !want[g.SourceType] || g.SourceID != sourceID {
+		if g.Event != "grant" || Kind(g.Kind) != kind || !want[g.SourceType] || sourceIDOf(g) != sourceID {
 			continue
 		}
 		terminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: l.merchant, GrantID: g.ID})
@@ -617,4 +617,12 @@ func productSpecKeys(raw []byte) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// sourceIDOf is a grant's source id; "" when it has none (NULL).
+func sourceIDOf(g gen.BillingGrant) string {
+	if g.SourceID == nil {
+		return ""
+	}
+	return *g.SourceID
 }

@@ -18,7 +18,7 @@ SET rail_customer_ref=$1::text, updated_at=$2::timestamptz
 WHERE merchant_id=$3::uuid AND id=$4::uuid
  AND customer_id=$5::uuid AND psp_id=$6::uuid
  AND rail='stripe' AND rail_method_ref=$7::text
- AND rail_customer_ref='' AND custodian='psp' AND custodian_id IS NULL AND park_reason=''
+ AND rail_customer_ref IS NULL AND custodian='psp' AND custodian_id IS NULL AND park_reason IS NULL
 `
 
 type BindMissingStripeCustomerReferenceParams struct {
@@ -52,16 +52,16 @@ func (q *Queries) BindMissingStripeCustomerReference(ctx context.Context, arg Bi
 const captureStoredCredentialRef = `-- name: CaptureStoredCredentialRef :execrows
 UPDATE billing.payment_methods SET
     stored_credential_recurring_ref = CASE
-        WHEN $1::text = 'recurring' THEN $2::text
+        WHEN $1::text = 'recurring' THEN NULLIF($2::text, '')
         ELSE stored_credential_recurring_ref END,
     stored_credential_unscheduled_ref = CASE
-        WHEN $1::text = 'unscheduled' THEN $2::text
+        WHEN $1::text = 'unscheduled' THEN NULLIF($2::text, '')
         ELSE stored_credential_unscheduled_ref END,
     updated_at = now()
 WHERE merchant_id = $3
   AND id = $4
-  AND (($1::text = 'recurring' AND stored_credential_recurring_ref = '')
-    OR ($1::text = 'unscheduled' AND stored_credential_unscheduled_ref = ''))
+  AND (($1::text = 'recurring' AND stored_credential_recurring_ref IS NULL)
+    OR ($1::text = 'unscheduled' AND stored_credential_unscheduled_ref IS NULL))
 `
 
 type CaptureStoredCredentialRefParams struct {
@@ -90,20 +90,20 @@ func (q *Queries) CaptureStoredCredentialRef(ctx context.Context, arg CaptureSto
 const captureStoredCredentialRefByRailInstrument = `-- name: CaptureStoredCredentialRefByRailInstrument :execrows
 UPDATE billing.payment_methods SET
     stored_credential_recurring_ref = CASE
-        WHEN $1::text = 'recurring' THEN $2::text
+        WHEN $1::text = 'recurring' THEN NULLIF($2::text, '')
         ELSE stored_credential_recurring_ref END,
     stored_credential_unscheduled_ref = CASE
-        WHEN $1::text = 'unscheduled' THEN $2::text
+        WHEN $1::text = 'unscheduled' THEN NULLIF($2::text, '')
         ELSE stored_credential_unscheduled_ref END,
     updated_at = now()
 WHERE merchant_id = $3 AND psp_id = $4::uuid
   AND rail = $5
-  AND rail_customer_ref = $6
-  AND (rail_method_ref = $7
+  AND rail_customer_ref = $6::text
+  AND (rail_method_ref = $7::text
        OR $7::text = ''
-       OR rail_method_ref = '')
-  AND (($1::text = 'recurring' AND stored_credential_recurring_ref = '')
-    OR ($1::text = 'unscheduled' AND stored_credential_unscheduled_ref = ''))
+       OR rail_method_ref IS NULL)
+  AND (($1::text = 'recurring' AND stored_credential_recurring_ref IS NULL)
+    OR ($1::text = 'unscheduled' AND stored_credential_unscheduled_ref IS NULL))
 `
 
 type CaptureStoredCredentialRefByRailInstrumentParams struct {
@@ -157,8 +157,7 @@ const countPaymentMethodsSharingCustomerRef = `-- name: CountPaymentMethodsShari
 SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id = $2::uuid AND psp_id = $3::uuid
   AND rail = $1
-  AND rail_customer_ref = $4
-  AND rail_customer_ref <> ''
+  AND rail_customer_ref = $4::text
   AND id <> $5
 `
 
@@ -195,7 +194,7 @@ INSERT INTO billing.payment_methods (
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
     network_token_par, charge_via, stored_credential_recurring_ref
 ) VALUES (
-    $1, $4::uuid, $2, $3, $5, $6,
+    $1, $4::uuid, $2, $3, NULLIF($5::text, ''), NULLIF($6::text, ''),
     $7::text, $8::text, $9::smallint, $10::smallint,
     $11,
     COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
@@ -203,10 +202,10 @@ INSERT INTO billing.payment_methods (
     $14::uuid,
     $15::text,
     $16::uuid,
-    $17, $18,
-    $19, $20,
+    NULLIF($17::text, ''), NULLIF($18::text, ''),
+    NULLIF($19::text, ''), NULLIF($20::text, ''),
     COALESCE(NULLIF($21::text, ''), 'pan_proxy'),
-    $22::text
+    NULLIF($22::text, '')
 )
 `
 
@@ -425,8 +424,7 @@ SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail
 WHERE pm.merchant_id = $1
   AND pm.custodian = $2
   AND pm.custodian_id = $3::uuid
-  AND pm.fingerprint = $4
-  AND pm.fingerprint <> ''
+  AND pm.fingerprint = $4::text
 ORDER BY pm.created_at
 LIMIT 1
 `
@@ -590,10 +588,10 @@ const getPaymentMethodByRailInstrument = `-- name: GetPaymentMethodByRailInstrum
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1 AND pm.psp_id = $2::uuid
   AND pm.rail = $3
-  AND pm.rail_customer_ref = $4
-  AND (pm.rail_method_ref = $5
+  AND pm.rail_customer_ref = $4::text
+  AND (pm.rail_method_ref = $5::text
        OR $5::text = ''
-       OR pm.rail_method_ref = '')
+       OR pm.rail_method_ref IS NULL)
 ORDER BY pm.created_at
 LIMIT 1
 `
@@ -657,7 +655,7 @@ WHERE pm.merchant_id = $1::uuid
   AND pm.rail = $2
   AND pm.psp_id = $3::uuid
   AND pm.custodian_id IS NOT DISTINCT FROM $4::uuid
-  AND pm.rail_method_ref = $5
+  AND pm.rail_method_ref = $5::text
 LIMIT 1
 `
 
@@ -763,7 +761,7 @@ func (q *Queries) GetPaymentMethodForShare(ctx context.Context, arg GetPaymentMe
 }
 
 const insertPaymentMethodUpdate = `-- name: InsertPaymentMethodUpdate :exec
-INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
+INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, occurred_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::text, COALESCE($8::timestamptz, now()))
 ON CONFLICT DO NOTHING
@@ -777,10 +775,10 @@ type InsertPaymentMethodUpdateParams struct {
 	Source          string
 	Kind            string
 	EventRef        string
-	At              *time.Time
+	OccurredAt      *time.Time
 }
 
-// #1115: idempotent on (source, event_ref, method); at defaults to now.
+// #1115: idempotent on (source, event_ref, method); occurred_at defaults to now.
 func (q *Queries) InsertPaymentMethodUpdate(ctx context.Context, arg InsertPaymentMethodUpdateParams) error {
 	_, err := q.db.Exec(ctx, insertPaymentMethodUpdate,
 		arg.MerchantID,
@@ -790,7 +788,7 @@ func (q *Queries) InsertPaymentMethodUpdate(ctx context.Context, arg InsertPayme
 		arg.Source,
 		arg.Kind,
 		arg.EventRef,
-		arg.At,
+		arg.OccurredAt,
 	)
 	return err
 }
@@ -1241,7 +1239,7 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, arg ListPayment
 const listVaultPaymentMethods = `-- name: ListVaultPaymentMethods :many
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND rail = 'nmi'
-  AND rail_customer_ref = $3::text AND park_reason NOT LIKE 'delete:%'
+  AND rail_customer_ref = $3::text AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 ORDER BY created_at, id
 `
 
@@ -1315,7 +1313,7 @@ UPDATE billing.payment_methods SET
     park_reason = $1::text,
     parked_at = $2::timestamptz,
     updated_at = $2::timestamptz
-WHERE merchant_id = $3::uuid AND id = $4::uuid AND park_reason = ''
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND park_reason IS NULL
 `
 
 type ParkPaymentMethodParams struct {
@@ -1342,14 +1340,14 @@ func (q *Queries) ParkPaymentMethod(ctx context.Context, arg ParkPaymentMethodPa
 
 const parkPaymentMethodByMethodRef = `-- name: ParkPaymentMethodByMethodRef :many
 UPDATE billing.payment_methods SET
-    park_reason = $1,
+    park_reason = $1::text,
     parked_at = now(),
     updated_at = now()
 WHERE merchant_id = $2::uuid
   AND custodian_id = $3::uuid
   AND custodian = $4
-  AND rail_method_ref = $5
-  AND park_reason = ''
+  AND rail_method_ref = $5::text
+  AND park_reason IS NULL
 RETURNING id, customer_id, psp_id
 `
 
@@ -1400,13 +1398,13 @@ func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaym
 
 const parkStripePaymentMethodByRef = `-- name: ParkStripePaymentMethodByRef :execrows
 UPDATE billing.payment_methods SET
-    park_reason = $1,
+    park_reason = $1::text,
     parked_at = COALESCE(parked_at, now()),
     updated_at = now()
 WHERE payment_methods.merchant_id = $2::uuid AND rail = 'stripe'
   AND psp_id = $3::uuid
-  AND rail_method_ref = $4
-  AND park_reason = ''
+  AND rail_method_ref = $4::text
+  AND park_reason IS NULL
 `
 
 type ParkStripePaymentMethodByRefParams struct {
@@ -1442,7 +1440,7 @@ UPDATE billing.payment_methods SET
 WHERE merchant_id = $6::uuid
   AND custodian_id = $7::uuid
   AND custodian = $8
-  AND rail_method_ref = $9
+  AND rail_method_ref = $9::text
 `
 
 type RefreshCustodianCardMetadataParams struct {
@@ -1482,10 +1480,10 @@ UPDATE billing.payment_methods SET
     card_last4 = COALESCE($2::text, card_last4),
     card_exp_month = COALESCE($3::smallint, card_exp_month),
     card_exp_year = COALESCE($4::smallint, card_exp_year),
-    park_reason = '',
+    park_reason = NULL,
     parked_at = NULL,
     updated_at = $5::timestamptz
-WHERE merchant_id = $6::uuid AND id = $7::uuid AND park_reason NOT LIKE 'delete:%'
+WHERE merchant_id = $6::uuid AND id = $7::uuid AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 `
 
 type RefreshPaymentMethodCardParams struct {
@@ -1524,13 +1522,13 @@ UPDATE billing.payment_methods SET
     card_exp_month = $4::smallint,
     card_exp_year = $5::smallint,
     metadata = $6,
-    stored_credential_recurring_ref = $7::text,
-    park_reason = '',
+    stored_credential_recurring_ref = NULLIF($7::text, ''),
+    park_reason = NULL,
     parked_at = NULL,
     updated_at = $8::timestamptz
 WHERE merchant_id = $9::uuid AND id = $10::uuid
   AND rail_method_ref = $11::text
-  AND park_reason NOT LIKE 'delete:%'
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 `
 
 type ReplacePaymentMethodCardParams struct {
@@ -1571,20 +1569,20 @@ func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePayme
 
 const rotateCustodianMethodRef = `-- name: RotateCustodianMethodRef :many
 UPDATE billing.payment_methods SET
-    rail_method_ref = $1,
+    rail_method_ref = $1::text,
     fingerprint = COALESCE(NULLIF($2::text, ''), fingerprint),
     card_brand = COALESCE($3::text, card_brand),
     card_last4 = COALESCE($4::text, card_last4),
     card_exp_month = COALESCE($5::smallint, card_exp_month),
     card_exp_year = COALESCE($6::smallint, card_exp_year),
-    park_reason = '',
+    park_reason = NULL,
     parked_at = NULL,
     updated_at = now()
 WHERE merchant_id = $7::uuid
   AND custodian_id = $8::uuid
   AND custodian = $9
-  AND rail_method_ref = $10
-  AND park_reason NOT LIKE 'delete:%'
+  AND rail_method_ref = $10::text
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 RETURNING id, customer_id, psp_id
 `
 
@@ -1649,15 +1647,14 @@ func (q *Queries) RotateCustodianMethodRef(ctx context.Context, arg RotateCustod
 
 const setNetworkTokenStatusByNetworkTokenID = `-- name: SetNetworkTokenStatusByNetworkTokenID :execrows
 UPDATE billing.payment_methods SET
-    network_token_status = $1,
+    network_token_status = $1::text,
     updated_at = now()
 WHERE merchant_id = $2::uuid
   AND custodian <> 'psp'
   AND custodian_id = $3::uuid
   AND custodian = $4
-  AND network_token_id = $5
-  AND network_token_id <> ''
-  AND network_token_status <> $1
+  AND network_token_id = $5::text
+  AND network_token_status IS DISTINCT FROM $1::text
 `
 
 type SetNetworkTokenStatusByNetworkTokenIDParams struct {
@@ -1687,12 +1684,12 @@ func (q *Queries) SetNetworkTokenStatusByNetworkTokenID(ctx context.Context, arg
 
 const setPaymentMethodNetworkToken = `-- name: SetPaymentMethodNetworkToken :execrows
 UPDATE billing.payment_methods SET
-    network_token_id = $1,
-    network_token_status = $2,
-    network_token_par = $3,
+    network_token_id = NULLIF($1::text, ''),
+    network_token_status = NULLIF($2::text, ''),
+    network_token_par = NULLIF($3::text, ''),
     updated_at = now()
 WHERE merchant_id = $4 AND id = $5
-  AND park_reason NOT LIKE 'delete:%'
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 `
 
 type SetPaymentMethodNetworkTokenParams struct {
@@ -1722,8 +1719,8 @@ const updatePaymentMethod = `-- name: UpdatePaymentMethod :execrows
 UPDATE billing.payment_methods SET
     customer_id = $2,
     rail = $3,
-    rail_customer_ref = $4,
-    rail_method_ref = $5,
+    rail_customer_ref = NULLIF($4::text, ''),
+    rail_method_ref = NULLIF($5::text, ''),
     card_brand = $6::text,
     card_last4 = $7::text,
     card_exp_month = $8::smallint,

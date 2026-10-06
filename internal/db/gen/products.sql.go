@@ -21,7 +21,7 @@ INSERT INTO billing.products (
     $1,
     $4::uuid,
     $2, $3, $5, $6,
-    $7,
+    NULLIF($7::text, ''),
     COALESCE(NULLIF($8::int, 0), 0),
     $9::boolean,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
@@ -298,7 +298,7 @@ UPDATE billing.products SET
     display_name = COALESCE($1::text, display_name),
     description = CASE WHEN $2::boolean THEN NULLIF($3::text, '') ELSE description END,
     entitlements_spec = CASE WHEN $4::boolean THEN $5::jsonb ELSE entitlements_spec END,
-    tier_group = CASE WHEN $6::boolean THEN $7::text ELSE tier_group END,
+    tier_group = CASE WHEN $6::boolean THEN NULLIF($7::text, '') ELSE tier_group END,
     tier_rank = COALESCE($8::int, tier_rank),
     archived = COALESCE($9::boolean, archived),
     updated_at = now()

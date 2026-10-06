@@ -27,7 +27,7 @@ func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context, merchant
 const createMerchantNotification = `-- name: CreateMerchantNotification :execrows
 
 INSERT INTO billing.notifications (merchant_id, id, recipient_kind, event_type, severity, title, body, link, data)
-VALUES ($1::uuid, COALESCE($2::uuid, uuidv7()), 'merchant', 'operator.alert', $3::text, $4::text, $5::text, $6::text, COALESCE($7::jsonb, '{}'::jsonb))
+VALUES ($1::uuid, COALESCE($2::uuid, uuidv7()), 'merchant', 'operator.alert', $3::text, $4::text, $5::text, NULLIF($6::text, ''), COALESCE($7::jsonb, '{}'::jsonb))
 ON CONFLICT (merchant_id, id) DO NOTHING
 `
 
@@ -64,7 +64,7 @@ func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerc
 const createMerchantWebhook = `-- name: CreateMerchantWebhook :one
 
 INSERT INTO billing.merchant_webhooks (id, merchant_id, name, destination_host, secret_version, format, enabled)
-VALUES ($1::uuid, $2::uuid, $3, $4, $5::integer, $6, $7)
+VALUES ($1::uuid, $2::uuid, NULLIF($3::text, ''), $4, $5::integer, $6, $7)
 RETURNING id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at
 `
 

@@ -253,7 +253,10 @@ func (c *Client) SetSpendDelegation(ctx context.Context, customer billing.Custom
 		return nil, err
 	}
 	var out billing.SpendDelegation
-	body := billing.SetSpendDelegationParams{Windows: delegation.Windows, Provenance: delegation.Provenance}
+	body := billing.SetSpendDelegationParams{Windows: delegation.Windows}
+	if delegation.Provenance != nil {
+		body.Provenance = *delegation.Provenance
+	}
 	if err := c.do(ctx, http.MethodPut, path, body, &out, requestOptions...); err != nil {
 		return nil, err
 	}

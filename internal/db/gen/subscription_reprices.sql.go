@@ -482,7 +482,7 @@ func (q *Queries) ListSubscriptionRepricesPage(ctx context.Context, arg ListSubs
 const unblockSubscriptionReprice = `-- name: UnblockSubscriptionReprice :execrows
 UPDATE billing.subscription_reprices SET
     status = 'scheduled',
-    blocked_reason = ''
+    blocked_reason = NULL
 WHERE subscription_reprices.merchant_id = $1::uuid AND id = $2 AND status = 'blocked'
 `
 

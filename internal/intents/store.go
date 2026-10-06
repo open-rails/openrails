@@ -177,7 +177,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if err != nil {
 				return err
 			}
-			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != "" {
+			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != nil {
 				return errors.New("engine admission payment method changed")
 			}
 			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
@@ -272,7 +272,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if err != nil {
 			return err
 		}
-		if method.CustomerID.String() != accepted.UserID || method.Rail != row.Rail || method.ParkReason != "" {
+		if method.CustomerID.String() != accepted.UserID || method.Rail != row.Rail || method.ParkReason != nil {
 			return apperr.Conflictf("payment method changed before upgrade admission")
 		}
 		for _, agreement := range []charge.Agreement{charge.AgreementRecurring, charge.AgreementUnscheduled} {
@@ -406,10 +406,10 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 		return gen.BillingProviderIntent{}, false, scopeErr
 	}
 	row, err := s.db.Gen(ctx).ClaimProviderIntentByID(ctx, gen.ClaimProviderIntentByIDParams{
-		MerchantID: scopeMerchantID.UUID(),
-		ID:         id,
-		Now:        now.UTC(),
-		LeaseUntil: leaseUntil.UTC(),
+		MerchantID:     scopeMerchantID.UUID(),
+		ID:             id,
+		Now:            now.UTC(),
+		LeaseExpiresAt: leaseUntil.UTC(),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -444,10 +444,10 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 		return nil, err
 	}
 	return s.db.Gen(ctx).ClaimDueProviderIntents(ctx, gen.ClaimDueProviderIntentsParams{
-		MerchantID: scopeMerchantID.UUID(),
-		Now:        now.UTC(),
-		LeaseUntil: leaseUntil.UTC(),
-		BatchSize:  batch,
+		MerchantID:     scopeMerchantID.UUID(),
+		Now:            now.UTC(),
+		LeaseExpiresAt: leaseUntil.UTC(),
+		BatchSize:      batch,
 	})
 }
 
@@ -466,7 +466,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 	}
 	n, err := s.db.Gen(ctx).RenewProviderIntentClaim(ctx, gen.RenewProviderIntentClaimParams{
 		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Status: status, Attempts: attempts, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		ID:         id, Status: status, Attempts: attempts, Now: now.UTC(), LeaseExpiresAt: leaseUntil.UTC(),
 	})
 	if err != nil {
 		return false, err
@@ -485,10 +485,10 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 		return nil, err
 	}
 	return s.db.Gen(ctx).ClaimDueVerifyProviderIntents(ctx, gen.ClaimDueVerifyProviderIntentsParams{
-		MerchantID: scopeMerchantID.UUID(),
-		Now:        now.UTC(),
-		LeaseUntil: leaseUntil.UTC(),
-		BatchSize:  batch,
+		MerchantID:     scopeMerchantID.UUID(),
+		Now:            now.UTC(),
+		LeaseExpiresAt: leaseUntil.UTC(),
+		BatchSize:      batch,
 	})
 }
 
@@ -501,7 +501,7 @@ func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUn
 	}
 	row, err := s.db.Gen(ctx).ClaimUnknownProviderIntentByID(ctx, gen.ClaimUnknownProviderIntentByIDParams{
 		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		ID:         id, Now: now.UTC(), LeaseExpiresAt: leaseUntil.UTC(),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return gen.BillingProviderIntent{}, false, nil

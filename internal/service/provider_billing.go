@@ -96,8 +96,8 @@ func providerBillingQualificationFromMoney(result *money.ProviderBillingQualific
 		Lifecycle: billing.ProviderBillingLifecycleEvidence{
 			Provider:                 result.Provider,
 			ProviderResourceID:       result.ProviderResourceID,
-			ProviderLifetimeStart:    result.ProviderLifetimeStart,
-			ProviderLifetimeEnd:      result.ProviderLifetimeEnd,
+			ProviderLifetimeStartsAt: result.ProviderLifetimeStartsAt,
+			ProviderLifetimeEndsAt:   result.ProviderLifetimeEndsAt,
 			ProviderAbsentAt:         result.ProviderAbsentAt,
 			ProviderAbsenceReference: result.ProviderAbsenceReference,
 			BillingStopReference:     result.BillingStopReference,

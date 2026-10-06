@@ -125,9 +125,9 @@ func (p Policy) Validate() error {
 // Exposure is the invoice-derived input to a delinquency decision: how much a
 // payer owes past its due date, since when, and across how many invoices.
 type Exposure struct {
-	OverdueSince    time.Time
-	OverdueAmount   int64
-	OverdueInvoices int
+	OverdueStartedAt time.Time
+	OverdueAmount    int64
+	OverdueInvoices  int
 }
 
 // Owes reports whether there is any overdue debt at all.
@@ -147,7 +147,7 @@ func Classify(p Policy, e Exposure, now time.Time) State {
 	if e.OverdueAmount < p.AmountFloor {
 		return StateGrace
 	}
-	if now.Before(e.OverdueSince.Add(p.Grace())) {
+	if now.Before(e.OverdueStartedAt.Add(p.Grace())) {
 		return StateGrace
 	}
 	return StateDelinquent

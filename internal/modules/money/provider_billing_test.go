@@ -22,12 +22,12 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 		OperationID:     "op-1",
 		ObservationID:   "obs-1",
 		NormalizedQuery: "podId=provider-resource-1",
-		QueryStart:      now.Add(-time.Hour),
-		QueryEnd:        now,
+		QueryStartsAt:   now.Add(-time.Hour),
+		QueryEndsAt:     now,
 		RawBody:         []byte(`[]`),
 		Lifecycle: ProviderBillingLifecycleEvidence{
 			Provider: "provider", ProviderResourceID: "provider-resource-1",
-			ProviderLifetimeStart: now.Add(-time.Hour), ProviderLifetimeEnd: now.Add(-time.Minute),
+			ProviderLifetimeStartsAt: now.Add(-time.Hour), ProviderLifetimeEndsAt: now.Add(-time.Minute),
 			ProviderAbsentAt: now, ProviderAbsenceReference: "absence:1",
 			BillingStopReference: "billing-stop:1", WindowsClosedAt: now,
 			WindowsClosedReference: "windows:1", LifecycleEvidenceBody: []byte(`{"absent":true}`),
@@ -75,22 +75,22 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 	require.True(t, prepared.hasNegative)
 
 	nanosecondTime := base
-	nanosecondTime.QueryEnd = nanosecondTime.QueryEnd.Add(time.Nanosecond)
+	nanosecondTime.QueryEndsAt = nanosecondTime.QueryEndsAt.Add(time.Nanosecond)
 	require.ErrorContains(t, validateProviderBillingInput(nanosecondTime), "PostgreSQL-exact microsecond precision")
 
 	zeroLifetime := base
-	zeroLifetime.Lifecycle.ProviderLifetimeEnd = zeroLifetime.Lifecycle.ProviderLifetimeStart
-	require.ErrorContains(t, validateProviderBillingInput(zeroLifetime), "must be after provider_lifetime_start")
+	zeroLifetime.Lifecycle.ProviderLifetimeEndsAt = zeroLifetime.Lifecycle.ProviderLifetimeStartsAt
+	require.ErrorContains(t, validateProviderBillingInput(zeroLifetime), "must be after provider_lifetime_starts_at")
 }
 
 func TestProviderBillingObservationEnvelopeIsTransportNeutral(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	in := ProviderBillingObservationInput{
 		OperationID: "op-1", ObservationID: "obs-1", NormalizedQuery: "podId=pod-1",
-		QueryStart: now.Add(-time.Hour), QueryEnd: now,
+		QueryStartsAt: now.Add(-time.Hour), QueryEndsAt: now,
 		Lifecycle: ProviderBillingLifecycleEvidence{
 			Provider: "provider", ProviderResourceID: "pod-1",
-			ProviderLifetimeStart: now.Add(-time.Hour), ProviderLifetimeEnd: now.Add(-time.Minute),
+			ProviderLifetimeStartsAt: now.Add(-time.Hour), ProviderLifetimeEndsAt: now.Add(-time.Minute),
 			ProviderAbsentAt: now, ProviderAbsenceReference: "absence:1", BillingStopReference: "stop:1",
 			WindowsClosedAt: now, WindowsClosedReference: "windows:1", LifecycleEvidenceBody: []byte(`{}`),
 		},

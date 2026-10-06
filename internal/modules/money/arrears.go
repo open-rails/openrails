@@ -54,7 +54,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	// transaction". No such pool exists — it worked only where an HTTP request
 	// had already pinned a merchant connection and pgxBegin inherited its GUC.
 	// Off that path (internal/service.FinalizeInvoice, MoneyService.SweepUsage, both
-	// embedded seams) the transaction carried no app.merchant_id and the
+	// embedded seams) the transaction carried no openrails.merchant_id and the
 	// since-removed RLS denied every insert below (42501), so metered/arrears
 	// billing was inoperable there. MerchantTx sets the GUC transaction-locally
 	// from the context's merchant, which the explicit merchant_id predicates

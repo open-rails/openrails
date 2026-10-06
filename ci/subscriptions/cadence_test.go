@@ -134,7 +134,7 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 			for _, r := range receipts {
 				data := r["data"].(map[string]any)
 				require.Equal(t, sub.String(), data["subscription_id"])
-				start, err := time.Parse(time.RFC3339Nano, data["period_start"].(string))
+				start, err := time.Parse(time.RFC3339Nano, data["period_starts_at"].(string))
 				require.NoError(t, err)
 				perDay[int(start.Sub(started)/(24*time.Hour))]++
 			}

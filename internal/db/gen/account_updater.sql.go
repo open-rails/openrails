@@ -20,8 +20,7 @@ UPDATE billing.account_updater_batches SET
     updated_at = now()
 WHERE merchant_id = $3
   AND custodian_id = $4::uuid
-  AND job_ref = $5
-  AND job_ref <> ''
+  AND job_ref = $5::text
   AND status IN ('pending', 'submitted')
 `
 
@@ -92,7 +91,7 @@ func (q *Queries) CreateAccountUpdaterBatch(ctx context.Context, arg CreateAccou
 const failAccountUpdaterBatch = `-- name: FailAccountUpdaterBatch :execrows
 UPDATE billing.account_updater_batches SET
     status = 'failed',
-    failure_reason = $1,
+    failure_reason = NULLIF($1::text, ''),
     completed_at = $2::timestamptz,
     updated_at = now()
 WHERE merchant_id = $3
@@ -210,7 +209,7 @@ WHERE c.kind = lower($2::text)
         SELECT 1 FROM billing.payment_methods pm
          WHERE pm.merchant_id = c.merchant_id
            AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
-           AND pm.rail_method_ref <> ''
+           AND pm.rail_method_ref IS NOT NULL
            AND (pm.account_updater_checked_at IS NULL
                 OR pm.account_updater_checked_at < $5::timestamptz - w.lookahead)
            AND EXISTS (
@@ -274,7 +273,7 @@ WHERE pm.merchant_id = $1
   AND pm.custodian <> 'psp'
   AND pm.custodian_id = $2::uuid
   AND pm.custodian = $3
-  AND pm.rail_method_ref <> ''
+  AND pm.rail_method_ref IS NOT NULL
   AND (pm.account_updater_checked_at IS NULL
        OR pm.account_updater_checked_at < $4::timestamptz)
   AND EXISTS (
@@ -300,7 +299,7 @@ type ListDueAccountUpdaterInstrumentsParams struct {
 
 type ListDueAccountUpdaterInstrumentsRow struct {
 	ID            uuid.UUID
-	RailMethodRef string
+	RailMethodRef *string
 	CardExpMonth  *int16
 	CardExpYear   *int16
 }
@@ -439,11 +438,11 @@ func (q *Queries) MarkAccountUpdaterBatchSubmitted(ctx context.Context, arg Mark
 
 const setAccountUpdaterBatchJobRef = `-- name: SetAccountUpdaterBatchJobRef :execrows
 UPDATE billing.account_updater_batches SET
-    job_ref = $1,
+    job_ref = $1::text,
     updated_at = now()
 WHERE merchant_id = $2
   AND id = $3
-  AND job_ref = ''
+  AND job_ref IS NULL
 `
 
 type SetAccountUpdaterBatchJobRefParams struct {

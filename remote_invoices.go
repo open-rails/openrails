@@ -12,11 +12,11 @@ import (
 func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Invoice], error) {
 	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "currency": normalizeCurrency(params.Currency), "status": string(params.Status)})
-	if params.PeriodFrom != nil {
-		q.Set("period_from", params.PeriodFrom.UTC().Format(time.RFC3339Nano))
+	if params.PeriodStartsAfter != nil {
+		q.Set("period_starts_after", params.PeriodStartsAfter.UTC().Format(time.RFC3339Nano))
 	}
-	if params.PeriodTo != nil {
-		q.Set("period_to", params.PeriodTo.UTC().Format(time.RFC3339Nano))
+	if params.PeriodStartsBefore != nil {
+		q.Set("period_starts_before", params.PeriodStartsBefore.UTC().Format(time.RFC3339Nano))
 	}
 	var out billing.ListPage[billing.Invoice]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/invoices?"+q.Encode(), nil, &out, requestOptions...); err != nil {

@@ -599,7 +599,7 @@ func (f *fleet) providerCustomers(e *engineCase) []string {
 	f.t.Helper()
 	rows, err := f.base.pool.Query(f.t.Context(), f.q(`SELECT DISTINCT pm.rail_customer_ref FROM billing.payment_methods pm
 		JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
-		WHERE s.id = $1 AND pm.rail_customer_ref <> ''`), subUUID(e.sub))
+		WHERE s.id = $1 AND pm.rail_customer_ref IS NOT NULL`), subUUID(e.sub))
 	require.NoError(f.t, err)
 	refs, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(f.t, err)

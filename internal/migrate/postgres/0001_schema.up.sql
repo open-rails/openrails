@@ -21,9 +21,9 @@ CREATE FUNCTION billing.current_merchant_id() RETURNS uuid
     LANGUAGE sql STABLE
     SET search_path TO 'billing', 'pg_catalog'
     AS $$
-    SELECT NULLIF(current_setting('app.merchant_id', true), '')::uuid
+    SELECT NULLIF(current_setting('openrails.merchant_id', true), '')::uuid
 $$;
-COMMENT ON FUNCTION billing.current_merchant_id() IS 'The request''s merchant from the app.merchant_id GUC, or NULL when unset. Used only by explicitly scoped SQL and restore transaction guards. Merely setting it does not filter other queries; their merchant predicates are mandatory.';
+COMMENT ON FUNCTION billing.current_merchant_id() IS 'The request''s merchant from the openrails.merchant_id GUC, or NULL when unset. Used only by explicitly scoped SQL and restore transaction guards. Merely setting it does not filter other queries; their merchant predicates are mandatory.';
 REVOKE ALL ON FUNCTION billing.current_merchant_id() FROM PUBLIC;
 
 -- Financial facts are immutable to ordinary DML, the schema owner included.
@@ -45,20 +45,20 @@ END;
 $$;
 
 -- Retention is the one path that deletes an append-only fact. The cleanup job
--- names the table in openrails.retention for its transaction, and the row must
+-- names the table in openrails.retention_table for its transaction, and the row must
 -- be older than the period the trigger declares: TG_ARGV[0] is the timestamp
 -- column the period counts from, TG_ARGV[1] the period.
 CREATE FUNCTION billing.guard_retention_delete() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    IF current_setting('openrails.retention', true) IS NOT DISTINCT FROM TG_TABLE_NAME::text
+    IF current_setting('openrails.retention_table', true) IS NOT DISTINCT FROM TG_TABLE_NAME::text
        AND (to_jsonb(OLD)->>TG_ARGV[0])::timestamptz < now() - TG_ARGV[1]::interval THEN
         RETURN OLD;
     END IF;
     RAISE EXCEPTION '% rows are deleted only by retention, % after %', TG_TABLE_NAME, TG_ARGV[1], TG_ARGV[0] USING ERRCODE='23514';
 END;
 $$;
-COMMENT ON FUNCTION billing.guard_retention_delete() IS 'Refuses every DELETE except the retention sweep''s: the transaction names the table in openrails.retention and the row is past the period the trigger declares.';
+COMMENT ON FUNCTION billing.guard_retention_delete() IS 'Refuses every DELETE except the retention sweep''s: the transaction names the table in openrails.retention_table and the row is past the period the trigger declares.';
 
 -- Monthly range partitions, named <table>_yYYYYmMM on UTC month bounds. Both
 -- functions work from the calendar and the catalog; neither reads a row.
@@ -251,10 +251,10 @@ REVOKE ALL ON FUNCTION billing.guard_merchant_name() FROM PUBLIC;
 CREATE TABLE billing.merchants (
     id uuid DEFAULT uuidv7() NOT NULL,
     slug text NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
+    status text NOT NULL,
     permission_group_id text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
     display_name text,
     api_host text,
@@ -311,7 +311,7 @@ COMMENT ON TABLE billing.merchant_api_host_claims IS 'A merchant''s unproven api
 
 CREATE TABLE billing.destructive_action_switch (
     singleton boolean DEFAULT true NOT NULL,
-    enabled boolean DEFAULT false NOT NULL,
+    enabled boolean NOT NULL,
     updated_by text,
     reason text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -351,7 +351,7 @@ BEGIN
     IF p_merchant IS DISTINCT FROM billing.current_merchant_id() THEN RETURN false; END IF;
     RETURN EXISTS (SELECT 1 FROM billing.maintenance_runs r
         WHERE r.merchant_id=p_merchant AND r.kind='billing_restore' AND r.status='running'
-        AND r.id::text=current_setting('app.billing_restore_id',true)
+        AND r.id::text=current_setting('openrails.billing_restore_id',true)
         AND r.xmin=pg_current_xact_id_if_assigned()::xid);
 END;
 $$;
@@ -495,7 +495,7 @@ BEGIN
            OR (to_jsonb(NEW)-ARRAY['status','finished_at','summary','run_class']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['status','finished_at','summary','run_class'])
            OR NOT EXISTS (SELECT 1 FROM billing.maintenance_runs r WHERE r.id=OLD.id AND r.merchant_id=OLD.merchant_id
                AND r.xmin=pg_current_xact_id_if_assigned()::xid)
-           OR OLD.id::text IS DISTINCT FROM current_setting('app.billing_restore_id',true)
+           OR OLD.id::text IS DISTINCT FROM current_setting('openrails.billing_restore_id',true)
            OR NEW.summary->>'digest' IS NULL OR NEW.summary->>'digest' !~ '^[0-9a-f]{64}$'
            OR jsonb_typeof(NEW.summary->'rows') IS DISTINCT FROM 'number'
            OR (NEW.summary->>'rows')::numeric < 0
@@ -533,7 +533,7 @@ BEGIN
     SELECT id INTO receipt FROM billing.maintenance_runs WHERE merchant_id=p_merchant AND kind='billing_restore' AND status='completed';
     IF receipt IS NOT NULL THEN RETURN receipt; END IF;
     INSERT INTO billing.maintenance_runs(merchant_id,kind,actor) VALUES(p_merchant,'billing_restore','merchantarchive') RETURNING id INTO receipt;
-    PERFORM set_config('app.billing_restore_id',receipt::text,true);
+    PERFORM set_config('openrails.billing_restore_id',receipt::text,true);
     RETURN receipt;
 END;
 $$;
@@ -547,7 +547,7 @@ BEGIN
     END IF;
     PERFORM billing.check_billing_restore_ledger(p_merchant);
     UPDATE billing.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
-        WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('app.billing_restore_id',true);
+        WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
 END;
 $$;
 REVOKE ALL ON FUNCTION billing.finish_billing_restore(uuid,text,bigint) FROM PUBLIC;
@@ -556,12 +556,12 @@ CREATE TABLE billing.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     kind text NOT NULL,
-    actor text DEFAULT '' NOT NULL,
+    actor text CHECK (actor <> ''),
     psp_id uuid,
-    mode text DEFAULT '' NOT NULL,
+    mode text,
     rails text[] DEFAULT '{}' NOT NULL,
-    window_since timestamp with time zone,
-    window_until timestamp with time zone,
+    window_starts_at timestamp with time zone,
+    window_ends_at timestamp with time zone,
     started_at timestamp with time zone DEFAULT now() NOT NULL,
     finished_at timestamp with time zone,
     status text DEFAULT 'running' NOT NULL,
@@ -579,17 +579,17 @@ CREATE TABLE billing.maintenance_runs (
     run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' WHEN kind = 'billing_restore' THEN 'restore' ELSE 'destructive' END) STORED NOT NULL,
     CONSTRAINT maintenance_runs_expected_rows_check CHECK (expected_rows IS NULL OR expected_rows >= 0),
     CONSTRAINT maintenance_runs_status_check CHECK (status IN ('running','completed','failed','reversed')),
-    CONSTRAINT maintenance_runs_x_check CHECK ((
+    CONSTRAINT maintenance_runs_kind_check CHECK ((
         (kind = 'reconciliation' AND mode IN ('advisory','enforce')
          AND status IN ('running','completed','failed') AND psp_id IS NULL
          AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
          AND reversed_at IS NULL AND reversed_by IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
         OR (kind IN ('prune','converge_enforce','merchant_purge') AND btrim(actor) <> ''
-         AND mode = '' AND cardinality(rails) = 0 AND window_since IS NULL AND window_until IS NULL
+         AND mode IS NULL AND cardinality(rails) = 0 AND window_starts_at IS NULL AND window_ends_at IS NULL
          AND summary IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
         OR (kind = 'billing_restore' AND actor = 'merchantarchive' AND status IN ('running','completed')
-         AND mode = '' AND cardinality(rails)=0 AND psp_id IS NULL AND NOT dry_run
-         AND window_since IS NULL AND window_until IS NULL AND coverage IS NULL AND expected_rows IS NULL
+         AND mode IS NULL AND cardinality(rails)=0 AND psp_id IS NULL AND NOT dry_run
+         AND window_starts_at IS NULL AND window_ends_at IS NULL AND coverage IS NULL AND expected_rows IS NULL
          AND affected IS NULL AND reversed_at IS NULL AND reversed_by IS NULL AND note IS NULL AND error IS NULL
          AND inventory_manifest IS NULL AND inventory_total_rows IS NULL
          AND ((status='running' AND finished_at IS NULL AND summary IS NULL)
@@ -597,8 +597,8 @@ CREATE TABLE billing.maintenance_runs (
                   AND summary ?& ARRAY['digest','rows'] AND jsonb_typeof(summary->'digest')='string'
                   AND jsonb_typeof(summary->'rows')='number' AND summary->>'digest' ~ '^[0-9a-f]{64}$' AND (summary->>'rows')::bigint >= 0)))
         OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL
-         AND mode = '' AND cardinality(rails) = 0 AND psp_id IS NULL
-         AND window_since IS NULL AND window_until IS NULL AND NOT dry_run
+         AND mode IS NULL AND cardinality(rails) = 0 AND psp_id IS NULL
+         AND window_starts_at IS NULL AND window_ends_at IS NULL AND NOT dry_run
          AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
          AND reversed_at IS NULL AND reversed_by IS NULL AND summary IS NULL AND error IS NULL
          AND inventory_manifest IS NOT NULL AND jsonb_typeof(inventory_manifest) = 'object'
@@ -676,14 +676,14 @@ CREATE TABLE billing.worker_state (
     worker_kind text NOT NULL,
     cursor_merchant_id uuid,
     cursor_version bigint DEFAULT 0 NOT NULL,
-    registered_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    registered_at timestamp with time zone DEFAULT now() NOT NULL,
     expected_period_seconds bigint,
     last_success_at timestamp with time zone,
     last_error_at timestamp with time zone,
     last_error text,
     consecutive_failures integer DEFAULT 0 NOT NULL,
     last_alerted_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 COMMENT ON TABLE billing.worker_state IS 'Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.';
 COMMENT ON COLUMN billing.worker_state.cursor_version IS 'Opaque compare-and-swap token for fair-sweep cursor saves: +1 per applied save, never touched by health writes, independent of any clock.';
@@ -717,7 +717,7 @@ END $$;
 
 CREATE TABLE billing.merchant_configurations (
     merchant_id uuid NOT NULL,
-    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    config jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -750,8 +750,8 @@ CREATE TRIGGER immutable_merchant_configuration_application BEFORE UPDATE OR DEL
 CREATE TABLE billing.merchant_deks (
     merchant_id uuid NOT NULL,
     wrapped_dek bytea NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 COMMENT ON TABLE billing.merchant_deks IS 'Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest. wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.';
 COMMENT ON COLUMN billing.merchant_deks.wrapped_dek IS 'AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).';
@@ -766,9 +766,9 @@ CREATE TABLE billing.merchant_secrets (
     merchant_id uuid NOT NULL,
     name text NOT NULL,
     value text NOT NULL,
-    version integer DEFAULT 1 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    version integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 COMMENT ON TABLE billing.merchant_secrets IS 'DB-backed per-merchant secret store. Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.';
 
@@ -798,11 +798,11 @@ COMMENT ON TABLE billing.credential_publications IS 'Credential publication rece
 CREATE TABLE billing.merchant_webhooks (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
-    name text DEFAULT ''::text NOT NULL,
+    name text CHECK (name <> ''),
     destination_host text NOT NULL,
     secret_version integer NOT NULL CHECK (secret_version > 0),
-    format text DEFAULT 'generic'::text NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
+    format text NOT NULL,
+    enabled boolean NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT merchant_webhooks_format_check CHECK ((format = ANY (ARRAY['generic'::text, 'discord'::text, 'slack'::text])))
@@ -859,11 +859,11 @@ ALTER TABLE ONLY billing.customers
 CREATE TABLE billing.customer_invoice_profiles (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    net_terms_days integer DEFAULT 0 NOT NULL,
-    collection_method text DEFAULT 'charge_automatically'::text NOT NULL,
+    net_terms_days integer NOT NULL,
+    collection_method text NOT NULL,
     po_number text,
-    tax jsonb DEFAULT '{}'::jsonb NOT NULL,
-    billing_contacts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    tax jsonb NOT NULL,
+    billing_contacts jsonb NOT NULL,
     memo text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -884,22 +884,22 @@ CREATE TABLE billing.customer_delinquency (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     currency text NOT NULL,
-    state text DEFAULT 'current'::text NOT NULL,
-    overdue_since timestamp with time zone,
-    entered_at timestamp with time zone DEFAULT now() NOT NULL,
-    overdue_amount bigint DEFAULT 0 NOT NULL,
-    overdue_invoices bigint DEFAULT 0 NOT NULL,
-    transition_seq bigint DEFAULT 0 NOT NULL,
-    evaluated_at timestamp with time zone DEFAULT now() NOT NULL,
+    state text NOT NULL,
+    overdue_started_at timestamp with time zone,
+    entered_at timestamp with time zone NOT NULL,
+    overdue_amount bigint NOT NULL,
+    overdue_invoices bigint NOT NULL,
+    transition_seq bigint NOT NULL,
+    evaluated_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT customer_delinquency_amount_check CHECK (((overdue_amount >= 0) AND (overdue_invoices >= 0))),
     CONSTRAINT customer_delinquency_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
-    CONSTRAINT customer_delinquency_since_check CHECK ((((state = 'current'::text) AND (overdue_since IS NULL)) OR ((state <> 'current'::text) AND (overdue_since IS NOT NULL)))),
+    CONSTRAINT customer_delinquency_overdue_started_at_check CHECK ((((state = 'current'::text) AND (overdue_started_at IS NULL)) OR ((state <> 'current'::text) AND (overdue_started_at IS NOT NULL)))),
     CONSTRAINT customer_delinquency_state_check CHECK ((state = ANY (ARRAY['current'::text, 'grace'::text, 'delinquent'::text])))
 );
 COMMENT ON TABLE billing.customer_delinquency IS 'Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant''s declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.';
-COMMENT ON COLUMN billing.customer_delinquency.overdue_since IS 'The oldest overdue due_at behind this state — the clock the grace window is measured on, not the moment we noticed.';
+COMMENT ON COLUMN billing.customer_delinquency.overdue_started_at IS 'The oldest overdue due_at behind this state — the clock the grace window is measured on, not the moment we noticed.';
 COMMENT ON COLUMN billing.customer_delinquency.transition_seq IS 'Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.';
 
 ALTER TABLE ONLY billing.customer_delinquency
@@ -921,13 +921,13 @@ CREATE TABLE billing.custodians (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
     kind text NOT NULL,
-    environment text DEFAULT 'live'::text NOT NULL,
+    environment text NOT NULL,
     account_id text NOT NULL,
-    settings jsonb DEFAULT '{}'::jsonb NOT NULL,
+    settings jsonb NOT NULL,
     credential_versions jsonb DEFAULT '{}'::jsonb NOT NULL,
-    archived boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    archived boolean NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT custodians_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text]))),
     CONSTRAINT custodians_kind_check CHECK ((kind = ANY (ARRAY['basis_theory'::text, 'hyperswitch'::text]))),
     CONSTRAINT custodians_nonempty_check CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text)))
@@ -956,7 +956,7 @@ CREATE TABLE billing.psps (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
     rail text NOT NULL,
-    environment text DEFAULT 'live'::text NOT NULL,
+    environment text NOT NULL,
     account_id text NOT NULL,
     custodian_id uuid,
     settings jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -972,8 +972,8 @@ CREATE TABLE billing.psps (
     revision bigint DEFAULT 0 NOT NULL,
     archived boolean DEFAULT false NOT NULL,
     archived_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT psps_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text]))),
     CONSTRAINT psps_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text]))),
     CONSTRAINT psps_nonempty_check CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text))),
@@ -1019,8 +1019,8 @@ CREATE TABLE billing.psp_customers (
     customer_id uuid NOT NULL,
     psp_id uuid NOT NULL,
     remote_customer_ref text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT psp_customers_remote_customer_ref_check CHECK ((btrim(remote_customer_ref) <> ''::text))
 );
 COMMENT ON TABLE billing.psp_customers IS 'A customer''s customer object at one PSP. Two PSPs on one rail hold independent mappings.';
@@ -1050,7 +1050,7 @@ DECLARE mid uuid;
 BEGIN
     IF TG_OP='UPDATE' AND NEW IS NOT DISTINCT FROM OLD THEN RETURN NEW; END IF;
     IF TG_OP='DELETE' THEN mid := OLD.merchant_id; ELSE mid := NEW.merchant_id; END IF;
-    IF current_setting('app.catalog_batch',true) IS DISTINCT FROM mid::text THEN
+    IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text THEN
         -- A legacy raw writer may already hold a child-row lock. Do not wait
         -- behind a merchant-first transaction while holding that child: refuse
         -- with a retryable serialization conflict instead of deadlocking.
@@ -1129,16 +1129,17 @@ CREATE TABLE billing.products (
     display_name text NOT NULL,
     description text,
     entitlements_spec jsonb,
-    tier_group character varying(100),
-    tier_rank integer DEFAULT 0 NOT NULL,
-    archived boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    tier_group text,
+    tier_rank integer NOT NULL,
+    archived boolean NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
+    CONSTRAINT products_tier_group_check CHECK (char_length(tier_group) BETWEEN 1 AND 100),
     CONSTRAINT products_entitlement_hours_nonnegative_check CHECK (NOT jsonb_path_exists(coalesce(entitlements_spec, '{}'::jsonb), '$.* ? (@.type() == "number" && @ < 0)'))
 );
 COMMENT ON TABLE billing.products IS 'Product definitions that can be purchased or subscribed to';
-COMMENT ON COLUMN billing.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.';
+COMMENT ON COLUMN billing.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). NULL: in no group (an empty name is stored as NULL). Products in same group require upgrade/downgrade, not parallel ownership.';
 COMMENT ON COLUMN billing.products.tier_rank IS 'Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.';
 
 ALTER TABLE ONLY billing.products
@@ -1178,13 +1179,13 @@ CREATE TABLE billing.product_archive_operations (
     request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256) = 32),
     product_id uuid NOT NULL,
     purchase_action text NOT NULL CHECK (purchase_action IN ('none','refund','review')),
-    purchased_since timestamptz,
-    reason text NOT NULL DEFAULT '' CHECK (length(reason) <= 500),
+    purchase_window_starts_at timestamptz,
+    reason text CHECK (length(reason) BETWEEN 1 AND 500),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
-    UNIQUE (merchant_id, idempotency_key),
-    FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT,
-    CHECK ((purchase_action = 'none') = (purchased_since IS NULL))
+    CONSTRAINT product_archive_operations_idempotency_key_key UNIQUE (merchant_id, idempotency_key),
+    CONSTRAINT product_archive_operations_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT product_archive_operations_purchase_window_check CHECK ((purchase_action = 'none') = (purchase_window_starts_at IS NULL))
 );
 COMMENT ON TABLE billing.product_archive_operations IS 'Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.';
 
@@ -1207,12 +1208,12 @@ CREATE TABLE billing.prices (
     product_id uuid NOT NULL,
     amount bigint NOT NULL,
     currency text NOT NULL,
-    archived boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    archived boolean NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
     access_duration_hours integer,
-    auto_renew boolean DEFAULT false NOT NULL,
+    auto_renew boolean NOT NULL,
     trial_unit_amount bigint,
     trial_duration_hours integer,
     key text NOT NULL,
@@ -1258,9 +1259,9 @@ CREATE TABLE billing.price_key_movements (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
     price_id uuid NOT NULL,
-    effective_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    archived boolean NOT NULL DEFAULT false
+    effective_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    archived boolean NOT NULL
 );
 COMMENT ON TABLE billing.price_key_movements IS 'Append-only log of when a price key''s current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.';
 
@@ -1285,7 +1286,7 @@ CREATE TABLE billing.price_psp_bindings (
     recurring_billing_option_id text,
     plan_pda text,
     flex_id text,
-    configuration jsonb NOT NULL DEFAULT '{}'::jsonb,
+    configuration jsonb NOT NULL,
     PRIMARY KEY (merchant_id, price_id, psp_id),
     CONSTRAINT price_psp_bindings_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT price_psp_bindings_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
@@ -1306,13 +1307,13 @@ CREATE TRIGGER catalog_authored_binding BEFORE INSERT OR UPDATE OR DELETE ON bil
 CREATE TABLE billing.catalog_meters (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     event_type text,
     value_property text,
     aggregation text,
     unit text,
-    group_by jsonb DEFAULT '{}'::jsonb NOT NULL,
+    group_by jsonb NOT NULL,
     CONSTRAINT catalog_meters_aggregation_check CHECK (((aggregation IS NULL) OR (aggregation = ANY (ARRAY['sum'::text, 'count'::text, 'max'::text, 'min'::text, 'unique_count'::text, 'latest'::text])))),
     CONSTRAINT catalog_meters_key_nonempty_check CHECK ((btrim(key) <> ''::text))
 );
@@ -1336,12 +1337,12 @@ CREATE TABLE billing.catalog_rate_cards (
     product_id uuid,
     ordinal integer NOT NULL,
     meter_key text,
-    payment_term text DEFAULT 'in_arrears'::text NOT NULL,
-    filter jsonb DEFAULT '{}'::jsonb NOT NULL,
+    payment_term text NOT NULL,
+    filter jsonb NOT NULL,
     allowance jsonb,
     price jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     customer_id uuid,
     CONSTRAINT catalog_rate_cards_ordinal_positive_check CHECK ((ordinal >= 1)),
     CONSTRAINT catalog_rate_cards_payment_term_check CHECK ((payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text]))),
@@ -1376,7 +1377,7 @@ CREATE TABLE billing.catalog_applications (
     schema_version bigint NOT NULL,
     request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256)=32),
     base_revision bigint NOT NULL CHECK (base_revision >= 0),
-    applied_revision bigint NOT NULL CHECK (applied_revision = base_revision + 1),
+    applied_revision bigint NOT NULL CONSTRAINT catalog_applications_applied_revision_check CHECK (applied_revision = base_revision + 1),
     result jsonb NOT NULL CHECK (octet_length(result::text) <= 16384),
     applied_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id,application_id)
@@ -1395,27 +1396,27 @@ CREATE TABLE billing.payment_methods (
     customer_id uuid NOT NULL,
     rail text NOT NULL,
     psp_id uuid,
-    custodian text DEFAULT 'psp'::text NOT NULL,
+    custodian text NOT NULL,
     custodian_id uuid,
-    rail_customer_ref text DEFAULT ''::text NOT NULL,
-    rail_method_ref text DEFAULT ''::text NOT NULL,
-    stored_credential_recurring_ref text DEFAULT ''::text NOT NULL,
-    stored_credential_unscheduled_ref text DEFAULT ''::text NOT NULL,
+    rail_customer_ref text CHECK (rail_customer_ref <> ''),
+    rail_method_ref text CHECK (rail_method_ref <> ''),
+    stored_credential_recurring_ref text CHECK (stored_credential_recurring_ref <> ''),
+    stored_credential_unscheduled_ref text CHECK (stored_credential_unscheduled_ref <> ''),
     card_brand text,
     card_last4 text,
     card_exp_month smallint,
     card_exp_year smallint,
     metadata jsonb,
-    fingerprint text DEFAULT ''::text NOT NULL,
-    network_token_id text DEFAULT ''::text NOT NULL,
-    network_token_status text DEFAULT ''::text NOT NULL,
-    network_token_par text DEFAULT ''::text NOT NULL,
-    charge_via text DEFAULT 'pan_proxy'::text NOT NULL,
-    park_reason text DEFAULT ''::text NOT NULL,
+    fingerprint text CHECK (fingerprint <> ''),
+    network_token_id text CHECK (network_token_id <> ''),
+    network_token_status text,
+    network_token_par text CHECK (network_token_par <> ''),
+    charge_via text NOT NULL,
+    park_reason text CHECK (park_reason <> ''),
     parked_at timestamp with time zone,
     account_updater_checked_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text]))),
     CONSTRAINT payment_methods_custodian_identity_check CHECK ((custodian = 'psp') = (custodian_id IS NULL)),
     CONSTRAINT payment_methods_psp_custody_check CHECK ((custodian = 'psp') = (psp_id IS NOT NULL)),
@@ -1424,7 +1425,7 @@ CREATE TABLE billing.payment_methods (
     CONSTRAINT payment_methods_card_exp_year_check CHECK (card_exp_year BETWEEN 2000 AND 2199),
     CONSTRAINT payment_methods_card_expiry_pair_check CHECK ((card_exp_month IS NULL) = (card_exp_year IS NULL)),
     CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
-    CONSTRAINT payment_methods_network_token_status_check CHECK ((network_token_status = ANY (ARRAY[''::text, 'active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
+    CONSTRAINT payment_methods_network_token_status_check CHECK ((network_token_status = ANY (ARRAY['active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
 );
 COMMENT ON TABLE billing.payment_methods IS 'A customer''s stored payment instrument.';
 COMMENT ON COLUMN billing.payment_methods.rail IS 'Rail the instrument is charged on: nmi or stripe.';
@@ -1454,12 +1455,12 @@ ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_customer_id_id_key UNIQUE (merchant_id, customer_id, id);
 
 CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text);
-CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
+CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL));
 CREATE INDEX payment_methods_customer_id_created_at_id_idx ON billing.payment_methods USING btree (merchant_id, customer_id, created_at DESC, id DESC);
 CREATE INDEX payment_methods_rail_rail_method_ref_idx ON billing.payment_methods USING btree (rail, rail_method_ref);
 CREATE INDEX payment_methods_psp_id_idx ON billing.payment_methods USING btree (psp_id);
-CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref <> ''::text));
-CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint <> ''::text);
+CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref IS NOT NULL));
+CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint IS NOT NULL);
 CREATE UNIQUE INDEX payment_methods_psp_instrument_key ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT;
 
 ALTER TABLE ONLY billing.payment_methods
@@ -1480,7 +1481,7 @@ CREATE TABLE billing.payment_method_updates (
     source text NOT NULL,
     kind text NOT NULL,
     event_ref text NOT NULL,
-    at timestamp with time zone NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payment_method_updates_pkey PRIMARY KEY (merchant_id, id),
     CONSTRAINT payment_method_updates_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
@@ -1494,7 +1495,7 @@ CREATE TABLE billing.payment_method_updates (
 COMMENT ON TABLE billing.payment_method_updates IS 'Changes to a stored card''s standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op. Retention: permanent, never pruned.';
 
 CREATE UNIQUE INDEX payment_method_updates_source_event_ref_payment_method_id_key ON billing.payment_method_updates USING btree (merchant_id, source, event_ref, payment_method_id);
-CREATE INDEX payment_method_updates_payment_method_id_at_idx ON billing.payment_method_updates USING btree (merchant_id, payment_method_id, at);
+CREATE INDEX payment_method_updates_payment_method_id_occurred_at_idx ON billing.payment_method_updates USING btree (merchant_id, payment_method_id, occurred_at);
 CREATE INDEX payment_method_updates_psp_id_idx ON billing.payment_method_updates USING btree (merchant_id, psp_id);
 CREATE INDEX payment_method_updates_customer_id_idx ON billing.payment_method_updates USING btree (merchant_id, customer_id);
 
@@ -1506,8 +1507,8 @@ CREATE TABLE billing.custody_migrations (
     rail text NOT NULL,
     from_custodian text NOT NULL,
     from_custodian_id uuid,
-    from_rail_customer_ref text DEFAULT ''::text NOT NULL,
-    from_rail_method_ref text DEFAULT ''::text NOT NULL,
+    from_rail_customer_ref text CHECK (from_rail_customer_ref <> ''),
+    from_rail_method_ref text CHECK (from_rail_method_ref <> ''),
     from_psp_id uuid,
     to_custodian text NOT NULL,
     to_custodian_id uuid NOT NULL,
@@ -1515,8 +1516,8 @@ CREATE TABLE billing.custody_migrations (
     to_psp_id uuid,
     exported_at timestamp with time zone,
     outcome text NOT NULL,
-    reason text DEFAULT ''::text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    reason text CHECK (reason <> ''),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT custody_migrations_outcome_check CHECK ((outcome = ANY (ARRAY['remapped'::text, 'created'::text]))),
     CONSTRAINT custody_migrations_target_check CHECK (((btrim(to_rail_method_ref) <> ''::text) AND (btrim(to_custodian) <> ''::text)))
 );
@@ -1568,16 +1569,16 @@ CREATE FUNCTION billing.subscriptions_record_status_transition() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
-    decision text := nullif(current_setting('billing.decision', true), '');
+    decision text := nullif(current_setting('openrails.subscription_decision', true), '');
 BEGIN
     IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     IF TG_OP = 'INSERT' THEN
         INSERT INTO billing.subscription_status_transitions
-            (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at, decision, to_paid_through)
+            (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at, decision, to_current_period_ends_at)
         VALUES (NEW.merchant_id, NEW.id, NULL, NEW.status, NEW.cancel_type, now(), 'created', NEW.current_period_ends_at);
     ELSIF OLD.status IS DISTINCT FROM NEW.status OR OLD.current_period_ends_at IS DISTINCT FROM NEW.current_period_ends_at THEN
         INSERT INTO billing.subscription_status_transitions
-            (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at, decision, from_paid_through, to_paid_through)
+            (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at, decision, from_current_period_ends_at, to_current_period_ends_at)
         VALUES (NEW.merchant_id, NEW.id, OLD.status, NEW.status, NEW.cancel_type, now(), decision, OLD.current_period_ends_at, NEW.current_period_ends_at);
     END IF;
     RETURN NEW;
@@ -1598,7 +1599,7 @@ BEGIN
       FROM billing.subscriptions s
      WHERE s.merchant_id = NEW.merchant_id AND s.id = NEW.id AND s.deleted_at IS NULL;
     IF current_status = 'unverified' THEN
-        INSERT INTO billing.subscription_verifications (merchant_id, subscription_id, since)
+        INSERT INTO billing.subscription_verifications (merchant_id, subscription_id, unverified_at)
         VALUES (NEW.merchant_id, NEW.id, entered_at)
         ON CONFLICT (merchant_id, subscription_id) DO NOTHING;
         IF FOUND THEN
@@ -1658,14 +1659,14 @@ CREATE TABLE billing.subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid,
     product_id uuid NOT NULL,
-    status text DEFAULT 'pending' NOT NULL,
+    status text NOT NULL,
     rail text NOT NULL,
-    collection_policy text DEFAULT 'provider' NOT NULL,
-    rail_subscription_id text DEFAULT ''::text NOT NULL,
+    collection_policy text NOT NULL,
+    rail_subscription_id text CHECK (rail_subscription_id <> ''),
     payment_method_id uuid,
     current_period_starts_at timestamp with time zone,
     current_period_ends_at timestamp with time zone,
-    started_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    started_at timestamp with time zone NOT NULL,
     ended_at timestamp with time zone,
     grace_ends_at timestamp with time zone,
     scheduled_price_id uuid,
@@ -1677,9 +1678,9 @@ CREATE TABLE billing.subscriptions (
     cancel_feedback text,
     entitlements_spec_snapshot jsonb,
     gateway_response jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    tier_group character varying(100),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    tier_group text,
     deletion_scheduled_at timestamp with time zone,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -1691,7 +1692,7 @@ CREATE TABLE billing.subscriptions (
     lifecycle_rev bigint DEFAULT 0 NOT NULL,
     row_version bigint DEFAULT 0 NOT NULL,
     dunning_policy jsonb,
-    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id='') OR rail='solana')),
+    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id IS NULL) OR rail='solana')),
     CONSTRAINT subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled') OR (canceled_at IS NOT NULL))),
     CONSTRAINT subscriptions_canceled_has_type_check CHECK (((status <> 'canceled') OR (cancel_type IS NOT NULL))),
     CONSTRAINT subscriptions_canceled_no_retry_schedule_check CHECK (((status <> 'canceled') OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
@@ -1734,7 +1735,7 @@ CREATE INDEX subscriptions_product_id_idx ON billing.subscriptions USING btree (
 CREATE INDEX subscriptions_psp_id_idx ON billing.subscriptions USING btree (merchant_id, psp_id);
 CREATE INDEX subscriptions_rail_rail_subscription_id_idx ON billing.subscriptions USING btree (rail, rail_subscription_id);
 CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status);
-CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_id_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_id_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id IS NOT NULL) AND (deleted_at IS NULL));
 CREATE INDEX subscriptions_current_period_ends_at_engine_due_global_idx ON billing.subscriptions (current_period_ends_at,merchant_id) WHERE collection_policy='engine' AND status IN ('active','past_due') AND deleted_at IS NULL;
 CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id)
     WHERE status IN ('active', 'pending', 'past_due', 'awaiting_method') AND deleted_at IS NULL;
@@ -1786,9 +1787,9 @@ CREATE TABLE billing.subscription_status_transitions (
     cancel_type text,
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     decision text,
-    from_paid_through timestamp with time zone,
-    to_paid_through timestamp with time zone,
-    CONSTRAINT subscription_status_transitions_real_transition_check CHECK (from_status IS DISTINCT FROM to_status OR from_paid_through IS DISTINCT FROM to_paid_through),
+    from_current_period_ends_at timestamp with time zone,
+    to_current_period_ends_at timestamp with time zone,
+    CONSTRAINT subscription_status_transitions_real_transition_check CHECK (from_status IS DISTINCT FROM to_status OR from_current_period_ends_at IS DISTINCT FROM to_current_period_ends_at),
     CONSTRAINT subscription_status_transitions_from_status_check CHECK (from_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'canceled', 'unverified')),
     CONSTRAINT subscription_status_transitions_to_status_check CHECK (to_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'canceled', 'unverified')),
     CONSTRAINT subscription_status_transitions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade'))
@@ -1815,7 +1816,7 @@ FOR EACH ROW EXECUTE FUNCTION billing.guard_retention_delete('occurred_at', '761
 CREATE TABLE billing.subscription_verifications (
     merchant_id uuid NOT NULL,
     subscription_id uuid NOT NULL,
-    since timestamp with time zone NOT NULL,
+    unverified_at timestamp with time zone NOT NULL,
     reads integer DEFAULT 0 NOT NULL,
     last_read_at timestamp with time zone,
     last_error text,
@@ -1823,9 +1824,9 @@ CREATE TABLE billing.subscription_verifications (
     CONSTRAINT subscription_verifications_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id)
         REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE
 );
-COMMENT ON TABLE billing.subscription_verifications IS 'One row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row''s updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.';
+COMMENT ON TABLE billing.subscription_verifications IS 'One row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. unverified_at dates entry (the row''s updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.';
 
-CREATE INDEX subscription_verifications_since_idx ON billing.subscription_verifications USING btree (merchant_id, since);
+CREATE INDEX subscription_verifications_unverified_at_idx ON billing.subscription_verifications USING btree (merchant_id, unverified_at);
 
 CREATE TABLE billing.reprice_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1833,13 +1834,13 @@ CREATE TABLE billing.reprice_batches (
     price_key text,
     to_price_id uuid NOT NULL,
     effective_at timestamp with time zone NOT NULL,
-    subscriptions_matched integer DEFAULT 0 NOT NULL,
-    subscriptions_skipped integer DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    subscriptions_matched integer NOT NULL,
+    subscriptions_skipped integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     kind text DEFAULT 'reprice'::text NOT NULL,
     source_price_id uuid,
-    fallback_policy text DEFAULT ''::text NOT NULL,
-    CONSTRAINT reprice_batches_fallback_check CHECK ((fallback_policy = ANY (ARRAY[''::text, 'keep_grandfathered'::text, 'cancel_at_period_end'::text]))),
+    fallback_policy text,
+    CONSTRAINT reprice_batches_fallback_check CHECK ((fallback_policy = ANY (ARRAY['keep_grandfathered'::text, 'cancel_at_period_end'::text]))),
     CONSTRAINT reprice_batches_kind_check CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text])))
 );
 COMMENT ON TABLE billing.reprice_batches IS 'Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id. Retention: permanent, never pruned.';
@@ -1870,14 +1871,14 @@ CREATE TABLE billing.subscription_reprices (
     effective_at timestamp with time zone NOT NULL,
     status text DEFAULT 'scheduled'::text NOT NULL,
     reprice_batch_id uuid,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     applied_at timestamp with time zone,
     canceled_at timestamp with time zone,
     acknowledged_short_notice boolean DEFAULT false NOT NULL,
-    kind text DEFAULT 'reprice'::text NOT NULL,
-    blocked_reason text DEFAULT ''::text NOT NULL,
+    kind text NOT NULL,
+    blocked_reason text CHECK (blocked_reason <> ''),
     CONSTRAINT subscription_reprices_applied_has_timestamp_check CHECK (((status <> 'applied'::text) OR (applied_at IS NOT NULL))),
-    CONSTRAINT subscription_reprices_blocked_has_reason_check CHECK (((status <> 'blocked'::text) OR (blocked_reason <> ''::text))),
+    CONSTRAINT subscription_reprices_blocked_has_reason_check CHECK (((status <> 'blocked'::text) OR (blocked_reason IS NOT NULL))),
     CONSTRAINT subscription_reprices_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL))),
     CONSTRAINT subscription_reprices_kind_check CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text]))),
     CONSTRAINT subscription_reprices_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
@@ -1920,10 +1921,10 @@ CREATE TABLE billing.solana_subscriptions (
     merchant_address text NOT NULL,
     mint text NOT NULL,
     plan_created_at_fingerprint bigint NOT NULL,
-    last_pulled_period_start timestamp with time zone,
+    last_pulled_period_starts_at timestamp with time zone,
     last_signature text,
     next_pull_at timestamp with time zone NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
+    status text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT solana_subscriptions_status_check CHECK (status IN ('active', 'canceled', 'expired'))
@@ -1984,8 +1985,8 @@ CREATE TABLE billing.payments (
     discount_metadata jsonb,
     entitlements_spec_snapshot jsonb,
     metadata jsonb,
-    purchased_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    purchased_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     card_brand text,
     card_last4 text,
     merchant_id uuid NOT NULL,
@@ -2079,8 +2080,8 @@ CREATE TABLE billing.checkout_attempts (
     rail_fields jsonb,
     rail_state jsonb,
     metadata jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     psp_id uuid NOT NULL,
@@ -2139,8 +2140,8 @@ CREATE TABLE billing.checkout_sessions (
     customer_id uuid NOT NULL,
     price_id uuid NOT NULL,
     offer jsonb NOT NULL,
-    success_url text DEFAULT '' NOT NULL,
-    origin text DEFAULT '' NOT NULL,
+    success_url text CHECK (success_url <> ''),
+    origin text CHECK (origin <> ''),
     attempt integer DEFAULT 0 NOT NULL,
     attempt_id uuid,
     expires_at timestamp with time zone NOT NULL,
@@ -2167,8 +2168,8 @@ CREATE TABLE billing.solana_pay_references (
     checkout_attempt_id uuid NOT NULL,
     kind text NOT NULL,
     status text NOT NULL,
-    settle_until timestamp with time zone NOT NULL,
-    watch_until timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    watch_ends_at timestamp with time zone NOT NULL,
     next_poll_at timestamp with time zone NOT NULL,
     signature text,
     seen_until text,
@@ -2185,13 +2186,13 @@ CREATE TABLE billing.solana_pay_references (
     CONSTRAINT solana_pay_references_kind_check CHECK (kind IN ('purchase', 'subscribe')),
     CONSTRAINT solana_pay_references_status_check CHECK (status IN ('pending', 'confirmed', 'expired')),
     CONSTRAINT solana_pay_references_signature_check CHECK ((status = 'confirmed') = (signature IS NOT NULL)),
-    CONSTRAINT solana_pay_references_window_check CHECK (watch_until >= settle_until),
+    CONSTRAINT solana_pay_references_window_check CHECK (watch_ends_at >= expires_at),
     CONSTRAINT solana_pay_references_built_check CHECK ((built_transaction IS NULL) = (built_valid_height IS NULL))
 );
-COMMENT ON TABLE billing.solana_pay_references IS 'One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.';
+COMMENT ON TABLE billing.solana_pay_references IS 'One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by expires_at; confirmed = one signature credited (or mirrored); expired = nothing credited by expires_at. Purchase references stay watched until watch_ends_at so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.';
 
 CREATE INDEX solana_pay_references_next_poll_at_idx ON billing.solana_pay_references USING btree (next_poll_at);
-CREATE INDEX solana_pay_references_watch_until_idx ON billing.solana_pay_references USING btree (watch_until) WHERE status <> 'pending';
+CREATE INDEX solana_pay_references_watch_ends_at_idx ON billing.solana_pay_references USING btree (watch_ends_at) WHERE status <> 'pending';
 
 CREATE TABLE billing.solana_pay_receipts (
     merchant_id uuid NOT NULL,
@@ -2293,7 +2294,7 @@ CREATE TABLE billing.payment_attempts (
     payment_method_id uuid,
     payment_id uuid,
     provider_intent_id uuid,
-    step text DEFAULT '' NOT NULL,
+    step text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_id uuid,
     card_bin text,
@@ -2409,11 +2410,11 @@ CREATE TABLE billing.ledger_accounts (
     customer_id uuid,
     account_type text NOT NULL,
     currency text NOT NULL,
-    debits_must_not_exceed_credits boolean DEFAULT false NOT NULL,
-    credits_must_not_exceed_debits boolean DEFAULT false NOT NULL,
+    debits_must_not_exceed_credits boolean NOT NULL,
+    credits_must_not_exceed_debits boolean NOT NULL,
     credits_posted bigint DEFAULT 0 NOT NULL,
     debits_posted bigint DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ledger_accounts_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text])))
 );
@@ -2507,7 +2508,7 @@ CREATE TABLE billing.ledger_transfers (
     amount bigint NOT NULL,
     currency text NOT NULL,
     transfer_type text NOT NULL,
-    allow_debit_negative_up_to bigint DEFAULT 0 NOT NULL,
+    allow_debit_negative_up_to bigint NOT NULL,
     source text NOT NULL CHECK (octet_length(source) BETWEEN 1 AND 512),
     source_id text NOT NULL CHECK (octet_length(source_id) BETWEEN 1 AND 512),
     grant_id uuid,
@@ -2515,7 +2516,7 @@ CREATE TABLE billing.ledger_transfers (
     invoker_id text,
     resource text,
     invoice_id uuid,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     operation text NOT NULL CHECK (octet_length(operation) BETWEEN 1 AND 512),
     CONSTRAINT ledger_transfers_coordinate_not_blank_check CHECK (((operation <> ''::text) AND (source <> ''::text) AND (source_id <> ''::text))),
     CONSTRAINT ledger_transfers_amount_positive_check CHECK ((amount > 0)),
@@ -2566,17 +2567,17 @@ CREATE TABLE billing.grants (
     product_id uuid,
     kind text NOT NULL,
     source_type text NOT NULL,
-    source_id text DEFAULT ''::text NOT NULL CHECK (octet_length(source_id) <= 255),
+    source_id text CHECK (octet_length(source_id) BETWEEN 1 AND 255),
     payment_id uuid,
-    event text DEFAULT 'grant'::text NOT NULL,
+    event text NOT NULL,
     supersedes_id uuid,
     spec_snapshot jsonb,
-    starts_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    starts_at timestamp with time zone NOT NULL,
     ends_at timestamp with time zone,
     amount bigint,
     currency text,
     reason text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT grants_amount_positive_check CHECK (((amount IS NULL) OR (amount > 0))),
     CONSTRAINT grants_credit_amount_check CHECK (((kind <> 'credit'::text) OR ((amount IS NOT NULL) AND (currency IS NOT NULL)))),
     CONSTRAINT grants_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
@@ -2601,9 +2602,9 @@ CREATE INDEX grants_ends_at_idx ON billing.grants USING btree (merchant_id, ends
 CREATE INDEX grants_customer_id_kind_idx ON billing.grants USING btree (merchant_id, customer_id, kind) WHERE (event = 'grant'::text);
 CREATE INDEX grants_created_at_idx ON billing.grants USING btree (merchant_id, created_at) WHERE (kind = 'credit'::text);
 CREATE INDEX grants_payment_id_idx ON billing.grants USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
-CREATE INDEX grants_source_type_source_id_idx ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id <> ''::text);
+CREATE INDEX grants_source_type_source_id_idx ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id IS NOT NULL);
 CREATE INDEX grants_supersedes_id_idx ON billing.grants USING btree (merchant_id, supersedes_id) WHERE (supersedes_id IS NOT NULL);
-CREATE UNIQUE INDEX grants_customer_id_source_id_key ON billing.grants USING btree (merchant_id, customer_id, source_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (source_id <> ''::text));
+CREATE UNIQUE INDEX grants_customer_id_source_id_key ON billing.grants USING btree (merchant_id, customer_id, source_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (source_id IS NOT NULL));
 CREATE UNIQUE INDEX grants_supersedes_id_key ON billing.grants USING btree (merchant_id, supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])));
 CREATE INDEX grants_product_id_idx ON billing.grants USING btree (merchant_id, product_id) WHERE (product_id IS NOT NULL);
 
@@ -2635,8 +2636,8 @@ CREATE TABLE billing.entitlements (
     source_type text NOT NULL,
     revoked_at timestamp with time zone,
     revoke_reason text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -2682,7 +2683,7 @@ CREATE TABLE billing.billing_policies (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     name text NOT NULL,
-    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+    policy jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -2732,7 +2733,7 @@ CREATE TRIGGER lock_merchant_policy_binding BEFORE INSERT OR UPDATE OR DELETE ON
 CREATE TABLE billing.money_settings (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
-    billing_mode text DEFAULT 'prepaid'::text NOT NULL,
+    billing_mode text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     tier text,
@@ -2763,11 +2764,11 @@ CREATE TABLE billing.invoker_spend_limits (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     scope text NOT NULL,
-    scope_key text DEFAULT ''::text NOT NULL,
-    windows jsonb DEFAULT '[]'::jsonb NOT NULL,
+    scope_key text NOT NULL,
+    windows jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    provenance text DEFAULT ''::text NOT NULL,
+    provenance text CHECK (provenance <> ''),
     CONSTRAINT invoker_spend_limits_scope_check CHECK ((scope = ANY (ARRAY['invoker'::text, 'role'::text, 'invoker_tier'::text])))
 );
 COMMENT ON TABLE billing.invoker_spend_limits IS 'Per-invoker spend limits: the payer caps how much a delegated invoker/role can spend of the payer''s money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.';
@@ -2792,7 +2793,7 @@ CREATE TABLE billing.usage_events (
     currency text NOT NULL,
     resource text,
     event_type text NOT NULL,
-    dimensions jsonb DEFAULT '{}'::jsonb NOT NULL,
+    dimensions jsonb NOT NULL,
     amount bigint NOT NULL,
     source text NOT NULL,
     source_id text NOT NULL CHECK (octet_length(source_id) BETWEEN 1 AND 255),
@@ -2800,7 +2801,7 @@ CREATE TABLE billing.usage_events (
     -- Pricing authority: catalog rows are metered inputs; host rows already carry final money.
     pricing_authority text NOT NULL CHECK (pricing_authority IN ('host', 'catalog')),
     metadata jsonb,
-    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT usage_events_amount_check CHECK ((amount >= 0)),
     CONSTRAINT usage_events_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
@@ -2839,20 +2840,20 @@ CREATE TABLE billing.metered_rating_watermarks (
     customer_id uuid NOT NULL,
     currency text NOT NULL,
     source text NOT NULL,
-    period_from timestamp with time zone NOT NULL,
-    rated_through timestamp with time zone NOT NULL,
-    accrued_amount bigint DEFAULT 0 NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    period_starts_at timestamp with time zone NOT NULL,
+    rated_through_at timestamp with time zone NOT NULL,
+    accrued_amount bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT metered_rating_watermarks_accrued_nonneg_check CHECK ((accrued_amount >= 0)),
     CONSTRAINT metered_rating_watermarks_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
 );
 COMMENT ON TABLE billing.metered_rating_watermarks IS 'Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.metered_rating_watermarks.source IS 'Meter accrual source key (metered:<meter>[:rate_card:<id>][:dim:<value>]).';
-COMMENT ON COLUMN billing.metered_rating_watermarks.accrued_amount IS 'Micros already accrued for [period_from, rated_through); the sweep accrues only the delta above this.';
+COMMENT ON COLUMN billing.metered_rating_watermarks.accrued_amount IS 'Micros already accrued for [period_starts_at, rated_through_at); the sweep accrues only the delta above this.';
 
 ALTER TABLE ONLY billing.metered_rating_watermarks
-    ADD CONSTRAINT metered_rating_watermarks_pkey PRIMARY KEY (merchant_id, customer_id, currency, source, period_from);
+    ADD CONSTRAINT metered_rating_watermarks_pkey PRIMARY KEY (merchant_id, customer_id, currency, source, period_starts_at);
 
 ALTER TABLE ONLY billing.metered_rating_watermarks
     ADD CONSTRAINT metered_rating_watermarks_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -2870,7 +2871,7 @@ CREATE TABLE billing.admission_operations (
     terms jsonb NOT NULL CHECK (jsonb_typeof(terms) = 'object' AND octet_length(terms::text) <= 65536),
     requested_expires_at timestamptz,
     expires_at timestamptz,
-    admitted_at timestamptz NOT NULL,
+    admitted_at timestamptz DEFAULT now() NOT NULL,
     window_keys text[] NOT NULL,
     state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'released', 'captured')),
     capture_terms jsonb CHECK (jsonb_typeof(capture_terms) = 'object' AND octet_length(capture_terms::text) <= 65536),
@@ -2878,14 +2879,14 @@ CREATE TABLE billing.admission_operations (
     captured_at timestamptz,
     released_at timestamptz,
     PRIMARY KEY (merchant_id, request_id, admitted_at),
-    FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
-    CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
-    CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
+    CONSTRAINT admission_operations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
+    CONSTRAINT admission_operations_requested_expires_at_check CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
+    CONSTRAINT admission_operations_expires_at_check CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
     -- A hold ends within 30 days of its admission, so a partition past its
     -- retention holds no live reservation. Hours, because a day's length
     -- follows the session time zone.
     CONSTRAINT admission_operations_hold_lifetime_check CHECK (expires_at IS NULL OR expires_at <= admitted_at + interval '720 hours'),
-    CHECK (
+    CONSTRAINT admission_operations_state_fields_check CHECK (
         (state = 'open' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
         OR (state = 'released' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
         OR (state = 'captured' AND capture_terms IS NOT NULL AND captured_amount IS NOT NULL AND captured_amount >= 0 AND captured_at IS NOT NULL)
@@ -2909,7 +2910,7 @@ CREATE TABLE billing.admission_denials_hourly (
     customer_id uuid NOT NULL,
     denial_reason text NOT NULL,
     hour_at timestamp with time zone NOT NULL,
-    denials bigint DEFAULT 0 NOT NULL,
+    denials bigint NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT admission_denials_hourly_denials_positive_check CHECK ((denials > 0)),
     CONSTRAINT admission_denials_hourly_hour_aligned_check CHECK ((hour_at = date_trunc('hour'::text, hour_at)))
@@ -2939,7 +2940,7 @@ CREATE TABLE billing.operation_authorizations (
     authorization_body_digest bytea NOT NULL,
     state text DEFAULT 'open'::text NOT NULL,
     terminal_reference text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     released_at timestamp with time zone,
     settled_at timestamp with time zone,
     settlement_cost_amount bigint,
@@ -2992,8 +2993,8 @@ CREATE TABLE billing.cost_qualifications (
     operation_id text NOT NULL,
     provider text NOT NULL,
     provider_resource_id text NOT NULL,
-    provider_lifetime_start timestamp with time zone NOT NULL,
-    provider_lifetime_end timestamp with time zone NOT NULL,
+    provider_lifetime_starts_at timestamp with time zone NOT NULL,
+    provider_lifetime_ends_at timestamp with time zone NOT NULL,
     provider_absent_at timestamp with time zone NOT NULL,
     provider_absence_reference text NOT NULL,
     billing_stop_reference text NOT NULL,
@@ -3008,10 +3009,10 @@ CREATE TABLE billing.cost_qualifications (
     qualified_observation_id text,
     qualified_cost_amount bigint,
     qualified_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT cost_qualifications_evidence_check CHECK ((((octet_length(lifecycle_evidence_bytes) >= 1) AND (octet_length(lifecycle_evidence_bytes) <= 65536)) AND (octet_length(lifecycle_evidence_digest) = 32) AND (lifecycle_evidence_digest = sha256(lifecycle_evidence_bytes)))),
-    CONSTRAINT cost_qualifications_lifetime_check CHECK (((provider_lifetime_end > provider_lifetime_start) AND (provider_absent_at >= provider_lifetime_end) AND (windows_closed_at >= provider_lifetime_end))),
+    CONSTRAINT cost_qualifications_lifetime_check CHECK (((provider_lifetime_ends_at > provider_lifetime_starts_at) AND (provider_absent_at >= provider_lifetime_ends_at) AND (windows_closed_at >= provider_lifetime_ends_at))),
     CONSTRAINT cost_qualifications_policy_check CHECK ((quiescence_seconds > 0)),
     CONSTRAINT cost_qualifications_provider_check CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (octet_length(provider) <= 255) AND (provider_resource_id <> ''::text) AND (provider_resource_id = btrim(provider_resource_id)) AND (octet_length(provider_resource_id) <= 255))),
     CONSTRAINT cost_qualifications_reference_check CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024))),
@@ -3033,22 +3034,22 @@ CREATE TABLE billing.cost_observations (
     operation_id text NOT NULL,
     observation_id text NOT NULL,
     normalized_query text NOT NULL,
-    query_start timestamp with time zone NOT NULL,
-    query_end timestamp with time zone NOT NULL,
+    query_starts_at timestamp with time zone NOT NULL,
+    query_ends_at timestamp with time zone NOT NULL,
     raw_body_available boolean NOT NULL,
     raw_body_bytes bytea NOT NULL,
     raw_body_digest bytea NOT NULL,
     normalized_records_bytes bytea,
     normalized_records_digest bytea,
     cost_amount bigint,
-    has_negative_record boolean DEFAULT false NOT NULL,
+    has_negative_record boolean NOT NULL,
     refusal_kind text,
     covers_lifetime boolean NOT NULL,
     qualification_reason text NOT NULL,
-    observed_at timestamp with time zone NOT NULL,
+    observed_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT cost_observations_id_check CHECK (((observation_id <> ''::text) AND (observation_id = btrim(observation_id)) AND (octet_length(observation_id) <= 255))),
     CONSTRAINT cost_observations_normalized_check CHECK ((((refusal_kind IS NULL) AND raw_body_available AND (octet_length(raw_body_bytes) > 0) AND (normalized_records_bytes IS NOT NULL) AND (octet_length(normalized_records_bytes) > 0) AND (octet_length(normalized_records_bytes) <= 786432) AND (normalized_records_digest IS NOT NULL) AND (octet_length(normalized_records_digest) = 32) AND (normalized_records_digest = sha256(normalized_records_bytes)) AND (cost_amount IS NOT NULL)) OR ((refusal_kind IS NOT NULL) AND (refusal_kind <> ''::text) AND (refusal_kind = btrim(refusal_kind)) AND (octet_length(refusal_kind) <= 255) AND (normalized_records_bytes IS NULL) AND (normalized_records_digest IS NULL) AND (cost_amount IS NULL) AND (NOT has_negative_record) AND (NOT covers_lifetime) AND (qualification_reason = 'provider_evidence_refused'::text) AND (((refusal_kind = ANY (ARRAY['schema_ambiguity'::text, 'submicro_amount'::text, 'amount_overflow'::text])) AND raw_body_available AND (octet_length(raw_body_bytes) > 0)) OR ((refusal_kind = 'response_too_large'::text) AND (NOT raw_body_available) AND (octet_length(raw_body_bytes) = 0)))))),
-    CONSTRAINT cost_observations_query_check CHECK (((normalized_query <> ''::text) AND (normalized_query = btrim(normalized_query)) AND (octet_length(normalized_query) <= 8192) AND (query_end > query_start))),
+    CONSTRAINT cost_observations_query_check CHECK (((normalized_query <> ''::text) AND (normalized_query = btrim(normalized_query)) AND (octet_length(normalized_query) <= 8192) AND (query_ends_at > query_starts_at))),
     CONSTRAINT cost_observations_raw_check CHECK (((octet_length(raw_body_bytes) <= 786432) AND (octet_length(raw_body_digest) = 32) AND (raw_body_digest = sha256(raw_body_bytes)) AND (raw_body_available OR (octet_length(raw_body_bytes) = 0)))),
     CONSTRAINT cost_observations_reason_check CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))
 );
@@ -3084,19 +3085,19 @@ CREATE TABLE billing.provider_intents (
     price_id uuid,
     payload jsonb,
     idempotency_key text NOT NULL CHECK (octet_length(idempotency_key) BETWEEN 1 AND 512),
-    status text DEFAULT 'pending'::text NOT NULL,
+    status text NOT NULL,
     attempts integer DEFAULT 0 NOT NULL,
-    next_attempt_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    claimed_until timestamp with time zone,
+    next_attempt_at timestamp with time zone NOT NULL,
+    lease_expires_at timestamp with time zone,
     origin text NOT NULL,
     origin_reason text,
     actor text,
     last_failure_reason text,
     expires_at timestamp with time zone,
     result_evidence jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     executed_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     psp_id uuid,
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
@@ -3110,7 +3111,7 @@ COMMENT ON TABLE billing.provider_intents IS 'Durable, effectively-once outbox f
 COMMENT ON COLUMN billing.provider_intents.rail IS 'Rail the mutation targets (e.g. ''nmi'', ''stripe'').';
 COMMENT ON COLUMN billing.provider_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff), for example nmi_delete_subscription or manual_rebill.';
 COMMENT ON COLUMN billing.provider_intents.idempotency_key IS 'Deterministic identity of the logical intent within the merchant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
-COMMENT ON COLUMN billing.provider_intents.claimed_until IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
+COMMENT ON COLUMN billing.provider_intents.lease_expires_at IS 'Single-executor lease (SKIP LOCKED claim). An in_flight row whose lease elapsed was orphaned by a crashed executor and becomes claimable again; per-type execute semantics (verify-then-execute, verifier-before-retry) make the reclaim safe.';
 COMMENT ON COLUMN billing.provider_intents.origin IS 'Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.';
 COMMENT ON COLUMN billing.provider_intents.actor IS 'Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).';
 COMMENT ON COLUMN billing.provider_intents.last_failure_reason IS 'Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.';
@@ -3190,7 +3191,7 @@ CREATE TABLE billing.provider_mutation_logs (
     provider_intent_id uuid,
     intent_type text,
     idempotency_key text,
-    attempt integer DEFAULT 0 NOT NULL,
+    attempt integer NOT NULL,
     phase text NOT NULL,
     reason text,
     evidence jsonb,
@@ -3255,8 +3256,8 @@ CREATE TABLE billing.webhook_events (
     custodian_id uuid,
     op text NOT NULL,
     event_id text NOT NULL CHECK (octet_length(event_id) BETWEEN 1 AND 255),
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    completed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT webhook_events_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
 );
 COMMENT ON TABLE billing.webhook_events IS 'webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.';
@@ -3325,28 +3326,28 @@ CREATE TABLE billing.account_updater_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     custodian_id uuid NOT NULL,
-    job_ref text DEFAULT ''::text NOT NULL,
+    job_ref text CHECK (btrim(job_ref) <> ''),
     status text DEFAULT 'pending'::text NOT NULL,
-    instruments jsonb DEFAULT '[]'::jsonb NOT NULL,
+    instruments jsonb NOT NULL,
     result_counts jsonb DEFAULT '{}'::jsonb NOT NULL,
-    failure_reason text DEFAULT ''::text NOT NULL,
+    failure_reason text CHECK (failure_reason <> ''),
     submitted_at timestamp with time zone,
     last_polled_at timestamp with time zone,
     completed_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT account_updater_batches_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'submitted'::text, 'completed'::text, 'failed'::text]))),
-    CONSTRAINT account_updater_batches_submitted_has_job_check CHECK (((status <> 'submitted'::text) OR (btrim(job_ref) <> ''::text)))
+    CONSTRAINT account_updater_batches_submitted_has_job_check CHECK (((status <> 'submitted'::text) OR (job_ref IS NOT NULL)))
 );
 COMMENT ON TABLE billing.account_updater_batches IS 'One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.account_updater_batches.job_ref IS 'The custodian-native job id (Basis Theory account-updater job). '''' until the create call is confirmed.';
+COMMENT ON COLUMN billing.account_updater_batches.job_ref IS 'The custodian-native job id (Basis Theory account-updater job). NULL until the create call is confirmed.';
 COMMENT ON COLUMN billing.account_updater_batches.status IS 'pending = assembled, not yet confirmed at the custodian | submitted = the custodian owns it, poll for results | completed = results folded | failed = abandoned (the instruments become due again; nothing is parked on our own malfunction).';
 
 ALTER TABLE ONLY billing.account_updater_batches
     ADD CONSTRAINT account_updater_batches_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX account_updater_batches_status_created_at_idx ON billing.account_updater_batches USING btree (merchant_id, status, created_at);
-CREATE UNIQUE INDEX account_updater_batches_custodian_id_job_ref_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref <> ''::text);
+CREATE UNIQUE INDEX account_updater_batches_custodian_id_job_ref_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref IS NOT NULL);
 CREATE UNIQUE INDEX account_updater_batches_custodian_id_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id) WHERE (status = ANY (ARRAY['pending'::text, 'submitted'::text]));
 
 ALTER TABLE ONLY billing.account_updater_batches
@@ -3359,10 +3360,10 @@ ALTER TABLE ONLY billing.account_updater_batches
 CREATE TABLE billing.nmi_bulk_checkpoints (
     merchant_id uuid NOT NULL,
     psp_id uuid NOT NULL,
-    since timestamp with time zone NOT NULL,
-    until timestamp with time zone NOT NULL,
-    next_page integer DEFAULT 1 NOT NULL,
-    started_at timestamp with time zone NOT NULL,
+    window_starts_at timestamp with time zone NOT NULL,
+    window_ends_at timestamp with time zone NOT NULL,
+    next_page integer NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT nmi_bulk_checkpoints_pkey PRIMARY KEY (merchant_id, psp_id),
     CONSTRAINT nmi_bulk_checkpoints_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
 );
@@ -3371,22 +3372,22 @@ COMMENT ON TABLE billing.nmi_bulk_checkpoints IS 'The in-progress bulk verificat
 CREATE TABLE billing.nmi_history_months (
     merchant_id uuid NOT NULL,
     psp_id uuid NOT NULL,
-    month timestamp with time zone NOT NULL,
+    month_at timestamp with time zone NOT NULL,
     kind text NOT NULL,
     category text NOT NULL,
-    reason text DEFAULT ''::text NOT NULL,
+    reason text NOT NULL,
     authorizations bigint NOT NULL,
-    CONSTRAINT nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month, kind, category, reason),
+    CONSTRAINT nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month_at, kind, category, reason),
     CONSTRAINT nmi_history_months_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT nmi_history_months_month_check CHECK (month = date_trunc('month', month, 'UTC')),
+    CONSTRAINT nmi_history_months_month_at_check CHECK (month_at = date_trunc('month', month_at, 'UTC')),
     CONSTRAINT nmi_history_months_kind_check CHECK (kind IN ('verification', 'one_off_sale', 'scheduled_rebill')),
     CONSTRAINT nmi_history_months_category_check CHECK (category IN ('approved', 'card_data', 'issuer_soft', 'issuer_hard', 'gateway_rule', 'system_error', 'unknown')),
     CONSTRAINT nmi_history_months_reason_check CHECK ((category = 'approved') = (reason = '')),
     CONSTRAINT nmi_history_months_authorizations_check CHECK (authorizations > 0)
 );
-COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal''s category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.';
+COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per PSP, month_at (the month''s first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal''s category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.';
 
-CREATE INDEX nmi_history_months_month_idx ON billing.nmi_history_months USING btree (merchant_id, month);
+CREATE INDEX nmi_history_months_month_at_idx ON billing.nmi_history_months USING btree (merchant_id, month_at);
 
 -- One row per NMI PSP whose history was read: the last read that completed.
 CREATE TABLE billing.nmi_history_reads (
@@ -3408,21 +3409,21 @@ CREATE TABLE billing.invoices (
     customer_id uuid NOT NULL,
     currency text NOT NULL,
     invoice_number text,
-    period_from timestamp with time zone NOT NULL,
-    period_to timestamp with time zone NOT NULL,
-    usage_total bigint DEFAULT 0 NOT NULL,
-    deposits_total bigint DEFAULT 0 NOT NULL,
-    owed_accrued bigint DEFAULT 0 NOT NULL,
-    owed_paid bigint DEFAULT 0 NOT NULL,
-    closing_balance bigint DEFAULT 0 NOT NULL,
-    subtotal_amount bigint DEFAULT 0 NOT NULL,
-    total_amount bigint DEFAULT 0 NOT NULL,
-    amount_paid bigint DEFAULT 0 NOT NULL,
-    amount_due bigint DEFAULT 0 NOT NULL,
-    line_items jsonb DEFAULT '[]'::jsonb NOT NULL,
-    money_movements jsonb DEFAULT '{}'::jsonb NOT NULL,
-    status text DEFAULT 'draft'::text NOT NULL,
-    collection_method text DEFAULT 'charge_automatically'::text NOT NULL,
+    period_starts_at timestamp with time zone NOT NULL,
+    period_ends_at timestamp with time zone NOT NULL,
+    usage_total bigint NOT NULL,
+    deposits_total bigint NOT NULL,
+    owed_accrued bigint NOT NULL,
+    owed_paid bigint NOT NULL,
+    closing_balance bigint NOT NULL,
+    subtotal_amount bigint NOT NULL,
+    total_amount bigint NOT NULL,
+    amount_paid bigint NOT NULL,
+    amount_due bigint NOT NULL,
+    line_items jsonb NOT NULL,
+    money_movements jsonb NOT NULL,
+    status text NOT NULL,
+    collection_method text NOT NULL,
     issued_at timestamp with time zone,
     due_at timestamp with time zone,
     paid_at timestamp with time zone,
@@ -3433,8 +3434,8 @@ CREATE TABLE billing.invoices (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     po_number text,
-    tax jsonb DEFAULT '{}'::jsonb NOT NULL,
-    billing_contacts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    tax jsonb NOT NULL,
+    billing_contacts jsonb NOT NULL,
     memo text,
     collection_failure_count integer DEFAULT 0 NOT NULL,
     collection_failed_at timestamp with time zone,
@@ -3462,10 +3463,10 @@ ALTER TABLE ONLY billing.invoices
     ADD CONSTRAINT invoices_customer_id_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
 
 CREATE INDEX invoices_next_collection_attempt_at_due_at_idx ON billing.invoices USING btree (merchant_id, next_collection_attempt_at, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0) AND (collection_method = 'charge_automatically'::text));
-CREATE INDEX invoices_status_period_from_id_idx ON billing.invoices USING btree (merchant_id, status, period_from DESC, id DESC);
+CREATE INDEX invoices_status_period_starts_at_id_idx ON billing.invoices USING btree (merchant_id, status, period_starts_at DESC, id DESC);
 CREATE INDEX invoices_customer_id_currency_due_at_idx ON billing.invoices USING btree (merchant_id, customer_id, currency, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0));
-CREATE INDEX invoices_customer_id_period_from_id_idx ON billing.invoices USING btree (merchant_id, customer_id, period_from DESC, id DESC);
-CREATE UNIQUE INDEX invoices_customer_id_currency_period_from_period_to_key ON billing.invoices USING btree (merchant_id, customer_id, currency, period_from, period_to);
+CREATE INDEX invoices_customer_id_period_starts_at_id_idx ON billing.invoices USING btree (merchant_id, customer_id, period_starts_at DESC, id DESC);
+CREATE UNIQUE INDEX invoices_customer_id_currency_period_starts_at_period_ends_at_key ON billing.invoices USING btree (merchant_id, customer_id, currency, period_starts_at, period_ends_at);
 CREATE INDEX invoices_collection_intent_id_idx ON billing.invoices USING btree (merchant_id, collection_intent_id) WHERE (collection_intent_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.invoices
@@ -3486,7 +3487,7 @@ CREATE TABLE billing.invoice_items (
     invoice_at timestamp with time zone NOT NULL,
     amount bigint NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
-    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    metadata jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT invoice_items_amount_nonneg_check CHECK ((amount >= 0)),
@@ -3517,13 +3518,13 @@ CREATE TABLE billing.invoice_payments (
     ledger_transfer_id uuid,
     currency text NOT NULL,
     amount bigint NOT NULL,
-    status text DEFAULT 'attempted'::text NOT NULL,
+    status text NOT NULL,
     channel text NOT NULL,
     rail text,
     rail_payment_id text,
     failure_code text,
     failure_message text,
-    attempted_at timestamp with time zone DEFAULT now() NOT NULL,
+    attempted_at timestamp with time zone NOT NULL,
     settled_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -3572,17 +3573,17 @@ CREATE TABLE billing.notifications (
     data jsonb NOT NULL,
     recipient_kind text DEFAULT 'customer' NOT NULL,
     read_at timestamp with time zone,
-    severity text DEFAULT '' NOT NULL,
-    title text DEFAULT '' NOT NULL,
-    body text DEFAULT '' NOT NULL,
-    link text DEFAULT '' NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    severity text CHECK (severity <> ''),
+    title text CHECK (title <> ''),
+    body text CHECK (body <> ''),
+    link text CHECK (link <> ''),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid,
     emailed_at timestamp with time zone,
     CONSTRAINT notifications_recipient_check CHECK (
-        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity = '' AND title = '' AND body = '' AND link = '')
-        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND title <> '')
+        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity IS NULL AND title IS NULL AND body IS NULL AND link IS NULL)
+        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND severity IS NOT NULL AND title IS NOT NULL AND body IS NOT NULL)
     )
 );
 COMMENT ON TABLE billing.notifications IS 'Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox. Retention: rows are deleted 90 days after created_at once read, 180 days if never read.';
@@ -3647,7 +3648,7 @@ ALTER TABLE ONLY billing.host_outbox
 CREATE TABLE billing.reconciliation_state (
     merchant_id uuid NOT NULL,
     source_domain text NOT NULL,
-    fully_reconciled boolean DEFAULT false NOT NULL,
+    fully_reconciled boolean NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT reconciliation_state_domain_check CHECK ((source_domain = ANY (ARRAY['subscriptions'::text, 'payments'::text, 'grants'::text])))
 );
@@ -3663,9 +3664,9 @@ CREATE TABLE billing.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     finding_type text NOT NULL,
-    rail text DEFAULT '' NOT NULL,
+    rail text,
     psp_id uuid,
-    openrails_resource_type text DEFAULT '' NOT NULL,
+    openrails_resource_type text,
     openrails_resource_id text,
     external_resource_id text,
     field text,
@@ -3673,16 +3674,16 @@ CREATE TABLE billing.reconciliation_findings (
     external_value text,
     subject_key text NOT NULL,
     severity text NOT NULL,
-    status text DEFAULT 'open'::text NOT NULL,
+    status text NOT NULL,
     recommended_action text,
     first_seen_run uuid,
     last_seen_run uuid,
-    last_seen_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     resolved_at timestamp with time zone,
     resolution text,
     operator_notes text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     evidence jsonb,
     resolved_by text,
     notified_at timestamp with time zone,
@@ -3694,10 +3695,10 @@ CREATE TABLE billing.reconciliation_findings (
          AND (finding_type = 'catalog.field_drift' OR finding_type LIKE 'catalog.%_in_' || rail)
          AND first_seen_run IS NULL AND last_seen_run IS NULL
          AND subject_key = jsonb_build_array(psp_id::text,openrails_resource_type,coalesce(openrails_resource_id,''),coalesce(external_resource_id,''),coalesce(field,''))::text)
-        OR (finding_type NOT LIKE 'catalog.%' AND openrails_resource_type=''
+        OR (finding_type NOT LIKE 'catalog.%' AND openrails_resource_type IS NULL
          AND openrails_resource_id IS NULL AND external_resource_id IS NULL AND field IS NULL
          AND openrails_value IS NULL AND external_value IS NULL
-         AND ((rail='' AND psp_id IS NULL) OR (finding_type LIKE 'pull.%' AND rail<>'' AND psp_id IS NOT NULL)))
+         AND ((rail IS NULL AND psp_id IS NULL) OR (finding_type LIKE 'pull.%' AND rail IS NOT NULL AND psp_id IS NOT NULL)))
     ),
     CONSTRAINT reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text])))),
     CONSTRAINT reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL)))),

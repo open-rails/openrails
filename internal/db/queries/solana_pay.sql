@@ -1,7 +1,7 @@
 -- name: RegisterSolanaPayReference :one
-INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, created_at, updated_at)
+INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, created_at, updated_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reference)::text, sqlc.arg(checkout_attempt_id)::uuid, sqlc.arg(kind)::text, 'pending',
-        sqlc.arg(settle_until)::timestamptz, sqlc.arg(watch_until)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
+        sqlc.arg(expires_at)::timestamptz, sqlc.arg(watch_ends_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
 ON CONFLICT (merchant_id, checkout_attempt_id) DO UPDATE SET updated_at = billing.solana_pay_references.updated_at
 RETURNING *;
 
@@ -22,7 +22,7 @@ SET next_poll_at = sqlc.arg(lease_until)::timestamptz
 FROM (
     SELECT d.merchant_id, d.reference FROM billing.solana_pay_references d
     WHERE d.next_poll_at <= sqlc.arg(now)::timestamptz
-      AND (d.status = 'pending' OR (d.kind = 'purchase' AND d.watch_until > sqlc.arg(now)::timestamptz))
+      AND (d.status = 'pending' OR (d.kind = 'purchase' AND d.watch_ends_at > sqlc.arg(now)::timestamptz))
     ORDER BY d.next_poll_at
     LIMIT sqlc.arg(batch)::int
     FOR UPDATE SKIP LOCKED
@@ -43,7 +43,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND reference = sqlc.arg(referen
 UPDATE billing.solana_pay_references
 SET status = 'expired', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND reference = sqlc.arg(reference)::text
-  AND status = 'pending' AND settle_until < sqlc.arg(now)::timestamptz;
+  AND status = 'pending' AND expires_at < sqlc.arg(now)::timestamptz;
 
 -- name: StoreSolanaPayBuiltTransaction :execrows
 -- Compare-and-set on the previous build, so two concurrent wallet POSTs
@@ -88,8 +88,8 @@ ON CONFLICT DO NOTHING;
 -- ignored receipts go with them; credited and review receipts are kept.
 WITH doomed AS (
     SELECT merchant_id, reference FROM billing.solana_pay_references
-    WHERE status <> 'pending' AND watch_until < sqlc.arg(now)::timestamptz AND cardinality(scan_stack) = 0
-    ORDER BY watch_until
+    WHERE status <> 'pending' AND watch_ends_at < sqlc.arg(now)::timestamptz AND cardinality(scan_stack) = 0
+    ORDER BY watch_ends_at
     LIMIT sqlc.arg(batch)::int
     FOR UPDATE SKIP LOCKED
 ), ignored AS (

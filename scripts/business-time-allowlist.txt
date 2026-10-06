@@ -49,7 +49,7 @@ internal/modules/payments/rail_customer_service.go|now := time.Now().UTC()|db_au
 internal/modules/payments/stripe_card.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
 internal/modules/productaccess/product_access_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/solana/pay.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:             time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
+internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:                time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
 internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:  time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|2
 internal/modules/solana/solanasubs/subscription_repo.go|now := time.Now().UTC()|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
 internal/modules/solana/support.go|quotedAt := time.Now()|external_protocol_time|Oracle quote freshness uses physical time|1

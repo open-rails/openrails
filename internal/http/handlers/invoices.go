@@ -53,7 +53,7 @@ func ListInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 			}
 			params.Status = raw
 		}
-		for name, target := range map[string]**time.Time{"period_from": &params.PeriodFrom, "period_to": &params.PeriodTo} {
+		for name, target := range map[string]**time.Time{"period_starts_after": &params.PeriodStartsAfter, "period_starts_before": &params.PeriodStartsBefore} {
 			if raw := r.Query(name); raw != "" {
 				parsed, err := time.Parse(time.RFC3339, raw)
 				if err != nil {

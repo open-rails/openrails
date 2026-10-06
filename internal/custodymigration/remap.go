@@ -49,14 +49,14 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 			return err
 		}
 		if existing.Custodian == models.CustodianPSP && existing.Rail == "nmi" && existing.PspID != nil {
-			if err := paymentmethods.LockNativeVault(ctx, q, p.merchantID.UUID(), *existing.PspID, existing.RailCustomerRef); err != nil {
+			if err := paymentmethods.LockNativeVault(ctx, q, p.merchantID.UUID(), *existing.PspID, models.DerefStr(existing.RailCustomerRef)); err != nil {
 				return err
 			}
-			if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.merchantID.UUID(), *existing.PspID, existing.RailCustomerRef, existing.RailMethodRef); err != nil {
+			if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.merchantID.UUID(), *existing.PspID, models.DerefStr(existing.RailCustomerRef), models.DerefStr(existing.RailMethodRef)); err != nil {
 				return err
 			}
 		}
-		old := paymentmethods.CustodianHandle{Method: existing.RailMethodRef}
+		old := paymentmethods.CustodianHandle{Method: models.DerefStr(existing.RailMethodRef)}
 		if existing.CustodianID != nil {
 			old.Custodian = *existing.CustodianID
 		}
@@ -73,7 +73,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 		if lerr != nil {
 			return fmt.Errorf("lock instrument %s: %w", existing.ID, lerr)
 		}
-		if locked.CustomerID != existing.CustomerID || locked.RailMethodRef != existing.RailMethodRef || (locked.CustodianID == nil) != (existing.CustodianID == nil) || locked.CustodianID != nil && *locked.CustodianID != *existing.CustodianID || strings.HasPrefix(locked.ParkReason, "delete:") {
+		if locked.CustomerID != existing.CustomerID || models.DerefStr(locked.RailMethodRef) != models.DerefStr(existing.RailMethodRef) || (locked.CustodianID == nil) != (existing.CustodianID == nil) || locked.CustodianID != nil && *locked.CustodianID != *existing.CustodianID || strings.HasPrefix(models.DerefStr(locked.ParkReason), "delete:") {
 			out.Outcome, out.Reason = OutcomeBlocked, ReasonCustodyConflict
 			return nil
 		}
@@ -81,7 +81,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 		// Re-decide under the lock. A concurrent run may have moved it; a
 		// dunning attempt may have gone in flight since the plan read.
 		if locked.CustodianID != nil && *locked.CustodianID == p.custodian.ID {
-			if locked.RailMethodRef == token {
+			if models.DerefStr(locked.RailMethodRef) == token {
 				out.Outcome = OutcomeAlreadyMigrated
 				return nil
 			}
@@ -133,8 +133,8 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Bil
 			Rail:                locked.Rail,
 			FromCustodian:       locked.Custodian,
 			FromCustodianID:     locked.CustodianID,
-			FromRailCustomerRef: locked.RailCustomerRef,
-			FromRailMethodRef:   locked.RailMethodRef,
+			FromRailCustomerRef: models.DerefStr(locked.RailCustomerRef),
+			FromRailMethodRef:   models.DerefStr(locked.RailMethodRef),
 			FromPspID:           fromPSP,
 			ToCustodian:         p.custodianKind(),
 			ToCustodianID:       p.custodian.ID,

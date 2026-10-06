@@ -93,7 +93,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != "" {
+		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != nil {
 			return apperr.Conflictf("initial enrollment instrument changed before admission")
 		}
 		if err := terms.Instrument.Matches(method, charge.AgreementRecurring); err != nil {

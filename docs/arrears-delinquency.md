@@ -114,7 +114,7 @@ signal is an outage for someone who has already paid.
 | `delinquency.entered` | past grace: OpenRails has stopped admitting new spend. **Shut off what you run.** |
 | `delinquency.cleared` | settled. **Restore it.** |
 
-Payload: `from_state`, `to_state`, `overdue_amount`, `overdue_since`,
+Payload: `from_state`, `to_state`, `overdue_amount`, `overdue_started_at`,
 `overdue_invoices`, `grace_days`, `amount_floor`.
 
 Embedded hosts:

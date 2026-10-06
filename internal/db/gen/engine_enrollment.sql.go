@@ -12,12 +12,12 @@ import (
 )
 
 const getConflictingInitialEnrollmentOperation = `-- name: GetConflictingInitialEnrollmentOperation :one
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id FROM billing.provider_intents i
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id FROM billing.provider_intents i
 JOIN billing.products accepted ON accepted.merchant_id=i.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=i.merchant_id AND existing.id::text=i.payload->'terms'->>'product_id'
 WHERE i.merchant_id=$2::uuid AND i.intent_type='initial_membership'
  AND i.payload->'terms'->>'customer_id'=$3::uuid::text
- AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND accepted.tier_group<>'' AND existing.tier_group=accepted.tier_group))
+ AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
  AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
 ORDER BY i.created_at LIMIT 1
 `
@@ -44,7 +44,7 @@ func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, 
 		&i.Status,
 		&i.Attempts,
 		&i.NextAttemptAt,
-		&i.ClaimedUntil,
+		&i.LeaseExpiresAt,
 		&i.Origin,
 		&i.OriginReason,
 		&i.Actor,
@@ -67,7 +67,7 @@ SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.
 JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
- AND (s.product_id=accepted.id OR (accepted.tier_group IS NOT NULL AND accepted.tier_group<>'' AND existing.tier_group=accepted.tier_group))
+ AND (s.product_id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
  AND s.status IN ('active','pending','past_due','awaiting_method','unverified') AND s.deleted_at IS NULL
 ORDER BY s.id LIMIT 1
 `

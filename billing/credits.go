@@ -94,7 +94,7 @@ type CreditGrant struct {
 	ExpiredAmount     int64            `json:"expired_amount,string"`
 	State             CreditGrantState `json:"state"`
 	SourceType        string           `json:"source_type"`
-	SourceID          string           `json:"source_id"`
+	SourceID          *string          `json:"source_id"`
 	Description       *string          `json:"description"`
 	StartsAt          time.Time        `json:"starts_at"`
 	ExpiresAt         *time.Time       `json:"expires_at"`
@@ -229,7 +229,7 @@ type SpendDelegation struct {
 	Scope      SpendDelegationScope `json:"scope"`
 	ScopeKey   string               `json:"scope_key"`
 	Windows    []BudgetWindow       `json:"windows"`
-	Provenance string               `json:"provenance"`
+	Provenance *string              `json:"provenance"`
 }
 
 // SetSpendDelegationsParams replaces a customer's spend delegations.

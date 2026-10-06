@@ -342,7 +342,7 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 }
 
 func invokerSpendLimitFromGen(r gen.BillingInvokerSpendLimit) (InvokerSpendLimit, error) {
-	p := InvokerSpendLimit{Scope: r.Scope, ScopeKey: r.ScopeKey, Provenance: r.Provenance}
+	p := InvokerSpendLimit{Scope: r.Scope, ScopeKey: r.ScopeKey, Provenance: models.DerefStr(r.Provenance)}
 	if len(r.Windows) > 0 {
 		if err := json.Unmarshal(r.Windows, &p.Windows); err != nil {
 			return InvokerSpendLimit{}, fmt.Errorf("admission: decode invoker spend-limit windows: %w", err)

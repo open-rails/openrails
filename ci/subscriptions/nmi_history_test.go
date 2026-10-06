@@ -43,7 +43,7 @@ func historyKey(at time.Time, kind, category, reason string) historyRow {
 // nmiHistory is the stored months and when the PSP's history was last read.
 func (w *world) nmiHistory() (map[historyRow]int64, time.Time) {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT month, kind, category, reason, authorizations FROM billing.nmi_history_months`))
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT month_at, kind, category, reason, authorizations FROM billing.nmi_history_months`))
 	require.NoError(w.t, err)
 	defer rows.Close()
 	out := map[historyRow]int64{}

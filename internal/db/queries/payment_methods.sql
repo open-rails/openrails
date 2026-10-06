@@ -10,7 +10,7 @@ INSERT INTO billing.payment_methods (
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
     network_token_par, charge_via, stored_credential_recurring_ref
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, $3, sqlc.arg(rail_customer_ref), sqlc.arg(rail_method_ref),
+    $1, sqlc.arg(merchant_id)::uuid, $2, $3, NULLIF(sqlc.arg(rail_customer_ref)::text, ''), NULLIF(sqlc.arg(rail_method_ref)::text, ''),
     sqlc.narg(card_brand)::text, sqlc.narg(card_last4)::text, sqlc.narg(card_exp_month)::smallint, sqlc.narg(card_exp_year)::smallint,
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
@@ -18,10 +18,10 @@ INSERT INTO billing.payment_methods (
     sqlc.narg(psp_id)::uuid,
     sqlc.arg(custodian)::text,
     sqlc.narg(custodian_id)::uuid,
-    sqlc.arg(fingerprint), sqlc.arg(network_token_id),
-    sqlc.arg(network_token_status), sqlc.arg(network_token_par),
+    NULLIF(sqlc.arg(fingerprint)::text, ''), NULLIF(sqlc.arg(network_token_id)::text, ''),
+    NULLIF(sqlc.arg(network_token_status)::text, ''), NULLIF(sqlc.arg(network_token_par)::text, ''),
     COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
-    sqlc.arg(stored_credential_recurring_ref)::text
+    NULLIF(sqlc.arg(stored_credential_recurring_ref)::text, '')
 );
 
 -- name: GetPaymentMethodByID :one
@@ -80,7 +80,7 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.rail = sqlc.arg(rail)
   AND pm.psp_id = sqlc.arg(psp_id)::uuid
   AND pm.custodian_id IS NOT DISTINCT FROM sqlc.narg(custodian_id)::uuid
-  AND pm.rail_method_ref = sqlc.arg(rail_method_ref)
+  AND pm.rail_method_ref = sqlc.arg(rail_method_ref)::text
 LIMIT 1;
 
 -- name: LockStripePaymentState :exec
@@ -92,8 +92,8 @@ SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
 UPDATE billing.payment_methods SET
     customer_id = $2,
     rail = $3,
-    rail_customer_ref = sqlc.arg(rail_customer_ref),
-    rail_method_ref = sqlc.arg(rail_method_ref),
+    rail_customer_ref = NULLIF(sqlc.arg(rail_customer_ref)::text, ''),
+    rail_method_ref = NULLIF(sqlc.arg(rail_method_ref)::text, ''),
     card_brand = sqlc.narg(card_brand)::text,
     card_last4 = sqlc.narg(card_last4)::text,
     card_exp_month = sqlc.narg(card_exp_month)::smallint,
@@ -110,7 +110,7 @@ SET rail_customer_ref=sqlc.arg(rail_customer_ref)::text, updated_at=sqlc.arg(now
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
  AND customer_id=sqlc.arg(customer_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
  AND rail='stripe' AND rail_method_ref=sqlc.arg(rail_method_ref)::text
- AND rail_customer_ref='' AND custodian='psp' AND custodian_id IS NULL AND park_reason='';
+ AND rail_customer_ref IS NULL AND custodian='psp' AND custodian_id IS NULL AND park_reason IS NULL;
 
 -- name: ListPaymentMethodsByRails :many
 SELECT * FROM billing.payment_methods pm
@@ -148,8 +148,7 @@ ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;
 SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = $1
-  AND rail_customer_ref = sqlc.arg(rail_customer_ref)
-  AND rail_customer_ref <> ''
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text
   AND id <> sqlc.arg(exclude_id);
 
 -- name: GetPaymentMethodByRailInstrument :one
@@ -161,10 +160,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id) AND pm.psp_id = sqlc.arg(psp_id)::uuid
   AND pm.rail = sqlc.arg(rail)
-  AND pm.rail_customer_ref = sqlc.arg(rail_customer_ref)
-  AND (pm.rail_method_ref = sqlc.arg(rail_method_ref)
+  AND pm.rail_customer_ref = sqlc.arg(rail_customer_ref)::text
+  AND (pm.rail_method_ref = sqlc.arg(rail_method_ref)::text
        OR sqlc.arg(rail_method_ref)::text = ''
-       OR pm.rail_method_ref = '')
+       OR pm.rail_method_ref IS NULL)
 ORDER BY pm.created_at
 LIMIT 1;
 
@@ -174,16 +173,16 @@ LIMIT 1;
 -- reference is never overwritten (the sequence anchors on its first capture).
 UPDATE billing.payment_methods SET
     stored_credential_recurring_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'recurring' THEN sqlc.arg(ref)::text
+        WHEN sqlc.arg(agreement)::text = 'recurring' THEN NULLIF(sqlc.arg(ref)::text, '')
         ELSE stored_credential_recurring_ref END,
     stored_credential_unscheduled_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN sqlc.arg(ref)::text
+        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN NULLIF(sqlc.arg(ref)::text, '')
         ELSE stored_credential_unscheduled_ref END,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND id = sqlc.arg(id)
-  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref = '')
-    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref = ''));
+  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref IS NULL)
+    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref IS NULL));
 
 -- name: CaptureStoredCredentialRefByRailInstrument :execrows
 -- #297: instrument-handle variant of CaptureStoredCredentialRef for charge
@@ -191,20 +190,20 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 -- Same write-once semantics.
 UPDATE billing.payment_methods SET
     stored_credential_recurring_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'recurring' THEN sqlc.arg(ref)::text
+        WHEN sqlc.arg(agreement)::text = 'recurring' THEN NULLIF(sqlc.arg(ref)::text, '')
         ELSE stored_credential_recurring_ref END,
     stored_credential_unscheduled_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN sqlc.arg(ref)::text
+        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN NULLIF(sqlc.arg(ref)::text, '')
         ELSE stored_credential_unscheduled_ref END,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id) AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = sqlc.arg(rail)
-  AND rail_customer_ref = sqlc.arg(rail_customer_ref)
-  AND (rail_method_ref = sqlc.arg(rail_method_ref)
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text
+  AND (rail_method_ref = sqlc.arg(rail_method_ref)::text
        OR sqlc.arg(rail_method_ref)::text = ''
-       OR rail_method_ref = '')
-  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref = '')
-    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref = ''));
+       OR rail_method_ref IS NULL)
+  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref IS NULL)
+    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref IS NULL));
 
 -- name: GetPaymentMethodByFingerprint :one
 -- #795: dedup lookup — an intent whose fingerprint matches a stored instrument
@@ -214,35 +213,33 @@ SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
   AND pm.custodian = sqlc.arg(custodian)
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
-  AND pm.fingerprint = sqlc.arg(fingerprint)
-  AND pm.fingerprint <> ''
+  AND pm.fingerprint = sqlc.arg(fingerprint)::text
 ORDER BY pm.created_at
 LIMIT 1;
 
 -- name: SetPaymentMethodNetworkToken :execrows
 -- #795 NT provisioning result (id/status/par). Never touches PAN-side expiry.
 UPDATE billing.payment_methods SET
-    network_token_id = sqlc.arg(network_token_id),
-    network_token_status = sqlc.arg(network_token_status),
-    network_token_par = sqlc.arg(network_token_par),
+    network_token_id = NULLIF(sqlc.arg(network_token_id)::text, ''),
+    network_token_status = NULLIF(sqlc.arg(network_token_status)::text, ''),
+    network_token_par = NULLIF(sqlc.arg(network_token_par)::text, ''),
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id)
-  AND park_reason NOT LIKE 'delete:%';
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
 
 -- name: SetNetworkTokenStatusByNetworkTokenID :execrows
 -- #795 webhook fold: NT lifecycle status/enrichment only (idempotent). Keyed on
 -- the CUSTODIAN that sent the event (or#879) — the network token is a custody
 -- artefact, and the rail says nothing about who minted it.
 UPDATE billing.payment_methods SET
-    network_token_status = sqlc.arg(network_token_status),
+    network_token_status = sqlc.arg(network_token_status)::text,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian <> 'psp'
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
-  AND network_token_id = sqlc.arg(network_token_id)
-  AND network_token_id <> ''
-  AND network_token_status <> sqlc.arg(network_token_status);
+  AND network_token_id = sqlc.arg(network_token_id)::text
+  AND network_token_status IS DISTINCT FROM sqlc.arg(network_token_status)::text;
 
 -- name: ParkPaymentMethodByMethodRef :many
 -- #795 cancellation-last-resort: a custody-side instrument problem (token
@@ -251,27 +248,27 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- an already-parked instrument keeps its first park. Keyed on the custodian
 -- that reported the problem (or#879), since the method ref is its token id.
 UPDATE billing.payment_methods SET
-    park_reason = sqlc.arg(park_reason),
+    park_reason = sqlc.arg(park_reason)::text,
     parked_at = now(),
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
-  AND rail_method_ref = sqlc.arg(rail_method_ref)
-  AND park_reason = ''
+  AND rail_method_ref = sqlc.arg(rail_method_ref)::text
+  AND park_reason IS NULL
 RETURNING id, customer_id, psp_id;
 
 -- name: ParkStripePaymentMethodByRef :execrows
 -- A Stripe detach is irreversible provider truth. Preserve the local evidence,
 -- but make the exact PSP-owned instrument unusable, within the merchant.
 UPDATE billing.payment_methods SET
-    park_reason = sqlc.arg(park_reason),
+    park_reason = sqlc.arg(park_reason)::text,
     parked_at = COALESCE(parked_at, now()),
     updated_at = now()
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
   AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_method_ref = sqlc.arg(rail_method_ref)
-  AND park_reason = '';
+  AND rail_method_ref = sqlc.arg(rail_method_ref)::text
+  AND park_reason IS NULL;
 
 -- name: RotateCustodianMethodRef :many
 -- #795 Account Updater UPD_* fold: the custodian minted a NEW token id —
@@ -284,20 +281,20 @@ WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stri
 -- recovery skipping the method, which is the engine overruling the very
 -- recovery the account updater exists to deliver.
 UPDATE billing.payment_methods SET
-    rail_method_ref = sqlc.arg(new_method_ref),
+    rail_method_ref = sqlc.arg(new_method_ref)::text,
     fingerprint = COALESCE(NULLIF(sqlc.arg(new_fingerprint)::text, ''), fingerprint),
     card_brand = COALESCE(sqlc.narg(card_brand)::text, card_brand),
     card_last4 = COALESCE(sqlc.narg(card_last4)::text, card_last4),
     card_exp_month = COALESCE(sqlc.narg(card_exp_month)::smallint, card_exp_month),
     card_exp_year = COALESCE(sqlc.narg(card_exp_year)::smallint, card_exp_year),
-    park_reason = '',
+    park_reason = NULL,
     parked_at = NULL,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
-  AND rail_method_ref = sqlc.arg(old_method_ref)
-  AND park_reason NOT LIKE 'delete:%'
+  AND rail_method_ref = sqlc.arg(old_method_ref)::text
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 RETURNING id, customer_id, psp_id;
 
 -- name: RefreshCustodianCardMetadata :execrows
@@ -312,7 +309,7 @@ UPDATE billing.payment_methods SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
-  AND rail_method_ref = sqlc.arg(rail_method_ref);
+  AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
 
 -- name: ReplacePaymentMethodCard :execrows
 -- An in-place card replacement moves the method onto the verified billing
@@ -324,19 +321,19 @@ UPDATE billing.payment_methods SET
     card_exp_month = sqlc.narg(card_exp_month)::smallint,
     card_exp_year = sqlc.narg(card_exp_year)::smallint,
     metadata = sqlc.narg(metadata),
-    stored_credential_recurring_ref = sqlc.arg(recurring_ref)::text,
-    park_reason = '',
+    stored_credential_recurring_ref = NULLIF(sqlc.arg(recurring_ref)::text, ''),
+    park_reason = NULL,
     parked_at = NULL,
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND rail_method_ref = sqlc.arg(old_rail_method_ref)::text
-  AND park_reason NOT LIKE 'delete:%';
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
 
 -- name: ListVaultPaymentMethods :many
 -- #1115: the stored cards on one NMI vault of one PSP.
 SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail = 'nmi'
-  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND park_reason NOT LIKE 'delete:%'
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 ORDER BY created_at, id;
 
 -- name: RefreshPaymentMethodCard :execrows
@@ -347,10 +344,10 @@ UPDATE billing.payment_methods SET
     card_last4 = COALESCE(sqlc.narg(card_last4)::text, card_last4),
     card_exp_month = COALESCE(sqlc.narg(card_exp_month)::smallint, card_exp_month),
     card_exp_year = COALESCE(sqlc.narg(card_exp_year)::smallint, card_exp_year),
-    park_reason = '',
+    park_reason = NULL,
     parked_at = NULL,
     updated_at = sqlc.arg(updated_at)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason NOT LIKE 'delete:%';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
 
 -- name: ParkPaymentMethod :execrows
 -- #1115: an account updater reported the card's account closed. The first
@@ -359,13 +356,13 @@ UPDATE billing.payment_methods SET
     park_reason = sqlc.arg(park_reason)::text,
     parked_at = sqlc.arg(parked_at)::timestamptz,
     updated_at = sqlc.arg(parked_at)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason = '';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason IS NULL;
 
 -- name: InsertPaymentMethodUpdate :exec
--- #1115: idempotent on (source, event_ref, method); at defaults to now.
-INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
+-- #1115: idempotent on (source, event_ref, method); occurred_at defaults to now.
+INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, occurred_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(payment_method_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.narg(psp_id)::uuid,
-    sqlc.arg(source)::text, sqlc.arg(kind)::text, sqlc.arg(event_ref)::text, COALESCE(sqlc.narg(at)::timestamptz, now()))
+    sqlc.arg(source)::text, sqlc.arg(kind)::text, sqlc.arg(event_ref)::text, COALESCE(sqlc.narg(occurred_at)::timestamptz, now()))
 ON CONFLICT DO NOTHING;
 
 -- name: GetPaymentMethodByPSPRefs :one

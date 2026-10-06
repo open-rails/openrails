@@ -495,7 +495,7 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 		}
 		return "", nil
 	}
-	return strings.TrimSpace(row.StoredCredentialUnscheduledRef), &row
+	return strings.TrimSpace(models.DerefStr(row.StoredCredentialUnscheduledRef)), &row
 }
 
 // finalize is the verified-existing leg (no fresh charge result): the charge

@@ -15,9 +15,9 @@ type Invoice struct {
 	CustomerID uuid.UUID `json:"customer_id"`
 	Currency   string    `json:"currency"`
 
-	InvoiceNumber *string   `json:"invoice_number,omitempty"`
-	PeriodFrom    time.Time `json:"period_from"`
-	PeriodTo      time.Time `json:"period_to"`
+	InvoiceNumber  *string   `json:"invoice_number,omitempty"`
+	PeriodStartsAt time.Time `json:"period_starts_at"`
+	PeriodEndsAt   time.Time `json:"period_ends_at"`
 
 	UsageTotal     int64 `json:"usage_total"`
 	DepositsTotal  int64 `json:"deposits_total"`

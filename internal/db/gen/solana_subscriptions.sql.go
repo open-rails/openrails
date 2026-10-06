@@ -14,7 +14,7 @@ import (
 
 const advanceSolanaSubscriptionAfterPull = `-- name: AdvanceSolanaSubscriptionAfterPull :exec
 UPDATE billing.solana_subscriptions SET
-    last_pulled_period_start = $2,
+    last_pulled_period_starts_at = $2,
     last_signature = $3,
     next_pull_at = $4,
     updated_at = $5
@@ -22,18 +22,18 @@ WHERE solana_subscriptions.merchant_id = $6::uuid AND id = $1
 `
 
 type AdvanceSolanaSubscriptionAfterPullParams struct {
-	ID                    uuid.UUID
-	LastPulledPeriodStart *time.Time
-	LastSignature         *string
-	NextPullAt            time.Time
-	UpdatedAt             time.Time
-	MerchantID            uuid.UUID
+	ID                       uuid.UUID
+	LastPulledPeriodStartsAt *time.Time
+	LastSignature            *string
+	NextPullAt               time.Time
+	UpdatedAt                time.Time
+	MerchantID               uuid.UUID
 }
 
 func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg AdvanceSolanaSubscriptionAfterPullParams) error {
 	_, err := q.db.Exec(ctx, advanceSolanaSubscriptionAfterPull,
 		arg.ID,
-		arg.LastPulledPeriodStart,
+		arg.LastPulledPeriodStartsAt,
 		arg.LastSignature,
 		arg.NextPullAt,
 		arg.UpdatedAt,
@@ -43,7 +43,7 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 }
 
 const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_pda = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_pda = $1
 `
 
 type GetSolanaSubscriptionByPDAParams struct {
@@ -65,7 +65,7 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, arg GetSolanaS
 		&i.MerchantAddress,
 		&i.Mint,
 		&i.PlanCreatedAtFingerprint,
-		&i.LastPulledPeriodStart,
+		&i.LastPulledPeriodStartsAt,
 		&i.LastSignature,
 		&i.NextPullAt,
 		&i.Status,
@@ -76,7 +76,7 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, arg GetSolanaS
 }
 
 const getSolanaSubscriptionBySubscriptionID = `-- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_id = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_id = $1
 `
 
 type GetSolanaSubscriptionBySubscriptionIDParams struct {
@@ -98,7 +98,7 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, arg
 		&i.MerchantAddress,
 		&i.Mint,
 		&i.PlanCreatedAtFingerprint,
-		&i.LastPulledPeriodStart,
+		&i.LastPulledPeriodStartsAt,
 		&i.LastSignature,
 		&i.NextPullAt,
 		&i.Status,
@@ -140,7 +140,7 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantI
 }
 
 const listActiveSolanaSubscriptionsWithSignature = `-- name: ListActiveSolanaSubscriptionsWithSignature :many
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature, next_pull_at, status, created_at, updated_at FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
@@ -173,7 +173,7 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 			&i.MerchantAddress,
 			&i.Mint,
 			&i.PlanCreatedAtFingerprint,
-			&i.LastPulledPeriodStart,
+			&i.LastPulledPeriodStartsAt,
 			&i.LastSignature,
 			&i.NextPullAt,
 			&i.Status,
@@ -191,7 +191,7 @@ func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context
 }
 
 const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
-SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_start, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, sub.psp_id
+SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_starts_at, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, sub.psp_id
 FROM billing.solana_subscriptions s
 JOIN billing.subscriptions sub ON sub.id = s.subscription_id
 WHERE s.merchant_id = $1::uuid AND sub.merchant_id = $1::uuid AND s.status = 'active' AND s.next_pull_at <= $2::timestamptz
@@ -237,7 +237,7 @@ func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSol
 			&i.BillingSolanaSubscription.MerchantAddress,
 			&i.BillingSolanaSubscription.Mint,
 			&i.BillingSolanaSubscription.PlanCreatedAtFingerprint,
-			&i.BillingSolanaSubscription.LastPulledPeriodStart,
+			&i.BillingSolanaSubscription.LastPulledPeriodStartsAt,
 			&i.BillingSolanaSubscription.LastSignature,
 			&i.BillingSolanaSubscription.NextPullAt,
 			&i.BillingSolanaSubscription.Status,
@@ -308,7 +308,7 @@ const upsertSolanaSubscription = `-- name: UpsertSolanaSubscription :exec
 INSERT INTO billing.solana_subscriptions (
     id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
-    plan_created_at_fingerprint, last_pulled_period_start, last_signature,
+    plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature,
     next_pull_at, status, created_at, updated_at
 ) VALUES (
     $1,
@@ -341,7 +341,7 @@ type UpsertSolanaSubscriptionParams struct {
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 	MerchantID               uuid.UUID
-	LastPulledPeriodStart    *time.Time
+	LastPulledPeriodStartsAt *time.Time
 	LastSignature            *string
 }
 
@@ -362,7 +362,7 @@ func (q *Queries) UpsertSolanaSubscription(ctx context.Context, arg UpsertSolana
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.MerchantID,
-		arg.LastPulledPeriodStart,
+		arg.LastPulledPeriodStartsAt,
 		arg.LastSignature,
 	)
 	return err

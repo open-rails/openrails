@@ -81,8 +81,8 @@ type ProviderBillingQualification struct {
 	MerchantID               uuid.UUID
 	Provider                 string
 	ProviderResourceID       string
-	ProviderLifetimeStart    time.Time
-	ProviderLifetimeEnd      time.Time
+	ProviderLifetimeStartsAt time.Time
+	ProviderLifetimeEndsAt   time.Time
 	ProviderAbsentAt         time.Time
 	ProviderAbsenceReference string
 	BillingStopReference     string
@@ -185,7 +185,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 	if now.Before(in.Lifecycle.WindowsClosedAt) {
 		return nil, fmt.Errorf("%w: provider billing observation precedes rental-window closure", billing.ErrInvalid)
 	}
-	if in.QueryEnd.After(now) {
+	if in.QueryEndsAt.After(now) {
 		return nil, fmt.Errorf("%w: provider billing query ends after observation time", billing.ErrInvalid)
 	}
 	lifecycleDigest := sha256.Sum256(in.Lifecycle.LifecycleEvidenceBody)
@@ -203,8 +203,8 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 			OperationID:              in.OperationID,
 			Provider:                 in.Lifecycle.Provider,
 			ProviderResourceID:       in.Lifecycle.ProviderResourceID,
-			ProviderLifetimeStart:    in.Lifecycle.ProviderLifetimeStart,
-			ProviderLifetimeEnd:      in.Lifecycle.ProviderLifetimeEnd,
+			ProviderLifetimeStartsAt: in.Lifecycle.ProviderLifetimeStartsAt,
+			ProviderLifetimeEndsAt:   in.Lifecycle.ProviderLifetimeEndsAt,
 			ProviderAbsentAt:         in.Lifecycle.ProviderAbsentAt,
 			ProviderAbsenceReference: in.Lifecycle.ProviderAbsenceReference,
 			BillingStopReference:     in.Lifecycle.BillingStopReference,
@@ -255,8 +255,8 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		OperationID:             in.OperationID,
 		ObservationID:           in.ObservationID,
 		NormalizedQuery:         in.NormalizedQuery,
-		QueryStart:              in.QueryStart,
-		QueryEnd:                in.QueryEnd,
+		QueryStartsAt:           in.QueryStartsAt,
+		QueryEndsAt:             in.QueryEndsAt,
 		RawBodyAvailable:        prepared.rawAvailable,
 		RawBodyBytes:            in.RawBody,
 		RawBodyDigest:           prepared.rawDigest[:],
@@ -340,8 +340,8 @@ func evaluateProviderBillingObservation(
 	}
 	if *prepared.providerCost != *baseline.CostAmount ||
 		baseline.NormalizedQuery != in.NormalizedQuery ||
-		!baseline.QueryStart.Equal(in.QueryStart) ||
-		!baseline.QueryEnd.Equal(in.QueryEnd) ||
+		!baseline.QueryStartsAt.Equal(in.QueryStartsAt) ||
+		!baseline.QueryEndsAt.Equal(in.QueryEndsAt) ||
 		!bytes.Equal(prepared.normalizedRecordsDigest[:], baseline.NormalizedRecordsDigest) {
 		id := in.ObservationID
 		return ProviderBillingQualificationPending, ProviderBillingObservationChanged, &id, nil, nil, nil, nil
@@ -388,12 +388,12 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 		}
 	}
 	for field, value := range map[string]time.Time{
-		"provider_lifetime_start": in.Lifecycle.ProviderLifetimeStart,
-		"provider_lifetime_end":   in.Lifecycle.ProviderLifetimeEnd,
-		"provider_absent_at":      in.Lifecycle.ProviderAbsentAt,
-		"windows_closed_at":       in.Lifecycle.WindowsClosedAt,
-		"query_start":             in.QueryStart,
-		"query_end":               in.QueryEnd,
+		"provider_lifetime_starts_at": in.Lifecycle.ProviderLifetimeStartsAt,
+		"provider_lifetime_ends_at":   in.Lifecycle.ProviderLifetimeEndsAt,
+		"provider_absent_at":          in.Lifecycle.ProviderAbsentAt,
+		"windows_closed_at":           in.Lifecycle.WindowsClosedAt,
+		"query_starts_at":             in.QueryStartsAt,
+		"query_ends_at":               in.QueryEndsAt,
 	} {
 		if value.IsZero() || !providerBillingTimeIsUTC(value) {
 			return fmt.Errorf("%s must be a nonzero UTC time", field)
@@ -402,17 +402,17 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 			return fmt.Errorf("%s must use PostgreSQL-exact microsecond precision", field)
 		}
 	}
-	if !in.Lifecycle.ProviderLifetimeEnd.After(in.Lifecycle.ProviderLifetimeStart) {
-		return fmt.Errorf("provider_lifetime_end must be after provider_lifetime_start")
+	if !in.Lifecycle.ProviderLifetimeEndsAt.After(in.Lifecycle.ProviderLifetimeStartsAt) {
+		return fmt.Errorf("provider_lifetime_ends_at must be after provider_lifetime_starts_at")
 	}
-	if in.Lifecycle.ProviderAbsentAt.Before(in.Lifecycle.ProviderLifetimeEnd) {
-		return fmt.Errorf("provider_absent_at precedes provider_lifetime_end")
+	if in.Lifecycle.ProviderAbsentAt.Before(in.Lifecycle.ProviderLifetimeEndsAt) {
+		return fmt.Errorf("provider_absent_at precedes provider_lifetime_ends_at")
 	}
-	if in.Lifecycle.WindowsClosedAt.Before(in.Lifecycle.ProviderLifetimeEnd) {
-		return fmt.Errorf("windows_closed_at precedes provider_lifetime_end")
+	if in.Lifecycle.WindowsClosedAt.Before(in.Lifecycle.ProviderLifetimeEndsAt) {
+		return fmt.Errorf("windows_closed_at precedes provider_lifetime_ends_at")
 	}
-	if !in.QueryEnd.After(in.QueryStart) {
-		return fmt.Errorf("query_end must be after query_start")
+	if !in.QueryEndsAt.After(in.QueryStartsAt) {
+		return fmt.Errorf("query_ends_at must be after query_starts_at")
 	}
 	if err := validateOperationAuthorizationText("normalized_query", in.NormalizedQuery, providerBillingMaxQueryBytes); err != nil {
 		return err
@@ -453,7 +453,7 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 	prepared := preparedProviderBillingObservation{
 		rawDigest:      sha256.Sum256(in.RawBody),
 		rawAvailable:   len(in.RawBody) > 0,
-		coversLifetime: !in.QueryStart.After(in.Lifecycle.ProviderLifetimeStart) && !in.QueryEnd.Before(in.Lifecycle.ProviderLifetimeEnd),
+		coversLifetime: !in.QueryStartsAt.After(in.Lifecycle.ProviderLifetimeStartsAt) && !in.QueryEndsAt.Before(in.Lifecycle.ProviderLifetimeEndsAt),
 	}
 	if in.Refusal != nil {
 		kind := string(in.Refusal.Kind)
@@ -533,8 +533,8 @@ func replayProviderBillingLifecycle(row gen.BillingCostQualification, in Provide
 	}{
 		{"provider", row.Provider == in.Provider},
 		{"provider_resource_id", row.ProviderResourceID == in.ProviderResourceID},
-		{"provider_lifetime_start", row.ProviderLifetimeStart.Equal(in.ProviderLifetimeStart)},
-		{"provider_lifetime_end", row.ProviderLifetimeEnd.Equal(in.ProviderLifetimeEnd)},
+		{"provider_lifetime_starts_at", row.ProviderLifetimeStartsAt.Equal(in.ProviderLifetimeStartsAt)},
+		{"provider_lifetime_ends_at", row.ProviderLifetimeEndsAt.Equal(in.ProviderLifetimeEndsAt)},
 		{"provider_absent_at", row.ProviderAbsentAt.Equal(in.ProviderAbsentAt)},
 		{"provider_absence_reference", row.ProviderAbsenceReference == in.ProviderAbsenceReference},
 		{"billing_stop_reference", row.BillingStopReference == in.BillingStopReference},
@@ -557,8 +557,8 @@ func replayProviderBillingObservation(row gen.GetProviderBillingObservationRow, 
 		same  bool
 	}{
 		{"normalized_query", row.NormalizedQuery == in.NormalizedQuery},
-		{"query_start", row.QueryStart.Equal(in.QueryStart)},
-		{"query_end", row.QueryEnd.Equal(in.QueryEnd)},
+		{"query_starts_at", row.QueryStartsAt.Equal(in.QueryStartsAt)},
+		{"query_ends_at", row.QueryEndsAt.Equal(in.QueryEndsAt)},
 		// The stored digests are bound to the stored bodies by the table's
 		// checks, so comparing digests compares bodies without reading them.
 		{"raw_body", bytes.Equal(row.RawBodyDigest, prepared.rawDigest[:])},
@@ -588,8 +588,8 @@ type providerBillingSettlementManifest struct {
 	OperationID              string                               `json:"operation_id"`
 	Provider                 string                               `json:"provider"`
 	ProviderResourceID       string                               `json:"provider_resource_id"`
-	ProviderLifetimeStart    string                               `json:"provider_lifetime_start"`
-	ProviderLifetimeEnd      string                               `json:"provider_lifetime_end"`
+	ProviderLifetimeStartsAt string                               `json:"provider_lifetime_starts_at"`
+	ProviderLifetimeEndsAt   string                               `json:"provider_lifetime_ends_at"`
 	ProviderAbsentAt         string                               `json:"provider_absent_at"`
 	ProviderAbsenceReference string                               `json:"provider_absence_reference"`
 	BillingStopReference     string                               `json:"billing_stop_reference"`
@@ -606,8 +606,8 @@ type providerBillingSettlementManifest struct {
 type providerBillingSettlementObservation struct {
 	ObservationID           string `json:"observation_id"`
 	NormalizedQuerySHA256   string `json:"normalized_query_sha256"`
-	QueryStart              string `json:"query_start"`
-	QueryEnd                string `json:"query_end"`
+	QueryStartsAt           string `json:"query_starts_at"`
+	QueryEndsAt             string `json:"query_ends_at"`
 	RawBodySHA256           string `json:"raw_body_sha256"`
 	NormalizedRecordsSHA256 string `json:"normalized_records_sha256"`
 }
@@ -634,8 +634,8 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 		OperationID:              row.OperationID,
 		Provider:                 row.Provider,
 		ProviderResourceID:       row.ProviderResourceID,
-		ProviderLifetimeStart:    row.ProviderLifetimeStart.UTC().Format(time.RFC3339Nano),
-		ProviderLifetimeEnd:      row.ProviderLifetimeEnd.UTC().Format(time.RFC3339Nano),
+		ProviderLifetimeStartsAt: row.ProviderLifetimeStartsAt.UTC().Format(time.RFC3339Nano),
+		ProviderLifetimeEndsAt:   row.ProviderLifetimeEndsAt.UTC().Format(time.RFC3339Nano),
 		ProviderAbsentAt:         row.ProviderAbsentAt.UTC().Format(time.RFC3339Nano),
 		ProviderAbsenceReference: row.ProviderAbsenceReference,
 		BillingStopReference:     row.BillingStopReference,
@@ -659,8 +659,8 @@ func providerBillingSettlementObservationFromRow(row gen.GetProviderBillingObser
 	return providerBillingSettlementObservation{
 		ObservationID:           row.ObservationID,
 		NormalizedQuerySHA256:   hex.EncodeToString(queryDigest[:]),
-		QueryStart:              row.QueryStart.UTC().Format(time.RFC3339Nano),
-		QueryEnd:                row.QueryEnd.UTC().Format(time.RFC3339Nano),
+		QueryStartsAt:           row.QueryStartsAt.UTC().Format(time.RFC3339Nano),
+		QueryEndsAt:             row.QueryEndsAt.UTC().Format(time.RFC3339Nano),
 		RawBodySHA256:           hex.EncodeToString(row.RawBodyDigest),
 		NormalizedRecordsSHA256: hex.EncodeToString(row.NormalizedRecordsDigest),
 	}
@@ -674,8 +674,8 @@ func providerBillingQualificationFromRow(row gen.BillingCostQualification, auth 
 		MerchantID:               row.MerchantID,
 		Provider:                 row.Provider,
 		ProviderResourceID:       row.ProviderResourceID,
-		ProviderLifetimeStart:    row.ProviderLifetimeStart,
-		ProviderLifetimeEnd:      row.ProviderLifetimeEnd,
+		ProviderLifetimeStartsAt: row.ProviderLifetimeStartsAt,
+		ProviderLifetimeEndsAt:   row.ProviderLifetimeEndsAt,
 		ProviderAbsentAt:         row.ProviderAbsentAt,
 		ProviderAbsenceReference: row.ProviderAbsenceReference,
 		BillingStopReference:     row.BillingStopReference,

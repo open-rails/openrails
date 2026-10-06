@@ -582,8 +582,8 @@ func writePullProviderLog(logDir string, run reconcile.RunRecord, res *reconcile
 		lf("mode", string(run.Mode)), lf("providers", strings.Join(run.Providers, ",")),
 		lf("insert", strconv.FormatBool(flags.Insert)), lf("overwrite", strconv.FormatBool(flags.Overwrite)),
 		lf("prune", strconv.FormatBool(flags.Prune)), lfTime("started_at", run.StartedAt),
-		lfTimePtr("finished_at", run.FinishedAt), lfTimePtr("window_since", run.WindowSince),
-		lfTimePtr("window_until", run.WindowUntil),
+		lfTimePtr("finished_at", run.FinishedAt), lfTimePtr("window_starts_at", run.WindowStartsAt),
+		lfTimePtr("window_ends_at", run.WindowEndsAt),
 	)
 	for _, rec := range res.Findings {
 		writeLogLine(f, now,

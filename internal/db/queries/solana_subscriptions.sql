@@ -4,13 +4,13 @@
 INSERT INTO billing.solana_subscriptions (
     id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
-    plan_created_at_fingerprint, last_pulled_period_start, last_signature,
+    plan_created_at_fingerprint, last_pulled_period_starts_at, last_signature,
     next_pull_at, status, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2, $3, $4, $5, $6, $7, $8, $9,
-    sqlc.narg(last_pulled_period_start), sqlc.narg(last_signature),
+    sqlc.narg(last_pulled_period_starts_at), sqlc.narg(last_signature),
     $10, $11, $12, $13
 )
 ON CONFLICT (subscription_pda) DO UPDATE SET
@@ -44,7 +44,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
 -- name: AdvanceSolanaSubscriptionAfterPull :exec
 UPDATE billing.solana_subscriptions SET
-    last_pulled_period_start = $2,
+    last_pulled_period_starts_at = $2,
     last_signature = $3,
     next_pull_at = $4,
     updated_at = $5

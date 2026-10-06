@@ -17,7 +17,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = $1::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
-      AND g.source_type = 'admin' AND g.source_id = $2::text AND g.source_id <> ''
+      AND g.source_type = 'admin' AND g.source_id = $2::text
 ) AS exists
 `
 
@@ -325,7 +325,7 @@ INSERT INTO billing.grants (
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
-    $4::text, $5::text, $6::text, $7::uuid,
+    $4::text, $5::text, NULLIF($6::text, ''), $7::uuid,
     $8::text, $9::uuid, $10::jsonb,
     $11::timestamptz, $12::timestamptz,
     $13::bigint, $14::text, $15::text
@@ -1065,7 +1065,7 @@ type ListOwnershipGrantsWithStatusRow struct {
 	CustomerID   uuid.UUID
 	ProductID    *uuid.UUID
 	SourceType   string
-	SourceID     string
+	SourceID     *string
 	PaymentID    *uuid.UUID
 	StartsAt     time.Time
 	EndsAt       *time.Time

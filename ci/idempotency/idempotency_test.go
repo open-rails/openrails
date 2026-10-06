@@ -73,7 +73,7 @@ func newEnv(t *testing.T) *env {
 	})
 	require.NoError(t, openrails.Migrate(t.Context(), admin, openrails.Config{Schema: e.schema, River: openrails.RiverHostOwned}))
 	e.merchant = e.newMerchant()
-	require.NoError(t, admin.QueryRow(t.Context(), e.q(`INSERT INTO billing.psps (merchant_id, key, rail, account_id) VALUES ($1, 'main', 'stripe', $2) RETURNING id`), e.merchant, "acct_"+uuid.NewString()[:8]).Scan(&e.psp))
+	require.NoError(t, admin.QueryRow(t.Context(), e.q(`INSERT INTO billing.psps (merchant_id, key, rail, account_id, environment) VALUES ($1, 'main', 'stripe', $2, 'live') RETURNING id`), e.merchant, "acct_"+uuid.NewString()[:8]).Scan(&e.psp))
 	for i := range e.replicas {
 		config, err := pgxpool.ParseConfig(dsn)
 		require.NoError(t, err)
@@ -105,7 +105,7 @@ func (e *env) exec(sql string, args ...any) int64 {
 
 func (e *env) newMerchant() uuid.UUID {
 	var id uuid.UUID
-	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`INSERT INTO billing.merchants (slug) VALUES ($1) RETURNING id`), "idem-"+uuid.NewString()[:8]).Scan(&id))
+	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`INSERT INTO billing.merchants (slug, status) VALUES ($1, 'active') RETURNING id`), "idem-"+uuid.NewString()[:8]).Scan(&id))
 	return id
 }
 

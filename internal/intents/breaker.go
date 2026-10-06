@@ -111,7 +111,7 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingProviderInt
 		return false, "", fmt.Errorf("volume breaker: db not configured")
 	}
 	// or#862: under the since-removed RLS both counts below (provider_intents,
-	// subscriptions) came back 0 and 0 on a connection with no app.merchant_id,
+	// subscriptions) came back 0 and 0 on a connection with no openrails.merchant_id,
 	// giving budget = max(25, 1% × 0) = 25 against executed = 0 — a breaker
 	// that could never hold, on exactly the unattended plane it exists
 	// to guard. Assert the pin instead of reading zeros; Check's contract is

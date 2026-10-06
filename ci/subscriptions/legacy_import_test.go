@@ -109,7 +109,7 @@ func (r *bookRow) sub(w *world, tp topology) *billing.Subscription {
 	subs, err := w.client[tp].ListSubscriptions(w.t.Context(), billing.SubscriptionListParams{CustomerID: r.c.customerID()})
 	require.NoError(w.t, err)
 	for i := range subs.Items {
-		if subs.Items[i].RailSubscriptionID == r.schedule {
+		if str(subs.Items[i].RailSubscriptionID) == r.schedule {
 			return &subs.Items[i]
 		}
 	}

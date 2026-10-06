@@ -24,7 +24,7 @@ type auditRow struct {
 func (w *world) transitions(sub string) []auditRow {
 	w.t.Helper()
 	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT coalesce(decision, ''), coalesce(from_status::text, ''), to_status::text,
-		from_paid_through IS DISTINCT FROM to_paid_through FROM billing.subscription_status_transitions
+		from_current_period_ends_at IS DISTINCT FROM to_current_period_ends_at FROM billing.subscription_status_transitions
 		WHERE subscription_id = $1::uuid ORDER BY occurred_at, id`), sub)
 	require.NoError(w.t, err)
 	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (auditRow, error) {

@@ -4,21 +4,21 @@
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
 
 -- name: GetProductArchiveByKey :one
-SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
+SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
 FROM billing.product_archive_operations o
 JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.idempotency_key = sqlc.arg(idempotency_key)::text;
 
 -- name: GetProductArchiveByID :one
-SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
+SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
 FROM billing.product_archive_operations o
 JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.arg(id)::uuid;
 
 -- name: InsertProductArchive :exec
-INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchased_since, reason)
+INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchase_window_starts_at, reason)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(idempotency_key)::text, sqlc.arg(request_sha256)::bytea, sqlc.arg(product_id)::uuid,
-        sqlc.arg(purchase_action)::text, sqlc.narg(purchased_since)::timestamptz, sqlc.arg(reason)::text);
+        sqlc.arg(purchase_action)::text, sqlc.narg(purchase_window_starts_at)::timestamptz, NULLIF(sqlc.arg(reason)::text, ''));
 
 -- One-time completed charges of the product since the window start.
 -- Subscription payments stay with their grandfathered subscriptions; rows
@@ -28,7 +28,7 @@ SELECT pay.id, pay.customer_id, pay.amount, pay.currency, pay.purchased_at, pay.
 FROM billing.payments pay
 JOIN billing.prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
 WHERE pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.product_id = sqlc.arg(product_id)::uuid
-  AND pay.purchased_at >= sqlc.arg(purchased_since)::timestamptz
+  AND pay.purchased_at >= sqlc.arg(purchase_window_starts_at)::timestamptz
   AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'completed'
   AND pay.deleted_at IS NULL AND pay.subscription_id IS NULL
   AND (pay.money_movement = 'rail' OR pay.channel <> 'rail')

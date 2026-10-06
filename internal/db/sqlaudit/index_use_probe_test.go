@@ -29,7 +29,7 @@ var keptUnchosen = map[string]string{
 	"psps_environment_archived_rail_created_at_id_idx":         "PSP list by environment and archived, in page order",
 	"provider_mutation_logs_psp_id_idx":                        "external write log's PSP filter",
 	"provider_mutation_logs_rail_phase_created_at_idx":         "external write log's rail and phase filters",
-	"invoices_status_period_from_id_idx":                       "invoice list by status, in page order",
+	"invoices_status_period_starts_at_id_idx":                  "invoice list by status, in page order",
 	"invoices_customer_id_period_from_id_idx":                  "a customer's invoices, in page order",
 	"reprice_batches_created_at_id_idx":                        "reprice batch list, in page order",
 	"reprice_batches_price_key_created_at_id_idx":              "reprice batch list by price key, in page order",
@@ -90,7 +90,7 @@ func TestIndexUseProbe(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, s := range []string{
-			`SELECT set_config('app.merchant_id', '` + AuditMerchantID + `', false)`,
+			`SELECT set_config('openrails.merchant_id', '` + AuditMerchantID + `', false)`,
 			`SET search_path = billing, public`,
 		} {
 			if _, err := conn.Exec(ctx, s); err != nil {

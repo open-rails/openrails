@@ -95,7 +95,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if method.CustomerID != req.Payer.UUID() {
 		return nil, fmt.Errorf("payment method belongs to another customer")
 	}
-	if strings.TrimSpace(method.ParkReason) != "" {
+	if strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
 		return nil, fmt.Errorf("%w: payment method is parked", charge.ErrInstrumentChanged)
 	}
 	if err := req.Instrument.Validate(); err != nil {
@@ -167,7 +167,7 @@ func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req Charge
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != req.Payer.UUID() || method.ParkReason != "" || normalizeRail(method.Rail) != rail {
+		if method.CustomerID != req.Payer.UUID() || method.ParkReason != nil || normalizeRail(method.Rail) != rail {
 			return charge.ErrInstrumentChanged
 		}
 		if err := req.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {

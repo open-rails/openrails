@@ -146,7 +146,7 @@ func (q *Queries) LockCatalogRevision(ctx context.Context, merchantID uuid.UUID)
 }
 
 const setCatalogBatchMerchant = `-- name: SetCatalogBatchMerchant :exec
-SELECT set_config('app.catalog_batch',$1::text,true)
+SELECT set_config('openrails.catalog_batch_merchant_id',$1::text,true)
 `
 
 func (q *Queries) SetCatalogBatchMerchant(ctx context.Context, merchantID string) error {

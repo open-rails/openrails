@@ -26,7 +26,7 @@ UPDATE billing.payment_methods
 SET park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text,
     parked_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND park_reason NOT LIKE 'delete:%';
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
 
 -- name: DeleteFencedPaymentMethod :execrows
 DELETE FROM billing.payment_methods
@@ -47,7 +47,7 @@ FOR UPDATE;
 -- name: CompleteCustodianMethodDelete :execrows
 UPDATE billing.provider_intents
 SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
-    claimed_until = NULL, executed_at = sqlc.arg(now)::timestamptz,
+    lease_expires_at = NULL, executed_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')
@@ -81,4 +81,4 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
 SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
   AND custodian='psp' AND rail_customer_ref=sqlc.arg(customer_ref)::text
-  AND rail_customer_ref<>'' AND id<>sqlc.arg(exclude_id)::uuid;
+  AND id<>sqlc.arg(exclude_id)::uuid;

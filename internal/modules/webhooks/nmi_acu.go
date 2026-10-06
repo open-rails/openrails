@@ -90,7 +90,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 		for _, m := range methods {
 			switch kind {
 			case paymentmethods.CardUpdated:
-				card, err := intents.NMIVaultCard(customer, m.RailMethodRef)
+				card, err := intents.NMIVaultCard(customer, models.DerefStr(m.RailMethodRef))
 				if err != nil {
 					return fmt.Errorf("nmi account updater: card %s: %w", m.ID, err)
 				}
@@ -115,7 +115,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 				notices = append(notices, asked...)
 			}
 			if err := paymentmethods.RecordCardUpdate(ctx, q, paymentmethods.CardUpdate{MerchantID: mid.UUID(), PaymentMethodID: m.ID, CustomerID: m.CustomerID,
-				PSPID: m.PspID, Source: paymentmethods.UpdateNMIACU, Kind: kind, EventRef: s.Data.EventID, At: now}); err != nil {
+				PSPID: m.PspID, Source: paymentmethods.UpdateNMIACU, Kind: kind, EventRef: s.Data.EventID, OccurredAt: now}); err != nil {
 				return err
 			}
 		}

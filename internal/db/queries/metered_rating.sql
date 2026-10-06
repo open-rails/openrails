@@ -82,20 +82,20 @@ GROUP BY 1, 2;
 -- ON CONFLICT DO UPDATE takes the row lock, serializing concurrent sweeps.
 -- name: LockMeteredRatingWatermark :one
 INSERT INTO billing.metered_rating_watermarks (
-    merchant_id, customer_id, currency, source, period_from, rated_through, accrued_amount, created_at, updated_at
+    merchant_id, customer_id, currency, source, period_starts_at, rated_through_at, accrued_amount, created_at, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(source)::text,
-    sqlc.arg(period_from)::timestamptz, sqlc.arg(period_from)::timestamptz, 0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+    sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_starts_at)::timestamptz, 0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 )
-ON CONFLICT (merchant_id, customer_id, currency, source, period_from)
+ON CONFLICT (merchant_id, customer_id, currency, source, period_starts_at)
 DO UPDATE SET updated_at = billing.metered_rating_watermarks.updated_at
 RETURNING accrued_amount;
 
 -- name: AdvanceMeteredRatingWatermark :exec
 UPDATE billing.metered_rating_watermarks
-SET rated_through = GREATEST(rated_through, sqlc.arg(rated_through)::timestamptz),
+SET rated_through_at = GREATEST(rated_through_at, sqlc.arg(rated_through_at)::timestamptz),
     accrued_amount = accrued_amount + sqlc.arg(accrued_delta)::bigint,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND source = sqlc.arg(source)::text
-  AND period_from = sqlc.arg(period_from)::timestamptz;
+  AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz;

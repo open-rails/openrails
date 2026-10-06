@@ -52,7 +52,7 @@ type PurchaseHistory struct {
 func ValidatePurchaseHistory(merchant, customer, product, payment uuid.UUID, wanted map[string]PurchaseWindow, ownership PurchaseWindow, original []gen.BillingGrant) (PurchaseHistory, error) {
 	out := PurchaseHistory{Entitlements: map[string]gen.BillingGrant{}}
 	for _, g := range original {
-		if g.MerchantID != merchant || g.CustomerID != customer || g.Event != "grant" || g.SourceType != string(Purchase) || g.SourceID != payment.String() || g.PaymentID != nil && *g.PaymentID != payment || g.ProductID != nil && *g.ProductID != product {
+		if g.MerchantID != merchant || g.CustomerID != customer || g.Event != "grant" || g.SourceType != string(Purchase) || sourceIDOf(g) != payment.String() || g.PaymentID != nil && *g.PaymentID != payment || g.ProductID != nil && *g.ProductID != product {
 			return out, errors.New("original grant belongs to another accepted purchase")
 		}
 		switch g.Kind {

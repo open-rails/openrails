@@ -9,7 +9,7 @@ import (
 )
 
 // ErrUnscopedMerchantWork is returned by AssertMerchantScope when the handle a
-// caller is about to query carries no app.merchant_id. Callers should treat it
+// caller is about to query carries no openrails.merchant_id. Callers should treat it
 // as fatal for the unit of work: SQL scoped by current_merchant_id() would
 // match nothing (silently) or refuse with 42501 (loudly).
 type ErrUnscopedMerchantWork struct {
@@ -34,7 +34,7 @@ func (e *ErrUnscopedMerchantWork) Error() string {
 }
 
 // AssertMerchantScope verifies that the handle Qx(ctx) resolves to actually
-// carries the app.merchant_id GUC, and that it names the merchant on the
+// carries the openrails.merchant_id GUC, and that it names the merchant on the
 // context.
 //
 // This exists because the failure it detects is SILENT. A GUC-less read that

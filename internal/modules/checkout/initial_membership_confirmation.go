@@ -104,7 +104,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != accepted.CustomerID || !charge.ChargeableOn(method, accepted.PSPID) || method.ParkReason != "" {
+		if method.CustomerID != accepted.CustomerID || !charge.ChargeableOn(method, accepted.PSPID) || method.ParkReason != nil {
 			return charge.ErrInstrumentChanged
 		}
 		if sessionID != nil {

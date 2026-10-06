@@ -50,7 +50,7 @@ type Subscription struct {
 	PriceID               PriceID            `json:"price_id"`
 	PSPID                 PSPID              `json:"psp_id"`
 	Rail                  string             `json:"rail"`
-	RailSubscriptionID    string             `json:"rail_subscription_id"`
+	RailSubscriptionID    *string            `json:"rail_subscription_id"`
 	Status                SubscriptionStatus `json:"status"`
 	ScheduledPriceID      *PriceID           `json:"scheduled_price_id,omitempty"`
 	PaymentMethodID       *PaymentMethodID   `json:"payment_method_id"`

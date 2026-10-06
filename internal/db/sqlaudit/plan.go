@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// AuditMerchantID is an arbitrary UUID for the app.merchant_id GUC.
+// AuditMerchantID is an arbitrary UUID for the openrails.merchant_id GUC.
 // current_merchant_id() predicates plan on its shape, never on its value.
 const AuditMerchantID = "00000000-0000-0000-0000-0000000a1d17"
 
@@ -48,7 +48,7 @@ func (n planNode) walk(fn func(planNode)) {
 // Actual workload performance is covered by the populated query/perf harness.
 func PrepareSession(ctx context.Context, conn *pgx.Conn) error {
 	stmts := []string{
-		`SELECT set_config('app.merchant_id', '` + AuditMerchantID + `', false)`,
+		`SELECT set_config('openrails.merchant_id', '` + AuditMerchantID + `', false)`,
 		`SET search_path = billing, public`,
 		`SET enable_seqscan = off`,
 	}

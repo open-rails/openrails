@@ -78,7 +78,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// Idempotency: one invoice per (payer, period, currency).
 		existing, gerr := q.GetInvoiceByPeriod(ctx, gen.GetInvoiceByPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID,
-			PeriodFrom: pfrom, PeriodTo: pto, Currency: cur,
+			PeriodStartsAt: pfrom, PeriodEndsAt: pto, Currency: cur,
 		})
 		if gerr == nil {
 			inv, gerr = invoiceFromGen(existing)
@@ -128,7 +128,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// gauge/metered usage rollups above carry quantities but zero amounts.
 		ratedRows, rerr := q.SumPendingInvoiceItemAmountBySourceInPeriod(ctx, gen.SumPendingInvoiceItemAmountBySourceInPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			PeriodFrom: pfrom, PeriodTo: pto,
+			PeriodStartsAt: pfrom, PeriodEndsAt: pto,
 		})
 		if rerr != nil {
 			return rerr
@@ -142,7 +142,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// --- money movements (#512 ledger, by transfer_type; amounts positive) ---
 		movs, merr := q.SumLedgerMovementsByCustomerInPeriod(ctx, gen.SumLedgerMovementsByCustomerInPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			PeriodFrom: pfrom, PeriodTo: pto,
+			PeriodStartsAt: pfrom, PeriodEndsAt: pto,
 		})
 		if merr != nil {
 			return merr
@@ -168,11 +168,11 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			}
 		}
 		pendingReceivable, perr := q.SumPendingInvoiceItemAmountInPeriod(ctx, gen.SumPendingInvoiceItemAmountInPeriodParams{
-			MerchantID: tenantID,
-			CustomerID: payerID,
-			Currency:   cur,
-			PeriodFrom: pfrom,
-			PeriodTo:   pto,
+			MerchantID:     tenantID,
+			CustomerID:     payerID,
+			Currency:       cur,
+			PeriodStartsAt: pfrom,
+			PeriodEndsAt:   pto,
 		})
 		if perr != nil {
 			return perr
@@ -233,8 +233,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			CustomerID:       payerID,
 			Currency:         cur, // amounts are minor units of this currency (#474)
 			InvoiceNumber:    &invoiceNumber,
-			PeriodFrom:       pfrom,
-			PeriodTo:         pto,
+			PeriodStartsAt:   pfrom,
+			PeriodEndsAt:     pto,
 			UsageTotal:       usageTotal,
 			DepositsTotal:    movements["deposit"],
 			OwedAccrued:      movements[txOwedAccrual],
@@ -286,8 +286,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			CustomerID:       inv.CustomerID,
 			Currency:         inv.Currency,
 			InvoiceNumber:    inv.InvoiceNumber,
-			PeriodFrom:       inv.PeriodFrom,
-			PeriodTo:         inv.PeriodTo,
+			PeriodStartsAt:   inv.PeriodStartsAt,
+			PeriodEndsAt:     inv.PeriodEndsAt,
 			UsageTotal:       inv.UsageTotal,
 			DepositsTotal:    inv.DepositsTotal,
 			OwedAccrued:      inv.OwedAccrued,
@@ -318,13 +318,13 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		// invoice_id/status tombstone so they can't bill twice. No 'invoiced'
 		// rows are inserted; the statement itemization is line_items above.
 		if _, err := q.AttachPendingInvoiceItemsToInvoice(ctx, gen.AttachPendingInvoiceItemsToInvoiceParams{
-			MerchantID: inv.MerchantID,
-			CustomerID: inv.CustomerID,
-			InvoiceID:  &inv.ID,
-			Now:        now,
-			Currency:   inv.Currency,
-			PeriodFrom: inv.PeriodFrom,
-			PeriodTo:   inv.PeriodTo,
+			MerchantID:     inv.MerchantID,
+			CustomerID:     inv.CustomerID,
+			InvoiceID:      &inv.ID,
+			Now:            now,
+			Currency:       inv.Currency,
+			PeriodStartsAt: inv.PeriodStartsAt,
+			PeriodEndsAt:   inv.PeriodEndsAt,
 		}); err != nil {
 			return err
 		}
@@ -674,7 +674,7 @@ func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff tim
 	}
 	count := 0
 	for _, r := range rows {
-		from := r.PeriodFrom
+		from := r.PeriodStartsAt
 		if opt.BillingPeriodBoundary != "" {
 			start, err := CurrentInvoicePeriodStart(cutoff, r.PeriodAnchor, opt.BillingPeriodBoundary)
 			if err != nil {

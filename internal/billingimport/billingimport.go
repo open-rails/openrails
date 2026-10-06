@@ -223,7 +223,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				if err != nil {
 					return err
 				}
-				if stored.StoredCredentialRecurringRef != pm.RecurringTransactionID {
+				if models.DerefStr(stored.StoredCredentialRecurringRef) != pm.RecurringTransactionID {
 					return apperr.Conflictf("payment method already has a different recurring agreement")
 				}
 			}
@@ -495,7 +495,7 @@ func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f
 		if err != nil {
 			return fmt.Errorf("load payment method for %s: %w", f.SourceID, err)
 		}
-		anchor := method.StoredCredentialRecurringRef
+		anchor := models.DerefStr(method.StoredCredentialRecurringRef)
 		if sale, ok := firstSale[f.RailSubscriptionID]; anchor == "" && ok {
 			if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: merchantID, ID: method.ID, Agreement: "recurring", Ref: sale.TransactionID}); err != nil {
 				return fmt.Errorf("import recurring anchor for %s: %w", f.SourceID, err)

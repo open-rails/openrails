@@ -69,7 +69,7 @@ func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, metho
 	if !armed || client == nil {
 		return nil, errors.New("engine NMI account unavailable")
 	}
-	if err := client.PrepareRecurringSale(ctx, method.RailCustomerRef, method.RailMethodRef); err != nil {
+	if err := client.PrepareRecurringSale(ctx, models.DerefStr(method.RailCustomerRef), models.DerefStr(method.RailMethodRef)); err != nil {
 		return nil, err
 	}
 	return nmidirect.New(client), nil

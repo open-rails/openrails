@@ -79,8 +79,8 @@ func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
 		if attempt >= 0 {
 			payload = fmt.Sprintf("jsonb_set(payload, '{attempt}', '%d'::jsonb)", attempt)
 		}
-		_, err := f.base.pool.Exec(t.Context(), f.q(`INSERT INTO billing.provider_intents (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, origin, psp_id)
-			SELECT merchant_id, rail, intent_type, subscription_id, price_id, `+payload+`, idempotency_key || ':' || gen_random_uuid()::text, $2, origin, psp_id
+		_, err := f.base.pool.Exec(t.Context(), f.q(`INSERT INTO billing.provider_intents (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, origin, psp_id, next_attempt_at)
+			SELECT merchant_id, rail, intent_type, subscription_id, price_id, `+payload+`, idempotency_key || ':' || gen_random_uuid()::text, $2, origin, psp_id, now()
 			FROM billing.provider_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' AND status = 'succeeded'`), subUUID(e.sub), status)
 		return err
 	}

@@ -41,7 +41,7 @@ func deletionMethodUnused(ctx context.Context, q *gen.Queries, mid, id uuid.UUID
 }
 
 func sameDeletionTarget(row gen.BillingPaymentMethod, pm *models.PaymentMethod) bool {
-	return row.ID == pm.ID && row.CustomerID == pm.CustomerID && row.PspID == pm.PspID && row.Custodian == pm.Custodian && row.CustodianID != nil && pm.CustodianID != nil && *row.CustodianID == *pm.CustodianID && row.RailMethodRef == pm.RailMethodRef && row.RailCustomerRef == pm.RailCustomerRef
+	return row.ID == pm.ID && row.CustomerID == pm.CustomerID && row.PspID == pm.PspID && row.Custodian == pm.Custodian && row.CustodianID != nil && pm.CustodianID != nil && *row.CustodianID == *pm.CustodianID && models.DerefStr(row.RailMethodRef) == pm.RailMethodRef && models.DerefStr(row.RailCustomerRef) == pm.RailCustomerRef
 }
 
 func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store, pm *models.PaymentMethod) (gen.BillingProviderIntent, error) {
@@ -85,7 +85,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		if err != nil {
 			return err
 		}
-		if !sameDeletionTarget(current, pm) || current.NetworkTokenID != "" || current.ChargeVia != "pan_proxy" {
+		if !sameDeletionTarget(current, pm) || current.NetworkTokenID != nil || current.ChargeVia != "pan_proxy" {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, mid.UUID(), handle); err != nil {
@@ -142,7 +142,7 @@ func (h *HyperSwitchMethodDeleteHandler) checkFence(ctx context.Context, in gen.
 		if err != nil {
 			return err
 		}
-		if row.CustomerID != p.CustomerID || row.ParkReason != "delete:"+in.ID.String() || p.Instrument.Matches(row, charge.AgreementUnscheduled) != nil {
+		if row.CustomerID != p.CustomerID || models.DerefStr(row.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(row, charge.AgreementUnscheduled) != nil {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		aliases, err := q.CountCustodianMethodAliases(ctx, gen.CountCustodianMethodAliasesParams{MerchantID: in.MerchantID, CustodianID: *in.CustodianID, MethodRef: p.Instrument.RailMethodRef, CustomerID: p.CustomerID})

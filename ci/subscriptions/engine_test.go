@@ -77,7 +77,7 @@ func enrollEvery(t *testing.T, w *world, rail string, tp topology, hours int) *e
 	e.sub = e.c.subscribe(tp, rail, price.ID.String(), e.ent, e.method)
 	sub := w.subscription(tp, e.sub)
 	require.Equal(t, "engine", sub.CollectionPolicy)
-	require.Empty(t, sub.RailSubscriptionID)
+	require.Nil(t, sub.RailSubscriptionID)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
 	require.Len(t, e.providerLedger(), before+1, "one initial charge")
 	require.True(t, e.c.entitled(e.ent))

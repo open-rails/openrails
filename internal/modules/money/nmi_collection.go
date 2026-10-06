@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -36,7 +37,7 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.BillingPaym
 	if a.Charger.Client.ReadOnly {
 		return nil, fmt.Errorf("nmi client is read-only (mode=readonly)")
 	}
-	if strings.TrimSpace(method.RailCustomerRef) == "" {
+	if strings.TrimSpace(models.DerefStr(method.RailCustomerRef)) == "" {
 		return nil, fmt.Errorf("nmi payment method missing customer vault id")
 	}
 	return prepareUnscheduledCollection(method, req, a.Charger)

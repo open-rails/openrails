@@ -14,10 +14,7 @@ func repriceBatch(b gen.BillingRepriceBatch, scheduled, applied, canceled, block
 		Scheduled: int(scheduled), Applied: int(applied), Canceled: int(canceled), Blocked: int(blocked),
 		CreatedAt: b.CreatedAt,
 	}
-	if b.FallbackPolicy != "" {
-		policy := b.FallbackPolicy
-		out.FallbackPolicy = &policy
-	}
+	out.FallbackPolicy = b.FallbackPolicy
 	return out
 }
 

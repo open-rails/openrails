@@ -202,7 +202,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		CurrentPeriodStartsAt: s.CurrentPeriodStartsAt,
 		CurrentPeriodEndsAt:   s.CurrentPeriodEndsAt,
 		Rail:                  Rail(s.Rail),
-		RailSubscriptionID:    s.RailSubscriptionID,
+		RailSubscriptionID:    DerefStr(s.RailSubscriptionID),
 		CollectionPolicy:      CollectionPolicy(s.CollectionPolicy),
 		PspID:                 s.PspID,
 		PaymentMethodID:       s.PaymentMethodID,
@@ -250,24 +250,24 @@ func PaymentMethodFromGen(p gen.BillingPaymentMethod) (*PaymentMethod, error) {
 		CustomerID:      p.CustomerID,
 		Rail:            Rail(p.Rail),
 		PspID:           p.PspID,
-		RailCustomerRef: p.RailCustomerRef,
-		RailMethodRef:   p.RailMethodRef,
+		RailCustomerRef: DerefStr(p.RailCustomerRef),
+		RailMethodRef:   DerefStr(p.RailMethodRef),
 
 		Card:      CardFromColumns(p.CardBrand, p.CardLast4, p.CardExpMonth, p.CardExpYear),
 		CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt,
 
-		StoredCredentialRecurringRef:   p.StoredCredentialRecurringRef,
-		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,
+		StoredCredentialRecurringRef:   DerefStr(p.StoredCredentialRecurringRef),
+		StoredCredentialUnscheduledRef: DerefStr(p.StoredCredentialUnscheduledRef),
 
 		Custodian:          p.Custodian,
 		CustodianID:        p.CustodianID,
-		Fingerprint:        p.Fingerprint,
-		NetworkTokenID:     p.NetworkTokenID,
-		NetworkTokenStatus: p.NetworkTokenStatus,
-		NetworkTokenPAR:    p.NetworkTokenPar,
+		Fingerprint:        DerefStr(p.Fingerprint),
+		NetworkTokenID:     DerefStr(p.NetworkTokenID),
+		NetworkTokenStatus: DerefStr(p.NetworkTokenStatus),
+		NetworkTokenPAR:    DerefStr(p.NetworkTokenPar),
 		ChargeVia:          p.ChargeVia,
-		ParkReason:         p.ParkReason,
+		ParkReason:         DerefStr(p.ParkReason),
 		ParkedAt:           p.ParkedAt,
 	}
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payment_methods.metadata"); err != nil {
@@ -416,7 +416,7 @@ func SubscriptionRepriceFromGen(r gen.BillingSubscriptionReprice) *SubscriptionR
 		CanceledAt:              r.CanceledAt,
 		AcknowledgedShortNotice: r.AcknowledgedShortNotice,
 		Kind:                    RepriceKind(r.Kind),
-		BlockedReason:           r.BlockedReason,
+		BlockedReason:           DerefStr(r.BlockedReason),
 	}
 }
 

@@ -18,13 +18,13 @@ SET next_poll_at = $1::timestamptz
 FROM (
     SELECT d.merchant_id, d.reference FROM billing.solana_pay_references d
     WHERE d.next_poll_at <= $2::timestamptz
-      AND (d.status = 'pending' OR (d.kind = 'purchase' AND d.watch_until > $2::timestamptz))
+      AND (d.status = 'pending' OR (d.kind = 'purchase' AND d.watch_ends_at > $2::timestamptz))
     ORDER BY d.next_poll_at
     LIMIT $3::int
     FOR UPDATE SKIP LOCKED
 ) due
 WHERE r.merchant_id = due.merchant_id AND r.reference = due.reference
-RETURNING r.merchant_id, r.reference, r.checkout_attempt_id, r.kind, r.status, r.settle_until, r.watch_until, r.next_poll_at, r.signature, r.seen_until, r.scan_stack, r.scan_below, r.built_transaction, r.built_valid_height, r.created_at, r.updated_at
+RETURNING r.merchant_id, r.reference, r.checkout_attempt_id, r.kind, r.status, r.expires_at, r.watch_ends_at, r.next_poll_at, r.signature, r.seen_until, r.scan_stack, r.scan_below, r.built_transaction, r.built_valid_height, r.created_at, r.updated_at
 `
 
 type ClaimDueSolanaPayReferencesParams struct {
@@ -50,8 +50,8 @@ func (q *Queries) ClaimDueSolanaPayReferences(ctx context.Context, arg ClaimDueS
 			&i.CheckoutAttemptID,
 			&i.Kind,
 			&i.Status,
-			&i.SettleUntil,
-			&i.WatchUntil,
+			&i.ExpiresAt,
+			&i.WatchEndsAt,
 			&i.NextPollAt,
 			&i.Signature,
 			&i.SeenUntil,
@@ -101,8 +101,8 @@ func (q *Queries) ConfirmSolanaPayReference(ctx context.Context, arg ConfirmSola
 const deleteSettledSolanaPayReferences = `-- name: DeleteSettledSolanaPayReferences :execrows
 WITH doomed AS (
     SELECT merchant_id, reference FROM billing.solana_pay_references
-    WHERE status <> 'pending' AND watch_until < $1::timestamptz AND cardinality(scan_stack) = 0
-    ORDER BY watch_until
+    WHERE status <> 'pending' AND watch_ends_at < $1::timestamptz AND cardinality(scan_stack) = 0
+    ORDER BY watch_ends_at
     LIMIT $2::int
     FOR UPDATE SKIP LOCKED
 ), ignored AS (
@@ -133,7 +133,7 @@ const expireSolanaPayReference = `-- name: ExpireSolanaPayReference :execrows
 UPDATE billing.solana_pay_references
 SET status = 'expired', updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND reference = $3::text
-  AND status = 'pending' AND settle_until < $1::timestamptz
+  AND status = 'pending' AND expires_at < $1::timestamptz
 `
 
 type ExpireSolanaPayReferenceParams struct {
@@ -186,7 +186,7 @@ func (q *Queries) GetSolanaPayReceipt(ctx context.Context, arg GetSolanaPayRecei
 }
 
 const getSolanaPayReference = `-- name: GetSolanaPayReference :one
-SELECT merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
+SELECT merchant_id, reference, checkout_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
 WHERE merchant_id = $1::uuid AND reference = $2::text
 `
 
@@ -204,8 +204,8 @@ func (q *Queries) GetSolanaPayReference(ctx context.Context, arg GetSolanaPayRef
 		&i.CheckoutAttemptID,
 		&i.Kind,
 		&i.Status,
-		&i.SettleUntil,
-		&i.WatchUntil,
+		&i.ExpiresAt,
+		&i.WatchEndsAt,
 		&i.NextPollAt,
 		&i.Signature,
 		&i.SeenUntil,
@@ -301,7 +301,7 @@ func (q *Queries) ListSolanaPayReceiptSignatures(ctx context.Context, arg ListSo
 }
 
 const lockSolanaPayReference = `-- name: LockSolanaPayReference :one
-SELECT merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
+SELECT merchant_id, reference, checkout_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at FROM billing.solana_pay_references
 WHERE merchant_id = $1::uuid AND reference = $2::text
 FOR UPDATE
 `
@@ -320,8 +320,8 @@ func (q *Queries) LockSolanaPayReference(ctx context.Context, arg LockSolanaPayR
 		&i.CheckoutAttemptID,
 		&i.Kind,
 		&i.Status,
-		&i.SettleUntil,
-		&i.WatchUntil,
+		&i.ExpiresAt,
+		&i.WatchEndsAt,
 		&i.NextPollAt,
 		&i.Signature,
 		&i.SeenUntil,
@@ -336,11 +336,11 @@ func (q *Queries) LockSolanaPayReference(ctx context.Context, arg LockSolanaPayR
 }
 
 const registerSolanaPayReference = `-- name: RegisterSolanaPayReference :one
-INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, created_at, updated_at)
+INSERT INTO billing.solana_pay_references (merchant_id, reference, checkout_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, created_at, updated_at)
 VALUES ($1::uuid, $2::text, $3::uuid, $4::text, 'pending',
         $5::timestamptz, $6::timestamptz, $7::timestamptz, $7::timestamptz, $7::timestamptz)
 ON CONFLICT (merchant_id, checkout_attempt_id) DO UPDATE SET updated_at = billing.solana_pay_references.updated_at
-RETURNING merchant_id, reference, checkout_attempt_id, kind, status, settle_until, watch_until, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at
+RETURNING merchant_id, reference, checkout_attempt_id, kind, status, expires_at, watch_ends_at, next_poll_at, signature, seen_until, scan_stack, scan_below, built_transaction, built_valid_height, created_at, updated_at
 `
 
 type RegisterSolanaPayReferenceParams struct {
@@ -348,8 +348,8 @@ type RegisterSolanaPayReferenceParams struct {
 	Reference         string
 	CheckoutAttemptID uuid.UUID
 	Kind              string
-	SettleUntil       time.Time
-	WatchUntil        time.Time
+	ExpiresAt         time.Time
+	WatchEndsAt       time.Time
 	Now               time.Time
 }
 
@@ -359,8 +359,8 @@ func (q *Queries) RegisterSolanaPayReference(ctx context.Context, arg RegisterSo
 		arg.Reference,
 		arg.CheckoutAttemptID,
 		arg.Kind,
-		arg.SettleUntil,
-		arg.WatchUntil,
+		arg.ExpiresAt,
+		arg.WatchEndsAt,
 		arg.Now,
 	)
 	var i BillingSolanaPayReference
@@ -370,8 +370,8 @@ func (q *Queries) RegisterSolanaPayReference(ctx context.Context, arg RegisterSo
 		&i.CheckoutAttemptID,
 		&i.Kind,
 		&i.Status,
-		&i.SettleUntil,
-		&i.WatchUntil,
+		&i.ExpiresAt,
+		&i.WatchEndsAt,
 		&i.NextPollAt,
 		&i.Signature,
 		&i.SeenUntil,

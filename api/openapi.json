@@ -7458,14 +7458,14 @@
             }
           },
           {
-            "name": "period_from",
+            "name": "period_starts_after",
             "in": "query",
             "schema": {
               "type": "string"
             }
           },
           {
-            "name": "period_to",
+            "name": "period_starts_before",
             "in": "query",
             "schema": {
               "type": "string"
@@ -13158,7 +13158,14 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "destination_host": {
             "type": "string"
@@ -13561,7 +13568,7 @@
               "review"
             ]
           },
-          "purchased_since": {
+          "purchase_window_starts_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -15904,7 +15911,14 @@
             "type": "string"
           },
           "source_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
             "oneOf": [
@@ -16535,7 +16549,7 @@
               "grace"
             ]
           },
-          "overdue_since": {
+          "overdue_started_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -16566,7 +16580,7 @@
           "customer_id",
           "currency",
           "state",
-          "overdue_since",
+          "overdue_started_at",
           "overdue_amount",
           "overdue_invoices",
           "entered_at",
@@ -16588,7 +16602,7 @@
           "to_state": {
             "type": "string"
           },
-          "overdue_since": {
+          "overdue_started_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -17359,11 +17373,11 @@
               }
             ]
           },
-          "period_from": {
+          "period_starts_at": {
             "type": "string",
             "format": "date-time"
           },
-          "period_to": {
+          "period_ends_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -17620,8 +17634,8 @@
           "customer_id",
           "currency",
           "invoice_number",
-          "period_from",
-          "period_to",
+          "period_starts_at",
+          "period_ends_at",
           "usage_total",
           "deposits_total",
           "owed_accrued",
@@ -18844,11 +18858,11 @@
             "type": "string",
             "format": "date-time"
           },
-          "period_start": {
+          "period_starts_at": {
             "type": "string",
             "format": "date-time"
           },
-          "period_end": {
+          "period_ends_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -18865,7 +18879,7 @@
           "overdue_invoices": {
             "type": "integer"
           },
-          "overdue_since": {
+          "overdue_started_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -20967,7 +20981,7 @@
               "review"
             ]
           },
-          "purchased_since": {
+          "purchase_window_starts_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -21007,7 +21021,7 @@
           "product_id",
           "product_key",
           "purchase_action",
-          "purchased_since",
+          "purchase_window_starts_at",
           "reason",
           "created_at",
           "complete",
@@ -21065,11 +21079,11 @@
           "provider_resource_id": {
             "type": "string"
           },
-          "provider_lifetime_start": {
+          "provider_lifetime_starts_at": {
             "type": "string",
             "format": "date-time"
           },
-          "provider_lifetime_end": {
+          "provider_lifetime_ends_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -21104,8 +21118,8 @@
         "required": [
           "provider",
           "provider_resource_id",
-          "provider_lifetime_start",
-          "provider_lifetime_end",
+          "provider_lifetime_starts_at",
+          "provider_lifetime_ends_at",
           "provider_absent_at",
           "provider_absence_reference",
           "billing_stop_reference",
@@ -21534,11 +21548,11 @@
           "normalized_query": {
             "type": "string"
           },
-          "query_start": {
+          "query_starts_at": {
             "type": "string",
             "format": "date-time"
           },
-          "query_end": {
+          "query_ends_at": {
             "type": "string",
             "format": "date-time"
           },
@@ -22331,7 +22345,14 @@
             }
           },
           "provenance": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -22517,7 +22538,14 @@
             "type": "string"
           },
           "rail_subscription_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "type": "string",

@@ -151,7 +151,7 @@ INSERT INTO billing.subscriptions (
     COALESCE(NULLIF($8::text, ''), 'pending'),
     $9,
     $10, $11, $12,
-    $13, $14,
+    $13, NULLIF($14::text, ''),
     $15, $16,
     $17, $18, $19,
     $20, $21, $22,
@@ -876,25 +876,25 @@ func (q *Queries) GetSubscriptionByIDForUpdate(ctx context.Context, arg GetSubsc
 
 const getSubscriptionByPSPSubID = `-- name: GetSubscriptionByPSPSubID :one
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions sub
-WHERE sub.merchant_id = $3::uuid AND sub.psp_id = $4::uuid
-  AND sub.rail = $1 AND sub.rail_subscription_id = $2
+WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
+  AND sub.rail = $1 AND sub.rail_subscription_id = $4::text
   AND sub.deleted_at IS NULL
 LIMIT 1
 `
 
 type GetSubscriptionByPSPSubIDParams struct {
 	Rail               string
-	RailSubscriptionID string
 	MerchantID         uuid.UUID
 	PspID              uuid.UUID
+	RailSubscriptionID string
 }
 
 func (q *Queries) GetSubscriptionByPSPSubID(ctx context.Context, arg GetSubscriptionByPSPSubIDParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByPSPSubID,
 		arg.Rail,
-		arg.RailSubscriptionID,
 		arg.MerchantID,
 		arg.PspID,
+		arg.RailSubscriptionID,
 	)
 	var i BillingSubscription
 	err := row.Scan(
@@ -940,8 +940,8 @@ func (q *Queries) GetSubscriptionByPSPSubID(ctx context.Context, arg GetSubscrip
 
 const getSubscriptionByPSPSubIDForUpdate = `-- name: GetSubscriptionByPSPSubIDForUpdate :one
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions sub
-WHERE sub.merchant_id = $3::uuid AND sub.psp_id = $4::uuid
-  AND sub.rail = $1 AND sub.rail_subscription_id = $2
+WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
+  AND sub.rail = $1 AND sub.rail_subscription_id = $4::text
   AND sub.deleted_at IS NULL
 LIMIT 1
 FOR UPDATE
@@ -949,9 +949,9 @@ FOR UPDATE
 
 type GetSubscriptionByPSPSubIDForUpdateParams struct {
 	Rail               string
-	RailSubscriptionID string
 	MerchantID         uuid.UUID
 	PspID              uuid.UUID
+	RailSubscriptionID string
 }
 
 // Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
@@ -959,9 +959,9 @@ type GetSubscriptionByPSPSubIDForUpdateParams struct {
 func (q *Queries) GetSubscriptionByPSPSubIDForUpdate(ctx context.Context, arg GetSubscriptionByPSPSubIDForUpdateParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByPSPSubIDForUpdate,
 		arg.Rail,
-		arg.RailSubscriptionID,
 		arg.MerchantID,
 		arg.PspID,
+		arg.RailSubscriptionID,
 	)
 	var i BillingSubscription
 	err := row.Scan(
@@ -2057,7 +2057,7 @@ UPDATE billing.subscriptions SET
     updated_at = now()
 WHERE subscriptions.merchant_id = $2::uuid AND rail = 'stripe'
   AND psp_id = $3::uuid
-  AND rail_subscription_id = $4
+  AND rail_subscription_id = $4::text
   AND deleted_at IS NULL
   AND payment_method_id IS DISTINCT FROM $1::uuid
 `
@@ -2153,7 +2153,7 @@ UPDATE billing.subscriptions SET
     current_period_starts_at = $8,
     current_period_ends_at = $9,
     rail = $10,
-    rail_subscription_id = $11,
+    rail_subscription_id = NULLIF($11::text, ''),
     payment_method_id = $12,
     last_retry_at = $13,
     retry_attempts = $14,
@@ -2252,7 +2252,7 @@ UPDATE billing.subscriptions SET
     current_period_starts_at = $8,
     current_period_ends_at = $9,
     rail = $10,
-    rail_subscription_id = $11,
+    rail_subscription_id = NULLIF($11::text, ''),
     payment_method_id = $12,
     last_retry_at = $13,
     retry_attempts = $14,
@@ -2273,7 +2273,7 @@ WHERE subscriptions.merchant_id = $26::uuid AND id = $1
   AND row_version = $28
   AND deleted_at IS NULL
   -- The status-transition audit records this decision's name (0021).
-  AND set_config('billing.decision', $29::text, true) IS NOT NULL
+  AND set_config('openrails.subscription_decision', $29::text, true) IS NOT NULL
 `
 
 type UpdateSubscriptionDecidedParams struct {

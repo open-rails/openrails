@@ -742,8 +742,8 @@ How it runs:
   merchant archive export) and the next pass tries again.
 - `subscription_status_transitions`, reconciliation runs and `cost_observations`
   refuse every other `DELETE`: `billing.guard_retention_delete` lets one through
-  only when the transaction names the table in `openrails.retention` and the row
-  is older than the period the trigger declares. `usage_events` and
+  only when the transaction names the table in the `openrails.retention_table`
+  setting and the row is older than the period the trigger declares. `usage_events` and
   `admission_operations` rows leave only with their partition.
 
 What an integrator sees:

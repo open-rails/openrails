@@ -55,13 +55,13 @@ type purchaseReview struct {
 }
 
 type productArchiveOperation struct {
-	ID             uuid.UUID
-	ProductID      uuid.UUID
-	ProductKey     string
-	Action         billing.PurchaseAction
-	PurchasedSince *time.Time
-	Reason         string
-	CreatedAt      time.Time
+	ID                     uuid.UUID
+	ProductID              uuid.UUID
+	ProductKey             string
+	Action                 billing.PurchaseAction
+	PurchaseWindowStartsAt *time.Time
+	Reason                 *string
+	CreatedAt              time.Time
 }
 
 // productArchiveFingerprint canonicalizes the caller's terms. A relative
@@ -72,8 +72,8 @@ func productArchiveFingerprint(req billing.ArchiveProductParams) []byte {
 		"product_id": req.ProductID.String(), "product_key": strings.TrimSpace(req.ProductKey),
 		"action": string(req.PurchaseAction), "reason": strings.TrimSpace(req.Reason),
 	}
-	if !req.PurchasedSince.IsZero() {
-		canonical["purchased_since"] = req.PurchasedSince.UTC().Format(time.RFC3339Nano)
+	if !req.PurchaseWindowStartsAt.IsZero() {
+		canonical["purchase_window_starts_at"] = req.PurchaseWindowStartsAt.UTC().Format(time.RFC3339Nano)
 	}
 	if req.WindowSeconds != 0 {
 		canonical["window_seconds"] = strconv.FormatInt(req.WindowSeconds, 10)
@@ -96,7 +96,7 @@ func validateProductArchive(req *billing.ArchiveProductParams) *api.APIError {
 	if req.PurchaseAction == "" {
 		req.PurchaseAction = billing.PurchaseActionNone
 	}
-	windowed := !req.PurchasedSince.IsZero() || req.WindowSeconds != 0
+	windowed := !req.PurchaseWindowStartsAt.IsZero() || req.WindowSeconds != 0
 	switch req.PurchaseAction {
 	case billing.PurchaseActionNone:
 		if windowed {
@@ -107,8 +107,8 @@ func validateProductArchive(req *billing.ArchiveProductParams) *api.APIError {
 	default:
 		return invalid("purchase_action", `purchase_action must be "none", "refund" or "review"`)
 	}
-	if req.PurchasedSince.IsZero() == (req.WindowSeconds == 0) {
-		return invalid("purchased_since", "exactly one of purchased_since or window_seconds is required")
+	if req.PurchaseWindowStartsAt.IsZero() == (req.WindowSeconds == 0) {
+		return invalid("purchase_window_starts_at", "exactly one of purchase_window_starts_at or window_seconds is required")
 	}
 	if req.WindowSeconds < 0 {
 		return invalid("window_seconds", "window_seconds must be positive")
@@ -194,7 +194,7 @@ func loadProductArchiveByID(ctx context.Context, d *db.DB, id uuid.UUID) (produc
 		return productArchiveOperation{}, err
 	}
 	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: billing.PurchaseAction(row.PurchaseAction),
-		PurchasedSince: row.PurchasedSince, Reason: row.Reason, CreatedAt: row.CreatedAt}, nil
+		PurchaseWindowStartsAt: row.PurchaseWindowStartsAt, Reason: row.Reason, CreatedAt: row.CreatedAt}, nil
 }
 
 func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (productArchiveOperation, []byte, error) {
@@ -207,7 +207,7 @@ func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (product
 		return productArchiveOperation{}, nil, err
 	}
 	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: billing.PurchaseAction(row.PurchaseAction),
-		PurchasedSince: row.PurchasedSince, Reason: row.Reason, CreatedAt: row.CreatedAt}, row.RequestSha256, nil
+		PurchaseWindowStartsAt: row.PurchaseWindowStartsAt, Reason: row.Reason, CreatedAt: row.CreatedAt}, row.RequestSha256, nil
 }
 
 // acceptProductArchive records the receipt once per key; a replay with other
@@ -252,15 +252,15 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req billi
 			return fmt.Errorf("resolve product: %w", err)
 		}
 		var since *time.Time
-		if !req.PurchasedSince.IsZero() {
-			at := req.PurchasedSince.UTC()
+		if !req.PurchaseWindowStartsAt.IsZero() {
+			at := req.PurchaseWindowStartsAt.UTC()
 			since = &at
 		} else if req.WindowSeconds != 0 {
 			at := r.Clock.Now().UTC().Add(-time.Duration(req.WindowSeconds) * time.Second)
 			since = &at
 		}
 		if err := q.InsertProductArchive(ctx, gen.InsertProductArchiveParams{MerchantID: mid.UUID(), IdempotencyKey: key, RequestSha256: fingerprint,
-			ProductID: product.ID, PurchaseAction: string(req.PurchaseAction), PurchasedSince: since, Reason: strings.TrimSpace(req.Reason)}); err != nil {
+			ProductID: product.ID, PurchaseAction: string(req.PurchaseAction), PurchaseWindowStartsAt: since, Reason: strings.TrimSpace(req.Reason)}); err != nil {
 			return fmt.Errorf("record product archive: %w", err)
 		}
 		op, _, err = loadProductArchiveByKey(ctx, txDB, key)
@@ -302,14 +302,14 @@ type qualifyingPurchase struct {
 }
 
 func qualifyingPurchases(ctx context.Context, d *db.DB, op productArchiveOperation) ([]qualifyingPurchase, error) {
-	if op.Action == billing.PurchaseActionNone || op.PurchasedSince == nil {
+	if op.Action == billing.PurchaseActionNone || op.PurchaseWindowStartsAt == nil {
 		return nil, nil
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := d.Gen(ctx).ListProductArchivePurchases(ctx, gen.ListProductArchivePurchasesParams{MerchantID: mid.UUID(), ProductID: op.ProductID, PurchasedSince: *op.PurchasedSince})
+	rows, err := d.Gen(ctx).ListProductArchivePurchases(ctx, gen.ListProductArchivePurchasesParams{MerchantID: mid.UUID(), ProductID: op.ProductID, PurchaseWindowStartsAt: *op.PurchaseWindowStartsAt})
 	if err != nil {
 		return nil, err
 	}
@@ -327,11 +327,8 @@ func productArchiveRefundKey(op productArchiveOperation) string {
 func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op productArchiveOperation, act bool) (*billing.ProductArchive, error) {
 	out := &billing.ProductArchive{
 		ID: billing.ProductArchiveID(op.ID), ProductID: billing.ProductID(op.ProductID), ProductKey: op.ProductKey,
-		PurchaseAction: op.Action, PurchasedSince: op.PurchasedSince, CreatedAt: op.CreatedAt,
+		PurchaseAction: op.Action, PurchaseWindowStartsAt: op.PurchaseWindowStartsAt, Reason: op.Reason, CreatedAt: op.CreatedAt,
 		Complete: true, Purchases: []billing.ArchivedPurchase{},
-	}
-	if op.Reason != "" {
-		out.Reason = &op.Reason
 	}
 	purchases, err := qualifyingPurchases(ctx, r.State.DB, op)
 	if err != nil {
@@ -399,9 +396,9 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 		return item, nil
 	}
 	*budget--
-	reason := op.Reason
-	if reason == "" {
-		reason = "product archived"
+	reason := "product archived"
+	if op.Reason != nil {
+		reason = *op.Reason
 	}
 	refund, status, err := executeAdminRefund(ctx, r, purchase.ID, RefundRequest{Full: true, Reason: reason, RevokeAccess: true}, productArchiveRefundKey(op))
 	if err != nil {

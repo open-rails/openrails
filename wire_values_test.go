@@ -92,7 +92,7 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 		OperationID: "rental/create", MerchantID: merchantID,
 		Lifecycle: billing.ProviderBillingLifecycleEvidence{
 			Provider: "runpod", ProviderResourceID: "pod-1",
-			ProviderLifetimeStart: when.Add(-2 * time.Hour), ProviderLifetimeEnd: when.Add(-time.Hour),
+			ProviderLifetimeStartsAt: when.Add(-2 * time.Hour), ProviderLifetimeEndsAt: when.Add(-time.Hour),
 			ProviderAbsentAt: when, ProviderAbsenceReference: "absence:1", BillingStopReference: "stop:1",
 			WindowsClosedAt: when, WindowsClosedReference: "windows:1", LifecycleEvidenceBody: []byte(`{}`),
 		},

@@ -14,7 +14,7 @@ import (
 
 const declareRetentionSweep = `-- name: DeclareRetentionSweep :exec
 
-SELECT set_config('openrails.retention', $1::text, true)
+SELECT set_config('openrails.retention_table', $1::text, true)
 `
 
 // Row retention. Each statement deletes one bounded batch, oldest first, of
@@ -384,7 +384,7 @@ FROM (
     (SELECT DISTINCT nh.merchant_id AS mid
        FROM billing.nmi_history_months nh
       WHERE ($1::uuid IS NULL OR nh.merchant_id > $1::uuid)
-        AND nh.month < $9::timestamptz
+        AND nh.month_at < $9::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT st.merchant_id AS mid

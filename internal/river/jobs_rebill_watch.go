@@ -171,7 +171,7 @@ func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscripti
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", nil, false, fmt.Errorf("payment method: %w", err)
 		}
-		scope.VaultID = method.RailCustomerRef
+		scope.VaultID = models.DerefStr(method.RailCustomerRef)
 	}
 	held, err := client.ReadCycleTransactions(ctx, scope, since)
 	if err != nil {

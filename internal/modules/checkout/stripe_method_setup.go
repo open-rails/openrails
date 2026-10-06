@@ -269,7 +269,7 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 			// attached PaymentMethod against this accepted customer/account.
 			// Older webhook mirrors omitted only this reference; fill an empty
 			// binding conditionally, never replace a different bound customer.
-			if existing.CustomerID == p.CustomerID && existing.RailCustomerRef == "" && existing.ParkReason == "" {
+			if existing.CustomerID == p.CustomerID && existing.RailCustomerRef == nil && existing.ParkReason == nil {
 				rows, err := q.BindMissingStripeCustomerReference(ctx, gen.BindMissingStripeCustomerReferenceParams{MerchantID: p.MerchantID, ID: existing.ID, CustomerID: p.CustomerID, PspID: p.PSPID, RailMethodRef: setup.MethodRef, RailCustomerRef: p.CustomerRef, Now: s.now().UTC()})
 				if err != nil {
 					return err
@@ -277,13 +277,13 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 				if rows != 1 {
 					return ErrCheckoutAttemptConflict
 				}
-				existing.RailCustomerRef = p.CustomerRef
+				existing.RailCustomerRef = new(p.CustomerRef)
 			}
-			if existing.CustomerID != p.CustomerID || existing.RailCustomerRef != p.CustomerRef || existing.ParkReason != "" {
+			if existing.CustomerID != p.CustomerID || models.DerefStr(existing.RailCustomerRef) != p.CustomerRef || existing.ParkReason != nil {
 				return ErrCheckoutAttemptConflict
 			}
 			methodID = existing.ID
-			anchor = existing.StoredCredentialRecurringRef == ""
+			anchor = existing.StoredCredentialRecurringRef == nil
 		} else if db.IsNotFound(err) {
 			now := s.now().UTC()
 			card := models.ParseCard(setup.Brand, setup.LastFour, "")

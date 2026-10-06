@@ -230,7 +230,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 
 	slug := uniqueName("unbound")
 	var mid string
-	require.NoError(t, f.pool.QueryRow(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1) RETURNING id::text", slug).Scan(&mid))
+	require.NoError(t, f.pool.QueryRow(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug, status) VALUES ($1, 'active') RETURNING id::text", slug).Scan(&mid))
 	res, err := operator.RunBootstrap(ctx, engine.Graph(cp), operator.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.True(t, res.MerchantGroupCreated)

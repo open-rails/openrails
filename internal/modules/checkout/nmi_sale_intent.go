@@ -151,7 +151,7 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 		if err != nil {
 			return err
 		}
-		if method.CustomerID.String() != p.UserID || method.ParkReason != "" {
+		if method.CustomerID.String() != p.UserID || method.ParkReason != nil {
 			return errors.New("sale method changed before submission")
 		}
 		return p.Instrument.Matches(method, charge.AgreementUnscheduled)

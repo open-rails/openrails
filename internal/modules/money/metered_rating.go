@@ -446,24 +446,24 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 	var accrued int64
 	// or#868 B2: merchant-pinned, matching AccrueOwed. Under the since-removed
 	// RLS the watermark INSERT below failed (42501) off the request path: the
-	// bare RunInTx this replaces carried no app.merchant_id.
+	// bare RunInTx this replaces carried no openrails.merchant_id.
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Upsert-lock the watermark row: ON CONFLICT DO UPDATE takes the row lock
 		// and returns the current committed values, serializing concurrent sweeps.
 		q := gen.New(tx)
 		advance := gen.AdvanceMeteredRatingWatermarkParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource,
-			PeriodFrom: periodFrom.UTC(), RatedThrough: ratedThrough.UTC(), Now: now,
+			PeriodStartsAt: periodFrom.UTC(), RatedThroughAt: ratedThrough.UTC(), Now: now,
 		}
 		alreadyAccrued, err := q.LockMeteredRatingWatermark(ctx, gen.LockMeteredRatingWatermarkParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource, PeriodFrom: periodFrom.UTC(), Now: now,
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource, PeriodStartsAt: periodFrom.UTC(), Now: now,
 		})
 		if err != nil {
 			return err
 		}
 		delta := ratedPrefix - alreadyAccrued
 		if delta <= 0 {
-			// Everything in this prefix is already billed; just advance rated_through.
+			// Everything in this prefix is already billed; just advance rated_through_at.
 			return q.AdvanceMeteredRatingWatermark(ctx, advance)
 		}
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {

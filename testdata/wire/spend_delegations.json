@@ -17,7 +17,7 @@
       "scope": "invoker_tier",
       "scope_key": "free",
       "windows": [],
-      "provenance": ""
+      "provenance": null
     }
   ],
   "next_cursor": null

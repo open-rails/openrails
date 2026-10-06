@@ -13,7 +13,7 @@ import (
 )
 
 const getMerchantInvoice = `-- name: GetMerchantInvoice :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -31,8 +31,8 @@ func (q *Queries) GetMerchantInvoice(ctx context.Context, arg GetMerchantInvoice
 		&i.CustomerID,
 		&i.Currency,
 		&i.InvoiceNumber,
-		&i.PeriodFrom,
-		&i.PeriodTo,
+		&i.PeriodStartsAt,
+		&i.PeriodEndsAt,
 		&i.UsageTotal,
 		&i.DepositsTotal,
 		&i.OwedAccrued,
@@ -86,32 +86,32 @@ func (q *Queries) InvoiceProfileCustomerExists(ctx context.Context, arg InvoiceP
 }
 
 const listInvoicesPage = `-- name: ListInvoicesPage :many
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND ($3::text IS NULL OR currency = $3::text)
   AND ($4::text IS NULL OR status = $4::text)
-  AND ($5::timestamptz IS NULL OR period_from >= $5::timestamptz)
-  AND ($6::timestamptz IS NULL OR period_from < $6::timestamptz)
+  AND ($5::timestamptz IS NULL OR period_starts_at >= $5::timestamptz)
+  AND ($6::timestamptz IS NULL OR period_starts_at < $6::timestamptz)
   AND ($7::timestamptz IS NULL
-       OR (period_from, id) < ($7::timestamptz, $8::uuid))
-ORDER BY period_from DESC, id DESC
+       OR (period_starts_at, id) < ($7::timestamptz, $8::uuid))
+ORDER BY period_starts_at DESC, id DESC
 LIMIT $9::int
 `
 
 type ListInvoicesPageParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Currency   *string
-	Status     *string
-	PeriodFrom *time.Time
-	PeriodTo   *time.Time
-	AfterAt    *time.Time
-	AfterID    *uuid.UUID
-	RowLimit   int32
+	MerchantID         uuid.UUID
+	CustomerID         *uuid.UUID
+	Currency           *string
+	Status             *string
+	PeriodStartsAfter  *time.Time
+	PeriodStartsBefore *time.Time
+	AfterAt            *time.Time
+	AfterID            *uuid.UUID
+	RowLimit           int32
 }
 
-// One page of invoices, newest period first, after a (period_from, id)
+// One page of invoices, newest period first, after a (period_starts_at, id)
 // cursor; every filter is optional.
 func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPageParams) ([]BillingInvoice, error) {
 	rows, err := q.db.Query(ctx, listInvoicesPage,
@@ -119,8 +119,8 @@ func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPagePara
 		arg.CustomerID,
 		arg.Currency,
 		arg.Status,
-		arg.PeriodFrom,
-		arg.PeriodTo,
+		arg.PeriodStartsAfter,
+		arg.PeriodStartsBefore,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.RowLimit,
@@ -138,8 +138,8 @@ func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPagePara
 			&i.CustomerID,
 			&i.Currency,
 			&i.InvoiceNumber,
-			&i.PeriodFrom,
-			&i.PeriodTo,
+			&i.PeriodStartsAt,
+			&i.PeriodEndsAt,
 			&i.UsageTotal,
 			&i.DepositsTotal,
 			&i.OwedAccrued,

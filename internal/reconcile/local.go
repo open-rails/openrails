@@ -174,7 +174,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ProductID:             row.ProductID,
 			Status:                string(row.Status),
 			Rail:                  row.Rail,
-			RailSubscriptionID:    row.RailSubscriptionID,
+			RailSubscriptionID:    models.DerefStr(row.RailSubscriptionID),
 			PaymentMethodID:       row.PaymentMethodID,
 			CurrentPeriodStartsAt: row.CurrentPeriodStartsAt,
 			CurrentPeriodEndsAt:   row.CurrentPeriodEndsAt,
@@ -254,8 +254,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ID:              row.ID,
 			CustomerID:      row.CustomerID,
 			Rail:            row.Rail,
-			RailCustomerRef: row.RailCustomerRef,
-			RailMethodRef:   row.RailMethodRef,
+			RailCustomerRef: models.DerefStr(row.RailCustomerRef),
+			RailMethodRef:   models.DerefStr(row.RailMethodRef),
 		}
 		pm.Card = models.CardFromColumns(row.CardBrand, row.CardLast4, row.CardExpMonth, row.CardExpYear)
 		state.PaymentMethods = append(state.PaymentMethods, pm)

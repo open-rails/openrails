@@ -63,5 +63,5 @@ SELECT count(*) FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = sqlc.arg(rail)::text
   AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
-  AND rail_subscription_id <> ''
+  AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL;

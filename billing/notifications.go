@@ -46,17 +46,17 @@ type NotificationData struct {
 
 	// Renewal receipt (premium_renewed): the renewed period, and whether it
 	// applied a scheduled downgrade.
-	PeriodStart      *time.Time `json:"period_start,omitempty"`
-	PeriodEnd        *time.Time `json:"period_end,omitempty"`
+	PeriodStartsAt   *time.Time `json:"period_starts_at,omitempty"`
+	PeriodEndsAt     *time.Time `json:"period_ends_at,omitempty"`
 	DowngradeApplied bool       `json:"downgrade_applied,omitempty"`
 	NewProduct       string     `json:"new_product,omitempty"`
 
 	// Arrears delinquency (account_delinquent, account_delinquency_cleared).
-	OverdueAmount   *int64     `json:"overdue_amount,omitempty,string"`
-	OverdueInvoices int        `json:"overdue_invoices,omitempty"`
-	OverdueSince    *time.Time `json:"overdue_since,omitempty"`
-	FromState       string     `json:"from_state,omitempty"`
-	ToState         string     `json:"to_state,omitempty"`
+	OverdueAmount    *int64     `json:"overdue_amount,omitempty,string"`
+	OverdueInvoices  int        `json:"overdue_invoices,omitempty"`
+	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
+	FromState        string     `json:"from_state,omitempty"`
+	ToState          string     `json:"to_state,omitempty"`
 
 	// Invoice lifecycle and collection (invoice_issued,
 	// payment_method_failed, payment_method_update_required,

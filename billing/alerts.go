@@ -74,7 +74,7 @@ const (
 // alerts to. Its URL is a credential: written, never read back.
 type AlertWebhook struct {
 	ID              AlertWebhookID     `json:"id"`
-	Name            string             `json:"name"`
+	Name            *string            `json:"name"`
 	DestinationHost string             `json:"destination_host"`
 	Format          AlertWebhookFormat `json:"format"`
 	Enabled         bool               `json:"enabled"`
