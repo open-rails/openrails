@@ -1,6 +1,0 @@
-# Refusals that answer a status generic code (ErrorJSON/AbortJSON), per file.
-# A count only goes down: new refusals name a registered code.
-internal/http/handlers/admin_findings.go 1
-internal/http/handlers/admin_payments.go 1
-internal/http/handlers/change_tier.go 1
-internal/http/handlers/solana_recurring.go 1

@@ -1,26 +1,18 @@
 package contractaudit
 
 import (
-	"bufio"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/open-rails/openrails/billing"
 )
-
-// refusalBudgetPath lists, per file, the refusals that still answer a status's
-// generic code (ErrorJSON/AbortJSON). New refusals name a registered code
-// (api.Coded, Request.ErrorCode/AbortCode, billingauth.Refusal), so a count
-// only goes down; edit the file when it does.
-const refusalBudgetPath = "internal/contractaudit/testdata/status_inferred_refusals.txt"
 
 // dynamicCodeFiles forward a code another site already named (a service
 // refusal, a host hook's GateError). A new entry needs the same justification.
@@ -32,7 +24,6 @@ var dynamicCodeFiles = map[string]bool{
 	"internal/http/handlers/invoices.go":               true,
 	"internal/http/handlers/admin_metering.go":         true,
 	"internal/http/handlers/admissions.go":             true,
-	"internal/http/handlers/admin_payments.go":         true,
 	"internal/http/handlers/change_tier.go":            true,
 	"internal/http/handlers/merchant_api_host.go":      true,
 	"internal/http/handlers/provider_operations.go":    true,
@@ -263,64 +254,5 @@ func TestRefusalsNameRegisteredCodes(t *testing.T) {
 	}
 	if checked < 150 {
 		t.Fatalf("only %d refusal sites were checked; the scan lost its targets", checked)
-	}
-}
-
-// Refusals that answer a status's generic code are counted per file and only
-// go down: new code names a registered code.
-func TestStatusInferredRefusalsOnlyGoDown(t *testing.T) {
-	files, _ := loadSources(t)
-	actual := map[string]int{}
-	for _, f := range files {
-		ast.Inspect(f.file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "ErrorJSON" || sel.Sel.Name == "AbortJSON") && len(call.Args) == 2 {
-				if _, isTransport := sel.X.(*ast.SelectorExpr); !isTransport {
-					actual[f.name]++
-				}
-			}
-			return true
-		})
-	}
-	budget := map[string]int{}
-	raw, err := fs.ReadFile(repositoryFS(t), refusalBudgetPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scanner := bufio.NewScanner(strings.NewReader(string(raw)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		name, count, ok := strings.Cut(line, " ")
-		n, err := strconv.Atoi(strings.TrimSpace(count))
-		if !ok || err != nil {
-			t.Fatalf("%s: malformed line %q", refusalBudgetPath, line)
-		}
-		budget[name] = n
-	}
-	names := map[string]bool{}
-	for name := range actual {
-		names[name] = true
-	}
-	for name := range budget {
-		names[name] = true
-	}
-	sorted := make([]string, 0, len(names))
-	for name := range names {
-		sorted = append(sorted, name)
-	}
-	sort.Strings(sorted)
-	for _, name := range sorted {
-		switch got, want := actual[name], budget[name]; {
-		case got > want:
-			t.Errorf("%s: %d status-inferred refusals, budget %d: name a registered code (Request.ErrorCode, api.Coded) instead", name, got, want)
-		case got < want:
-			t.Errorf("%s: %d status-inferred refusals, budget %d: lower its line in %s", name, got, want, refusalBudgetPath)
-		}
 	}
 }

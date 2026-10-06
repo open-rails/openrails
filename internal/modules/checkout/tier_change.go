@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
@@ -22,8 +21,6 @@ type TierChangeRequest struct {
 
 var (
 	ErrTierChangeNoSubscription = errors.New("no active subscription found")
-	ErrTierChangeNotSupported   = errors.New("tier change not supported for this rail")
-	ErrTierChangeBlocked        = errors.New("tier change blocked")
 	ErrTierChangePending        = errors.New("tier change already pending")
 	ErrTierChangeSameProduct    = errors.New("already on this plan")
 	ErrTierChangeDifferentGroup = errors.New("cannot change to a different tier group")
@@ -65,11 +62,34 @@ func RequireSameCurrency(old, new PriceAmount) error {
 	return nil
 }
 
+// TierChangeError is a refused tier change: Code is a registered error code,
+// which fixes the HTTP status.
 type TierChangeError struct {
-	HTTPStatus int
-	Message    string
-	Code       string
+	Code    string
+	Message string
 }
+
+// Refusal codes the tier change shares with other routes.
+const (
+	codePriceNotFound         = "price_not_found"
+	codeProductNotFound       = "product_not_found"
+	codeSubscriptionNotFound  = "subscription_not_found"
+	codeSubscriptionNotActive = "subscription_not_active"
+	codeCustomerEmailRequired = "customer_email_required"
+)
+
+// TierChangeDeclinedError is the provider's payment decline of a tier
+// change's charge; it answers card_declined or payment_provider_rejected by
+// its decline reason. Reason, when set, was classified with the full
+// evidence; otherwise FailureCode is classified in Rail's vocabulary.
+type TierChangeDeclinedError struct {
+	Rail        string
+	FailureCode string
+	Reason      billing.DeclineReason
+	Message     string
+}
+
+func (e *TierChangeDeclinedError) Error() string { return e.Message }
 
 func (e *TierChangeError) Error() string {
 	return e.Message
@@ -85,14 +105,14 @@ func (e *TierChangeError) Is(target error) bool {
 // Idempotency-Key before anything is admitted or mutated: the key is the only
 // handle a client has to read back a lost response.
 func tierChangeKeyRequired() error {
-	return &TierChangeError{HTTPStatus: http.StatusBadRequest, Code: billing.CodeTierChangeIdempotencyKeyRequired, Message: "Idempotency-Key is required for a tier change"}
+	return &TierChangeError{Code: billing.CodeTierChangeIdempotencyKeyRequired, Message: "Idempotency-Key is required for a tier change"}
 }
 
 // tierChangeIdempotencyConflict refuses a key that already names a different
 // tier change (another customer, subscription or target). It never carries
 // that operation's result or identity.
 func tierChangeIdempotencyConflict() error {
-	return &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeIdempotencyConflict, Message: "Idempotency-Key already names a different tier change; use a new key"}
+	return &TierChangeError{Code: billing.CodeTierChangeIdempotencyConflict, Message: "Idempotency-Key already names a different tier change; use a new key"}
 }
 
 // TierChangeInFlightError: an unresolved tier change already owns the
@@ -112,7 +132,7 @@ func (e *TierChangeInFlightError) Unwrap() error { return ErrTierChangePending }
 // more per hour than the current one. Rank never makes a costlier plan free.
 func SolanaTierChange(sub *models.Subscription, current, next *models.Product, currentPrice, nextPrice *models.Price) (upgrade bool, err error) {
 	if sub == nil || sub.Status != models.StatusActive {
-		return false, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "only an active subscription can change tier on Solana"}
+		return false, &TierChangeError{Code: codeSubscriptionNotActive, Message: "only an active subscription can change tier on Solana"}
 	}
 	if current.ID == next.ID {
 		return false, ErrTierChangeSameProduct

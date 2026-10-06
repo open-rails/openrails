@@ -33,9 +33,9 @@ type nmiUpgradeStep struct {
 	SubmittedAt time.Time         `json:"submitted_at"`
 	Sale        *nmi.SaleResponse `json:"sale,omitempty"`
 	Refusal     string            `json:"refusal,omitempty"`
-	// RefusalStatus/RefusalCode classify a provider refusal for the route: a
-	// card decline is 402 with its failure code, another rejection 400. An
-	// operator-attested non-execution carries neither.
+	// RefusalStatus/RefusalCode classify a provider refusal: a card decline
+	// is 402 with its failure code, another rejection 400, a refusal the
+	// provider attests it never executed 409 with its code.
 	RefusalCode   string `json:"refusal_code,omitempty"`
 	RefusalStatus int    `json:"refusal_status,omitempty"`
 	// Resolution records operator evidence that supplied this step's outcome.
@@ -610,9 +610,9 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResp
 		var progress nmiUpgradeProgress
 		_ = json.Unmarshal(in.ResultEvidence, &progress)
 		if step := progress.refused(); step != nil {
-			return nil, tierChangeRefused(in, step.RefusalStatus, step.RefusalCode)
+			return nil, tierChangeRefused(in, string(models.RailNMI), step.RefusalStatus, step.RefusalCode)
 		}
-		return nil, tierChangeRefused(in, 0, "")
+		return nil, tierChangeRefused(in, string(models.RailNMI), 0, "")
 	default:
 		return tierChangeProcessing(resp)
 	}

@@ -43,9 +43,9 @@ type RefundRequest = billing.RefundPaymentParams
 func validateRefund(req RefundRequest) error {
 	switch {
 	case req.Full && req.Amount != 0:
-		return adminRefundHTTPError(http.StatusBadRequest, "amount and full are mutually exclusive")
+		return api.Coded(billing.CodeInvalidParam, "amount and full are mutually exclusive").WithParam("amount")
 	case !req.Full && req.Amount <= 0:
-		return adminRefundHTTPError(http.StatusBadRequest, "amount must be a positive native amount, or full must be true")
+		return api.Coded(billing.CodeInvalidParam, "amount must be a positive native amount, or full must be true").WithParam("amount")
 	}
 	return nil
 }
@@ -96,14 +96,15 @@ func RefundPayment(r *httprequest.Request) {
 	r.JSON(status, PaymentToAPI(refund, nil))
 }
 
+// writeAdminRefundError answers a refused refund by its code; anything else
+// is an internal failure.
 func writeAdminRefundError(r *httprequest.Request, err error) {
-	var statusErr *adminRefundStatusError
-	if errors.As(err, &statusErr) && statusErr.Code != "" {
-		r.APIError(api.NewAPIError(statusErr.Status, api.ErrorTypeInvalidRequest, statusErr.Code, statusErr.Message))
+	var refusal *api.APIError
+	if errors.As(err, &refusal) {
+		r.APIError(refusal)
 		return
 	}
-	status, message := adminRefundErrorResponse(err)
-	r.ErrorJSON(status, message)
+	r.InternalError("refund request failed", err)
 }
 
 func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req RefundRequest, idempotencyKey string) (*models.Payment, int, error) {
@@ -148,7 +149,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 	}
 	payment, err := paymentService.GetByID(ctx, paymentID)
 	if err != nil {
-		return adminRefundHTTPError(http.StatusNotFound, "payment not found")
+		return api.Coded(codePaymentNotFound, "")
 	}
 	if revokeAccess && payment.SubscriptionID != nil {
 		// Revoking a provider-billed membership's access ends it and deletes
@@ -161,7 +162,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 		if err == nil && sub.Status.Live() {
 			if _, err := subscriptions.RequireProviderCancelArmed(ctx, r.State.DB, sub, false); err != nil {
 				if errors.Is(err, subscriptions.ErrProviderCancelHeld) {
-					return adminRefundCodedError(http.StatusConflict, billing.CodeProviderCancelHeld, err.Error())
+					return api.Coded(billing.CodeProviderCancelHeld, err.Error())
 				}
 				return err
 			}
@@ -169,10 +170,10 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 	}
 	switch {
 	case payment.Rail == models.RailCCBill:
-		return adminRefundCodedError(http.StatusBadRequest, refundCodeUnsupported, ccbill.ErrRefundUnsupported.Error())
+		return api.Coded(refundCodeUnsupported, ccbill.ErrRefundUnsupported.Error())
 	case payment.Rail == models.RailStripe:
 		if _, _, err := subscriptions.RequireStripeSecretKey(ctx, r.State.RailConfigs); err != nil {
-			return adminRefundCodedError(http.StatusConflict, refundCodeRailUnavailable, "stripe refunds are unavailable: rail is not configured")
+			return api.Coded(refundCodeRailUnavailable, "stripe refunds are unavailable: rail is not configured")
 		}
 	case rails.IsNMI(payment.Rail):
 		mid, err := merchant.Require(ctx)
@@ -182,51 +183,29 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 		client, ok, err := r.State.CollectionResolver.ResolveNMIClient(ctx, mid.UUID(), payment.PspID)
 		if err != nil || !ok || client == nil {
 			log.WithError(err).WithField("payment_id", paymentID).Warn("nmi refund rail unavailable")
-			return adminRefundCodedError(http.StatusConflict, refundCodeRailUnavailable, "nmi refunds are unavailable: the payment's rail account is not armed")
+			return api.Coded(refundCodeRailUnavailable, "nmi refunds are unavailable: the payment's rail account is not armed")
 		}
 		// A credential set already known to fail sandbox posture refuses here;
 		// an unverified one is verified by the dispatch gate itself.
 		if client.TestMode && !client.LoopbackFixture {
 			if status, known := providerposture.Process().Lookup(client.PostureKey()); known && !status.Armed() {
-				return adminRefundCodedError(http.StatusConflict, refundCodeRailUnavailable, "nmi refunds are unavailable: sandbox posture is not verified ("+status.Verdict.String()+")")
+				return api.Coded(refundCodeRailUnavailable, "nmi refunds are unavailable: sandbox posture is not verified ("+status.Verdict.String()+")")
 			}
 		}
 	default:
-		return adminRefundCodedError(http.StatusBadRequest, refundCodeUnsupported, fmt.Sprintf("refunds not supported for rail: %s", payment.Rail))
+		return api.Coded(refundCodeUnsupported, fmt.Sprintf("refunds not supported for rail: %s", payment.Rail))
 	}
 	return nil
 }
 
-type adminRefundStatusError struct {
-	Status  int
-	Code    string
-	Message string
-}
-
-func (e *adminRefundStatusError) Error() string { return e.Message }
-
-func adminRefundHTTPError(status int, message string) error {
-	return &adminRefundStatusError{Status: status, Message: message}
-}
-
-// Stable refund refusal codes (openrails.ErrRefund*).
+// Refund refusal codes (openrails.ErrRefund*); each fixes its status.
 const (
+	codePaymentNotFound       = "payment_not_found"
 	refundCodeRailUnavailable = "refund_rail_unavailable"
 	refundCodeUnsupported     = "refund_unsupported"
-	refundCodeKeyReused       = "idempotency_key_reused"
+	refundCodeNotRefundable   = "payment_not_refundable"
+	refundCodeFailed          = "refund_failed"
 )
-
-func adminRefundCodedError(status int, code, message string) error {
-	return &adminRefundStatusError{Status: status, Code: code, Message: message}
-}
-
-func adminRefundErrorResponse(err error) (int, string) {
-	var statusErr *adminRefundStatusError
-	if errors.As(err, &statusErr) {
-		return statusErr.Status, statusErr.Message
-	}
-	return http.StatusInternalServerError, "refund request failed"
-}
 
 type adminRefundPrepared struct {
 	reservationID uuid.UUID
@@ -253,11 +232,11 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	}
 	payment, err := paymentService.GetByID(ctx, paymentID)
 	if err != nil {
-		return nil, adminRefundHTTPError(http.StatusNotFound, "payment not found")
+		return nil, api.Coded(codePaymentNotFound, "")
 	}
 	if existing, err := paymentService.GetRefundByAdminIdempotencyKey(ctx, paymentID, idempotencyKey); err == nil {
 		if !adminRefundMatchesRequest(existing, req) {
-			return nil, adminRefundCodedError(http.StatusConflict, refundCodeKeyReused, "idempotency key was already used for a different refund request")
+			return nil, api.Coded(billing.CodeIdempotencyKeyReused, "idempotency key was already used for a different refund request")
 		}
 		intent, err := txDB.Gen(ctx).GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{
 			MerchantID: mid.UUID(), IdempotencyKey: intents.RefundIdempotencyKey(paymentID, idempotencyKey),
@@ -278,25 +257,25 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 			return nil, fmt.Errorf("load refunded total: %w", err)
 		}
 		if req.Amount = payment.Amount - refunded; req.Amount <= 0 {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment has no remaining refundable amount")
+			return nil, api.Coded(refundCodeNotRefundable, "payment has no remaining refundable amount")
 		}
 	}
 	if err := paymentService.ValidateRefund(ctx, payment, req.Amount); err != nil {
-		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+		return nil, api.Coded(refundCodeNotRefundable, err.Error())
 	}
 	amountCents, err := refundAmountCents(payment.Currency, req.Amount)
 	if err != nil {
-		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+		return nil, api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("amount")
 	}
 
 	if payment.Rail == models.RailCCBill {
-		return nil, adminRefundCodedError(http.StatusBadRequest, refundCodeUnsupported, ccbill.ErrRefundUnsupported.Error())
+		return nil, api.Coded(refundCodeUnsupported, ccbill.ErrRefundUnsupported.Error())
 	}
 	var stripeRefundTargetID string
 	if payment.Rail == models.RailStripe {
 		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: "+err.Error())
+			return nil, api.Coded(refundCodeNotRefundable, "payment cannot be refunded: "+err.Error())
 		}
 		stripeRefundTargetID = refundTargetID
 	}
@@ -307,7 +286,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		return nil, fmt.Errorf("reserve refund: %w", err)
 	}
 	if payment.PspID == nil {
-		return nil, adminRefundHTTPError(http.StatusConflict, "payment carries no PSP; it cannot be refunded on a rail")
+		return nil, api.Coded(refundCodeUnsupported, "payment carries no PSP; it cannot be refunded on a rail")
 	}
 	providerTarget := payment.TransactionID
 	if payment.Rail == models.RailStripe {
@@ -394,7 +373,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepa
 		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
 			message = "refund failed: " + *intent.LastFailureReason
 		}
-		return nil, 0, adminRefundHTTPError(http.StatusBadGateway, message)
+		return nil, 0, api.Coded(refundCodeFailed, message)
 	default:
 		// Parked (mode/kill switch — deliberately not an error), ambiguous
 		// (verifier resolving) or retryable: the durable intent finishes the

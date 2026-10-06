@@ -2070,14 +2070,14 @@ CREATE TABLE billing.payments (
     CONSTRAINT payments_reversal_kind_check CHECK (((reversal_kind IS NULL) OR (reversal_kind = ANY (ARRAY['refund'::text, 'chargeback'::text, 'dispute_reversal'::text])))),
     CONSTRAINT payments_token_type_check CHECK (((token_type IS NULL) OR (token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))),
     CONSTRAINT payments_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
-    CONSTRAINT payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text, 'admin'::text]))),
+    CONSTRAINT payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text]))),
     CONSTRAINT payments_channel_psp_check CHECK (CASE WHEN channel = 'rail' THEN rail IS NOT NULL AND psp_id IS NOT NULL ELSE rail IS NULL AND psp_id IS NULL END),
     CONSTRAINT payments_reversal_check CHECK (((reversal_kind IS NULL) = (refunded_payment_id IS NULL))),
     CONSTRAINT payments_sign_check CHECK (CASE WHEN reversal_kind IS NULL OR reversal_kind = 'dispute_reversal' THEN amount >= 0 ELSE amount <= 0 END)
 );
 COMMENT ON TABLE billing.payments IS 'Records of all payment transactions. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.payments.subscription_id IS 'Links a payment to the subscription that generated it (nullable for one-off payments)';
-COMMENT ON COLUMN billing.payments.channel IS 'How the money arrived: rail (through a PSP), manual (recorded by the merchant) or admin (an operator comp). Off-rail rows have no rail and no PSP.';
+COMMENT ON COLUMN billing.payments.channel IS 'How the money arrived: rail (through a PSP) or manual (recorded by the merchant). Manual rows have no rail and no PSP.';
 COMMENT ON COLUMN billing.payments.psp_id IS 'PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).';
 COMMENT ON COLUMN billing.payments.attempt_kind IS 'initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).';
 COMMENT ON COLUMN billing.payments.failure_code IS 'Raw rail decline code, recorded verbatim (no fabrication).';

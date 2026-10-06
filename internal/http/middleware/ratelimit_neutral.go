@@ -367,7 +367,8 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 	// response bodies (and the embedded surface now matches too).
 	switch decision.Outcome {
 	case RateLimitTooLarge:
-		writeJSONResponse(w, http.StatusRequestEntityTooLarge, api.SimpleErrorResponse(http.StatusRequestEntityTooLarge, "request payload too large"))
+		apiErr := api.Coded(billing.CodeRequestBodyTooLarge, "request payload too large")
+		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitCaptchaRequired:
 		w.Header().Set("X-Captcha-Required", "true")
 		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_required", "Captcha verification required").
@@ -386,7 +387,8 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 		apiErr := api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "captcha_invalid", msg)
 		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	case RateLimitTooMany:
-		writeJSONResponse(w, http.StatusTooManyRequests, api.SimpleErrorResponse(http.StatusTooManyRequests, "Rate limit exceeded"))
+		apiErr := api.Coded(billing.CodeRateLimitExceeded, "Rate limit exceeded")
+		writeJSONResponse(w, apiErr.HTTPStatus, apiErr.ToResponse())
 	default:
 		if len(decision.SubjectKeys) > 0 {
 			r = r.WithContext(WithSubjectKeys(r.Context(), decision.SubjectKeys))

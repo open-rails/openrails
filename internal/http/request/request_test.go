@@ -14,6 +14,7 @@ import (
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -206,7 +207,7 @@ func TestBindQueryRefusesMalformedValues(t *testing.T) {
 func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
 	req, rec := newReq(http.MethodGet, "/x", "")
 	req.SuccessJSON(map[string]any{"ok": true})
-	req.ErrorJSON(http.StatusInternalServerError, "late")
+	req.ErrorCode(billing.CodeInternalError, "late")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	require.JSONEq(t, `{"ok":true}`, rec.Body.String())
@@ -252,12 +253,12 @@ func TestRefusalLogLevel(t *testing.T) {
 		want  logrus.Level
 		code  int
 	}{
-		{func(r *Request) { r.ErrorJSON(http.StatusNotFound, "product_not_found") }, logrus.InfoLevel, 404},
-		{func(r *Request) { r.AbortJSON(http.StatusConflict, "conflict") }, logrus.InfoLevel, 409},
+		{func(r *Request) { r.ErrorCode("product_not_found", "") }, logrus.InfoLevel, 404},
+		{func(r *Request) { r.AbortCode(billing.CodeResourceConflict, "conflict") }, logrus.InfoLevel, 409},
 		{func(r *Request) {
 			r.APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, "card_declined", "declined"))
 		}, logrus.InfoLevel, 402},
-		{func(r *Request) { r.ErrorJSON(http.StatusInternalServerError, "boom") }, logrus.ErrorLevel, 500},
+		{func(r *Request) { r.ErrorCode(billing.CodeInternalError, "boom") }, logrus.ErrorLevel, 500},
 		{func(r *Request) {
 			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "service_unavailable", "down"))
 		}, logrus.ErrorLevel, 503},

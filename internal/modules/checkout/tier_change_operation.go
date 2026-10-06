@@ -184,31 +184,23 @@ func tierChangeProcessing(resp *TierChangeResponse) (*TierChangeResponse, error)
 	return resp, nil
 }
 
-// tierChangeRefused renders a terminal operation as tier_change_refused. A
-// provider payment refusal (402) keeps its decline code, another provider
-// refusal is a 400, and an operator-attested non-execution or a refusal
-// before submission (providerStatus 0) is a 409: the change did not happen
-// and a new request needs a new key.
-func tierChangeRefused(in gen.BillingProviderIntent, providerStatus int, declineCode string) error {
-	refusal := &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "tier change was not executed"}
+// tierChangeRefused renders a terminal operation. A provider payment refusal
+// (402) is a decline; NMI's attested non-execution keeps its code
+// (payment_duplicate_refused); any other refusal, or one before submission
+// (providerStatus 0), is tier_change_refused: the change did not happen and a
+// new request needs a new key.
+func tierChangeRefused(in gen.BillingProviderIntent, rail string, providerStatus int, code string) error {
+	message := "tier change was not executed"
 	if in.LastFailureReason != nil && *in.LastFailureReason != "" {
-		refusal.Message = *in.LastFailureReason
+		message = *in.LastFailureReason
 	}
 	switch {
-	case providerStatus == 0:
-	case providerStatus == http.StatusConflict:
-		if declineCode != "" {
-			refusal.Code = declineCode
-		}
 	case providerStatus == http.StatusPaymentRequired:
-		refusal.HTTPStatus = http.StatusPaymentRequired
-		if declineCode != "" {
-			refusal.Code = declineCode
-		}
-	default:
-		refusal.HTTPStatus = http.StatusBadRequest
+		return &TierChangeDeclinedError{Rail: rail, FailureCode: code, Message: message}
+	case providerStatus == http.StatusConflict && code == billing.CodePaymentDuplicateRefused:
+		return &TierChangeError{Code: code, Message: message}
 	}
-	return refusal
+	return &TierChangeError{Code: billing.CodeTierChangeRefused, Message: message}
 }
 
 // refuseTierChangeInFlight points a new request at the unresolved tier change

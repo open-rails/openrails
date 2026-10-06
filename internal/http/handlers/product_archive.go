@@ -405,7 +405,7 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 	}
 	refund, status, err := executeAdminRefund(ctx, r, purchase.ID, RefundRequest{Full: true, Reason: reason, RevokeAccess: true}, productArchiveRefundKey(op))
 	if err != nil {
-		var refusal *adminRefundStatusError
+		var refusal *api.APIError
 		if !errors.As(err, &refusal) {
 			return item, fmt.Errorf("refund archived purchase %s: %w", purchase.ID, err)
 		}

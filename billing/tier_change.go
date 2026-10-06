@@ -69,11 +69,20 @@ const (
 	// keeps its schedule's next billing date, so its tier can change only to a
 	// price of the same cadence.
 	CodeTierChangeCadenceUnsupported = "tier_change_cadence_unsupported"
-	// CodeTierChangeRequiresLinkedPlan: the provider-billed (NMI) schedule is
-	// on a named NMI plan, which NMI changes only by switching plans, and the
-	// target price has no linked NMI plan on this account matching its amount
-	// and cycle. Nothing was charged.
+	// CodeTierChangeRequiresLinkedPlan: the target price has no plan on the
+	// subscription's PSP that this change can use (a named NMI plan needs one
+	// of the same amount and cycle). Nothing was charged.
 	CodeTierChangeRequiresLinkedPlan = "tier_change_requires_linked_plan"
+	// CodeTierChangeTargetInactive: the target price or its product is
+	// archived.
+	CodeTierChangeTargetInactive = "tier_change_target_inactive"
+	// CodeTierChangeUnsupportedOnRail: the subscription's rail cannot make
+	// this change (a CCBill downgrade).
+	CodeTierChangeUnsupportedOnRail = "tier_change_unsupported_on_rail"
+	// CodeTierChangeProviderConflict: the provider's copy of the subscription
+	// is missing or differs from OpenRails' (another price, a provider
+	// schedule); reconcile it first.
+	CodeTierChangeProviderConflict = "tier_change_provider_conflict"
 )
 
 type TierChangePreview struct {
