@@ -579,7 +579,7 @@ CREATE TABLE billing.maintenance_runs (
     run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' WHEN kind = 'billing_restore' THEN 'restore' ELSE 'destructive' END) STORED NOT NULL,
     CONSTRAINT maintenance_runs_expected_rows_check CHECK (expected_rows IS NULL OR expected_rows >= 0),
     CONSTRAINT maintenance_runs_status_check CHECK (status IN ('running','completed','failed','reversed')),
-    CONSTRAINT maintenance_runs_x_check CHECK ((
+    CONSTRAINT maintenance_runs_kind_check CHECK ((
         (kind = 'reconciliation' AND mode IN ('advisory','enforce')
          AND status IN ('running','completed','failed') AND psp_id IS NULL
          AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
@@ -1183,9 +1183,9 @@ CREATE TABLE billing.product_archive_operations (
     reason text CHECK (length(reason) BETWEEN 1 AND 500),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
-    UNIQUE (merchant_id, idempotency_key),
-    FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT,
-    CHECK ((purchase_action = 'none') = (purchase_window_starts_at IS NULL))
+    CONSTRAINT product_archive_operations_idempotency_key_key UNIQUE (merchant_id, idempotency_key),
+    CONSTRAINT product_archive_operations_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT product_archive_operations_purchase_window_check CHECK ((purchase_action = 'none') = (purchase_window_starts_at IS NULL))
 );
 COMMENT ON TABLE billing.product_archive_operations IS 'Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.';
 
@@ -1377,7 +1377,7 @@ CREATE TABLE billing.catalog_applications (
     schema_version bigint NOT NULL,
     request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256)=32),
     base_revision bigint NOT NULL CHECK (base_revision >= 0),
-    applied_revision bigint NOT NULL CHECK (applied_revision = base_revision + 1),
+    applied_revision bigint NOT NULL CONSTRAINT catalog_applications_applied_revision_check CHECK (applied_revision = base_revision + 1),
     result jsonb NOT NULL CHECK (octet_length(result::text) <= 16384),
     applied_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id,application_id)
@@ -2879,14 +2879,14 @@ CREATE TABLE billing.admission_operations (
     captured_at timestamptz,
     released_at timestamptz,
     PRIMARY KEY (merchant_id, request_id, admitted_at),
-    FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
-    CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
-    CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
+    CONSTRAINT admission_operations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
+    CONSTRAINT admission_operations_requested_expires_at_check CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
+    CONSTRAINT admission_operations_expires_at_check CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
     -- A hold ends within 30 days of its admission, so a partition past its
     -- retention holds no live reservation. Hours, because a day's length
     -- follows the session time zone.
     CONSTRAINT admission_operations_hold_lifetime_check CHECK (expires_at IS NULL OR expires_at <= admitted_at + interval '720 hours'),
-    CHECK (
+    CONSTRAINT admission_operations_state_fields_check CHECK (
         (state = 'open' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
         OR (state = 'released' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
         OR (state = 'captured' AND capture_terms IS NOT NULL AND captured_amount IS NOT NULL AND captured_amount >= 0 AND captured_at IS NOT NULL)
