@@ -158,7 +158,7 @@ func TestHTTPCatalogMutationsOmittedWhenDisabled(t *testing.T) {
 	}
 	require.Positive(t, reads)
 	mux := mountAt(t, rt, "/api/pay")
-	for _, path := range []string{"/api/pay/v1/merchant/catalog/products", "/api/pay/v1/catalog/products", "/api/pay/v1/merchant/catalogs"} {
+	for _, path := range []string{"/api/pay/v1/merchant/catalog/products", "/api/pay/v1/merchant/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
 }

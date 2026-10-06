@@ -141,8 +141,7 @@ and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate
 ### Catalog ownership
 
 New Stripe products and
-prices stay in OpenRails, including creator catalogs and secondary provider
-accounts. Recurring setup uses saved Customer/PaymentMethod references and
+prices stay in OpenRails, including secondary provider accounts. Recurring setup uses saved Customer/PaymentMethod references and
 PaymentIntents; it creates no Stripe Subscription. One-time hosted checkout uses
 inline accepted product/price presentation without a maintained remote catalog.
 Existing explicit Stripe links remain available for provider-owned agreements.

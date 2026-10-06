@@ -2,8 +2,6 @@ package openrails
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
@@ -12,9 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/http/inprocess"
-	"github.com/open-rails/openrails/internal/requestauth"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -75,54 +70,10 @@ func TestDerivedClientCannotClose(t *testing.T) {
 	require.NoError(t, err)
 	derived, err := c.With(WithTimeout(1))
 	require.NoError(t, err)
-	owner, err := c.ForCatalogOwner("author")
-	require.NoError(t, err)
 	again, err := derived.With()
 	require.NoError(t, err)
-	for _, d := range []*Client{derived, owner, again} {
+	for _, d := range []*Client{derived, again} {
 		require.ErrorContains(t, d.Close(t.Context()), "derived client")
 	}
 	require.NoError(t, c.Close(t.Context()))
-}
-
-// A catalog-owner clone is attenuated: the selector travels as a header, the
-// transport principal never becomes that subject, and nothing the clone
-// exposes can widen scope or reach admin operations.
-func TestCatalogOwnerClientCannotExpandScope(t *testing.T) {
-	mid := billing.MerchantID(uuid.New())
-	product := billing.ProductID(uuid.New())
-	const subject = "作者 / external:123"
-	calls := 0
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		require.Equal(t, "/v1/catalog/products/"+product.String(), r.URL.Path)
-		owner, err := base64.RawURLEncoding.DecodeString(r.Header.Get("OpenRails-Catalog-Owner"))
-		require.NoError(t, err)
-		require.Equal(t, subject, string(owner))
-		principal, ok := requestauth.HostPrincipalFromContext(r.Context())
-		require.True(t, ok)
-		require.Equal(t, mid, principal.MerchantID)
-		require.Empty(t, principal.Subject)
-		require.NoError(t, json.NewEncoder(w).Encode(billing.Product{ID: product}))
-	})
-	transport, capability := inprocess.NewTransport(handler, func() billing.MerchantID { return mid })
-	admin, err := NewRemote(engine.InprocessBaseURL, WithMerchantID(mid), WithHTTPClient(&http.Client{Transport: transport}),
-		WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
-	require.NoError(t, err)
-	_, err = admin.ForCatalogOwner("")
-	require.Error(t, err)
-	owner, err := admin.ForCatalogOwner(subject)
-	require.NoError(t, err)
-	_, err = owner.GetProduct(t.Context(), product)
-	require.NoError(t, err)
-
-	_, err = owner.CheckProductAccess(t.Context(), billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product}})
-	require.ErrorIs(t, err, billing.ErrDenied, "resource handles bind to the attenuated clone")
-	_, err = owner.ListCatalogs(t.Context(), billing.CatalogListParams{})
-	require.ErrorIs(t, err, billing.ErrDenied)
-	_, err = owner.EnsureCatalog(t.Context(), billing.EnsureCatalogParams{OwnerSubject: "another"})
-	require.ErrorIs(t, err, billing.ErrDenied)
-	_, err = owner.ForCatalogOwner("another")
-	require.ErrorIs(t, err, billing.ErrDenied)
-	require.Equal(t, 1, calls, "denied operations never reach the transport")
 }

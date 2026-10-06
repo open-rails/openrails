@@ -12,8 +12,8 @@ var page = []Param{text("cursor"), integer("limit")}
 
 // Error codes of the catalog's nouns.
 var (
-	productErrors = []string{"catalog_not_found", "catalog_owner_forbidden", "catalog_scope_mismatch", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict"}
-	priceErrors   = []string{"catalog_owner_forbidden", "catalog_scope_mismatch", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "trial_unsupported_on_rail"}
+	productErrors = []string{"product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict"}
+	priceErrors   = []string{"price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "trial_unsupported_on_rail"}
 	meterErrors   = []string{
 		"allowance_meter_not_found", "allowance_source_in_use", "allowance_source_invalid", "default_rate_card_not_found", "default_rate_card_required",
 		"meter_in_use", "meter_rate_card_conflict", "rate_card_currency_mismatch", "rate_card_has_overrides", "rate_card_product_not_found",
@@ -23,10 +23,9 @@ var (
 
 // catalogRoutes is what a merchant sells: products, prices, meters and their
 // rate cards. The public pair lists what a buyer may see; the merchant routes
-// administer the merchant's catalogs; /v1/catalog is a creator managing its
-// own, with the same product and price operations. A write is mounted only
-// where the deployment allows catalog updates.
-var catalogRoutes = append([]Route{
+// administer the catalog. A write is mounted only where the deployment allows
+// catalog updates.
+var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/products", Group: Checkout, Auth: AuthOptional,
 		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Handler: h(handlers.ListPublicProducts)},
 	{Method: GET, Path: "/v1/prices", Group: Checkout, Auth: AuthOptional,
@@ -39,7 +38,7 @@ var catalogRoutes = append([]Route{
 	{Method: GET, Path: "/v1/merchant/catalog/drift", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Query: params(page, queryOf(handlers.CatalogDriftQuery{})), Responses: []Reply{{200, billing.ListPage[billing.CatalogDrift]{}}}, Handler: h(handlers.ListCatalogDrift)},
 	{Method: POST, Path: "/v1/merchant/catalog/drift/refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
-		Responses: []Reply{{200, billing.CatalogDriftRefresh{}}}, Errors: codes("catalog_scope_mismatch"), Handler: h(handlers.RefreshCatalogDrift)},
+		Responses: []Reply{{200, billing.CatalogDriftRefresh{}}}, Handler: h(handlers.RefreshCatalogDrift)},
 
 	{Method: GET, Path: "/v1/merchant/catalog/meters", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
 		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Meter]{}}}, Handler: h(handlers.ListMeters)},
@@ -65,49 +64,35 @@ var catalogRoutes = append([]Route{
 	{Method: GET, Path: "/v1/merchant/catalog/product-archives/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead, Also: billing.MerchantPaymentsRead,
 		Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes("invalid_param", "provider_cancel_held", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetProductArchive)},
 
-	{Method: GET, Path: "/v1/merchant/catalogs", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
-		Query: params(page, queryOf(handlers.CatalogListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Catalog]{}}}, Handler: h(handlers.ListCatalogs)},
-	{Method: POST, Path: "/v1/merchant/catalogs", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
-		Request: billing.EnsureCatalogParams{}, Responses: []Reply{{200, billing.Catalog{}}}, Handler: h(handlers.EnsureCatalog)},
-	{Method: GET, Path: "/v1/merchant/catalogs/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
-		Responses: []Reply{{200, billing.Catalog{}}}, Errors: codes("catalog_not_found"), Handler: h(handlers.GetCatalog)},
-
 	// The catalog assistant answers questions about the catalog and drafts
 	// price changes for a person to review; it never changes a catalog row.
 	{Method: POST, Path: "/v1/merchant/catalog/ask", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead, When: FeatureCatalogCopilot,
 		Request: billing.AskCatalogParams{}, Responses: []Reply{{200, billing.CatalogAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.AskCatalog)},
-}, append(catalogResourceRoutes("/v1/merchant/catalog", Merchant, billing.MerchantCatalogRead, billing.MerchantCatalogUpdate),
-	catalogResourceRoutes("/v1/catalog", CatalogOwned, billing.MerchantCatalogOwnRead, billing.MerchantCatalogOwnUpdate)...)...)
 
-// catalogResourceRoutes is the product, price and offer surface of one
-// catalog prefix: the merchant's, or a creator's own.
-func catalogResourceRoutes(prefix string, group Group, read, update string) []Route {
-	return []Route{
-		{Method: POST, Path: prefix + "/products", Group: group, Auth: AuthMerchant, Perm: update, CatalogWrite: true,
-			Request: billing.CreateProductParams{}, Responses: []Reply{{201, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.CreateProduct)},
-		{Method: GET, Path: prefix + "/products", Group: group, Auth: AuthMerchant, Perm: read,
-			Query: params(page, queryOf(handlers.ProductListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes(productErrors...), Handler: h(handlers.ListProducts)},
-		{Method: GET, Path: prefix + "/products/{id}", Group: group, Auth: AuthMerchant, Perm: read,
-			Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProduct)},
-		{Method: PATCH, Path: prefix + "/products/{id}", Group: group, Auth: AuthMerchant, Perm: update, CatalogWrite: true,
-			Request: billing.UpdateProductParams{}, Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.UpdateProduct)},
-		{Method: GET, Path: prefix + "/products/by-key/{key}", Group: group, Auth: AuthMerchant, Perm: read,
-			Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProductByKey)},
-		{Method: PUT, Path: prefix + "/products/by-key/{key}", Group: group, Auth: AuthMerchant, Perm: update, CatalogWrite: true,
-			Request: billing.CreateProductParams{}, Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.EnsureProduct)},
-		{Method: POST, Path: prefix + "/prices", Group: group, Auth: AuthMerchant, Perm: update, CatalogWrite: true,
-			Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.CreatePrice)},
-		{Method: GET, Path: prefix + "/prices", Group: group, Auth: AuthMerchant, Perm: read,
-			Query: params(page, queryOf(handlers.PriceListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
-		{Method: GET, Path: prefix + "/prices/{id}", Group: group, Auth: AuthMerchant, Perm: read,
-			Query: queryOf(handlers.PriceQuery{}), Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
-		{Method: PATCH, Path: prefix + "/prices/{id}", Group: group, Auth: AuthMerchant, Perm: update, CatalogWrite: true,
-			Request: billing.UpdatePriceParams{}, Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.UpdatePrice)},
-		{Method: GET, Path: prefix + "/prices/by-key/{key}", Group: group, Auth: AuthMerchant, Perm: read,
-			Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPriceByKey)},
-		{Method: GET, Path: prefix + "/prices/by-key/{key}/history", Group: group, Auth: AuthMerchant, Perm: read,
-			Query: page, Responses: []Reply{{200, billing.ListPage[billing.PriceKeyMovement]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPriceKeyHistory)},
-		{Method: POST, Path: prefix + "/offers/lookup", Group: group, Auth: AuthMerchant, Perm: read,
-			Request: billing.OfferListParams{}, Responses: []Reply{{200, billing.OfferPages{}}}, Errors: codes("catalog_scope_mismatch"), Handler: h(handlers.ListOffers)},
-	}
+	{Method: POST, Path: "/v1/merchant/catalog/products", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
+		Request: billing.CreateProductParams{}, Responses: []Reply{{201, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.CreateProduct)},
+	{Method: GET, Path: "/v1/merchant/catalog/products", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Query: params(page, queryOf(handlers.ProductListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes(productErrors...), Handler: h(handlers.ListProducts)},
+	{Method: GET, Path: "/v1/merchant/catalog/products/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProduct)},
+	{Method: PATCH, Path: "/v1/merchant/catalog/products/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
+		Request: billing.UpdateProductParams{}, Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.UpdateProduct)},
+	{Method: GET, Path: "/v1/merchant/catalog/products/by-key/{key}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProductByKey)},
+	{Method: PUT, Path: "/v1/merchant/catalog/products/by-key/{key}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
+		Request: billing.CreateProductParams{}, Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.EnsureProduct)},
+	{Method: POST, Path: "/v1/merchant/catalog/prices", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
+		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.CreatePrice)},
+	{Method: GET, Path: "/v1/merchant/catalog/prices", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Query: params(page, queryOf(handlers.PriceListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
+	{Method: GET, Path: "/v1/merchant/catalog/prices/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Query: queryOf(handlers.PriceQuery{}), Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
+	{Method: PATCH, Path: "/v1/merchant/catalog/prices/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogUpdate, CatalogWrite: true,
+		Request: billing.UpdatePriceParams{}, Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.UpdatePrice)},
+	{Method: GET, Path: "/v1/merchant/catalog/prices/by-key/{key}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPriceByKey)},
+	{Method: GET, Path: "/v1/merchant/catalog/prices/by-key/{key}/history", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Query: page, Responses: []Reply{{200, billing.ListPage[billing.PriceKeyMovement]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPriceKeyHistory)},
+	{Method: POST, Path: "/v1/merchant/catalog/offers/lookup", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,
+		Request: billing.OfferListParams{}, Responses: []Reply{{200, billing.OfferPages{}}}, Handler: h(handlers.ListOffers)},
 }

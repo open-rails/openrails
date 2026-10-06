@@ -790,14 +790,14 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 		}
 		return resp, nil
 	case intents.StatusFailedTerminal:
-		// Stripe's own 402 keeps its decline code; another Stripe refusal is
-		// a 400; an operator closure is a 409.
+		// Stripe's own 402 is a decline; any other refusal, or an operator
+		// closure, is tier_change_refused.
 		var progress stripeTierChangeProgress
 		_ = json.Unmarshal(in.ResultEvidence, &progress)
 		if step := progress.refused(); step != nil {
-			return nil, tierChangeRefused(in, step.RefusalStatus, step.RefusalCode)
+			return nil, tierChangeRefused(in, string(models.RailStripe), step.RefusalStatus, step.RefusalCode)
 		}
-		return nil, tierChangeRefused(in, 0, "")
+		return nil, tierChangeRefused(in, string(models.RailStripe), 0, "")
 	default:
 		return tierChangeProcessing(resp)
 	}

@@ -156,9 +156,6 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"PUT /v1/merchant/catalog/meters/{key}":                                             billing.MerchantCatalogUpdate,
 		"DELETE /v1/merchant/catalog/meters/{key}/rate-card":                                billing.MerchantCatalogUpdate,
 		"POST /v1/merchant/catalog/product-archives":                                        billing.MerchantCatalogUpdate,
-		"POST /v1/merchant/catalogs":                                                        billing.MerchantCatalogUpdate,
-		"POST /v1/catalog/offers/lookup":                                                    billing.MerchantCatalogOwnRead,
-		"POST /v1/catalog/products":                                                         billing.MerchantCatalogOwnUpdate,
 	} {
 		require.Contains(t, asked, key)
 		require.Equal(t, perm, asked[key], key)
@@ -207,7 +204,7 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 // Disabled catalog updates remove every catalog mutation registration — not
 // merely reject it — while reads, batch lookups and credit grants remain.
 func TestCatalogWritePolicy(t *testing.T) {
-	reads := []string{"POST /merchant/catalog/offers/lookup", "POST /catalog/offers/lookup"}
+	reads := []string{"POST /merchant/catalog/offers/lookup"}
 	for _, allow := range []bool{false, true} {
 		rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: allow}}
 		merchant := &router.Table{}
@@ -216,11 +213,11 @@ func TestCatalogWritePolicy(t *testing.T) {
 		var keys []string
 		for _, key := range all {
 			_, path, _ := strings.Cut(key, " ")
-			if strings.HasPrefix(path, "/merchant/catalog") || strings.HasPrefix(path, "/catalog") {
+			if strings.HasPrefix(path, "/merchant/catalog") {
 				keys = append(keys, key)
 			}
 		}
-		for _, key := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /catalog/products", "GET /merchant/catalogs"}, reads...) {
+		for _, key := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /merchant/catalog/products"}, reads...) {
 			require.Contains(t, keys, key)
 		}
 		mutations := 0
@@ -232,7 +229,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 		}
 		require.Equal(t, allow, mutations > 0)
 		if allow {
-			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /catalog/prices", "POST /merchant/catalogs"} {
+			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /merchant/catalog/prices"} {
 				require.Contains(t, keys, key)
 			}
 		}

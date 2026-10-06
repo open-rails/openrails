@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -96,24 +95,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 			return nil, err
 		}
 		q := scoped.catalogDatabase().Gen(ctx)
-		var target uuid.UUID
-		if params.CatalogID != "" {
-			id, err := billing.ParseCatalogID(params.CatalogID)
-			if err != nil {
-				return nil, apperr.Invalidf("invalid catalog_id")
-			}
-			row, err := catalogmodule.NewCatalogRepo(scoped.catalogDatabase()).Get(ctx, id.UUID())
-			if err != nil {
-				return nil, productLookup(err)
-			}
-			target = row.ID
-		} else {
-			row, err := q.GetDefaultApplicationCatalog(ctx, mid.UUID())
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return nil, err
-			}
-			target = row.ID
-		}
 		accounts, err := q.ListPSPsForMerchant(ctx, mid.UUID())
 		if err != nil {
 			return nil, err
@@ -122,9 +103,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 			product, err := scoped.GetProductByKey(ctx, declared.Key)
 			if err != nil && !errors.Is(err, billing.ErrNotFound) {
 				return nil, err
-			}
-			if product != nil && product.CatalogID.UUID() != target {
-				return nil, ErrCatalogConflict
 			}
 			if product == nil {
 				if !declared.DisplayName.Set {

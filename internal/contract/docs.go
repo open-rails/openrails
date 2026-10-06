@@ -20,7 +20,6 @@ var groupTitles = []struct {
 	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
 	{routes.Merchant, "Merchant", "The merchant API: staff, machines and the Go client alike, each route gated by its merchant permission."},
-	{routes.CatalogOwned, "Owned catalog (`/v1/catalog`)", "A creator managing its own catalog."},
 	{routes.ControlPlane, "Control plane (standalone)", "Merchant accounts, API keys and the team."},
 	{routes.Platform, "Platform (standalone)", "The operator tier."},
 	{routes.Webhooks, "Provider webhooks", "Inbound provider callbacks."},

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
@@ -185,22 +184,22 @@ func TestStripeTierGroupConflict(t *testing.T) {
 func TestTierChangeAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		sub  models.Subscription
-		want int
+		want string
 	}{
-		{models.Subscription{Status: models.StatusActive, Rail: models.RailStripe}, 0},
-		{models.Subscription{Status: models.StatusPastDue, Rail: models.RailStripe}, 0},
-		{models.Subscription{Status: models.StatusActive, Rail: models.RailNMI, CollectionPolicy: models.CollectionPolicyEngine}, 0},
-		{models.Subscription{Status: models.StatusPending, Rail: models.RailStripe}, http.StatusConflict},
-		{models.Subscription{Status: models.StatusCanceled, Rail: models.RailStripe}, http.StatusConflict},
+		{models.Subscription{Status: models.StatusActive, Rail: models.RailStripe}, ""},
+		{models.Subscription{Status: models.StatusPastDue, Rail: models.RailStripe}, ""},
+		{models.Subscription{Status: models.StatusActive, Rail: models.RailNMI, CollectionPolicy: models.CollectionPolicyEngine}, ""},
+		{models.Subscription{Status: models.StatusPending, Rail: models.RailStripe}, codeSubscriptionNotActive},
+		{models.Subscription{Status: models.StatusCanceled, Rail: models.RailStripe}, codeSubscriptionNotActive},
 	} {
 		err := validateTierChangeSubscriptionStatus(&tc.sub)
-		if tc.want == 0 {
+		if tc.want == "" {
 			require.NoError(t, err, "%+v", tc.sub)
 			continue
 		}
 		var tierErr *TierChangeError
 		require.ErrorAs(t, err, &tierErr)
-		require.Equal(t, tc.want, tierErr.HTTPStatus)
+		require.Equal(t, tc.want, tierErr.Code)
 	}
 
 	ctx := merchantCtx()

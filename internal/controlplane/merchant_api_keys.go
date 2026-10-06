@@ -32,7 +32,7 @@ type MerchantAPIKey = billing.APIKey
 // its no-escalation rule (the route gate plus RoleCoveredBy). The
 // secret is returned once: it is never stored and never retrievable again.
 func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor iam.Actor) (MerchantAPIKey, string, error) {
-	if !slices.Contains(MerchantAPIKeyRoles(), role) {
+	if !slices.Contains(MerchantRoles(), role) {
 		return MerchantAPIKey{}, "", ErrUnknownMerchantRole
 	}
 	group, err := c.merchantGroup(ctx, mid)

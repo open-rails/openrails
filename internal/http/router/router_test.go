@@ -26,7 +26,7 @@ func TestMuxRegistrationAndMiddlewareChain(t *testing.T) {
 		}
 	}
 	abort := func(Handler) Handler {
-		return func(r *request.Request) { r.AbortJSON(http.StatusForbidden, "no") }
+		return func(r *request.Request) { r.AbortCode(billing.CodeResourceAccessDenied, "no") }
 	}
 	var patterns []string
 	mux := http.NewServeMux()

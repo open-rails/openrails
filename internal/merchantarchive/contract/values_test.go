@@ -3,9 +3,6 @@ package contract
 import (
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
 )
 
 const testMerchant = "10000000-0000-0000-0000-000000000001"
@@ -81,11 +78,6 @@ func TestScalarContracts(t *testing.T) {
 		{"uuid is not a PAN", "customers", map[string]string{"issuer": "12345678-1234-1234-1234-123456789012"}, true},
 		{"text array", "maintenance_runs", map[string]string{"rails": `{nmi,stripe}`, "kind": "prune"}, true},
 		{"nested text array", "maintenance_runs", map[string]string{"rails": `{{nmi}}`}, false},
-		{"opaque owner subject", "catalogs", map[string]string{"owner_subject": "https://issuer.invalid/作者?identity=Case%2f#value"}, true},
-		{"PAN-shaped owner subject is opaque identity", "catalogs", map[string]string{"owner_subject": "4242424242424242"}, true},
-		{"empty owner subject", "catalogs", map[string]string{"owner_subject": ""}, false},
-		{"NUL owner subject", "catalogs", map[string]string{"owner_subject": "a\x00b"}, false},
-		{"default catalog owner", "catalogs", map[string]string{"merchant_id": testMerchant}, true},
 	})
 	if err := ValidateValues(profile(t, "customers"), []*string{nil}); err == nil {
 		t.Fatal("row width mismatch accepted")
@@ -140,19 +132,17 @@ func TestSubscriptionCollectionOwnership(t *testing.T) {
 }
 
 func TestCatalogApplicationReceiptMatchesRow(t *testing.T) {
-	catalog := uuid.MustParse("20000000-0000-0000-0000-000000000001")
 	base := func() map[string]string {
 		return map[string]string{
-			"application_id": "deploy-1", "catalog_id": catalog.String(), "request_sha256": `\x` + strings.Repeat("ab", 32),
+			"application_id": "deploy-1", "request_sha256": `\x` + strings.Repeat("ab", 32),
 			"base_revision": "4", "applied_revision": "5", "applied_at": "2026-01-01 00:00:00+00",
-			"result": `{"application_id":"deploy-1","catalog_id":"` + billing.CatalogID(catalog).String() + `","base_revision":4,"applied_revision":5,"replayed":false,"products_changed":1,"prices_changed":0}`,
+			"result": `{"application_id":"deploy-1","base_revision":4,"applied_revision":5,"replayed":false,"products_changed":1,"prices_changed":0}`,
 		}
 	}
 	cases := []rowCase{{"exact receipt", "catalog_applications", base(), true}}
 	for name, mutate := range map[string]func(map[string]string){
 		"other application": func(m map[string]string) { m["application_id"] = "deploy-2" },
 		"skipped revision":  func(m map[string]string) { m["applied_revision"] = "6" },
-		"other catalog":     func(m map[string]string) { m["catalog_id"] = testMerchant },
 		"short digest":      func(m map[string]string) { m["request_sha256"] = `\xab` },
 		"non-hex digest":    func(m map[string]string) { m["request_sha256"] = `\x` + strings.Repeat("zz", 32) },
 		"replayed receipt": func(m map[string]string) {
@@ -162,9 +152,6 @@ func TestCatalogApplicationReceiptMatchesRow(t *testing.T) {
 			m["result"] = strings.Replace(m["result"], `"prices_changed":0`, `"prices_changed":-1`, 1)
 		},
 		"missing result": func(m map[string]string) { delete(m, "result") },
-		"unprefixed catalog": func(m map[string]string) {
-			m["result"] = strings.Replace(m["result"], billing.CatalogID(catalog).String(), catalog.String(), 1)
-		},
 	} {
 		m := base()
 		mutate(m)

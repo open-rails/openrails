@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (234), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (218), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -102,9 +102,6 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | — | 204 — | catalog write; limit `destructive` |
 | POST | `/v1/merchant/catalog/product-archives` | merchant | `merchant:catalog:update` + `merchant:payments:refund` | `ArchiveProductParams` | 200 `ProductArchive` | catalog write; `Idempotency-Key` |
 | GET | `/v1/merchant/catalog/product-archives/{id}` | merchant | `merchant:catalog:read` + `merchant:payments:read` | — | 200 `ProductArchive` |  |
-| GET | `/v1/merchant/catalogs` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Catalog>` |  |
-| POST | `/v1/merchant/catalogs` | merchant | `merchant:catalog:update` | `EnsureCatalogParams` | 200 `Catalog` | catalog write |
-| GET | `/v1/merchant/catalogs/{id}` | merchant | `merchant:catalog:read` | — | 200 `Catalog` |  |
 | POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
 | POST | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:update` | `CreateProductParams` | 201 `Product` | catalog write |
 | GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Product>` |  |
@@ -237,26 +234,6 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:findings:resolve` | `ResolveFindingParams` | 200 `FindingResolution` |  |
 | POST | `/v1/merchant/metrics/ask` | merchant | `merchant:metrics:read` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
 | POST | `/v1/merchant/dashboard/widgets/generate` | merchant | `merchant:dashboard:update` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
-
-## Owned catalog (`/v1/catalog`)
-
-A creator managing its own catalog.
-
-| Method | Path | Tier | Permission | Request | Response | Notes |
-|---|---|---|---|---|---|---|
-| POST | `/v1/catalog/products` | merchant | `merchant:catalog:update-own` | `CreateProductParams` | 201 `Product` | catalog write |
-| GET | `/v1/catalog/products` | merchant | `merchant:catalog:read-own` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read-own` | — | 200 `Product` |  |
-| PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:update-own` | `UpdateProductParams` | 200 `Product` | catalog write |
-| GET | `/v1/catalog/products/by-key/{key}` | merchant | `merchant:catalog:read-own` | — | 200 `Product` |  |
-| PUT | `/v1/catalog/products/by-key/{key}` | merchant | `merchant:catalog:update-own` | `CreateProductParams` | 200 `Product` | catalog write |
-| POST | `/v1/catalog/prices` | merchant | `merchant:catalog:update-own` | `CreatePriceParams` | 201 `Price` | catalog write |
-| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:read-own` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:read-own` | — | 200 `Price` |  |
-| PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:update-own` | `UpdatePriceParams` | 200 `Price` | catalog write |
-| GET | `/v1/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read-own` | — | 200 `Price` |  |
-| GET | `/v1/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read-own` | — | 200 `ListPage<PriceKeyMovement>` |  |
-| POST | `/v1/catalog/offers/lookup` | merchant | `merchant:catalog:read-own` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
 
 ## Control plane (standalone)
 

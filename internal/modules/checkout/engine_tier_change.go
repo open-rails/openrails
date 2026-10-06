@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -40,9 +39,9 @@ import (
 //     price for a period of its cadence, and nothing is refunded.
 
 var (
-	errTierChangeRenewalDue = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change tier after the renewal settles"}
-	errTierChangeScheduled  = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
-	errTierChangeMoved      = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "the subscription changed since the tier change was requested; preview again"}
+	errTierChangeRenewalDue = &TierChangeError{Code: billing.CodeTierChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change tier after the renewal settles"}
+	errTierChangeScheduled  = &TierChangeError{Code: billing.CodeTierChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
+	errTierChangeMoved      = &TierChangeError{Code: billing.CodeTierChangeRefused, Message: "the subscription changed since the tier change was requested; preview again"}
 )
 
 // engineUpgradeQuote prices an engine upgrade at now and freezes the successor
@@ -87,7 +86,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		return nil, errors.New("engine tier change services unavailable")
 	}
 	if s.Config.EngineAdmissionHold {
-		return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "engine payment admission is held"}
+		return nil, &TierChangeError{Code: billing.CodeTierChangeRefused, Message: "engine payment admission is held"}
 	}
 	ctx = db.WithPSPID(ctx, existingSub.PspID)
 	terms, err := engineUpgradeQuote(existingSub, currentPrice, newPrice, newProduct, s.now().UTC().Truncate(time.Microsecond))
@@ -130,7 +129,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 			return err
 		}
 		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
-			return &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
+			return &TierChangeError{Code: billing.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
 		label := psp.Key
 		email := ""
@@ -286,10 +285,10 @@ func engineUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeR
 			Declined bool `json:"declined"`
 		}
 		_ = json.Unmarshal(in.ResultEvidence, &evidence)
-		if failure := operationFailure(in); evidence.Declined && failure != nil {
-			return nil, tierChangeRefused(in, http.StatusPaymentRequired, failure.Reason)
+		if evidence.Declined {
+			return nil, &TierChangeDeclinedError{Reason: operationReason(in), Message: operationFailure(in).Message}
 		}
-		return nil, tierChangeRefused(in, 0, "")
+		return nil, tierChangeRefused(in, "", 0, "")
 	default:
 		if authenticationRequired(in) {
 			resp.Status = "requires_action"

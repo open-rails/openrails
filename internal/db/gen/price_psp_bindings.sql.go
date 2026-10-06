@@ -13,17 +13,16 @@ import (
 
 const deletePricePSPBindings = `-- name: DeletePricePSPBindings :exec
 DELETE FROM billing.price_psp_bindings
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=price_psp_bindings.merchant_id AND owned_price.id=price_psp_bindings.price_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND price_id = $3::uuid
+WHERE merchant_id = $1::uuid AND price_id = $2::uuid
 `
 
 type DeletePricePSPBindingsParams struct {
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	PriceID    uuid.UUID
 }
 
 func (q *Queries) DeletePricePSPBindings(ctx context.Context, arg DeletePricePSPBindingsParams) error {
-	_, err := q.db.Exec(ctx, deletePricePSPBindings, arg.CatalogID, arg.MerchantID, arg.PriceID)
+	_, err := q.db.Exec(ctx, deletePricePSPBindings, arg.MerchantID, arg.PriceID)
 	return err
 }
 
@@ -32,10 +31,8 @@ INSERT INTO billing.price_psp_bindings
 (merchant_id, price_id, psp_id, plan_id, price_ref, recurring_billing_option_id, plan_pda, flex_id, configuration)
 SELECT $1::uuid, $2::uuid, $3::uuid,
     $4, $5, $6, $7, $8, $9::jsonb
-FROM billing.prices owned_price JOIN billing.products catalog_product
-  ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
+FROM billing.prices owned_price
 WHERE owned_price.merchant_id=$1::uuid AND owned_price.id=$2::uuid
-  AND ($10::uuid IS NULL OR catalog_product.catalog_id=$10::uuid)
 `
 
 type InsertPricePSPBindingParams struct {
@@ -48,7 +45,6 @@ type InsertPricePSPBindingParams struct {
 	PlanPda                  *string
 	FlexID                   *string
 	Configuration            []byte
-	CatalogID                *uuid.UUID
 }
 
 func (q *Queries) InsertPricePSPBinding(ctx context.Context, arg InsertPricePSPBindingParams) error {
@@ -62,7 +58,6 @@ func (q *Queries) InsertPricePSPBinding(ctx context.Context, arg InsertPricePSPB
 		arg.PlanPda,
 		arg.FlexID,
 		arg.Configuration,
-		arg.CatalogID,
 	)
 	return err
 }
@@ -71,13 +66,12 @@ const listPricePSPBindings = `-- name: ListPricePSPBindings :many
 SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, p.key AS psp_key
 FROM billing.price_psp_bindings b
 JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=b.merchant_id AND owned_price.id=b.price_id AND catalog_product.catalog_id=$1::uuid)) AND b.merchant_id = $2::uuid AND (cardinality($3::uuid[]) = 0 OR b.price_id = ANY($3::uuid[]))
-  AND ($4::uuid IS NULL OR b.psp_id = $4::uuid)
+WHERE b.merchant_id = $1::uuid AND (cardinality($2::uuid[]) = 0 OR b.price_id = ANY($2::uuid[]))
+  AND ($3::uuid IS NULL OR b.psp_id = $3::uuid)
 ORDER BY b.price_id, b.psp_id
 `
 
 type ListPricePSPBindingsParams struct {
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	PriceIds   []uuid.UUID
 	PspID      *uuid.UUID
@@ -98,12 +92,7 @@ type ListPricePSPBindingsRow struct {
 }
 
 func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBindingsParams) ([]ListPricePSPBindingsRow, error) {
-	rows, err := q.db.Query(ctx, listPricePSPBindings,
-		arg.CatalogID,
-		arg.MerchantID,
-		arg.PriceIds,
-		arg.PspID,
-	)
+	rows, err := q.db.Query(ctx, listPricePSPBindings, arg.MerchantID, arg.PriceIds, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,18 +125,17 @@ func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBind
 
 const lockPriceForBindingUpdate = `-- name: LockPriceForBindingUpdate :one
 SELECT id FROM billing.prices
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=prices.merchant_id AND catalog_product.id=prices.product_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND id = $3::uuid
+WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
 
 type LockPriceForBindingUpdateParams struct {
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	PriceID    uuid.UUID
 }
 
 func (q *Queries) LockPriceForBindingUpdate(ctx context.Context, arg LockPriceForBindingUpdateParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, lockPriceForBindingUpdate, arg.CatalogID, arg.MerchantID, arg.PriceID)
+	row := q.db.QueryRow(ctx, lockPriceForBindingUpdate, arg.MerchantID, arg.PriceID)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

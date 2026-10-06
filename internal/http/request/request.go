@@ -124,20 +124,6 @@ func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) 
 	return context.WithTimeout(r.Request.Context(), d)
 }
 
-func (r *Request) AbortJSON(code int, msg string) {
-	r.logRefusal(code, nil, msg)
-	response := api.SimpleErrorResponse(code, msg)
-	response.Error.RequestID = r.RequestID()
-	r.t.AbortJSON(code, response)
-}
-
-func (r *Request) ErrorJSON(code int, msg string) {
-	r.logRefusal(code, nil, msg)
-	response := api.SimpleErrorResponse(code, msg)
-	response.Error.RequestID = r.RequestID()
-	r.t.WriteJSON(code, response)
-}
-
 // logRefusal records a response the handler itself chose. A 4xx is the
 // contract answering as designed — not found, conflict, precondition failed,
 // refused input — so it is logged at info; only a 5xx is an error an operator
@@ -153,13 +139,8 @@ func (r *Request) logRefusal(code int, fields logrus.Fields, msg string) {
 }
 
 // InternalError answers 500 with a STABLE, non-leaky msg and logs the cause
-// verbatim against the request id.
-//
-// ErrorJSON(500, "...") drops whatever error the handler was holding, so an
-// internal failure reaches the operator as a bare constant. upstream#1627: three
-// boot-time `set billing policy failed` lines and a 500 on every billed
-// admission carried no cause at all, and attributing them cost a bisect across
-// two standing stacks. Every 500 that has an error in hand should use this.
+// verbatim against the request id. Every 500 that has an error in hand uses
+// this, so an internal failure never reaches the operator as a bare constant.
 func (r *Request) InternalError(msg string, cause error) {
 	// A saturated database pool is a retryable 503, never a 500 (#1105).
 	var refusal *apperr.Error

@@ -75,15 +75,6 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 		scope = billingauth.PlatformScope
 	}
 
-	subject := identity.SubjectID
-	if identity.Kind == billingauth.User && (permission == billing.MerchantCatalogOwnRead || permission == billing.MerchantCatalogOwnUpdate) {
-		if identity.CustomerID.IsZero() && r.Header.Get("OpenRails-Catalog-Owner") == "" {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodeCatalogOwnerRequired, "canonical personal identity required")
-		}
-		// With an explicit owner and no personal mapping, leave the actor key
-		// empty so ownerCatalogScopeMW must perform its live administrator check.
-		subject = identity.CustomerID.String()
-	}
 	required := billingauth.Requirement{Permission: permission, Scope: scope, Target: target}
 	if err := g.auth.Authorization.Authorize(ctx, r, identity, required); err != nil {
 		var gate billingauth.GateError
@@ -92,7 +83,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 		}
 		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAuthorizationUnavailable)
 	}
-	principal := billingauth.Principal{MerchantID: target.MerchantID, Kind: identity.Kind, Subject: subject}
+	principal := billingauth.Principal{MerchantID: target.MerchantID, Kind: identity.Kind, Subject: identity.SubjectID}
 	if identity.Kind == billingauth.User {
 		principal.UserContext = billingauth.UserContext{UserID: identity.CustomerID.String(), Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
 	} else {

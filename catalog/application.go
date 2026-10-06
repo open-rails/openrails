@@ -97,7 +97,6 @@ type Application struct {
 	SchemaVersion    int            `json:"schema_version"`
 	ApplicationID    string         `json:"application_id,omitempty"`
 	ExpectedRevision *int64         `json:"expected_revision,omitempty"`
-	CatalogID        string         `json:"catalog_id,omitempty"`
 	Prune            bool           `json:"prune,omitempty"`
 	Products         []ApplyProduct `json:"products,omitempty"`
 	Meters           []ApplyMeter   `json:"meters,omitempty"`

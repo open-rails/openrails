@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -26,7 +24,6 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "catalog_applications" {
 		var receipt struct {
 			ApplicationID   string `json:"application_id"`
-			CatalogID       string `json:"catalog_id"`
 			BaseRevision    int64  `json:"base_revision"`
 			AppliedRevision int64  `json:"applied_revision"`
 			Replayed        bool   `json:"replayed"`
@@ -50,12 +47,6 @@ func ValidateValues(p Profile, values []*string) error {
 		if _, err := hex.DecodeString((*digest)[2:]); err != nil {
 			return fmt.Errorf("invalid catalog application digest")
 		}
-		catalogID := value(p, values, "catalog_id")
-		parsed, err := billing.ParseCatalogID(receipt.CatalogID)
-		if err != nil || catalogID == nil || parsed.UUID().String() != *catalogID {
-			return fmt.Errorf("catalog application receipt target mismatch")
-		}
-
 	}
 	if p.Name == "subscriptions" {
 		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")
@@ -108,14 +99,6 @@ func ValidateValues(p Profile, values []*string) error {
 			continue
 		}
 		v := *values[i]
-		// An owner subject is an opaque host identity, not free-form metadata.
-		// Preserve exact UTF-8 bytes (including URL/non-UUID subject formats).
-		if p.Name == "catalogs" && c.Name == "owner_subject" {
-			if err := catalogscope.ValidateSubject(v); err != nil {
-				return err
-			}
-			continue
-		}
 		if c.Type == "text" || strings.HasPrefix(c.Type, "character varying") {
 			if !(encodedKey && (c.Name == "idempotency_key" || p.Name == "ledger_transfers" && c.Name == "source_id")) && !safeText(v) {
 				return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)

@@ -20,7 +20,7 @@ import (
 type Handler func(*request.Request)
 
 // Middleware wraps a Handler with around-the-handler behavior: it may run logic
-// before calling next, short-circuit (e.g. AbortJSON + return without calling
+// before calling next, short-circuit (e.g. AbortCode + return without calling
 // next), and run deferred cleanup after next returns (e.g. release a pinned DB
 // connection). It is the neutral analogue of a gin.HandlerFunc that calls
 // c.Next().

@@ -118,14 +118,8 @@ request counts, payments, subscriptions, paid periods and benefits remain
 unchanged. Public Client/HTTP/CLI and live-provider qualification are separate
 gates.
 
-Creator catalogs are business ownership records. A whole-book operator restore
-preserves catalog UUIDs, opaque owner subjects, and each product's catalog UUID.
-The destination host must preserve the subject namespace; changing authentication
-identity mappings is an explicit operator decision, never an automatic remap.
-Creator catalog authority does not authorize export or restore.
-
-The destination must be empty, including catalogs. Creating a default or owned
-catalog before restore produces the ordinary `not_empty` refusal; the importer
-never reassigns existing catalog ownership or rewrites incoming product IDs.
+The destination must be empty, including its catalog. Creating a product before
+restore produces the ordinary `not_empty` refusal; the importer never rewrites
+incoming product IDs.
 
 Catalog applications require archive wire version 2. The consistent snapshot carries the merchant catalog revision in its hashed header and all permanent application receipts alongside catalog state. Restore preserves both atomically; replaying a completed restore cannot reset a later revision. Version 1 artifacts fail closed. Produce a fresh version 2 archive using the current library before cutover; retain older backups as historical artifacts.

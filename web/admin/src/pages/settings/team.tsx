@@ -52,14 +52,6 @@ const ROLES: {
   description: string
 }[] = [
   {
-    value: "creator",
-    name: "Creator",
-    hint: "own catalog",
-    description:
-      "Manage products and prices in their own catalog. Cannot access other " +
-      "catalogs, customer operations, or merchant settings.",
-  },
-  {
     value: "viewer",
     name: "Viewer",
     hint: "read-only",

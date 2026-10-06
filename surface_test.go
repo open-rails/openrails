@@ -38,7 +38,6 @@ var hostingMethods = map[string]string{
 	"CheckoutFrameAncestors": "the frame policy of the payment page the host serves",
 	"RiverJobs":              "the jobs a host-owned River fleet runs",
 	"With":                   "a client with other options over the same transport",
-	"ForCatalogOwner":        "a client acting on one creator's catalog",
 	"MerchantID":             "the client's default merchant",
 }
 
@@ -224,8 +223,6 @@ func (p *surfaceProbe) call(client *Client, m reflect.Method) ([]string, error) 
 
 func TestClientIsTheMerchantAPI(t *testing.T) {
 	p := newSurfaceProbe(t)
-	owner, err := p.client.ForCatalogOwner("creator")
-	require.NoError(t, err)
 
 	catalogRoutes := map[string]routes.Route{}
 	for _, r := range routes.Catalog() {
@@ -284,17 +281,6 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 		if out := m.Type.Out(0); out.Kind() == reflect.Struct {
 			t.Errorf("%s returns %s by value: return a pointer", m.Name, out)
 		}
-
-		// A creator's catalog is the same methods on a ForCatalogOwner
-		// client, at /v1/catalog instead of /v1/merchant/catalog.
-		twin := route.Method + " " + strings.Replace(route.Path, "/v1/merchant/catalog/", "/v1/catalog/", 1)
-		if own, ok := catalogRoutes[twin]; ok && own.Group == routes.CatalogOwned {
-			seen, err := p.call(owner, m)
-			if !slices.Equal(seen, []string{twin}) {
-				t.Errorf("%s on a catalog owner's client calls %v, not %s (error: %v)", m.Name, seen, twin, err)
-			}
-			methodsOf[twin] = append(methodsOf[twin], m.Name)
-		}
 	}
 	for name := range hostingMethods {
 		require.True(t, names[name], "hostingMethods lists %s, which Client does not have", name)
@@ -305,7 +291,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 
 	for _, r := range routes.Catalog() {
 		switch r.Group {
-		case routes.Merchant, routes.CatalogOwned:
+		case routes.Merchant:
 			methods := methodsOf[r.Key()]
 			sort.Strings(methods)
 			if len(methods) != 1 {

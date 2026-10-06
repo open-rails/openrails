@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"errors"
-	"net/http"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -49,78 +50,73 @@ type solanaResolvedPlanTerms struct {
 }
 
 // resolveSolanaTierChange authorizes ownership and resolves everything the
-// prepare/confirm endpoints share. It returns an HTTP status + message on
-// failure (the caller writes the error response).
-func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, newPriceIDStr string) (*resolvedTierChange, int, string) {
+// prepare/confirm endpoints share. A refusal is an *api.APIError or a checkout
+// refusal; writeChangeTierError answers either.
+func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, newPriceIDStr string) (*resolvedTierChange, error) {
 	if r.State.SubscriptionService == nil || r.State.PriceService == nil || r.State.ProductService == nil {
-		return nil, http.StatusServiceUnavailable, "subscriptions are not configured"
+		return nil, api.Coded(billing.CodeServiceUnavailable, "subscriptions are not configured")
 	}
 	uc, ok := r.UserContext()
 	if !ok || uc.UserID == "" {
-		return nil, http.StatusUnauthorized, "User authentication required"
+		return nil, api.Coded(billing.CodeAuthenticationRequired, "")
 	}
 
 	// Authorize: the acting user must own the OLD lifecycle subscription.
 	oldSub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
-			return nil, http.StatusNotFound, "subscription not found"
+			return nil, api.Coded(codeSubscriptionNotFound, "")
 		}
-		return nil, http.StatusInternalServerError, "failed to retrieve subscription"
+		return nil, fmt.Errorf("load subscription: %w", err)
 	}
 	if oldSub.CustomerID.String() != uc.UserID {
-		return nil, http.StatusNotFound, "subscription not found"
+		return nil, api.Coded(codeSubscriptionNotFound, "")
 	}
 	if oldSub.Rail != models.RailSolana {
-		return nil, http.StatusBadRequest, "subscription is not a Solana subscription"
+		return nil, api.Coded(billing.CodeTierChangeUnsupportedOnRail, "subscription is not a Solana subscription")
 	}
 
 	// Load the OLD on-chain row (subscriber/merchant identifiers for the atomic tx).
 	oldRow, err := solanasubs.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(r.Request.Context(), subscriptionID)
 	if err != nil || oldRow == nil {
-		return nil, http.StatusBadRequest, "no on-chain record for this subscription"
+		return nil, api.Coded(billing.CodeTierChangeProviderConflict, "no on-chain record for this subscription")
 	}
 
 	// Resolve the NEW price + its published plan terms.
 	typedNewPriceID, err := billing.ParsePriceID(newPriceIDStr)
 	if err != nil || typedNewPriceID.IsZero() {
-		return nil, http.StatusBadRequest, "invalid new_price_id"
+		return nil, api.Coded(billing.CodeInvalidParam, "invalid price_id").WithParam("price_id")
 	}
 	newPriceID := typedNewPriceID.UUID()
 	newPrice, err := r.State.PriceService.GetByID(r.Request.Context(), newPriceID)
 	if err != nil || newPrice == nil {
-		return nil, http.StatusNotFound, "target price not found"
+		return nil, api.Coded(codePriceNotFound, "target price not found")
 	}
 	if !newPrice.IsPurchasable() {
-		return nil, http.StatusBadRequest, "target price is not available"
+		return nil, api.Coded(billing.CodeTierChangeTargetInactive, "target price is not available")
 	}
 	newCfg := newPrice.ForPSP(oldSub.PspID).PSPLinkForRail(models.RailSolana)
 	newTerms, ok := parseResolvedPlanTerms(newCfg)
 	if !ok {
-		return nil, http.StatusBadRequest, "target price is not configured for Solana recurring billing"
+		return nil, api.Coded(billing.CodeTierChangeRequiresLinkedPlan, "target price is not configured for Solana recurring billing")
 	}
 
 	// Load OLD + NEW products: SolanaTierChange decides the change.
 	oldPrice, err := r.State.PriceService.GetByID(r.Request.Context(), oldSub.PriceID)
 	if err != nil || oldPrice == nil {
-		return nil, http.StatusInternalServerError, "current price not found"
+		return nil, fmt.Errorf("load current price: %w", errors.Join(err, errNilRow))
 	}
 	newProduct, err := r.State.ProductService.GetByID(r.Request.Context(), newPrice.ProductID)
 	if err != nil || newProduct == nil {
-		return nil, http.StatusNotFound, "target product not found"
+		return nil, api.Coded(codeProductNotFound, "target product not found")
 	}
 	oldProduct, err := r.State.ProductService.GetByID(r.Request.Context(), oldPrice.ProductID)
 	if err != nil || oldProduct == nil {
-		return nil, http.StatusInternalServerError, "current product not found"
+		return nil, fmt.Errorf("load current product: %w", errors.Join(err, errNilRow))
 	}
 	isUpgrade, err := checkout.SolanaTierChange(oldSub, oldProduct, newProduct, oldPrice, newPrice)
 	if err != nil {
-		status := http.StatusBadRequest
-		var tierErr *checkout.TierChangeError
-		if errors.As(err, &tierErr) {
-			status = tierErr.HTTPStatus
-		}
-		return nil, status, err.Error()
+		return nil, err
 	}
 
 	out := &resolvedTierChange{
@@ -141,25 +137,18 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 			NewCycleHours: newPrice.RecurringCycleHours(),
 		}, nowOrDefault(r))
 		if err != nil {
-			status := http.StatusBadRequest
-			var tierErr *checkout.TierChangeError
-			if errors.As(err, &tierErr) {
-				status = tierErr.HTTPStatus
-			}
-			return nil, status, err.Error()
+			return nil, err
 		}
 		firstChargeMicros := quote.ChargeNow
 		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
 		if err != nil {
-			status, msg := solanaClientError(err, http.StatusInternalServerError)
-			return nil, status, msg
+			return nil, solanaFailure(err, "resolve token decimals")
 		}
 		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
 			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
 		if err != nil {
-			status, msg := solanaClientError(err, http.StatusInternalServerError)
-			return nil, status, msg
+			return nil, solanaFailure(err, "convert the first charge")
 		}
 		// A genuine upgrade can round to 0 base units only when the unused old credit
 		// fully covers the new price; we still need a non-zero pull to activate the
@@ -172,7 +161,24 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		out.firstChargeBaseUnits = firstChargeBaseUnits
 	}
 
-	return out, 0, ""
+	return out, nil
+}
+
+var errNilRow = errors.New("no row")
+
+const (
+	codeSubscriptionNotFound = "subscription_not_found"
+	codePriceNotFound        = "price_not_found"
+	codeProductNotFound      = "product_not_found"
+)
+
+// solanaFailure is a transient outage's refusal, or err as an internal
+// failure.
+func solanaFailure(err error, step string) error {
+	if refusal := solanaUnavailable(err); refusal != nil {
+		return refusal
+	}
+	return fmt.Errorf("%s: %w", step, err)
 }
 
 // parseResolvedPlanTerms parses a price's Solana rail config into the
@@ -223,9 +229,9 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
-	resolved, status, msg := resolveSolanaTierChange(r, subscriptionID, priceID)
-	if status != 0 {
-		r.ErrorJSON(status, msg)
+	resolved, err := resolveSolanaTierChange(r, subscriptionID, priceID)
+	if err != nil {
+		writeChangeTierError(r, err)
 		return
 	}
 	ctx := r.Request.Context()
@@ -250,7 +256,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
 	})
 	if err != nil {
-		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+		r.APIError(solanaClientError(err))
 		return
 	}
 
@@ -323,7 +329,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		OldPeriodEndsAt: resolved.oldSub.CurrentPeriodEndsAt,
 	})
 	if err != nil {
-		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+		r.APIError(solanaClientError(err))
 		return
 	}
 	next := billing.SubscriptionID(result.NewSubscription.ID)

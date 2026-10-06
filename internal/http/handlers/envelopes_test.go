@@ -245,7 +245,6 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 	tierStatus := map[error]int{
 		fmt.Errorf("upgrade: %w", checkout.ErrCheckoutProcessing): 409,
 		checkout.ErrTierChangePending:                             409,
-		checkout.ErrTierChangeBlocked:                             409,
 		checkout.ErrTierChangeSameProduct:                         409,
 		checkout.ErrTierChangeNoSubscription:                      404,
 		checkout.ErrTierChangeDifferentGroup:                      400,
@@ -264,9 +263,24 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 	require.Equal(t, []any{409, billing.CodeTierChangeInFlight, op.String()}, []any{got.Status, got.Code, got.Metadata["operation_id"]})
 
 	got = render(t, func(r *httprequest.Request) {
-		writeChangeTierError(r, &checkout.TierChangeError{HTTPStatus: 402, Code: "insufficient_funds", Message: "Your card has insufficient funds."})
+		writeChangeTierError(r, &checkout.TierChangeDeclinedError{Rail: "stripe", FailureCode: "insufficient_funds", Message: "raw provider text"})
 	})
-	require.Equal(t, []any{402, "insufficient_funds", "card_error"}, []any{got.Status, got.Code, got.Type})
+	require.Equal(t, []any{402, billing.CodeCardDeclined, "card_error", "insufficient_funds"}, []any{got.Status, got.Code, got.Type, got.Metadata["decline_reason"]})
+	require.NotContains(t, got.Raw, "raw provider text")
+
+	// A tier change refusal's code fixes its status.
+	for code, status := range map[string]int{
+		billing.CodeTierChangeRefused:           409,
+		billing.CodeTierChangeTargetInactive:    422,
+		billing.CodeTierChangeUnsupportedOnRail: 400,
+		billing.CodeTierChangeProviderConflict:  409,
+		billing.CodeCustomerActionRequired:      403,
+	} {
+		got = render(t, func(r *httprequest.Request) {
+			writeChangeTierError(r, &checkout.TierChangeError{Code: code, Message: "x"})
+		})
+		require.Equal(t, []any{status, code}, []any{got.Status, got.Code})
+	}
 
 	for status, want := range map[string]int{"processing": http.StatusAccepted, "succeeded": http.StatusOK} {
 		r, rec := newTestRequest(http.MethodPost, "/", nil, &app.Runtime{})
@@ -308,10 +322,11 @@ func TestProviderTransportErrorsAreNotEchoed(t *testing.T) {
 	client := solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{Endpoint: srv.URL + "/?api-key=" + secret, Network: "mainnet"})
 	_, err := client.GetBalance(context.Background(), solanago.MustPublicKeyFromBase58("11111111111111111111111111111111"))
 	require.Error(t, err)
-	status, msg := solanaClientError(err, http.StatusBadRequest)
-	require.Equal(t, http.StatusBadGateway, status)
-	require.Equal(t, "Solana RPC is temporarily unavailable; please retry", msg)
+	refusal := solanaClientError(err)
+	require.Equal(t, []any{http.StatusBadGateway, codeSolanaRPCUnavailable, "Solana RPC is temporarily unavailable; please retry"},
+		[]any{refusal.HTTPStatus, refusal.Code, refusal.Message})
 
-	status, msg = solanaClientError(errors.New("subscriber already enrolled"), http.StatusBadRequest)
-	require.Equal(t, []any{http.StatusBadRequest, "subscriber already enrolled"}, []any{status, msg})
+	refusal = solanaClientError(errors.New("subscriber already enrolled"))
+	require.Equal(t, []any{http.StatusBadRequest, codeSolanaTransactionRefused, "subscriber already enrolled"},
+		[]any{refusal.HTTPStatus, refusal.Code, refusal.Message})
 }

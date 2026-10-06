@@ -219,7 +219,6 @@
         "x-openrails-auth": "public",
         "x-openrails-mounted-when": "solana",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "credential_custody_transition_required",
           "resource_conflict"
         ],
@@ -332,7 +331,6 @@
           "card_declined",
           "card_not_saved",
           "card_requires_https",
-          "catalog_scope_mismatch",
           "checkout_offer_unavailable",
           "checkout_payment_in_progress",
           "checkout_request_invalid",
@@ -391,7 +389,6 @@
         "x-openrails-auth": "session_id",
         "x-openrails-mounted-when": "solana",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "checkout_attempt_expired",
           "invalid_param",
           "resource_conflict",
@@ -493,7 +490,6 @@
         "x-openrails-customer-scope": "self_service",
         "x-openrails-errors": [
           "authentication_required",
-          "catalog_scope_mismatch",
           "checkout_offer_unavailable",
           "checkout_session_unavailable",
           "customer_action_required",
@@ -546,7 +542,6 @@
         "x-openrails-permission": "merchant:checkout:create",
         "x-openrails-errors": [
           "authentication_required",
-          "catalog_scope_mismatch",
           "checkout_offer_unavailable",
           "checkout_session_unavailable",
           "invalid_param",
@@ -611,7 +606,6 @@
           "card_attempts_blocked",
           "card_declined",
           "card_not_saved",
-          "catalog_scope_mismatch",
           "checkout_attempt_closed",
           "idempotency_key_reused",
           "insufficient_funds",
@@ -796,7 +790,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param",
           "resource_not_found",
           "service_unavailable"
@@ -1092,10 +1085,7 @@
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
           "catalog_application_conflict",
-          "catalog_not_found",
-          "catalog_owner_forbidden",
           "catalog_revision_conflict",
-          "catalog_scope_mismatch",
           "price_not_sellable",
           "product_not_found",
           "product_tier_group_conflict",
@@ -1226,9 +1216,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_scope_mismatch"
-        ],
+        "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
           "catalog_write"
@@ -1897,9 +1885,6 @@
         "x-openrails-also-permission": "merchant:payments:refund",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
@@ -1963,169 +1948,6 @@
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/catalogs": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "owner_subject",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Catalog"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnsureCatalogParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Catalog"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:update",
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write"
-        ]
-      }
-    },
-    "/v1/merchant/catalogs/{id}": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Catalog"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read",
-        "x-openrails-errors": [
-          "catalog_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -2219,9 +2041,6 @@
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2243,13 +2062,6 @@
             "in": "query",
             "schema": {
               "type": "boolean"
-            }
-          },
-          {
-            "name": "catalog_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
             }
           },
           {
@@ -2315,9 +2127,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2367,9 +2176,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2426,9 +2232,6 @@
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2479,9 +2282,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2538,9 +2338,6 @@
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2591,8 +2388,6 @@
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2623,13 +2418,6 @@
             "in": "query",
             "schema": {
               "type": "boolean"
-            }
-          },
-          {
-            "name": "catalog_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
             }
           },
           {
@@ -2702,8 +2490,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2762,8 +2548,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2823,8 +2607,6 @@
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2877,8 +2659,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2961,8 +2741,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
         "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -3033,886 +2811,10 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:catalog:read",
-        "x-openrails-errors": [
-          "catalog_scope_mismatch"
-        ],
+        "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
-        ]
-      }
-    },
-    "/v1/catalog/products": {
-      "post": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProductParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:update-own",
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write",
-          "owned_catalog"
-        ]
-      },
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "archived",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "catalog_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "tier_group",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/products/{id}": {
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "owned_catalog"
-        ]
-      },
-      "patch": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProductParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:update-own",
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/products/by-key/{key}": {
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "owned_catalog"
-        ]
-      },
-      "put": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProductParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:update-own",
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_not_found",
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/prices": {
-      "post": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePriceParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Price"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:update-own",
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write",
-          "owned_catalog"
-        ]
-      },
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "archived",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "auto_renew",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "catalog_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "product_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Price"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/prices/{id}": {
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "verify",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Price"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "owned_catalog"
-        ]
-      },
-      "patch": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdatePriceParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Price"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:update-own",
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/prices/by-key/{key}": {
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Price"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/prices/by-key/{key}/history": {
-      "get": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/PriceKeyMovement"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_owner_forbidden",
-          "catalog_scope_mismatch",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "owned_catalog"
-        ]
-      }
-    },
-    "/v1/catalog/offers/lookup": {
-      "post": {
-        "tags": [
-          "catalog_owned"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OfferListParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "data": {
-                        "type": "array",
-                        "items": {
-                          "$ref": "#/components/schemas/Offer"
-                        }
-                      },
-                      "next_cursor": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "data",
-                      "next_cursor"
-                    ]
-                  }
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:catalog:read-own",
-        "x-openrails-errors": [
-          "catalog_scope_mismatch"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "owned_catalog"
         ]
       }
     },
@@ -4046,7 +2948,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_cursor",
           "invalid_param",
           "invalid_query"
@@ -4095,7 +2996,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param",
           "subscription_not_found"
         ],
@@ -4278,18 +3178,30 @@
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "card_declined",
-          "catalog_scope_mismatch",
           "customer_action_required",
+          "customer_email_required",
           "invalid_param",
+          "payment_duplicate_refused",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_not_found",
+          "product_not_found",
           "rebill_terms_committed",
           "reprice_already_scheduled",
           "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
+          "service_unavailable",
+          "subscription_not_active",
+          "subscription_not_found",
           "tier_change_already_scheduled",
-          "tier_change_in_flight"
+          "tier_change_in_flight",
+          "tier_change_period_unknown",
+          "tier_change_provider_conflict",
+          "tier_change_refused",
+          "tier_change_requires_linked_plan",
+          "tier_change_target_inactive",
+          "tier_change_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -4345,16 +3257,26 @@
         "x-openrails-permission": "merchant:subscriptions:update",
         "x-openrails-errors": [
           "card_declined",
-          "catalog_scope_mismatch",
           "customer_action_required",
+          "customer_email_required",
           "invalid_param",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_not_found",
+          "product_not_found",
           "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
+          "service_unavailable",
+          "subscription_not_active",
+          "subscription_not_found",
           "tier_change_already_scheduled",
-          "tier_change_in_flight"
+          "tier_change_in_flight",
+          "tier_change_period_unknown",
+          "tier_change_provider_conflict",
+          "tier_change_requires_linked_plan",
+          "tier_change_target_inactive",
+          "tier_change_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -4461,7 +3383,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:update",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param",
           "rebill_terms_committed",
           "reprice_already_scheduled",
@@ -4591,7 +3512,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param",
           "reprice_price_key_not_found"
         ],
@@ -4731,7 +3651,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:update",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param",
           "rebill_terms_committed",
           "reprice_already_scheduled",
@@ -4784,7 +3703,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:subscriptions:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param",
           "reprice_already_scheduled",
           "reprice_cross_currency",
@@ -5036,6 +3954,8 @@
           "invalid_param",
           "provider_cancel_held",
           "service_unavailable",
+          "solana_rpc_unavailable",
+          "solana_transaction_refused",
           "subscription_not_active",
           "subscription_not_found"
         ],
@@ -5226,7 +4146,6 @@
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
           "authentication_required",
-          "catalog_scope_mismatch",
           "invalid_cursor",
           "invalid_query"
         ],
@@ -5275,7 +4194,6 @@
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
           "authentication_required",
-          "catalog_scope_mismatch",
           "invalid_param",
           "resource_not_found",
           "subscription_not_found"
@@ -5344,7 +4262,6 @@
         "x-openrails-errors": [
           "authentication_required",
           "card_declined",
-          "catalog_scope_mismatch",
           "customer_action_required",
           "customer_payment_unsupported",
           "invalid_param",
@@ -5430,17 +4347,31 @@
         "x-openrails-errors": [
           "authentication_required",
           "card_declined",
-          "catalog_scope_mismatch",
           "customer_action_required",
+          "customer_email_required",
           "invalid_param",
+          "payment_duplicate_refused",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_not_found",
+          "product_not_found",
           "rebill_terms_committed",
           "reprice_already_scheduled",
           "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
-          "tier_change_in_flight"
+          "service_unavailable",
+          "solana_rpc_unavailable",
+          "solana_transaction_refused",
+          "subscription_not_active",
+          "subscription_not_found",
+          "tier_change_in_flight",
+          "tier_change_period_unknown",
+          "tier_change_provider_conflict",
+          "tier_change_refused",
+          "tier_change_requires_linked_plan",
+          "tier_change_target_inactive",
+          "tier_change_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -5497,14 +4428,24 @@
         "x-openrails-errors": [
           "authentication_required",
           "card_declined",
-          "catalog_scope_mismatch",
+          "customer_email_required",
           "invalid_param",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_not_found",
+          "product_not_found",
           "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
-          "tier_change_in_flight"
+          "service_unavailable",
+          "subscription_not_active",
+          "subscription_not_found",
+          "tier_change_in_flight",
+          "tier_change_period_unknown",
+          "tier_change_provider_conflict",
+          "tier_change_requires_linked_plan",
+          "tier_change_target_inactive",
+          "tier_change_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -9376,7 +8317,6 @@
         "x-openrails-permission": "merchant:customer-settings:update",
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "idempotency_key_reused",
           "invalid_param",
           "price_not_found"
@@ -9613,8 +8553,11 @@
           "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
+          "payment_not_found",
+          "payment_not_refundable",
           "provider_cancel_held",
           "rebill_terms_committed",
+          "refund_failed",
           "refund_rail_unavailable",
           "refund_unsupported",
           "resource_conflict",
@@ -11246,7 +10189,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:psps:read",
         "x-openrails-errors": [
-          "catalog_scope_mismatch",
           "invalid_param"
         ],
         "x-openrails-error-sets": [
@@ -13289,9 +12231,17 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:findings:resolve",
         "x-openrails-errors": [
+          "finding_action_failed",
+          "finding_not_actionable",
+          "idempotency_key_reused",
           "invalid_param",
+          "payment_not_found",
+          "payment_not_refundable",
           "provider_cancel_held",
           "rebill_terms_committed",
+          "refund_failed",
+          "refund_rail_unavailable",
+          "refund_unsupported",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -14268,9 +13218,6 @@
           },
           "expected_revision": {
             "type": "integer"
-          },
-          "catalog_id": {
-            "type": "string"
           },
           "prune": {
             "type": "boolean"
@@ -15286,38 +14233,6 @@
           }
         }
       },
-      "Catalog": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "owner_subject": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "owner_subject",
-          "created_at",
-          "updated_at"
-        ]
-      },
       "CatalogAnswer": {
         "type": "object",
         "properties": {
@@ -15349,9 +14264,6 @@
           "application_id": {
             "type": "string"
           },
-          "catalog_id": {
-            "type": "string"
-          },
           "base_revision": {
             "type": "integer"
           },
@@ -15370,7 +14282,6 @@
         },
         "required": [
           "application_id",
-          "catalog_id",
           "base_revision",
           "applied_revision",
           "replayed",
@@ -16788,9 +15699,6 @@
       "CreatePriceProduct": {
         "type": "object",
         "properties": {
-          "catalog_id": {
-            "type": "string"
-          },
           "key": {
             "type": "string"
           },
@@ -16828,9 +15736,6 @@
       "CreateProductParams": {
         "type": "object",
         "properties": {
-          "catalog_id": {
-            "type": "string"
-          },
           "key": {
             "type": "string"
           },
@@ -17812,14 +16717,6 @@
           "group",
           "tier"
         ]
-      },
-      "EnsureCatalogParams": {
-        "type": "object",
-        "properties": {
-          "owner_subject": {
-            "type": "string"
-          }
-        }
       },
       "EnsureCustomerParams": {
         "type": "object",
@@ -21849,9 +20746,6 @@
           "id": {
             "type": "string"
           },
-          "catalog_id": {
-            "type": "string"
-          },
           "key": {
             "type": "string"
           },
@@ -21914,7 +20808,6 @@
         },
         "required": [
           "id",
-          "catalog_id",
           "key",
           "display_name",
           "description",
@@ -24908,11 +23801,6 @@
       "catalog_declared",
       "catalog_updates_disabled"
     ],
-    "owned_catalog": [
-      "catalog_owner_required",
-      "catalog_not_found",
-      "catalog_scope_mismatch"
-    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -25171,30 +24059,10 @@
       "type": "invalid_request_error",
       "meaning": "The catalog is declared by the host; change the declaration and restart."
     },
-    "catalog_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The catalog does not exist."
-    },
-    "catalog_owner_forbidden": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "A catalog owner cannot change merchant-wide catalog settings."
-    },
-    "catalog_owner_required": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The catalog owner could not be established from the credential or selector."
-    },
     "catalog_revision_conflict": {
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The catalog changed during the application; retry."
-    },
-    "catalog_scope_mismatch": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The catalog scope does not match the authorized merchant and catalog."
     },
     "catalog_updates_disabled": {
       "status": 403,
@@ -25331,6 +24199,11 @@
       "type": "authorization_error",
       "meaning": "Only the customer may take this action, through their own step."
     },
+    "customer_email_required": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The rail needs the customer's verified email and username."
+    },
     "customer_not_found": {
       "status": 404,
       "type": "invalid_request_error",
@@ -25400,6 +24273,16 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "Creating a merchant needs a verified email."
+    },
+    "finding_action_failed": {
+      "status": 502,
+      "type": "api_error",
+      "meaning": "Running the finding's recommendation failed; the finding stays open with the error in its notes."
+    },
+    "finding_not_actionable": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The finding carries no recommendation to approve; ignore it or fix it out of band."
     },
     "hold_not_found": {
       "status": 404,
@@ -25751,6 +24634,11 @@
       "type": "invalid_request_error",
       "meaning": "The payment or payment operation does not exist."
     },
+    "payment_not_refundable": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The payment is not a completed rail charge, or the amount exceeds what remains refundable."
+    },
     "payment_not_retryable": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25891,6 +24779,11 @@
       "type": "invalid_request_error",
       "meaning": "An accepted recurring payment owns the pending price terms."
     },
+    "refund_failed": {
+      "status": 502,
+      "type": "api_error",
+      "meaning": "The provider refused the refund."
+    },
     "refund_rail_unavailable": {
       "status": 409,
       "type": "invalid_request_error",
@@ -26016,6 +24909,16 @@
       "type": "api_error",
       "meaning": "A dependency is temporarily unavailable; retry."
     },
+    "solana_rpc_unavailable": {
+      "status": 502,
+      "type": "api_error",
+      "meaning": "The Solana RPC endpoints did not answer; retry."
+    },
+    "solana_transaction_refused": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The wallet transaction could not be prepared or confirmed; the message says why."
+    },
     "spend_delegation_not_found": {
       "status": 404,
       "type": "invalid_request_error",
@@ -26081,6 +24984,11 @@
       "type": "invalid_request_error",
       "meaning": "The subscription has no valid current period."
     },
+    "tier_change_provider_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The provider's copy of the subscription is missing or differs; reconcile it first."
+    },
     "tier_change_refused": {
       "status": 409,
       "type": "invalid_request_error",
@@ -26094,7 +25002,17 @@
     "tier_change_requires_linked_plan": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The target price has no linked provider plan of the same amount and cycle."
+      "meaning": "The target price has no plan on the subscription's PSP that this change can use."
+    },
+    "tier_change_target_inactive": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The target price or its product is archived."
+    },
+    "tier_change_unsupported_on_rail": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The subscription's rail cannot make this tier change."
     },
     "trial_unsupported_on_rail": {
       "status": 400,

@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -24,16 +23,6 @@ import (
 )
 
 func (s *Service) CreateProduct(ctx context.Context, req billing.CreateProductParams) (*billing.Product, error) {
-	owned, err := catalogOwnerRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned && (req.EntitlementsSpec != nil || req.TierGroup != nil || req.TierRank != 0) {
-		return nil, catalog.ErrOwnerOperation
-	}
-	if owned && !req.CatalogID.IsZero() && req.CatalogID.UUID() != *catalogscope.QueryID(ctx) {
-		return nil, catalog.ErrOwnerScope
-	}
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.createProduct(ctx, req)
 	})
@@ -70,7 +59,6 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		// (merchant_id, key) — same logical product → same id in every DB.
 		ID:               uuidutil.DeterministicID(uuidutil.DeterministicNamespace, tid.UUID().String(), req.Key),
 		MerchantID:       tid.UUID(),
-		CatalogID:        req.CatalogID.UUID(),
 		Key:              req.Key,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -147,13 +135,6 @@ func (s *Service) UpdateProduct(ctx context.Context, id billing.ProductID, param
 }
 
 func (s *Service) patchProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*billing.Product, error) {
-	owned, err := catalogOwnerRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned && (req.EntitlementsSpec != nil || req.SetEntitlements || req.TierGroup != nil || req.SetTierGroup || req.TierRank != nil || req.SkipRailSync) {
-		return nil, catalog.ErrOwnerOperation
-	}
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Product, error) {
 		return scoped.updateProduct(ctx, id, req)
 	})
@@ -341,13 +322,6 @@ func priceRequestCycleDays(req billing.CreatePriceParams) *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
-	owned, err := catalogOwnerRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned && (req.PSPs != nil || req.PSPLinks != nil) {
-		return nil, catalog.ErrOwnerOperation
-	}
 	if err := s.checkCatalogWritePolicy(ctx); err != nil {
 		return nil, err
 	}
@@ -369,13 +343,13 @@ func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams
 	}
 	if req.ProductData != nil {
 		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
-			return scoped.createPrice(ctx, req, owned)
+			return scoped.createPrice(ctx, req)
 		})
 	}
-	return s.createPrice(ctx, req, owned)
+	return s.createPrice(ctx, req)
 }
 
-func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams, owned bool) (*billing.Price, error) {
+func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	if req.ProductData != nil {
 		return s.createPriceWithProduct(ctx, req)
 	}
@@ -416,12 +390,6 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
 	priceID := priceDeterministicID(req.ProductID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
-	if owned {
-		req.PSPs, err = s.creatorProviderKeys(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	var rails map[string]map[string]string
 	var providerStates map[string]billing.PSPLinkState
@@ -542,13 +510,6 @@ func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, params bi
 }
 
 func (s *Service) patchPrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*billing.Price, error) {
-	owned, err := catalogOwnerRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned && (req.PSPLinks != nil || req.SkipRailSync) {
-		return nil, catalog.ErrOwnerOperation
-	}
 	if err := s.checkCatalogWritePolicy(ctx); err != nil {
 		return nil, err
 	}

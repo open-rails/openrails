@@ -40,8 +40,6 @@ const (
 	// Merchant is the merchant API: staff, machines and the Go client alike,
 	// each route gated by its merchant permission.
 	Merchant Group = "merchant"
-	// CatalogOwned is a creator managing its own catalog (/v1/catalog).
-	CatalogOwned Group = "catalog_owned"
 	// ControlPlane is the standalone server's merchant accounts, team and
 	// API keys.
 	ControlPlane Group = "control_plane"
@@ -364,9 +362,6 @@ func (r Route) ErrorSets() []string {
 	if r.CatalogWrite {
 		sets = append(sets, "catalog_write")
 	}
-	if r.Group == CatalogOwned {
-		sets = append(sets, "owned_catalog")
-	}
 	return sets
 }
 
@@ -377,8 +372,6 @@ func ErrorSet(name string) []string {
 		return requestShapeErrors
 	case "catalog_write":
 		return []string{"catalog_declared", "catalog_updates_disabled"}
-	case "owned_catalog":
-		return []string{billing.CodeCatalogOwnerRequired, "catalog_not_found", "catalog_scope_mismatch"}
 	}
 	if tier, ok := strings.CutPrefix(name, "tier:"); ok {
 		return TierErrors(Tier(tier))

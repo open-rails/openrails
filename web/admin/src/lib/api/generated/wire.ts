@@ -94,7 +94,6 @@ export type Application = {
   schema_version?: number
   application_id?: string
   expected_revision?: number
-  catalog_id?: string
   prune?: boolean
   products?: ApplyProduct[]
   meters?: ApplyMeter[]
@@ -304,13 +303,6 @@ export type CardEntry = {
   cvc?: string
 }
 
-export type Catalog = {
-  id: string
-  owner_subject: string | null
-  created_at: string
-  updated_at: string
-}
-
 export type CatalogAnswer = {
   answer: string
   evidence: CatalogEvidence[]
@@ -319,7 +311,6 @@ export type CatalogAnswer = {
 
 export type CatalogApplicationReceipt = {
   application_id: string
-  catalog_id: string
   base_revision: number
   applied_revision: number
   replayed: boolean
@@ -663,7 +654,6 @@ export type CreatePriceParams = {
 }
 
 export type CreatePriceProduct = {
-  catalog_id?: string
   key: string
   display_name: string
   description?: string
@@ -675,7 +665,6 @@ export type CreateProductAccessParams = {
 }
 
 export type CreateProductParams = {
-  catalog_id?: string
   key?: string
   display_name?: string
   description?: string
@@ -920,10 +909,6 @@ export type DunningTier = {
 export type EffectiveTier = {
   group: string
   tier: Tier | null
-}
-
-export type EnsureCatalogParams = {
-  owner_subject?: string
 }
 
 export type EnsureCustomerParams = {
@@ -1781,7 +1766,6 @@ export type PriceKeyMovement = {
 
 export type Product = {
   id: string
-  catalog_id: string
   key: string
   display_name: string
   description: string

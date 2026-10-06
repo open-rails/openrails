@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net/http"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -15,14 +14,14 @@ import (
 var (
 	// ErrTierChangeCycleUnknown: the target price has no positive billing
 	// cycle, so the reset period it would start is undefined.
-	ErrTierChangeCycleUnknown = &TierChangeError{HTTPStatus: http.StatusUnprocessableEntity, Code: billing.CodeTierChangeCycleUnknown, Message: "target price has no positive billing cycle"}
+	ErrTierChangeCycleUnknown = &TierChangeError{Code: billing.CodeTierChangeCycleUnknown, Message: "target price has no positive billing cycle"}
 	// ErrTierChangePeriodUnknown: the subscription has no open current period
 	// to measure the old plan's unused value against.
-	ErrTierChangePeriodUnknown = &TierChangeError{HTTPStatus: http.StatusUnprocessableEntity, Code: billing.CodeTierChangePeriodUnknown, Message: "subscription has no valid current period"}
+	ErrTierChangePeriodUnknown = &TierChangeError{Code: billing.CodeTierChangePeriodUnknown, Message: "subscription has no valid current period"}
 	// ErrTierChangeCreditExceedsPrice: the old plan's unused value is larger
 	// than the new plan's price. Model B has no stored balance to carry the
 	// excess, so the change is refused rather than forfeiting it.
-	ErrTierChangeCreditExceedsPrice = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeCreditExceedsPrice, Message: "unused value of the current plan exceeds the new plan's price; change at period end instead"}
+	ErrTierChangeCreditExceedsPrice = &TierChangeError{Code: billing.CodeTierChangeCreditExceedsPrice, Message: "unused value of the current plan exceeds the new plan's price; change at period end instead"}
 )
 
 // ModelBUpgrade is one reset-period upgrade: the subscription's current paid

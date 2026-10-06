@@ -85,7 +85,6 @@ const (
 	CodeHostMerchantMismatch                  = "host_merchant_mismatch"
 	CodeMerchantContextMismatch               = "merchant_context_mismatch"
 	CodeInvokerScopedPrincipal                = "invoker_scoped_principal"
-	CodeCatalogOwnerRequired                  = "catalog_owner_required"
 	CodeStepUpRequired                        = "step_up_required"
 	CodeStepUpUnavailable                     = "step_up_unavailable"
 	CodeAuthenticationUnavailable             = "authentication_unavailable"
@@ -166,7 +165,6 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeDelegatedMerchantUnresolved, 403, authz, "The delegated token's issuer resolves to no merchant."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
-	{CodeCatalogOwnerRequired, 403, authz, "The catalog owner could not be established from the credential or selector."},
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
@@ -201,6 +199,8 @@ var errorCodes = []ErrorCode{
 	{"payment_not_found", 404, invalid, "The payment or payment operation does not exist."},
 	{"refund_rail_unavailable", 409, invalid, "The payment's rail cannot accept a refund right now."},
 	{"refund_unsupported", 400, invalid, "The payment's rail has no automatic refund."},
+	{"payment_not_refundable", 400, invalid, "The payment is not a completed rail charge, or the amount exceeds what remains refundable."},
+	{"refund_failed", 502, fault, "The provider refused the refund."},
 
 	// Checkout.
 	{"checkout_session_not_found", 404, invalid, "The checkout session does not exist."},
@@ -228,7 +228,13 @@ var errorCodes = []ErrorCode{
 	{CodeTierChangeRenewalDue, 409, invalid, "The current period ended or its renewal is unresolved; the renewal settles first."},
 	{CodeTierChangeAlreadyScheduled, 409, invalid, "A different period-end change is already scheduled."},
 	{CodeTierChangeCadenceUnsupported, 409, invalid, "A provider-billed subscription can change only to a price of the same cadence."},
-	{CodeTierChangeRequiresLinkedPlan, 409, invalid, "The target price has no linked provider plan of the same amount and cycle."},
+	{CodeTierChangeRequiresLinkedPlan, 409, invalid, "The target price has no plan on the subscription's PSP that this change can use."},
+	{CodeTierChangeTargetInactive, 422, invalid, "The target price or its product is archived."},
+	{CodeTierChangeUnsupportedOnRail, 400, invalid, "The subscription's rail cannot make this tier change."},
+	{CodeTierChangeProviderConflict, 409, invalid, "The provider's copy of the subscription is missing or differs; reconcile it first."},
+	{"customer_email_required", 400, invalid, "The rail needs the customer's verified email and username."},
+	{"solana_transaction_refused", 400, invalid, "The wallet transaction could not be prepared or confirmed; the message says why."},
+	{"solana_rpc_unavailable", 502, fault, "The Solana RPC endpoints did not answer; retry."},
 	{"reprice_not_found", 404, invalid, "The reprice does not exist."},
 	{"reprice_price_key_not_found", 404, invalid, "The reprice names a price key that does not exist."},
 	{"reprice_target_price_not_found", 404, invalid, "The reprice's target price does not exist."},
@@ -285,9 +291,6 @@ var errorCodes = []ErrorCode{
 	{"trial_unsupported_on_rail", 400, invalid, "This rail cannot run a trial first phase."},
 	{"product_tier_group_conflict", 409, invalid, "A customer holds live subscriptions to more than one product of the tier group."},
 	{"product_tier_group_in_use", 409, invalid, "The tier group cannot change while a subscription has a plan change in flight."},
-	{"catalog_not_found", 404, invalid, "The catalog does not exist."},
-	{"catalog_owner_forbidden", 403, authz, "A catalog owner cannot change merchant-wide catalog settings."},
-	{"catalog_scope_mismatch", 403, authz, "The catalog scope does not match the authorized merchant and catalog."},
 	{"catalog_updates_disabled", 403, invalid, "Catalog updates over HTTP are disabled in this deployment."},
 	{"catalog_declared", 405, invalid, "The catalog is declared by the host; change the declaration and restart."},
 	{"catalog_application_conflict", 409, invalid, "The application id already committed with different content."},
@@ -306,6 +309,10 @@ var errorCodes = []ErrorCode{
 	{"rate_card_has_overrides", 409, invalid, "The rate card still has customer overrides."},
 	{"rate_card_currency_mismatch", 409, invalid, "The rate card's currency does not match."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
+
+	// Findings.
+	{"finding_not_actionable", 422, invalid, "The finding carries no recommendation to approve; ignore it or fix it out of band."},
+	{"finding_action_failed", 502, fault, "Running the finding's recommendation failed; the finding stays open with the error in its notes."},
 
 	// Merchant configuration and PSPs.
 	{"psp_not_found", 404, invalid, "The PSP does not exist."},

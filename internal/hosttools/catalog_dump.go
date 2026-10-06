@@ -3,7 +3,6 @@ package hosttools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -17,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -96,25 +94,18 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 		return nil, err
 	}
 	m := &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}
-	// The default catalog; without one, no product row matches uuid.Nil.
-	var catalogID uuid.UUID
-	if c, err := database.Gen(ctx).GetDefaultApplicationCatalog(ctx, tid.UUID()); err == nil {
-		catalogID = c.ID
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("load default catalog: %w", err)
-	}
-	scope := gen.ListLiveCatalogProductsParams{MerchantID: tid.UUID(), CatalogID: catalogID}
-	productIDs, byID, err := dumpCatalogProducts(ctx, database, scope)
+	merchantID := tid.UUID()
+	productIDs, byID, err := dumpCatalogProducts(ctx, database, merchantID)
 	if err != nil {
 		return nil, err
 	}
-	if m.Meters, err = dumpCatalogMeters(ctx, database, tid.UUID()); err != nil {
+	if m.Meters, err = dumpCatalogMeters(ctx, database, merchantID); err != nil {
 		return nil, err
 	}
-	if err := dumpCatalogPrices(ctx, database, scope, byID); err != nil {
+	if err := dumpCatalogPrices(ctx, database, merchantID, byID); err != nil {
 		return nil, err
 	}
-	if err := dumpCatalogRateCards(ctx, database, scope, byID); err != nil {
+	if err := dumpCatalogRateCards(ctx, database, merchantID, byID); err != nil {
 		return nil, err
 	}
 	for _, id := range productIDs {
@@ -125,8 +116,8 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 	return m, nil
 }
 
-func dumpCatalogProducts(ctx context.Context, database *db.DB, scope gen.ListLiveCatalogProductsParams) ([]uuid.UUID, map[uuid.UUID]*catalog.ApplyProduct, error) {
-	rows, err := database.Gen(ctx).ListLiveCatalogProducts(ctx, scope)
+func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]uuid.UUID, map[uuid.UUID]*catalog.ApplyProduct, error) {
+	rows, err := database.Gen(ctx).ListLiveCatalogProducts(ctx, merchantID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list catalog products: %w", err)
 	}
@@ -177,10 +168,10 @@ func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUI
 	return out, nil
 }
 
-func dumpCatalogPrices(ctx context.Context, database *db.DB, scope gen.ListLiveCatalogProductsParams, byID map[uuid.UUID]*catalog.ApplyProduct) error {
+func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.ApplyProduct) error {
 	// Metered pricing dumps as rate cards (#707): legacy metered: declarations
 	// are translated at push time, so no price-attached metered shape exists.
-	rows, err := database.Gen(ctx).ListLiveCatalogPricesWithPSPLinks(ctx, gen.ListLiveCatalogPricesWithPSPLinksParams(scope))
+	rows, err := database.Gen(ctx).ListLiveCatalogPricesWithPSPLinks(ctx, merchantID)
 	if err != nil {
 		return fmt.Errorf("list catalog prices: %w", err)
 	}
@@ -217,8 +208,8 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, scope gen.ListLiveC
 	return nil
 }
 
-func dumpCatalogRateCards(ctx context.Context, database *db.DB, scope gen.ListLiveCatalogProductsParams, byID map[uuid.UUID]*catalog.ApplyProduct) error {
-	rows, err := database.Gen(ctx).ListCatalogProductRateCards(ctx, gen.ListCatalogProductRateCardsParams(scope))
+func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.ApplyProduct) error {
+	rows, err := database.Gen(ctx).ListCatalogProductRateCards(ctx, merchantID)
 	if err != nil {
 		return fmt.Errorf("list catalog rate cards: %w", err)
 	}

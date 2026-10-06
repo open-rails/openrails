@@ -40,7 +40,7 @@ Before the code:
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | Removed: they are the standalone server's own settings. A host that decoded a file into an OpenRails type declares its own struct |
 | `AuthConfig.Naming merchant.NamingConfig` | `openrails.NamingConfig`, `openrails.FormerNamesConfig`, `openrails.FormerNamesMode` |
 | `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` returns an error for them; they belong to `openrails.NewRemote` |
-| `Close` on a client from `With` or `ForCatalogOwner` closed the engine | It returns an error; close the client `openrails.New` returned |
+| `Close` on a client from `With` closed the engine | It returns an error; close the client `openrails.New` returned |
 | `openrails.WithCurrency`; `client.Balance` | Removed: every request names its currency |
 
 ### Rate limits and health
@@ -131,7 +131,8 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
 | `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(`, `client.GetMeter(`, `client.ListMeters(`, `client.SetMeterRateCard(`, `client.DeleteMeterRateCard(`, and `client.ListRateOverrides(`, `client.SetRateOverride(`, `client.DeleteRateOverride(` for a customer's negotiated price |
 | `ListOffersForEntitlements` | `client.ListOffers(` with `billing.OfferListParams` |
-| `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()` | `client.EnsureCatalog(`, `client.GetCatalog(`, `client.ListCatalogs(`; `client.ForCatalogOwner(` is the one selector |
+| Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
+| `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
 | `CheckCatalogDrift` | `client.RefreshCatalogDrift(` |
 | `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchasedSince` and `WindowSeconds` |
@@ -209,6 +210,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListActiveMerchantIDs(ctx, limit, offset)` | `client.ListActiveMerchantIDs(` takes a `billing.PageRequest` and returns a page |
 | `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
 | Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | `merchant:operations:read` gates the inbox, findings and worker health |
+| Permissions `merchant:catalog:read-own`, `merchant:catalog:update-own`; the control plane's `creator` role | Removed with creator-owned catalogs; a teammate or API key holds `viewer`, `support` or `owner` |
 
 ## 4. HTTP routes and shapes
 
@@ -258,7 +260,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/webhooks…` | `/v1/merchant/alert-webhooks` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}` | `/v1/merchant/reprice-batches`, `/v1/merchant/reprice-batches/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/merchant/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
-| `GET /v1/merchant/catalogs/by-owner` | `GET /v1/merchant/catalogs` with `owner_subject` |
+| A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/merchant/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/merchant/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
@@ -293,9 +295,24 @@ fields (`400 unknown_field`), and every error code is in
   metrics dimension `payer` is `customer`; `active_payers` and
   `payers_at_depletion_risk` are `active_customers` and
   `customers_at_depletion_risk`.
-- **Error codes.** Every refusal carries a registered code; a client that
-  matched on a status-derived code reads [error-codes.md](api/error-codes.md).
-  An expired checkout attempt is 410 `checkout_attempt_expired`.
+- **Error codes.** Every refusal carries a registered code, and a code always
+  answers the same status; a client that matched on a status-derived code reads
+  [error-codes.md](api/error-codes.md). An expired checkout attempt is 410
+  `checkout_attempt_expired`. A refund refusal is 404 `payment_not_found`,
+  400 `payment_not_refundable` or 502 `refund_failed`; approving a finding
+  without a recommendation is 422 `finding_not_actionable`, and a failed run
+  502 `finding_action_failed`. A tier change answers 404 `price_not_found`,
+  404 `product_not_found`, 404 `subscription_not_found`, 409
+  `subscription_not_active`, 422 `tier_change_target_inactive`, 409
+  `tier_change_requires_linked_plan`, 400 `tier_change_unsupported_on_rail`, 409
+  `tier_change_provider_conflict` or 400 `customer_email_required` where it
+  answered a bare 400, 404 or 409, and a declined charge is 402 `card_declined`
+  or 502 `payment_provider_rejected` with `decline_reason`. A Solana wallet step
+  the chain refuses is 400 `solana_transaction_refused`; an unreachable RPC is
+  502 `solana_rpc_unavailable`.
+- **Catalog.** `catalog_id` is gone from products, product and price requests
+  and list filters, the catalog application document and its receipt; there are
+  no `cat_` ids.
 - **Payments.** `kind`, `status`, `channel`, `psp_id`, `card`, `failure`; a
   refunded charge reads `refunded` or `partially_refunded` in lists too.
 - **Balance.** `balance_amount`, `held_amount`, `available_amount`,
@@ -368,5 +385,6 @@ up there.
 | Unique payments and subscriptions by `(merchant_id, rail, psp_id, …)` | By `(merchant_id, psp_id, …)`; an `ON CONFLICT` naming the old columns no longer matches |
 | Postgres enums `payment_status`, `subscription_status` | `text` with a CHECK |
 | `payments.rail` holding `manual` or `admin` | `payments.channel` (`rail`, `manual`); `rail` is null off-channel |
+| `catalogs`; `products.catalog_id`, `catalog_applications.catalog_id` | Removed: a merchant has one catalog, `billing.products` keyed by `merchant_id` |
 | `entitlements.start_at`, `end_at` | `starts_at`, `ends_at` |
 | Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |

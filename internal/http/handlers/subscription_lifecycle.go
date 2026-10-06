@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"unicode/utf8"
 
@@ -72,7 +71,7 @@ func CancelSubscription(r *httprequest.Request) {
 			}
 			prepared, err := r.State.SolanaPrepareCancelService.Prepare(ctx, sub.ID)
 			if err != nil {
-				r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+				r.APIError(solanaClientError(err))
 				return
 			}
 			writeMySubscription(r, userID, sub.ID, &billing.NextAction{
@@ -86,7 +85,7 @@ func CancelSubscription(r *httprequest.Request) {
 		}
 		svc := recurring.NewConfirmCancelService(r.State.SolanaRPCResolver.ChainReader(), r.State.SubscriptionLifecycleService)
 		if err := svc.Confirm(ctx, sub.ID, signature, reason); err != nil {
-			r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
+			r.APIError(solanaClientError(err))
 			return
 		}
 	} else {

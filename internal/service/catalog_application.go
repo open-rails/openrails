@@ -9,16 +9,13 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogrules"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -71,9 +68,6 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 		return nil, apperr.Invalidf("%s", err)
 	}
 	params = *normalized
-	if _, owned := catalogscope.FromContext(ctx); owned {
-		return nil, catalogmodule.ErrOwnerOperation
-	}
 	digest, err := params.CanonicalDigest()
 	if err != nil {
 		return nil, err
@@ -131,23 +125,9 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err := q.SetCatalogBatchMerchant(ctx, mid.String()); err != nil {
 			return nil, err
 		}
-		repo := catalogmodule.NewCatalogRepo(scoped.catalogDatabase())
-		var target gen.BillingCatalog
-		if params.CatalogID == "" {
-			target, err = repo.Ensure(ctx, nil)
-		} else {
-			id, parseErr := billing.ParseCatalogID(params.CatalogID)
-			if parseErr != nil {
-				return nil, apperr.Invalidf("invalid catalog_id")
-			}
-			target, err = repo.Get(ctx, id.UUID())
-		}
-		if err != nil {
-			return nil, productLookup(err)
-		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
-		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, CatalogID: billing.CatalogID(target.ID), BaseRevision: revision}
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, BaseRevision: revision}
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -159,7 +139,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 				}
 			}
 		}
-		if err := scoped.applyCatalogProducts(ctx, target.ID, params, receipt); err != nil {
+		if err := scoped.applyCatalogProducts(ctx, params, receipt); err != nil {
 			return nil, err
 		}
 		if err := scoped.applyCatalogBilling(ctx, params); err != nil {
@@ -176,7 +156,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, CatalogID: target.ID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
+		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
 		if err != nil {
 			return nil, err
 		}
@@ -187,12 +167,12 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 	})
 }
 
-func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, params catalogwire.Application, receipt *billing.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.Application, receipt *billing.CatalogApplicationReceipt) error {
 	// Enumerate all pages without public active/tier filtering. The merchant lock
 	// makes the stable pagination snapshot safe while the eventual apply mutates it.
 	existing := map[string]*billing.Product{}
 	for cursor := ""; ; {
-		page, err := s.ListProducts(ctx, billing.ProductListParams{CatalogID: billing.CatalogID(target), PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit, Cursor: cursor}})
+		page, err := s.ListProducts(ctx, billing.ProductListParams{PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit, Cursor: cursor}})
 		if err != nil {
 			return err
 		}
@@ -210,21 +190,13 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 		keep[decl.Key] = true
 		p := existing[decl.Key]
 		if p == nil {
-			// A key may already belong to another catalog in this same merchant.
-			foreign, e := s.GetProductByKey(ctx, decl.Key)
-			if e == nil && foreign.CatalogID.UUID() != target {
-				return ErrCatalogConflict
-			}
-			if e != nil && !errors.Is(e, billing.ErrNotFound) {
-				return e
-			}
 			if decl.Archived.Set && decl.Archived.Value && !decl.DisplayName.Set {
 				return apperr.Invalidf("cannot archive unknown product %q", decl.Key)
 			}
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
 				return apperr.Invalidf("new product %q requires display_name", decl.Key)
 			}
-			req := billing.CreateProductParams{CatalogID: billing.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
+			req := billing.CreateProductParams{Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
 			if decl.TierGroup.Set && !decl.TierGroup.Null {
 				req.TierGroup = &decl.TierGroup.Value
 			}

@@ -23,7 +23,6 @@ INSERT INTO billing.price_key_movements (
 FROM billing.prices owned_price JOIN billing.products catalog_product
   ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
 WHERE owned_price.merchant_id=$1::uuid AND owned_price.id=$3::uuid
-  AND ($5::uuid IS NULL OR catalog_product.catalog_id=$5::uuid)
 `
 
 type InsertPriceKeyMovementParams struct {
@@ -31,7 +30,6 @@ type InsertPriceKeyMovementParams struct {
 	Key         string
 	PriceID     uuid.UUID
 	EffectiveAt time.Time
-	CatalogID   *uuid.UUID
 }
 
 // billing.price_key_movements (#774): pointer-movement history log.
@@ -41,7 +39,6 @@ func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKey
 		arg.Key,
 		arg.PriceID,
 		arg.EffectiveAt,
-		arg.CatalogID,
 	)
 	if err != nil {
 		return 0, err
@@ -51,19 +48,13 @@ func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKey
 
 const listPriceKeyMovements = `-- name: ListPriceKeyMovements :many
 SELECT id, merchant_id, key, price_id, effective_at, created_at, archived FROM billing.price_key_movements
-WHERE ($1::uuid IS NULL OR EXISTS (
- SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product
- ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
- WHERE owned_price.merchant_id=price_key_movements.merchant_id AND owned_price.id=price_key_movements.price_id
- AND catalog_product.catalog_id=$1::uuid))
- AND merchant_id = $2::uuid AND key = $3::text
- AND ($4::timestamptz IS NULL OR (effective_at, id) < ($4::timestamptz, $5::uuid))
+WHERE merchant_id = $1::uuid AND key = $2::text
+ AND ($3::timestamptz IS NULL OR (effective_at, id) < ($3::timestamptz, $4::uuid))
 ORDER BY effective_at DESC, id DESC
-LIMIT $6::int
+LIMIT $5::int
 `
 
 type ListPriceKeyMovementsParams struct {
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Key        string
 	AfterAt    *time.Time
@@ -73,7 +64,6 @@ type ListPriceKeyMovementsParams struct {
 
 func (q *Queries) ListPriceKeyMovements(ctx context.Context, arg ListPriceKeyMovementsParams) ([]BillingPriceKeyMovement, error) {
 	rows, err := q.db.Query(ctx, listPriceKeyMovements,
-		arg.CatalogID,
 		arg.MerchantID,
 		arg.Key,
 		arg.AfterAt,

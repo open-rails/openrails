@@ -17,8 +17,6 @@ const (
 	MerchantPSPsUpdate             = "merchant:psps:update"
 	MerchantCatalogRead            = "merchant:catalog:read"
 	MerchantCatalogUpdate          = "merchant:catalog:update"
-	MerchantCatalogOwnRead         = "merchant:catalog:read-own"
-	MerchantCatalogOwnUpdate       = "merchant:catalog:update-own"
 	MerchantCustomerSettingsRead   = "merchant:customer-settings:read"
 	MerchantCustomerSettingsUpdate = "merchant:customer-settings:update"
 	MerchantInvoicesRead           = "merchant:invoices:read"
@@ -105,7 +103,7 @@ func RequiresRecentSignIn(perm string) bool {
 		return false
 	}
 	rest, ok := strings.CutPrefix(perm, "merchant:")
-	return ok && !strings.HasSuffix(rest, ":read") && !strings.HasSuffix(rest, ":read-own")
+	return ok && !strings.HasSuffix(rest, ":read")
 }
 
 // Platform-operator (root) permissions (#721). AuthKit's #111 rename made

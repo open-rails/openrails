@@ -159,6 +159,11 @@ func ChangeTierPreview(r *httprequest.Request) {
 }
 
 func writeChangeTierError(r *httprequest.Request, err error) {
+	var refusal *api.APIError
+	if errors.As(err, &refusal) {
+		r.APIError(refusal)
+		return
+	}
 	var inFlight *checkout.TierChangeInFlightError
 	if errors.As(err, &inFlight) {
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeTierChangeInFlight, inFlight.Error()).
@@ -167,11 +172,12 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 	}
 	var tierErr *checkout.TierChangeError
 	if errors.As(err, &tierErr) {
-		if tierErr.Code != "" {
-			r.APIError(api.NewAPIError(tierErr.HTTPStatus, api.ErrorTypeForStatus(tierErr.HTTPStatus), tierErr.Code, tierErr.Message))
-			return
-		}
-		r.ErrorJSON(tierErr.HTTPStatus, tierErr.Message)
+		r.ErrorCode(tierErr.Code, tierErr.Message)
+		return
+	}
+	var declined *checkout.TierChangeDeclinedError
+	if errors.As(err, &declined) {
+		r.APIError(railPaymentRefusalError(declined.Rail, declined.FailureCode, declined.Reason))
 		return
 	}
 
@@ -188,10 +194,6 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 	switch {
 	case errors.Is(err, checkout.ErrTierChangeNoSubscription):
 		r.ErrorCode(billing.CodeResourceNotFound, "no active subscription found")
-	case errors.Is(err, checkout.ErrTierChangeNotSupported):
-		r.ErrorCode(billing.CodeInvalidParam, err.Error())
-	case errors.Is(err, checkout.ErrTierChangeBlocked):
-		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrTierChangePending), errors.Is(err, checkout.ErrCheckoutProcessing):
 		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrTierChangeSameProduct):

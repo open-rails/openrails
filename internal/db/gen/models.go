@@ -91,20 +91,10 @@ type BillingCardAttemptFailure struct {
 	Failures   int64
 }
 
-// Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.
-type BillingCatalog struct {
-	ID           uuid.UUID
-	MerchantID   uuid.UUID
-	OwnerSubject *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
 // Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL. Retention: permanent, never pruned.
 type BillingCatalogApplication struct {
 	MerchantID      uuid.UUID
 	ApplicationID   string
-	CatalogID       uuid.UUID
 	SchemaVersion   int64
 	RequestSha256   []byte
 	BaseRevision    int64
@@ -852,7 +842,7 @@ type BillingOperationAuthorization struct {
 type BillingPayment struct {
 	ID      uuid.UUID
 	PriceID uuid.UUID
-	// How the money arrived: rail (through a PSP), manual (recorded by the merchant) or admin (an operator comp). Off-rail rows have no rail and no PSP.
+	// How the money arrived: rail (through a PSP) or manual (recorded by the merchant). Manual rows have no rail and no PSP.
 	Channel       string
 	Rail          *string
 	TransactionID string
@@ -1064,7 +1054,6 @@ type BillingProduct struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-	CatalogID  uuid.UUID
 }
 
 // Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.

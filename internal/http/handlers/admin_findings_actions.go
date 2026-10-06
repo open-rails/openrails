@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -39,7 +40,7 @@ import (
 // finding OPEN with the compensation state documented.
 
 // findingParamError marks operator-fixable input problems (bad/missing
-// params, unsupported rail) — surfaced as 400 rather than 502.
+// params, unsupported rail).
 type findingParamError struct{ msg string }
 
 func (e *findingParamError) Error() string { return e.msg }
@@ -48,19 +49,22 @@ func paramErrorf(format string, args ...any) error {
 	return &findingParamError{msg: fmt.Sprintf(format, args...)}
 }
 
-// findingActionErrorStatus maps executor errors onto HTTP statuses: operator
-// input problems 400, refund producer statuses pass through, provider-side
-// failures 502.
-func findingActionErrorStatus(err error) int {
-	var pe *findingParamError
-	if errors.As(err, &pe) {
-		return http.StatusBadRequest
+// findingActionRefusal answers a failed approve: operator input problems are
+// invalid_param, a refused refund keeps its code, anything else is
+// finding_action_failed. The finding stays open in every case.
+func findingActionRefusal(err error) *api.APIError {
+	message := "recommendation execution failed; finding remains open: " + err.Error()
+	var param *findingParamError
+	if errors.As(err, &param) {
+		return api.Coded(billing.CodeInvalidParam, message)
 	}
-	var statusErr *adminRefundStatusError
-	if errors.As(err, &statusErr) {
-		return statusErr.Status
+	var refusal *api.APIError
+	if errors.As(err, &refusal) {
+		out := *refusal
+		out.Message = message
+		return &out
 	}
-	return http.StatusBadGateway
+	return api.Coded(codeFindingActionFailed, message)
 }
 
 func compactJSON(v any) string {

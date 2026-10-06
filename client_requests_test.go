@@ -310,7 +310,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"price":        func() error { _, err := c.GetPrice(ctx, billing.PriceID{}, billing.GetPriceParams{}); return err },
 		"update price": func() error { _, err := c.UpdatePrice(ctx, billing.PriceID{}, billing.UpdatePriceParams{}); return err },
-		"catalog":      func() error { _, err := c.GetCatalog(ctx, billing.CatalogID{}); return err },
 		"rate overrides": func() error {
 			_, err := c.ListRateOverrides(ctx, billing.CustomerID{}, billing.PageRequest{})
 			return err

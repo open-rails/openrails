@@ -203,35 +203,6 @@ func TestExtraHeadersCannotDuplicateSelectionOrAuthority(t *testing.T) {
 	}
 }
 
-func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
-	var calls atomic.Int64
-	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		require.Equal(t, "/v1/catalog/products", r.URL.Path)
-		require.Equal(t, "Y2hhbm5lbC_DqQ", r.Header.Get("OpenRails-Catalog-Owner"), "owner is base64url of the UTF-8 subject")
-		_, _ = w.Write([]byte(`{}`))
-	})
-	owner, err := client.ForCatalogOwner("channel/é")
-	require.NoError(t, err)
-	_, err = owner.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post", DisplayName: "Post"})
-	require.NoError(t, err)
-
-	var denied *billing.StatusError
-	require.ErrorAs(t, readConfiguration(owner, t.Context()), &denied)
-	require.Equal(t, http.StatusForbidden, denied.Status)
-	_, err = owner.ApplyCatalog(t.Context(), catalogApplication())
-	require.ErrorIs(t, err, billing.ErrDenied)
-	_, err = owner.GetCatalogRevision(t.Context())
-	require.ErrorIs(t, err, billing.ErrDenied)
-	_, err = owner.ForCatalogOwner("someone-else")
-	require.ErrorIs(t, err, billing.ErrDenied)
-	for _, subject := range []string{"", "a\x00b", "\xff"} {
-		_, err := client.ForCatalogOwner(subject)
-		require.ErrorIs(t, err, billing.ErrInvalid)
-	}
-	require.EqualValues(t, 1, calls.Load())
-}
-
 // Per-operation options never mutate the shared Client under concurrency.
 func TestConcurrentSelectionDoesNotContaminate(t *testing.T) {
 	var requests atomic.Int64

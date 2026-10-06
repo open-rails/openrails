@@ -15,18 +15,17 @@ import (
 const createProduct = `-- name: CreateProduct :execrows
 
 INSERT INTO billing.products (
-    id, merchant_id, catalog_id, key, display_name, description, entitlements_spec,
+    id, merchant_id, key, display_name, description, entitlements_spec,
     tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
     $1,
     $4::uuid,
-    $5::uuid,
-    $2, $3, $6, $7,
-    $8,
-    COALESCE(NULLIF($9::int, 0), 0),
-    $10::boolean,
-    COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $2, $3, $5, $6,
+    $7,
+    COALESCE(NULLIF($8::int, 0), 0),
+    $9::boolean,
+    COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -35,7 +34,6 @@ type CreateProductParams struct {
 	Key              string
 	DisplayName      string
 	MerchantID       uuid.UUID
-	CatalogID        *uuid.UUID
 	Description      *string
 	EntitlementsSpec []byte
 	TierGroup        *string
@@ -52,7 +50,6 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 		arg.Key,
 		arg.DisplayName,
 		arg.MerchantID,
-		arg.CatalogID,
 		arg.Description,
 		arg.EntitlementsSpec,
 		arg.TierGroup,
@@ -68,17 +65,16 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products WHERE ($2::uuid IS NULL OR products.catalog_id=$2::uuid) AND products.merchant_id = $3::uuid AND id = $1
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1
 `
 
 type GetProductByIDParams struct {
 	ID         uuid.UUID
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 }
 
 func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) (BillingProduct, error) {
-	row := q.db.QueryRow(ctx, getProductByID, arg.ID, arg.CatalogID, arg.MerchantID)
+	row := q.db.QueryRow(ctx, getProductByID, arg.ID, arg.MerchantID)
 	var i BillingProduct
 	err := row.Scan(
 		&i.ID,
@@ -92,23 +88,21 @@ func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
-		&i.CatalogID,
 	)
 	return i, err
 }
 
 const getProductByKey = `-- name: GetProductByKey :one
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products WHERE ($2::uuid IS NULL OR products.catalog_id=$2::uuid) AND products.merchant_id = $3::uuid AND key = $1
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1
 `
 
 type GetProductByKeyParams struct {
 	Key        string
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 }
 
 func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams) (BillingProduct, error) {
-	row := q.db.QueryRow(ctx, getProductByKey, arg.Key, arg.CatalogID, arg.MerchantID)
+	row := q.db.QueryRow(ctx, getProductByKey, arg.Key, arg.MerchantID)
 	var i BillingProduct
 	err := row.Scan(
 		&i.ID,
@@ -122,22 +116,16 @@ func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
-		&i.CatalogID,
 	)
 	return i, err
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND NOT archived
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
 `
 
-type ListActiveProductsParams struct {
-	CatalogID  *uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) ListActiveProducts(ctx context.Context, arg ListActiveProductsParams) ([]BillingProduct, error) {
-	rows, err := q.db.Query(ctx, listActiveProducts, arg.CatalogID, arg.MerchantID)
+func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
+	rows, err := q.db.Query(ctx, listActiveProducts, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +145,6 @@ func (q *Queries) ListActiveProducts(ctx context.Context, arg ListActiveProducts
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -170,17 +157,12 @@ func (q *Queries) ListActiveProducts(ctx context.Context, arg ListActiveProducts
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products
-WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products
+WHERE products.merchant_id = $1::uuid
 `
 
-type ListAllProductsParams struct {
-	CatalogID  *uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) ListAllProducts(ctx context.Context, arg ListAllProductsParams) ([]BillingProduct, error) {
-	rows, err := q.db.Query(ctx, listAllProducts, arg.CatalogID, arg.MerchantID)
+func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
+	rows, err := q.db.Query(ctx, listAllProducts, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +182,6 @@ func (q *Queries) ListAllProducts(ctx context.Context, arg ListAllProductsParams
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -213,17 +194,16 @@ func (q *Queries) ListAllProducts(ctx context.Context, arg ListAllProductsParams
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND id = ANY($3::uuid[])
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
 
 type ListProductsByIDsParams struct {
-	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Ids        []uuid.UUID
 }
 
 func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsParams) ([]BillingProduct, error) {
-	rows, err := q.db.Query(ctx, listProductsByIDs, arg.CatalogID, arg.MerchantID, arg.Ids)
+	rows, err := q.db.Query(ctx, listProductsByIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +223,6 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -256,19 +235,17 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 }
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM billing.products
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products
 WHERE products.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR products.catalog_id=$2::uuid)
-  AND ($3::boolean IS NULL OR archived = $3::boolean)
-  AND ($4::text = '' OR lower(btrim(tier_group)) = lower(btrim($4::text)))
-  AND ($5::timestamptz IS NULL OR (created_at, id) < ($5::timestamptz, $6::uuid))
+  AND ($2::boolean IS NULL OR archived = $2::boolean)
+  AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
+  AND ($4::timestamptz IS NULL OR (created_at, id) < ($4::timestamptz, $5::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $7::int
+LIMIT $6::int
 `
 
 type ListProductsFilteredParams struct {
 	MerchantID uuid.UUID
-	CatalogID  *uuid.UUID
 	Archived   *bool
 	TierGroup  string
 	AfterAt    *time.Time
@@ -280,7 +257,6 @@ type ListProductsFilteredParams struct {
 func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilteredParams) ([]BillingProduct, error) {
 	rows, err := q.db.Query(ctx, listProductsFiltered,
 		arg.MerchantID,
-		arg.CatalogID,
 		arg.Archived,
 		arg.TierGroup,
 		arg.AfterAt,
@@ -306,7 +282,6 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
-			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -327,8 +302,8 @@ UPDATE billing.products SET
     tier_rank = COALESCE($8::int, tier_rank),
     archived = COALESCE($9::boolean, archived),
     updated_at = now()
-WHERE ($10::uuid IS NULL OR products.catalog_id=$10::uuid) AND products.merchant_id = $11::uuid AND id = $12::uuid
-RETURNING id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id
+WHERE products.merchant_id = $10::uuid AND id = $11::uuid
+RETURNING id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id
 `
 
 type PatchProductParams struct {
@@ -341,7 +316,6 @@ type PatchProductParams struct {
 	TierGroup        *string
 	TierRank         *int32
 	Archived         *bool
-	CatalogID        *uuid.UUID
 	MerchantID       uuid.UUID
 	ID               uuid.UUID
 }
@@ -358,7 +332,6 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Bil
 		arg.TierGroup,
 		arg.TierRank,
 		arg.Archived,
-		arg.CatalogID,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -375,7 +348,6 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Bil
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
-		&i.CatalogID,
 	)
 	return i, err
 }

@@ -30,7 +30,7 @@ var pspsRoutes = []Route{
 	// or#288: which PSP a checkout would get, and why. A projection of the
 	// PSP catalog, so it takes the same read.
 	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
-		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("catalog_scope_mismatch", "invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
+		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
 	// A refresh rewrites the subscription mirrors from provider truth.
 	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
 		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},

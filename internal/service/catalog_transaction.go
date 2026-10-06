@@ -3,19 +3,18 @@ package service
 import (
 	"context"
 	"fmt"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // catalogMutation fences every service authoring operation in merchant-first
 // lock order. Nested writes share one local transaction and cannot commit early.
-// A declared catalog refuses them outside a creator's own catalog.
+// A declared catalog refuses them.
 func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (T, error) {
-	_, owned := catalogscope.FromContext(ctx)
-	return lockedCatalogWrite(ctx, s, !owned, fn)
+	return lockedCatalogWrite(ctx, s, true, fn)
 }
 
 // payerTermsMutation is catalogMutation for a payer's negotiated rates, which
@@ -92,9 +91,6 @@ func (s *Service) checkCatalogWritePolicy(ctx context.Context) error {
 	}
 	if err := catalogpolicy.Check(ctx, s.rt.Config); err != nil {
 		return err
-	}
-	if _, owned := catalogscope.FromContext(ctx); owned {
-		return nil
 	}
 	return catalogpolicy.CheckDeclared(ctx, s.rt.Config)
 }

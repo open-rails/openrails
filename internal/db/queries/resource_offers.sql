@@ -26,7 +26,6 @@ CROSS JOIN LATERAL (
  FROM billing.products product
  JOIN billing.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
  WHERE product.merchant_id=sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(catalog_id)::uuid IS NULL OR product.catalog_id=sqlc.narg(catalog_id)::uuid)
   AND NOT product.archived AND NOT price.archived
   AND product.entitlements_spec ? wanted.entitlement
   AND ((sqlc.arg(kind)::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
