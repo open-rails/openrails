@@ -1129,16 +1129,17 @@ CREATE TABLE billing.products (
     display_name text NOT NULL,
     description text,
     entitlements_spec jsonb,
-    tier_group character varying(100),
+    tier_group text,
     tier_rank integer NOT NULL,
     archived boolean NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
+    CONSTRAINT products_tier_group_check CHECK (char_length(tier_group) BETWEEN 1 AND 100),
     CONSTRAINT products_entitlement_hours_nonnegative_check CHECK (NOT jsonb_path_exists(coalesce(entitlements_spec, '{}'::jsonb), '$.* ? (@.type() == "number" && @ < 0)'))
 );
 COMMENT ON TABLE billing.products IS 'Product definitions that can be purchased or subscribed to';
-COMMENT ON COLUMN billing.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.';
+COMMENT ON COLUMN billing.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). NULL: in no group (an empty name is stored as NULL). Products in same group require upgrade/downgrade, not parallel ownership.';
 COMMENT ON COLUMN billing.products.tier_rank IS 'Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.';
 
 ALTER TABLE ONLY billing.products
@@ -1679,7 +1680,7 @@ CREATE TABLE billing.subscriptions (
     gateway_response jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    tier_group character varying(100),
+    tier_group text,
     deletion_scheduled_at timestamp with time zone,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,

@@ -3,7 +3,6 @@ package merchantarchive
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -173,27 +172,19 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 		for _, c := range strings.Fields(omittedColumns[p.Name]) {
 			omitted[c] = true
 		}
-		rows, err := tx.Query(ctx, `SELECT a.attname,t.typname,a.atttypmod FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_type t ON t.oid=a.atttypid
+		rows, err := tx.Query(ctx, `SELECT a.attname,t.typname FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_type t ON t.oid=a.atttypid
 			WHERE c.relname=$1 AND c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='billing.merchants'::regclass) AND a.attnum>0 AND NOT a.attisdropped`, p.Name)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var name, typ string
-			var mod int32
-			if err := rows.Scan(&name, &typ, &mod); err != nil {
+			if err := rows.Scan(&name, &typ); err != nil {
 				rows.Close()
 				return err
 			}
 			if c, ok := wanted[name]; ok {
 				expected := map[string]string{"bytea": "bytea", "uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "smallint": "int2", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz"}[c.Type]
-				if strings.HasPrefix(c.Type, "character varying(") {
-					expected = "varchar"
-					n, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(c.Type, "character varying("), ")"), 10, 32)
-					if err != nil || int64(mod) != n+4 {
-						expected = "invalid"
-					}
-				}
 				if c.Type != "" && typ != expected {
 					rows.Close()
 					return &Error{Code: "unsupported_state", Table: p.Name, Err: fmt.Errorf("column type changed: %s", name)}

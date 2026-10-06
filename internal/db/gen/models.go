@@ -1046,7 +1046,7 @@ type BillingProduct struct {
 	DisplayName      string
 	Description      *string
 	EntitlementsSpec []byte
-	// Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.
+	// Semantic group name for mutually-exclusive products (e.g., "premium"). NULL: in no group (an empty name is stored as NULL). Products in same group require upgrade/downgrade, not parallel ownership.
 	TierGroup *string
 	// Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.
 	TierRank   int32

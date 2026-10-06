@@ -99,7 +99,7 @@ func ValidateValues(p Profile, values []*string) error {
 			continue
 		}
 		v := *values[i]
-		if c.Type == "text" || strings.HasPrefix(c.Type, "character varying") {
+		if c.Type == "text" {
 			if !(encodedKey && (c.Name == "idempotency_key" || p.Name == "ledger_transfers" && c.Name == "source_id")) && !safeText(v) {
 				return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
 			}
