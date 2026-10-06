@@ -16,7 +16,7 @@ INSERT INTO billing.subscriptions (
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending'),
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
-    sqlc.arg(rail), sqlc.arg(rail_subscription_id),
+    sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
     sqlc.narg(payment_method_id), sqlc.narg(last_retry_at),
     sqlc.narg(retry_attempts), sqlc.narg(next_retry_at), sqlc.narg(grace_ends_at),
     sqlc.narg(cancel_feedback), sqlc.narg(cancel_type), sqlc.narg(canceled_at),
@@ -40,7 +40,7 @@ UPDATE billing.subscriptions SET
     current_period_starts_at = sqlc.narg(current_period_starts_at),
     current_period_ends_at = sqlc.narg(current_period_ends_at),
     rail = sqlc.arg(rail),
-    rail_subscription_id = sqlc.arg(rail_subscription_id),
+    rail_subscription_id = NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
@@ -74,7 +74,7 @@ UPDATE billing.subscriptions SET
     current_period_starts_at = sqlc.narg(current_period_starts_at),
     current_period_ends_at = sqlc.narg(current_period_ends_at),
     rail = sqlc.arg(rail),
-    rail_subscription_id = sqlc.arg(rail_subscription_id),
+    rail_subscription_id = NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
@@ -146,7 +146,7 @@ LIMIT 1;
 -- name: GetSubscriptionByPSPSubID :one
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.rail = $1 AND sub.rail_subscription_id = $2
+  AND sub.rail = $1 AND sub.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
   AND sub.deleted_at IS NULL
 LIMIT 1;
 
@@ -155,7 +155,7 @@ LIMIT 1;
 -- UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.rail = $1 AND sub.rail_subscription_id = $2
+  AND sub.rail = $1 AND sub.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
   AND sub.deleted_at IS NULL
 LIMIT 1
 FOR UPDATE;
@@ -185,7 +185,7 @@ UPDATE billing.subscriptions SET
     updated_at = now()
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
   AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_subscription_id = sqlc.arg(rail_subscription_id)
+  AND rail_subscription_id = sqlc.arg(rail_subscription_id)::text
   AND deleted_at IS NULL
   AND payment_method_id IS DISTINCT FROM sqlc.narg(payment_method_id)::uuid;
 

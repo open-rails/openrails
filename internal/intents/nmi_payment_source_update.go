@@ -347,7 +347,7 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 		switch {
 		case lerr == nil:
 			currentTargetPSP = derefUUID(locked.PspID)
-			if ref = strings.TrimSpace(locked.RailCustomerRef); ref == "" {
+			if ref = strings.TrimSpace(models.DerefStr(locked.RailCustomerRef)); ref == "" {
 				refused = ptr(Terminal("target payment method has no rail customer ref; cannot repoint billing"))
 				return nil
 			}

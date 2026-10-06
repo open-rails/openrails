@@ -42,7 +42,7 @@ func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) billin
 	}
 	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
 		Amount: row.Amount, SpentAmount: row.SpentAmount, RemainingAmount: row.RemainingAmount, RevokedAmount: row.RevokedAmount,
-		ExpiredAmount: row.ExpiredAmount, State: state, SourceType: row.SourceType, SourceID: billing.SourceRef(row.SourceType, row.SourceID),
+		ExpiredAmount: row.ExpiredAmount, State: state, SourceType: row.SourceType, SourceID: sourceRef(row.SourceType, row.SourceID),
 		Description: row.Reason, StartsAt: row.StartsAt, ExpiresAt: row.EndsAt, CreatedAt: row.CreatedAt,
 		TerminatedAt: row.TerminatedAt, TerminationReason: row.TerminationReason}
 }
@@ -185,4 +185,13 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		return nil
 	})
 	return result, err
+}
+
+// sourceRef is a grant's prefixed source id, or nil when it has none.
+func sourceRef(sourceType string, id *string) *string {
+	if id == nil {
+		return nil
+	}
+	ref := billing.SourceRef(sourceType, *id)
+	return &ref
 }

@@ -224,7 +224,7 @@ function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
   const removeWebhook = useMutation(adminMutations.deleteWebhook(queryClient))
   return (
     <TableRow className={webhook.enabled === false ? "opacity-60" : undefined}>
-      <TableCell className="py-3 font-medium">{webhook.name}</TableCell>
+      <TableCell className="py-3 font-medium">{webhook.name ?? webhook.destination_host}</TableCell>
       <TableCell className="py-3">
         <Badge variant="secondary">{webhook.format}</Badge>
       </TableCell>
@@ -251,7 +251,7 @@ function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
           <TypedConfirmDialog
             open={confirmOpen}
             onOpenChange={setConfirmOpen}
-            title={`Delete "${webhook.name}"?`}
+            title={`Delete "${webhook.name ?? webhook.destination_host}"?`}
             description="Operational notifications will stop delivering to this webhook. This cannot be undone."
             confirmationWord="DELETE"
             actionLabel="Delete webhook"

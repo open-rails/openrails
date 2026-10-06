@@ -53,14 +53,14 @@ func (w *world) seedAttempts(customerID string, s attemptSeed) {
 			c AS (INSERT INTO billing.rebill_cycles (merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
 				SELECT m.id, s.id, $2::uuid, $3::uuid, $4, $5, $6::timestamptz - (g * interval '1 second') - interval '1 minute', 9990000, 'USD'
 				FROM m, s, generate_series(1, $7::int) g RETURNING id, merchant_id, subscription_id, due_at)
-			INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, cycle_id, subscription_id)
-			SELECT c.merchant_id, $2::uuid, $3::uuid, $4, 'rebill', $5, 'saved', $11, $12, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', c.due_at + interval '1 minute', c.id, c.subscription_id FROM c`),
+			INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, cycle_id, subscription_id, step)
+			SELECT c.merchant_id, $2::uuid, $3::uuid, $4, 'rebill', $5, 'saved', $11, $12, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', c.due_at + interval '1 minute', c.id, c.subscription_id, '' FROM c`),
 			w.slug, customerID, s.psp, s.rail, s.owner, s.at, s.n, s.category, s.reason, s.code, source, via)
 		require.NoError(w.t, err)
 		return
 	}
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at)
-		SELECT m.id, $2::uuid, $3::uuid, $4, $5, $6, $7, $13, $14, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', $11::timestamptz - (g * interval '1 second')
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, step)
+		SELECT m.id, $2::uuid, $3::uuid, $4, $5, $6, $7, $13, $14, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', $11::timestamptz - (g * interval '1 second'), ''
 		FROM billing.merchants m, generate_series(1, $12::int) g WHERE m.slug = $1`),
 		w.slug, customerID, s.psp, s.rail, s.kind, s.owner, s.cardEntry, s.category, s.reason, s.code, s.at, s.n, source, via)
 	require.NoError(w.t, err)

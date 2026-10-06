@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // or#859 §5.2: ONE undo verb over the whole destructive-run ledger.
@@ -160,7 +161,7 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		return UndoPlan{}, fmt.Errorf("load destructive run %s: %w", runID, err)
 	}
 	plan := UndoPlan{
-		RunID: runID, Kind: run.Kind, Status: run.Status, Actor: run.Actor,
+		RunID: runID, Kind: run.Kind, Status: run.Status, Actor: models.DerefStr(run.Actor),
 		StartedAt:  run.StartedAt.UTC(),
 		Scope:      UndoScope{MerchantID: mid, PspID: run.PspID, PspScoped: run.PspID != nil},
 		Restorable: map[string]int64{},

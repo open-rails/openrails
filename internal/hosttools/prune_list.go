@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -78,7 +79,7 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 	for i := range runs {
 		r := &runs[i]
 		fmt.Fprintf(opts.Out, "%s  %-8s  %-9s  actor=%-16s  started=%s  affected=%s\n",
-			r.ID, r.Kind, r.Status, r.Actor, r.StartedAt.UTC().Format("2006-01-02T15:04:05Z"), string(r.Affected))
+			r.ID, r.Kind, r.Status, models.DerefStr(r.Actor), r.StartedAt.UTC().Format("2006-01-02T15:04:05Z"), string(r.Affected))
 	}
 	return nil
 }

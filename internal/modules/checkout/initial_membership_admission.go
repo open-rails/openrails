@@ -136,7 +136,7 @@ func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *Check
 		if err != nil {
 			return err
 		}
-		if saved.CustomerID != customer || !charge.ChargeableOn(saved, target.Scope.ID) || saved.Custodian != models.CustodianPSP || saved.ParkReason != "" || saved.RailCustomerRef != method.RailCustomerRef || saved.RailMethodRef != method.RailMethodRef {
+		if saved.CustomerID != customer || !charge.ChargeableOn(saved, target.Scope.ID) || saved.Custodian != models.CustodianPSP || saved.ParkReason != nil || models.DerefStr(saved.RailCustomerRef) != method.RailCustomerRef || models.DerefStr(saved.RailMethodRef) != method.RailMethodRef {
 			return errors.New("enrollment instrument changed during admission")
 		}
 		coverage, err := purchase.GetUserProductCoverage(ctx, user.ID, product)

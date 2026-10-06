@@ -292,7 +292,7 @@ const listExcessSubscriptionsForPSP = `-- name: ListExcessSubscriptionsForPSP :m
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
-  AND rail_subscription_id <> ''
+  AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL
   AND cardinality($3::text[]) > 0
   AND rail_subscription_id <> ALL($3::text[])
@@ -384,7 +384,7 @@ const listPSPSubscriptionCandidates = `-- name: ListPSPSubscriptionCandidates :m
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
-  AND rail_subscription_id <> ''
+  AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL
 `
 

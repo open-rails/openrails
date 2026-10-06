@@ -556,9 +556,9 @@ CREATE TABLE billing.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     kind text NOT NULL,
-    actor text DEFAULT '' NOT NULL,
+    actor text CHECK (actor <> ''),
     psp_id uuid,
-    mode text DEFAULT '' NOT NULL,
+    mode text,
     rails text[] DEFAULT '{}' NOT NULL,
     window_starts_at timestamp with time zone,
     window_ends_at timestamp with time zone,
@@ -585,10 +585,10 @@ CREATE TABLE billing.maintenance_runs (
          AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
          AND reversed_at IS NULL AND reversed_by IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
         OR (kind IN ('prune','converge_enforce','merchant_purge') AND btrim(actor) <> ''
-         AND mode = '' AND cardinality(rails) = 0 AND window_starts_at IS NULL AND window_ends_at IS NULL
+         AND mode IS NULL AND cardinality(rails) = 0 AND window_starts_at IS NULL AND window_ends_at IS NULL
          AND summary IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
         OR (kind = 'billing_restore' AND actor = 'merchantarchive' AND status IN ('running','completed')
-         AND mode = '' AND cardinality(rails)=0 AND psp_id IS NULL AND NOT dry_run
+         AND mode IS NULL AND cardinality(rails)=0 AND psp_id IS NULL AND NOT dry_run
          AND window_starts_at IS NULL AND window_ends_at IS NULL AND coverage IS NULL AND expected_rows IS NULL
          AND affected IS NULL AND reversed_at IS NULL AND reversed_by IS NULL AND note IS NULL AND error IS NULL
          AND inventory_manifest IS NULL AND inventory_total_rows IS NULL
@@ -597,7 +597,7 @@ CREATE TABLE billing.maintenance_runs (
                   AND summary ?& ARRAY['digest','rows'] AND jsonb_typeof(summary->'digest')='string'
                   AND jsonb_typeof(summary->'rows')='number' AND summary->>'digest' ~ '^[0-9a-f]{64}$' AND (summary->>'rows')::bigint >= 0)))
         OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL
-         AND mode = '' AND cardinality(rails) = 0 AND psp_id IS NULL
+         AND mode IS NULL AND cardinality(rails) = 0 AND psp_id IS NULL
          AND window_starts_at IS NULL AND window_ends_at IS NULL AND NOT dry_run
          AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
          AND reversed_at IS NULL AND reversed_by IS NULL AND summary IS NULL AND error IS NULL
@@ -798,7 +798,7 @@ COMMENT ON TABLE billing.credential_publications IS 'Credential publication rece
 CREATE TABLE billing.merchant_webhooks (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
-    name text DEFAULT ''::text NOT NULL,
+    name text CHECK (name <> ''),
     destination_host text NOT NULL,
     secret_version integer NOT NULL CHECK (secret_version > 0),
     format text NOT NULL,
@@ -1180,7 +1180,7 @@ CREATE TABLE billing.product_archive_operations (
     product_id uuid NOT NULL,
     purchase_action text NOT NULL CHECK (purchase_action IN ('none','refund','review')),
     purchase_window_starts_at timestamptz,
-    reason text NOT NULL DEFAULT '' CHECK (length(reason) <= 500),
+    reason text CHECK (length(reason) BETWEEN 1 AND 500),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
     UNIQUE (merchant_id, idempotency_key),
@@ -1398,21 +1398,21 @@ CREATE TABLE billing.payment_methods (
     psp_id uuid,
     custodian text NOT NULL,
     custodian_id uuid,
-    rail_customer_ref text DEFAULT ''::text NOT NULL,
-    rail_method_ref text DEFAULT ''::text NOT NULL,
-    stored_credential_recurring_ref text DEFAULT ''::text NOT NULL,
-    stored_credential_unscheduled_ref text DEFAULT ''::text NOT NULL,
+    rail_customer_ref text CHECK (rail_customer_ref <> ''),
+    rail_method_ref text CHECK (rail_method_ref <> ''),
+    stored_credential_recurring_ref text CHECK (stored_credential_recurring_ref <> ''),
+    stored_credential_unscheduled_ref text CHECK (stored_credential_unscheduled_ref <> ''),
     card_brand text,
     card_last4 text,
     card_exp_month smallint,
     card_exp_year smallint,
     metadata jsonb,
-    fingerprint text DEFAULT ''::text NOT NULL,
-    network_token_id text DEFAULT ''::text NOT NULL,
-    network_token_status text DEFAULT ''::text NOT NULL,
-    network_token_par text DEFAULT ''::text NOT NULL,
+    fingerprint text CHECK (fingerprint <> ''),
+    network_token_id text CHECK (network_token_id <> ''),
+    network_token_status text,
+    network_token_par text CHECK (network_token_par <> ''),
     charge_via text NOT NULL,
-    park_reason text DEFAULT ''::text NOT NULL,
+    park_reason text CHECK (park_reason <> ''),
     parked_at timestamp with time zone,
     account_updater_checked_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1425,7 +1425,7 @@ CREATE TABLE billing.payment_methods (
     CONSTRAINT payment_methods_card_exp_year_check CHECK (card_exp_year BETWEEN 2000 AND 2199),
     CONSTRAINT payment_methods_card_expiry_pair_check CHECK ((card_exp_month IS NULL) = (card_exp_year IS NULL)),
     CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
-    CONSTRAINT payment_methods_network_token_status_check CHECK ((network_token_status = ANY (ARRAY[''::text, 'active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
+    CONSTRAINT payment_methods_network_token_status_check CHECK ((network_token_status = ANY (ARRAY['active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
 );
 COMMENT ON TABLE billing.payment_methods IS 'A customer''s stored payment instrument.';
 COMMENT ON COLUMN billing.payment_methods.rail IS 'Rail the instrument is charged on: nmi or stripe.';
@@ -1455,12 +1455,12 @@ ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_customer_id_id_key UNIQUE (merchant_id, customer_id, id);
 
 CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text);
-CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
+CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL));
 CREATE INDEX payment_methods_customer_id_created_at_id_idx ON billing.payment_methods USING btree (merchant_id, customer_id, created_at DESC, id DESC);
 CREATE INDEX payment_methods_rail_rail_method_ref_idx ON billing.payment_methods USING btree (rail, rail_method_ref);
 CREATE INDEX payment_methods_psp_id_idx ON billing.payment_methods USING btree (psp_id);
-CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref <> ''::text));
-CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint <> ''::text);
+CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref IS NOT NULL));
+CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint IS NOT NULL);
 CREATE UNIQUE INDEX payment_methods_psp_instrument_key ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT;
 
 ALTER TABLE ONLY billing.payment_methods
@@ -1507,8 +1507,8 @@ CREATE TABLE billing.custody_migrations (
     rail text NOT NULL,
     from_custodian text NOT NULL,
     from_custodian_id uuid,
-    from_rail_customer_ref text DEFAULT ''::text NOT NULL,
-    from_rail_method_ref text DEFAULT ''::text NOT NULL,
+    from_rail_customer_ref text CHECK (from_rail_customer_ref <> ''),
+    from_rail_method_ref text CHECK (from_rail_method_ref <> ''),
     from_psp_id uuid,
     to_custodian text NOT NULL,
     to_custodian_id uuid NOT NULL,
@@ -1516,7 +1516,7 @@ CREATE TABLE billing.custody_migrations (
     to_psp_id uuid,
     exported_at timestamp with time zone,
     outcome text NOT NULL,
-    reason text DEFAULT ''::text NOT NULL,
+    reason text CHECK (reason <> ''),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT custody_migrations_outcome_check CHECK ((outcome = ANY (ARRAY['remapped'::text, 'created'::text]))),
     CONSTRAINT custody_migrations_target_check CHECK (((btrim(to_rail_method_ref) <> ''::text) AND (btrim(to_custodian) <> ''::text)))
@@ -1662,7 +1662,7 @@ CREATE TABLE billing.subscriptions (
     status text NOT NULL,
     rail text NOT NULL,
     collection_policy text NOT NULL,
-    rail_subscription_id text DEFAULT ''::text NOT NULL,
+    rail_subscription_id text CHECK (rail_subscription_id <> ''),
     payment_method_id uuid,
     current_period_starts_at timestamp with time zone,
     current_period_ends_at timestamp with time zone,
@@ -1692,7 +1692,7 @@ CREATE TABLE billing.subscriptions (
     lifecycle_rev bigint DEFAULT 0 NOT NULL,
     row_version bigint DEFAULT 0 NOT NULL,
     dunning_policy jsonb,
-    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id='') OR rail='solana')),
+    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id IS NULL) OR rail='solana')),
     CONSTRAINT subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled') OR (canceled_at IS NOT NULL))),
     CONSTRAINT subscriptions_canceled_has_type_check CHECK (((status <> 'canceled') OR (cancel_type IS NOT NULL))),
     CONSTRAINT subscriptions_canceled_no_retry_schedule_check CHECK (((status <> 'canceled') OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
@@ -1735,7 +1735,7 @@ CREATE INDEX subscriptions_product_id_idx ON billing.subscriptions USING btree (
 CREATE INDEX subscriptions_psp_id_idx ON billing.subscriptions USING btree (merchant_id, psp_id);
 CREATE INDEX subscriptions_rail_rail_subscription_id_idx ON billing.subscriptions USING btree (rail, rail_subscription_id);
 CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status);
-CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_id_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_id_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id IS NOT NULL) AND (deleted_at IS NULL));
 CREATE INDEX subscriptions_current_period_ends_at_engine_due_global_idx ON billing.subscriptions (current_period_ends_at,merchant_id) WHERE collection_policy='engine' AND status IN ('active','past_due') AND deleted_at IS NULL;
 CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id)
     WHERE status IN ('active', 'pending', 'past_due', 'awaiting_method') AND deleted_at IS NULL;
@@ -1839,8 +1839,8 @@ CREATE TABLE billing.reprice_batches (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     kind text DEFAULT 'reprice'::text NOT NULL,
     source_price_id uuid,
-    fallback_policy text DEFAULT ''::text NOT NULL,
-    CONSTRAINT reprice_batches_fallback_check CHECK ((fallback_policy = ANY (ARRAY[''::text, 'keep_grandfathered'::text, 'cancel_at_period_end'::text]))),
+    fallback_policy text,
+    CONSTRAINT reprice_batches_fallback_check CHECK ((fallback_policy = ANY (ARRAY['keep_grandfathered'::text, 'cancel_at_period_end'::text]))),
     CONSTRAINT reprice_batches_kind_check CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text])))
 );
 COMMENT ON TABLE billing.reprice_batches IS 'Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id. Retention: permanent, never pruned.';
@@ -1876,9 +1876,9 @@ CREATE TABLE billing.subscription_reprices (
     canceled_at timestamp with time zone,
     acknowledged_short_notice boolean DEFAULT false NOT NULL,
     kind text NOT NULL,
-    blocked_reason text DEFAULT ''::text NOT NULL,
+    blocked_reason text CHECK (blocked_reason <> ''),
     CONSTRAINT subscription_reprices_applied_has_timestamp_check CHECK (((status <> 'applied'::text) OR (applied_at IS NOT NULL))),
-    CONSTRAINT subscription_reprices_blocked_has_reason_check CHECK (((status <> 'blocked'::text) OR (blocked_reason <> ''::text))),
+    CONSTRAINT subscription_reprices_blocked_has_reason_check CHECK (((status <> 'blocked'::text) OR (blocked_reason IS NOT NULL))),
     CONSTRAINT subscription_reprices_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL))),
     CONSTRAINT subscription_reprices_kind_check CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text]))),
     CONSTRAINT subscription_reprices_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
@@ -2140,8 +2140,8 @@ CREATE TABLE billing.checkout_sessions (
     customer_id uuid NOT NULL,
     price_id uuid NOT NULL,
     offer jsonb NOT NULL,
-    success_url text DEFAULT '' NOT NULL,
-    origin text DEFAULT '' NOT NULL,
+    success_url text CHECK (success_url <> ''),
+    origin text CHECK (origin <> ''),
     attempt integer DEFAULT 0 NOT NULL,
     attempt_id uuid,
     expires_at timestamp with time zone NOT NULL,
@@ -2294,7 +2294,7 @@ CREATE TABLE billing.payment_attempts (
     payment_method_id uuid,
     payment_id uuid,
     provider_intent_id uuid,
-    step text DEFAULT '' NOT NULL,
+    step text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     cycle_id uuid,
     card_bin text,
@@ -2567,7 +2567,7 @@ CREATE TABLE billing.grants (
     product_id uuid,
     kind text NOT NULL,
     source_type text NOT NULL,
-    source_id text DEFAULT ''::text NOT NULL CHECK (octet_length(source_id) <= 255),
+    source_id text CHECK (octet_length(source_id) BETWEEN 1 AND 255),
     payment_id uuid,
     event text NOT NULL,
     supersedes_id uuid,
@@ -2602,9 +2602,9 @@ CREATE INDEX grants_ends_at_idx ON billing.grants USING btree (merchant_id, ends
 CREATE INDEX grants_customer_id_kind_idx ON billing.grants USING btree (merchant_id, customer_id, kind) WHERE (event = 'grant'::text);
 CREATE INDEX grants_created_at_idx ON billing.grants USING btree (merchant_id, created_at) WHERE (kind = 'credit'::text);
 CREATE INDEX grants_payment_id_idx ON billing.grants USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
-CREATE INDEX grants_source_type_source_id_idx ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id <> ''::text);
+CREATE INDEX grants_source_type_source_id_idx ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id IS NOT NULL);
 CREATE INDEX grants_supersedes_id_idx ON billing.grants USING btree (merchant_id, supersedes_id) WHERE (supersedes_id IS NOT NULL);
-CREATE UNIQUE INDEX grants_customer_id_source_id_key ON billing.grants USING btree (merchant_id, customer_id, source_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (source_id <> ''::text));
+CREATE UNIQUE INDEX grants_customer_id_source_id_key ON billing.grants USING btree (merchant_id, customer_id, source_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (source_id IS NOT NULL));
 CREATE UNIQUE INDEX grants_supersedes_id_key ON billing.grants USING btree (merchant_id, supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])));
 CREATE INDEX grants_product_id_idx ON billing.grants USING btree (merchant_id, product_id) WHERE (product_id IS NOT NULL);
 
@@ -2764,11 +2764,11 @@ CREATE TABLE billing.invoker_spend_limits (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     scope text NOT NULL,
-    scope_key text DEFAULT ''::text NOT NULL,
+    scope_key text NOT NULL,
     windows jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    provenance text DEFAULT ''::text NOT NULL,
+    provenance text CHECK (provenance <> ''),
     CONSTRAINT invoker_spend_limits_scope_check CHECK ((scope = ANY (ARRAY['invoker'::text, 'role'::text, 'invoker_tier'::text])))
 );
 COMMENT ON TABLE billing.invoker_spend_limits IS 'Per-invoker spend limits: the payer caps how much a delegated invoker/role can spend of the payer''s money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.';
@@ -3326,28 +3326,28 @@ CREATE TABLE billing.account_updater_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     custodian_id uuid NOT NULL,
-    job_ref text DEFAULT ''::text NOT NULL,
+    job_ref text CHECK (btrim(job_ref) <> ''),
     status text DEFAULT 'pending'::text NOT NULL,
     instruments jsonb NOT NULL,
     result_counts jsonb DEFAULT '{}'::jsonb NOT NULL,
-    failure_reason text DEFAULT ''::text NOT NULL,
+    failure_reason text CHECK (failure_reason <> ''),
     submitted_at timestamp with time zone,
     last_polled_at timestamp with time zone,
     completed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT account_updater_batches_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'submitted'::text, 'completed'::text, 'failed'::text]))),
-    CONSTRAINT account_updater_batches_submitted_has_job_check CHECK (((status <> 'submitted'::text) OR (btrim(job_ref) <> ''::text)))
+    CONSTRAINT account_updater_batches_submitted_has_job_check CHECK (((status <> 'submitted'::text) OR (job_ref IS NOT NULL)))
 );
 COMMENT ON TABLE billing.account_updater_batches IS 'One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.account_updater_batches.job_ref IS 'The custodian-native job id (Basis Theory account-updater job). '''' until the create call is confirmed.';
+COMMENT ON COLUMN billing.account_updater_batches.job_ref IS 'The custodian-native job id (Basis Theory account-updater job). NULL until the create call is confirmed.';
 COMMENT ON COLUMN billing.account_updater_batches.status IS 'pending = assembled, not yet confirmed at the custodian | submitted = the custodian owns it, poll for results | completed = results folded | failed = abandoned (the instruments become due again; nothing is parked on our own malfunction).';
 
 ALTER TABLE ONLY billing.account_updater_batches
     ADD CONSTRAINT account_updater_batches_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX account_updater_batches_status_created_at_idx ON billing.account_updater_batches USING btree (merchant_id, status, created_at);
-CREATE UNIQUE INDEX account_updater_batches_custodian_id_job_ref_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref <> ''::text);
+CREATE UNIQUE INDEX account_updater_batches_custodian_id_job_ref_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref IS NOT NULL);
 CREATE UNIQUE INDEX account_updater_batches_custodian_id_key ON billing.account_updater_batches USING btree (merchant_id, custodian_id) WHERE (status = ANY (ARRAY['pending'::text, 'submitted'::text]));
 
 ALTER TABLE ONLY billing.account_updater_batches
@@ -3375,7 +3375,7 @@ CREATE TABLE billing.nmi_history_months (
     month_at timestamp with time zone NOT NULL,
     kind text NOT NULL,
     category text NOT NULL,
-    reason text DEFAULT ''::text NOT NULL,
+    reason text NOT NULL,
     authorizations bigint NOT NULL,
     CONSTRAINT nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month_at, kind, category, reason),
     CONSTRAINT nmi_history_months_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
@@ -3573,17 +3573,17 @@ CREATE TABLE billing.notifications (
     data jsonb NOT NULL,
     recipient_kind text DEFAULT 'customer' NOT NULL,
     read_at timestamp with time zone,
-    severity text DEFAULT '' NOT NULL,
-    title text DEFAULT '' NOT NULL,
-    body text DEFAULT '' NOT NULL,
-    link text DEFAULT '' NOT NULL,
+    severity text CHECK (severity <> ''),
+    title text CHECK (title <> ''),
+    body text CHECK (body <> ''),
+    link text CHECK (link <> ''),
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid,
     emailed_at timestamp with time zone,
     CONSTRAINT notifications_recipient_check CHECK (
-        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity = '' AND title = '' AND body = '' AND link = '')
-        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND title <> '')
+        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity IS NULL AND title IS NULL AND body IS NULL AND link IS NULL)
+        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND severity IS NOT NULL AND title IS NOT NULL AND body IS NOT NULL)
     )
 );
 COMMENT ON TABLE billing.notifications IS 'Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox. Retention: rows are deleted 90 days after created_at once read, 180 days if never read.';
@@ -3664,9 +3664,9 @@ CREATE TABLE billing.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     finding_type text NOT NULL,
-    rail text DEFAULT '' NOT NULL,
+    rail text,
     psp_id uuid,
-    openrails_resource_type text DEFAULT '' NOT NULL,
+    openrails_resource_type text,
     openrails_resource_id text,
     external_resource_id text,
     field text,
@@ -3695,10 +3695,10 @@ CREATE TABLE billing.reconciliation_findings (
          AND (finding_type = 'catalog.field_drift' OR finding_type LIKE 'catalog.%_in_' || rail)
          AND first_seen_run IS NULL AND last_seen_run IS NULL
          AND subject_key = jsonb_build_array(psp_id::text,openrails_resource_type,coalesce(openrails_resource_id,''),coalesce(external_resource_id,''),coalesce(field,''))::text)
-        OR (finding_type NOT LIKE 'catalog.%' AND openrails_resource_type=''
+        OR (finding_type NOT LIKE 'catalog.%' AND openrails_resource_type IS NULL
          AND openrails_resource_id IS NULL AND external_resource_id IS NULL AND field IS NULL
          AND openrails_value IS NULL AND external_value IS NULL
-         AND ((rail='' AND psp_id IS NULL) OR (finding_type LIKE 'pull.%' AND rail<>'' AND psp_id IS NOT NULL)))
+         AND ((rail IS NULL AND psp_id IS NULL) OR (finding_type LIKE 'pull.%' AND rail IS NOT NULL AND psp_id IS NOT NULL)))
     ),
     CONSTRAINT reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text])))),
     CONSTRAINT reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL)))),

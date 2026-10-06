@@ -50,7 +50,7 @@ func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg Accep
 const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
 INSERT INTO billing.payment_methods
 (id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,created_at,updated_at)
-VALUES($1,$2,$3,NULL,'nmi','hyperswitch',$4,$5,$6,$7::text,$8::text,$9::smallint,$10::smallint,'pan_proxy',$11,$11)
+VALUES($1,$2,$3,NULL,'nmi','hyperswitch',$4,NULLIF($5::text,''),$6::text,$7::text,$8::text,$9::smallint,$10::smallint,'pan_proxy',$11,$11)
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=billing.payment_methods.id
 WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id

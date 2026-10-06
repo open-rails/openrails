@@ -6,6 +6,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // ListSpendDelegations lists the delegations that let invokers spend a
@@ -73,7 +74,7 @@ func SetSpendDelegation(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	delegation := billing.SpendDelegation{Scope: scope, ScopeKey: key, Windows: params.Windows, Provenance: params.Provenance}
+	delegation := billing.SpendDelegation{Scope: scope, ScopeKey: key, Windows: params.Windows, Provenance: normalize.OptionalString(params.Provenance)}
 	set, err := svc.SetInvokerSpendLimit(r.Request.Context(), customer, delegation)
 	if err != nil {
 		writeMoneyError(r, err, "spend delegation update failed")

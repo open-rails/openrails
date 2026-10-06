@@ -79,7 +79,7 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 		require.Equal(t, tc.ok, tc.in.Validate() == nil, tc.name)
 	}
 
-	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: &psp, Custodian: models.CustodianPSP, RailCustomerRef: " vault ", RailMethodRef: "billing", StoredCredentialRecurringRef: " rec ", StoredCredentialUnscheduledRef: "unsch"}
+	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: &psp, Custodian: models.CustodianPSP, RailCustomerRef: new(" vault "), RailMethodRef: new("billing"), StoredCredentialRecurringRef: new(" rec "), StoredCredentialUnscheduledRef: new("unsch")}
 	frozen := FreezeInstrument(method, psp)
 	require.Equal(t, "vault", frozen.RailCustomerRef)
 	require.Equal(t, "rec", frozen.StoredCredentialRecurringRef)
@@ -90,18 +90,18 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 
 	// Agreements keep independent credential sequences: only the charged one must match.
 	changed := method
-	changed.StoredCredentialUnscheduledRef = "other"
+	changed.StoredCredentialUnscheduledRef = new("other")
 	require.NoError(t, frozen.Matches(changed, AgreementRecurring))
 	require.ErrorIs(t, frozen.Matches(changed, AgreementUnscheduled), ErrInstrumentChanged)
 
 	for name, mutate := range map[string]func(*gen.BillingPaymentMethod){
 		"account":  func(m *gen.BillingPaymentMethod) { other := uuid.New(); m.PspID = &other },
-		"customer": func(m *gen.BillingPaymentMethod) { m.RailCustomerRef = "vault2" },
-		"method":   func(m *gen.BillingPaymentMethod) { m.RailMethodRef = "billing2" },
+		"customer": func(m *gen.BillingPaymentMethod) { m.RailCustomerRef = new("vault2") },
+		"method":   func(m *gen.BillingPaymentMethod) { m.RailMethodRef = new("billing2") },
 		"custody": func(m *gen.BillingPaymentMethod) {
 			m.Custodian, m.CustodianID = models.CustodianBasisTheory, &custodian
 		},
-		"recurring": func(m *gen.BillingPaymentMethod) { m.StoredCredentialRecurringRef = "rec2" },
+		"recurring": func(m *gen.BillingPaymentMethod) { m.StoredCredentialRecurringRef = new("rec2") },
 	} {
 		m := method
 		mutate(&m)

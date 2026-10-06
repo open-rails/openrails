@@ -5,6 +5,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // View projects a customer's own subscription onto the shared DTO, with the
@@ -25,7 +26,7 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Ti
 		CollectionPolicy: string(sub.CollectionPolicy),
 		LastRetryAt:      sub.LastRetryAt, RetryAttempts: sub.RetryAttempts, NextRetryAt: sub.NextRetryAt, GraceEndsAt: sub.GraceEndsAt, DeletionScheduledAt: sub.DeletionScheduledAt,
 		ID: billing.SubscriptionID(sub.ID), CustomerID: billing.CustomerID(sub.CustomerID), ProductID: billing.ProductID(sub.ProductID), PriceID: billing.PriceID(sub.PriceID),
-		PSPID: billing.PSPID(sub.PspID), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, Status: billing.SubscriptionStatus(sub.Status),
+		PSPID: billing.PSPID(sub.PspID), Rail: string(sub.Rail), RailSubscriptionID: normalize.OptionalString(sub.RailSubscriptionID), Status: billing.SubscriptionStatus(sub.Status),
 		StartedAt: sub.StartedAt, EndedAt: sub.EndedAt, CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt, CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt,
 		CanceledAt: sub.CanceledAt, CancelFeedback: sub.CancelFeedback, CreatedAt: sub.CreatedAt, UpdatedAt: sub.UpdatedAt,
 		PaymentMethodID: (*billing.PaymentMethodID)(sub.PaymentMethodID),

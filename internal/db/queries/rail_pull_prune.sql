@@ -18,7 +18,7 @@
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_subscription_id <> ''
+  AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL
   AND cardinality(sqlc.arg(present_ids)::text[]) > 0
   AND rail_subscription_id <> ALL(sqlc.arg(present_ids)::text[]);
@@ -29,7 +29,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_subscription_id <> ''
+  AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL;
 
 -- name: ListExcessPaymentsForPSP :many

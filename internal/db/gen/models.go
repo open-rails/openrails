@@ -15,13 +15,13 @@ type BillingAccountUpdaterBatch struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	CustodianID uuid.UUID
-	// The custodian-native job id (Basis Theory account-updater job). '' until the create call is confirmed.
-	JobRef string
+	// The custodian-native job id (Basis Theory account-updater job). NULL until the create call is confirmed.
+	JobRef *string
 	// pending = assembled, not yet confirmed at the custodian | submitted = the custodian owns it, poll for results | completed = results folded | failed = abandoned (the instruments become due again; nothing is parked on our own malfunction).
 	Status        string
 	Instruments   []byte
 	ResultCounts  []byte
-	FailureReason string
+	FailureReason *string
 	SubmittedAt   *time.Time
 	LastPolledAt  *time.Time
 	CompletedAt   *time.Time
@@ -175,8 +175,8 @@ type BillingCheckoutSession struct {
 	CustomerID uuid.UUID
 	PriceID    uuid.UUID
 	Offer      []byte
-	SuccessUrl string
-	Origin     string
+	SuccessUrl *string
+	Origin     *string
 	Attempt    int32
 	AttemptID  *uuid.UUID
 	ExpiresAt  time.Time
@@ -278,9 +278,9 @@ type BillingCustodyMigration struct {
 	FromCustodian   string
 	FromCustodianID *uuid.UUID
 	// The PSP-scope vault handle the instrument had BEFORE the flip (NMI customer_vault_id). Retained on the payment_methods row too — this is the copy that survives a later re-remap.
-	FromRailCustomerRef string
+	FromRailCustomerRef *string
 	// The instrument-scope handle before the flip (NMI billing_id; empty for the one-vault-per-card default).
-	FromRailMethodRef string
+	FromRailMethodRef *string
 	FromPspID         *uuid.UUID
 	ToCustodian       string
 	ToCustodianID     uuid.UUID
@@ -291,7 +291,7 @@ type BillingCustodyMigration struct {
 	ExportedAt *time.Time
 	// remapped = an existing instrument changed custody (same payment_method_id, subscriptions untouched); created = the export carried a card with no local instrument and the operator declared its customer.
 	Outcome   string
-	Reason    string
+	Reason    *string
 	CreatedAt time.Time
 }
 
@@ -401,7 +401,7 @@ type BillingGrant struct {
 	ProductID  *uuid.UUID
 	Kind       string
 	SourceType string
-	SourceID   string
+	SourceID   *string
 	PaymentID  *uuid.UUID
 	// Grant roots a grant; revoke/expire/supersede are new rows referencing it via supersedes_id. The grant row is never updated.
 	Event        string
@@ -554,7 +554,7 @@ type BillingInvokerSpendLimit struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	// Opaque caller-supplied provenance reference, e.g. a signed-document digest. Stored verbatim, returned on reads; never interpreted.
-	Provenance string
+	Provenance *string
 }
 
 // Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
@@ -606,9 +606,9 @@ type BillingMaintenanceRun struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	Kind           string
-	Actor          string
+	Actor          *string
 	PspID          *uuid.UUID
-	Mode           string
+	Mode           *string
 	Rails          []string
 	WindowStartsAt *time.Time
 	WindowEndsAt   *time.Time
@@ -724,7 +724,7 @@ type BillingMerchantSlugAlias struct {
 type BillingMerchantWebhook struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
-	Name            string
+	Name            *string
 	DestinationHost string
 	SecretVersion   int32
 	Format          string
@@ -798,10 +798,10 @@ type BillingNotification struct {
 	Data          []byte
 	RecipientKind string
 	ReadAt        *time.Time
-	Severity      string
-	Title         string
-	Body          string
-	Link          string
+	Severity      *string
+	Title         *string
+	Body          *string
+	Link          *string
 	CreatedAt     time.Time
 	MerchantID    uuid.UUID
 	CustomerID    *uuid.UUID
@@ -941,13 +941,13 @@ type BillingPaymentMethod struct {
 	Custodian   string
 	CustodianID *uuid.UUID
 	// Customer-scope rail handle (NMI customer_vault_id, one per card); empty when the customer scope lives in psp_customers (Stripe).
-	RailCustomerRef string
+	RailCustomerRef *string
 	// Instrument-scope handle: NMI billing_id, Stripe pm_, or the custodian token.
-	RailMethodRef string
+	RailMethodRef *string
 	// Replay reference of the recurring card-network agreement (NMI: the transactionid of its initial customer-initiated charge). Empty until captured; written once.
-	StoredCredentialRecurringRef string
+	StoredCredentialRecurringRef *string
 	// Replay reference of the unscheduled card-network agreement. Empty until captured; written once.
-	StoredCredentialUnscheduledRef string
+	StoredCredentialUnscheduledRef *string
 	// Card brand as the provider or custodian reports it.
 	CardBrand *string
 	// Last four digits of the card number.
@@ -959,17 +959,17 @@ type BillingPaymentMethod struct {
 	// Billing details the customer entered with the card.
 	Metadata []byte
 	// Custodian-issued stable fingerprint of the card number, for dedup; empty when the custodian issues none.
-	Fingerprint string
+	Fingerprint *string
 	// Custodian network token id; empty when none is provisioned.
-	NetworkTokenID string
+	NetworkTokenID *string
 	// Network token lifecycle status; empty when none is provisioned.
-	NetworkTokenStatus string
+	NetworkTokenStatus *string
 	// Payment account reference from network token provisioning.
-	NetworkTokenPar string
+	NetworkTokenPar *string
 	// How a custodian card reaches the processor: pan_proxy or network_token.
 	ChargeVia string
 	// Non-empty when the instrument is parked (vault-side problem): charges fail loudly and nothing is canceled because of it.
-	ParkReason string
+	ParkReason *string
 	// When the instrument was parked; NULL when it is not.
 	ParkedAt *time.Time
 	// When the instrument was last submitted to an account-updater batch; NULL when never.
@@ -1065,7 +1065,7 @@ type BillingProductArchiveOperation struct {
 	ProductID              uuid.UUID
 	PurchaseAction         string
 	PurchaseWindowStartsAt *time.Time
-	Reason                 string
+	Reason                 *string
 	CreatedAt              time.Time
 }
 
@@ -1219,10 +1219,10 @@ type BillingReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	FindingType string
-	Rail        string
+	Rail        *string
 	// Catalog and pull.* findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.
 	PspID                 *uuid.UUID
-	OpenrailsResourceType string
+	OpenrailsResourceType *string
 	OpenrailsResourceID   *string
 	ExternalResourceID    *string
 	Field                 *string
@@ -1276,7 +1276,7 @@ type BillingRepriceBatch struct {
 	// The retired plan's price for a plan_change batch (the cohort selector); NULL for price-key batches.
 	SourcePriceID *uuid.UUID
 	// Operator's choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.
-	FallbackPolicy string
+	FallbackPolicy *string
 }
 
 // Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
@@ -1349,7 +1349,7 @@ type BillingSubscription struct {
 	Status                string
 	Rail                  string
 	CollectionPolicy      string
-	RailSubscriptionID    string
+	RailSubscriptionID    *string
 	PaymentMethodID       *uuid.UUID
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
@@ -1403,7 +1403,7 @@ type BillingSubscriptionReprice struct {
 	// 'reprice' = same-product price move; 'plan_change' = cross-product migration — the renewal-boundary pickup also moves product_id and cuts entitlement/credit snapshots over.
 	Kind string
 	// Why this row could not be auto-scheduled (rail_requires_user_action, missing rail config, rail push failure). Only set when status=blocked.
-	BlockedReason string
+	BlockedReason *string
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

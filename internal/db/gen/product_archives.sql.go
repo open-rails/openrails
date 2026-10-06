@@ -30,7 +30,7 @@ type GetProductArchiveByIDRow struct {
 	ProductKey             string
 	PurchaseAction         string
 	PurchaseWindowStartsAt *time.Time
-	Reason                 string
+	Reason                 *string
 	CreatedAt              time.Time
 	RequestSha256          []byte
 }
@@ -69,7 +69,7 @@ type GetProductArchiveByKeyRow struct {
 	ProductKey             string
 	PurchaseAction         string
 	PurchaseWindowStartsAt *time.Time
-	Reason                 string
+	Reason                 *string
 	CreatedAt              time.Time
 	RequestSha256          []byte
 }
@@ -128,7 +128,7 @@ func (q *Queries) GetPurchaseReviewBySubject(ctx context.Context, arg GetPurchas
 const insertProductArchive = `-- name: InsertProductArchive :exec
 INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchase_window_starts_at, reason)
 VALUES ($1::uuid, $2::text, $3::bytea, $4::uuid,
-        $5::text, $6::timestamptz, $7::text)
+        $5::text, $6::timestamptz, NULLIF($7::text, ''))
 `
 
 type InsertProductArchiveParams struct {

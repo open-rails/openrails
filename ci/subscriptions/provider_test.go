@@ -98,7 +98,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		require.NotNil(t, sub.GraceEndsAt)
 	}
 	require.Equal(t, status, string(sub.Status))
-	require.Equal(t, l.railSub, sub.RailSubscriptionID)
+	require.Equal(t, l.railSub, str(sub.RailSubscriptionID))
 	wantPolicy := "provider"
 	if rail == "nmi" {
 		wantPolicy = "nmi_schedule" // every NMI schedule is dunned by OpenRails (Paul, 2026-09-25)
@@ -348,7 +348,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			sub = w.subscription(tp, l.sub)
 			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			require.Equal(t, "nmi_schedule", sub.CollectionPolicy)
-			require.Equal(t, l.railSub, sub.RailSubscriptionID)
+			require.Equal(t, l.railSub, str(sub.RailSubscriptionID))
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)))
 			require.Nil(t, sub.NextRetryAt)
 			require.Equal(t, 1, len(w.nmi.Attempts()), "one automatic recovery charge")

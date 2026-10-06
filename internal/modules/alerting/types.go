@@ -54,7 +54,7 @@ func (f WebhookFormat) valid() bool {
 type Webhook struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
-	Name            string
+	Name            *string
 	DestinationHost string
 	secretVersion   int
 	Format          WebhookFormat

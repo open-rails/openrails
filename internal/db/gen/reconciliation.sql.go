@@ -651,7 +651,7 @@ const createReconciliationRun = `-- name: CreateReconciliationRun :one
 INSERT INTO billing.maintenance_runs (
     merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
 ) VALUES (
-    $1, 'reconciliation', $2, $3,
+    $1, 'reconciliation', $2::text, $3,
     $4, $5, now(), 'running'
 )
 RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
@@ -1909,7 +1909,7 @@ type ListSubscriptionVaultRefsParams struct {
 
 type ListSubscriptionVaultRefsRow struct {
 	ID              uuid.UUID
-	RailCustomerRef string
+	RailCustomerRef *string
 }
 
 func (q *Queries) ListSubscriptionVaultRefs(ctx context.Context, arg ListSubscriptionVaultRefsParams) ([]ListSubscriptionVaultRefsRow, error) {
@@ -2096,7 +2096,7 @@ type ListUnknownSubscriptionsRow struct {
 	Rail                  string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
-	RailSubscriptionID    string
+	RailSubscriptionID    *string
 }
 
 // #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
@@ -2138,7 +2138,7 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 const listUnverifiedNMISubscriptionIDs = `-- name: ListUnverifiedNMISubscriptionIDs :many
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 ORDER BY current_period_ends_at NULLS FIRST
 LIMIT $2::bigint
 `
@@ -2173,7 +2173,7 @@ const listUnverifiedSubscriptionIDsForPSP = `-- name: ListUnverifiedSubscription
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
   AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 ORDER BY current_period_ends_at NULLS FIRST
 `
 
@@ -2206,7 +2206,7 @@ const listUnverifiedSubscriptionIDsIn = `-- name: ListUnverifiedSubscriptionIDsI
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 `
 
 type ListUnverifiedSubscriptionIDsInParams struct {
@@ -2491,8 +2491,8 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	ID              uuid.UUID
 	CustomerID      uuid.UUID
 	Rail            string
-	RailCustomerRef string
-	RailMethodRef   string
+	RailCustomerRef *string
+	RailMethodRef   *string
 	CardBrand       *string
 	CardLast4       *string
 	CardExpMonth    *int16
@@ -2714,7 +2714,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	ProductID                uuid.UUID
 	Status                   string
 	Rail                     string
-	RailSubscriptionID       string
+	RailSubscriptionID       *string
 	PaymentMethodID          *uuid.UUID
 	CurrentPeriodStartsAt    *time.Time
 	CurrentPeriodEndsAt      *time.Time
@@ -2806,7 +2806,7 @@ INSERT INTO billing.subscriptions (
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
-       $3, $4,
+       $3, NULLIF($4::text, ''),
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
@@ -2816,7 +2816,7 @@ JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM billing.subscriptions s
-      WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4
+      WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4::text
         AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
         -- or#893: every writer resolves a PSP now, including the declared
@@ -3138,7 +3138,7 @@ INSERT INTO billing.reconciliation_findings (
     CASE WHEN $5::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
     $8, $8, $9::uuid,
     -- A pull finding carries its PSP's rail (the psps FK checks they agree).
-    COALESCE((SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid), '')
+    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = $1 AND p.id = $9::uuid)
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,

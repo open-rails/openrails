@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -159,12 +160,8 @@ func webhookFromRow(row gen.BillingMerchantWebhook) Webhook {
 
 func notificationFromRow(row gen.BillingNotification) billing.MerchantNotification {
 	n := billing.MerchantNotification{
-		ID: billing.NotificationID(row.ID), Severity: billing.AlertSeverity(row.Severity), Title: row.Title, Body: row.Body,
-		CreatedAt: row.CreatedAt, ReadAt: row.ReadAt,
-	}
-	if row.Link != "" {
-		link := row.Link
-		n.Link = &link
+		ID: billing.NotificationID(row.ID), Severity: billing.AlertSeverity(models.DerefStr(row.Severity)), Title: models.DerefStr(row.Title), Body: models.DerefStr(row.Body),
+		Link: row.Link, CreatedAt: row.CreatedAt, ReadAt: row.ReadAt,
 	}
 	return n
 }

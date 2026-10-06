@@ -265,7 +265,7 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 	}
 	out := map[uuid.UUID]string{}
 	for _, row := range rows {
-		out[row.ID] = strings.TrimSpace(row.RailCustomerRef)
+		out[row.ID] = strings.TrimSpace(models.DerefStr(row.RailCustomerRef))
 	}
 	return out, nil
 }

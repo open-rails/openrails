@@ -46,7 +46,7 @@ func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (ge
 		if err != nil {
 			return err
 		}
-		if p.Provider != "nmi" || method.Rail != p.Provider || method.CustomerID != customer || derefUUID(method.PspID) != p.PspID || method.Custodian != models.CustodianPSP || method.RailCustomerRef != terms.RailCustomerRef || method.RailMethodRef != terms.RailMethodRef {
+		if p.Provider != "nmi" || method.Rail != p.Provider || method.CustomerID != customer || derefUUID(method.PspID) != p.PspID || method.Custodian != models.CustodianPSP || models.DerefStr(method.RailCustomerRef) != terms.RailCustomerRef || models.DerefStr(method.RailMethodRef) != terms.RailMethodRef {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		prior, err := store.GetByIdempotencyKey(ctx, p.IdempotencyKey)
@@ -69,7 +69,7 @@ func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (ge
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if strings.HasPrefix(method.ParkReason, "delete:") {
+		if strings.HasPrefix(models.DerefStr(method.ParkReason), "delete:") {
 			return paymentmethods.ErrPaymentMethodDeleteProcessing
 		}
 		row, err = store.enqueue(ctx, p)

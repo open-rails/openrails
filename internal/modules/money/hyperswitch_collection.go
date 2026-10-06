@@ -73,7 +73,7 @@ func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.B
 	if req.HyperSwitch == nil || *req.HyperSwitch != a.binding {
 		return nil, fmt.Errorf("%w: accepted HyperSwitch custody profile changed", charge.ErrInstrumentChanged)
 	}
-	if method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ChargeVia != "pan_proxy" || method.RailCustomerRef == "" || method.RailMethodRef == "" || method.ParkReason != "" {
+	if method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ChargeVia != "pan_proxy" || method.RailCustomerRef == nil || method.RailMethodRef == nil || method.ParkReason != nil {
 		return nil, fmt.Errorf("HyperSwitch collection requires an owned, usable permanent card")
 	}
 	// Read-only contract qualification precedes the durable submission marker.

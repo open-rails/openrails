@@ -174,7 +174,7 @@ func (h *HyperSwitchMethodDeleteHandler) complete(ctx context.Context, in gen.Bi
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != p.CustomerID || method.ParkReason != "delete:"+in.ID.String() || p.Instrument.Matches(method, charge.AgreementUnscheduled) != nil {
+		if method.CustomerID != p.CustomerID || models.DerefStr(method.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(method, charge.AgreementUnscheduled) != nil {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})

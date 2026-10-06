@@ -196,7 +196,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if methodRow.CustomerID != customerID || !charge.ChargeableOn(methodRow, sub.PspID) || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == "" || methodRow.ParkReason != "" {
+	if methodRow.CustomerID != customerID || !charge.ChargeableOn(methodRow, sub.PspID) || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == nil || methodRow.ParkReason != nil {
 		return nil, ErrPaymentMethodStale
 	}
 	email := ""

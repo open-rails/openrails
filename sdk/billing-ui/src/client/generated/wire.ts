@@ -610,7 +610,7 @@ export type Subscription = {
   price_id: string
   psp_id: string
   rail: string
-  rail_subscription_id: string
+  rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_price_id?: string
   payment_method_id: string | null

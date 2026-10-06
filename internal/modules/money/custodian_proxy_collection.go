@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 )
 
@@ -26,15 +27,15 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 	if a == nil || a.Charger == nil {
 		return nil, fmt.Errorf("custodian-proxy collection adapter not initialized")
 	}
-	if strings.TrimSpace(method.RailMethodRef) == "" {
+	if strings.TrimSpace(models.DerefStr(method.RailMethodRef)) == "" {
 		return nil, fmt.Errorf("custodian-held payment method missing its custodian token reference")
 	}
-	if strings.TrimSpace(method.ParkReason) != "" {
+	if strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
 		return nil, fmt.Errorf("custodian-held instrument is parked")
 	}
 	charger := a.Charger.WithSource(nmiproxy.Source{
-		TokenID: strings.TrimSpace(method.RailMethodRef), Via: method.ChargeVia,
-		NetworkTokenID: strings.TrimSpace(method.NetworkTokenID),
+		TokenID: strings.TrimSpace(models.DerefStr(method.RailMethodRef)), Via: method.ChargeVia,
+		NetworkTokenID: strings.TrimSpace(models.DerefStr(method.NetworkTokenID)),
 	})
 	return prepareUnscheduledCollection(method, req, charger)
 }

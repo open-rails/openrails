@@ -1200,7 +1200,7 @@ pkg openrails/billing, type AlertWebhook struct, DestinationHost string `json:"d
 pkg openrails/billing, type AlertWebhook struct, Enabled bool `json:"enabled"`
 pkg openrails/billing, type AlertWebhook struct, Format AlertWebhookFormat `json:"format"`
 pkg openrails/billing, type AlertWebhook struct, ID AlertWebhookID `json:"id"`
-pkg openrails/billing, type AlertWebhook struct, Name string `json:"name"`
+pkg openrails/billing, type AlertWebhook struct, Name *string `json:"name"`
 pkg openrails/billing, type AlertWebhook struct, UpdatedAt time.Time `json:"updated_at"`
 pkg openrails/billing, type AlertWebhookFormat string
 pkg openrails/billing, type AlertWebhookID [16]byte
@@ -1588,7 +1588,7 @@ pkg openrails/billing, type CreditGrant struct, ID CreditGrantID `json:"id"`
 pkg openrails/billing, type CreditGrant struct, RemainingAmount int64 `json:"remaining_amount,string"`
 pkg openrails/billing, type CreditGrant struct, Replayed bool `json:"replayed"`
 pkg openrails/billing, type CreditGrant struct, RevokedAmount int64 `json:"revoked_amount,string"`
-pkg openrails/billing, type CreditGrant struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type CreditGrant struct, SourceID *string `json:"source_id"`
 pkg openrails/billing, type CreditGrant struct, SourceType string `json:"source_type"`
 pkg openrails/billing, type CreditGrant struct, SpentAmount int64 `json:"spent_amount,string"`
 pkg openrails/billing, type CreditGrant struct, StartsAt time.Time `json:"starts_at"`
@@ -2861,7 +2861,7 @@ pkg openrails/billing, type SolanaCheckoutToken struct, Preferred bool `json:"pr
 pkg openrails/billing, type SolanaCheckoutToken struct, RecurringEligible bool `json:"recurring_eligible"`
 pkg openrails/billing, type SolanaCheckoutToken struct, Symbol string `json:"symbol"`
 pkg openrails/billing, type SpendDelegation struct
-pkg openrails/billing, type SpendDelegation struct, Provenance string `json:"provenance"`
+pkg openrails/billing, type SpendDelegation struct, Provenance *string `json:"provenance"`
 pkg openrails/billing, type SpendDelegation struct, Scope SpendDelegationScope `json:"scope"`
 pkg openrails/billing, type SpendDelegation struct, ScopeKey string `json:"scope_key"`
 pkg openrails/billing, type SpendDelegation struct, Windows []BudgetWindow `json:"windows"`
@@ -2913,7 +2913,7 @@ pkg openrails/billing, type Subscription struct, PriceID PriceID `json:"price_id
 pkg openrails/billing, type Subscription struct, Product *ProductSummary `json:"product,omitempty"`
 pkg openrails/billing, type Subscription struct, ProductID ProductID `json:"product_id"`
 pkg openrails/billing, type Subscription struct, Rail string `json:"rail"`
-pkg openrails/billing, type Subscription struct, RailSubscriptionID string `json:"rail_subscription_id"`
+pkg openrails/billing, type Subscription struct, RailSubscriptionID *string `json:"rail_subscription_id"`
 pkg openrails/billing, type Subscription struct, Recovery *PaymentRecovery `json:"recovery,omitempty"`
 pkg openrails/billing, type Subscription struct, Resumable bool `json:"resumable"`
 pkg openrails/billing, type Subscription struct, RetryAttempts *int `json:"retry_attempts"`

@@ -101,7 +101,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	if err != nil {
 		return out, err
 	}
-	if target.Scope == nil || !charge.ChargeableOn(method, target.Scope.ID) || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || method.ParkReason != "" {
+	if target.Scope == nil || !charge.ChargeableOn(method, target.Scope.ID) || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || method.ParkReason != nil {
 		return out, errors.New("sale instrument does not match customer and provider")
 	}
 	now := purchase.now().UTC().Truncate(time.Microsecond)

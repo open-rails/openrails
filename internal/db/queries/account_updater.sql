@@ -30,7 +30,7 @@ WHERE c.kind = lower(sqlc.arg(custodian)::text)
         SELECT 1 FROM billing.payment_methods pm
          WHERE pm.merchant_id = c.merchant_id
            AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
-           AND pm.rail_method_ref <> ''
+           AND pm.rail_method_ref IS NOT NULL
            AND (pm.account_updater_checked_at IS NULL
                 OR pm.account_updater_checked_at < sqlc.arg(now)::timestamptz - w.lookahead)
            AND EXISTS (
@@ -64,7 +64,7 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)
   AND pm.custodian <> 'psp'
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.custodian = sqlc.arg(custodian)
-  AND pm.rail_method_ref <> ''
+  AND pm.rail_method_ref IS NOT NULL
   AND (pm.account_updater_checked_at IS NULL
        OR pm.account_updater_checked_at < sqlc.arg(stale_before)::timestamptz)
   AND EXISTS (
@@ -117,11 +117,11 @@ LIMIT sqlc.arg(row_limit);
 -- crash immediately after it resumes on the SAME job.
 -- name: SetAccountUpdaterBatchJobRef :execrows
 UPDATE billing.account_updater_batches SET
-    job_ref = sqlc.arg(job_ref),
+    job_ref = sqlc.arg(job_ref)::text,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND id = sqlc.arg(id)
-  AND job_ref = '';
+  AND job_ref IS NULL;
 
 -- name: MarkAccountUpdaterBatchSubmitted :execrows
 UPDATE billing.account_updater_batches SET
@@ -150,8 +150,7 @@ UPDATE billing.account_updater_batches SET
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND custodian_id = sqlc.arg(custodian_id)::uuid
-  AND job_ref = sqlc.arg(job_ref)
-  AND job_ref <> ''
+  AND job_ref = sqlc.arg(job_ref)::text
   AND status IN ('pending', 'submitted');
 
 -- Abandoned, never parked: a batch we could not finish says nothing about the
@@ -160,7 +159,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 -- name: FailAccountUpdaterBatch :execrows
 UPDATE billing.account_updater_batches SET
     status = 'failed',
-    failure_reason = sqlc.arg(failure_reason),
+    failure_reason = NULLIF(sqlc.arg(failure_reason)::text, ''),
     completed_at = sqlc.arg(completed_at)::timestamptz,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)

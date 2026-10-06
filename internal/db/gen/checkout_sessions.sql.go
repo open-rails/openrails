@@ -79,7 +79,7 @@ INSERT INTO billing.checkout_sessions (
     merchant_id, id_hash, customer_id, price_id, offer, success_url, origin, expires_at, purge_at, created_at
 ) VALUES (
     $1::uuid, $2::bytea, $3::uuid, $4::uuid,
-    $5::jsonb, $6::text, $7::text,
+    $5::jsonb, NULLIF($6::text, ''), NULLIF($7::text, ''),
     $8::timestamptz, $9::timestamptz, $10::timestamptz
 )
 ON CONFLICT (merchant_id, id_hash) DO NOTHING
@@ -166,8 +166,8 @@ type GetCheckoutSessionRow struct {
 	CustomerID uuid.UUID
 	PriceID    uuid.UUID
 	Offer      []byte
-	SuccessUrl string
-	Origin     string
+	SuccessUrl *string
+	Origin     *string
 	Attempt    int32
 	AttemptID  *uuid.UUID
 	ExpiresAt  time.Time

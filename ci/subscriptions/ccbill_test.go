@@ -72,7 +72,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	l.sub = subs.Items[0].ID
 	require.Equal(t, billing.SubscriptionActive, subs.Items[0].Status)
 	require.Equal(t, "ccbill", subs.Items[0].Rail)
-	require.Equal(t, l.railSub, subs.Items[0].RailSubscriptionID)
+	require.Equal(t, l.railSub, str(subs.Items[0].RailSubscriptionID))
 	w.converge()
 	require.True(t, l.c.entitled(l.ent))
 	return m

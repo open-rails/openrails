@@ -18,7 +18,7 @@ INSERT INTO billing.reprice_batches (
     subscriptions_matched, subscriptions_skipped
 ) VALUES (
     $1::uuid, $2::uuid, $3::timestamptz,
-    'plan_change', $4::uuid, $5::text,
+    'plan_change', $4::uuid, NULLIF($5::text, ''),
     $6::int, $7::int
 )
 RETURNING id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy

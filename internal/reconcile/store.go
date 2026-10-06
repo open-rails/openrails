@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 )
@@ -51,17 +52,17 @@ type FindingRecord struct {
 
 // RunRecord is a persisted reconciliation run.
 type RunRecord struct {
-	ID          uuid.UUID       `json:"id"`
-	MerchantID  uuid.UUID       `json:"tenant_id"`
-	Mode        Mode            `json:"mode"`
-	Providers   []string        `json:"providers"`
+	ID             uuid.UUID       `json:"id"`
+	MerchantID     uuid.UUID       `json:"tenant_id"`
+	Mode           Mode            `json:"mode"`
+	Providers      []string        `json:"providers"`
 	WindowStartsAt *time.Time      `json:"window_starts_at,omitempty"`
-	WindowEndsAt *time.Time      `json:"window_ends_at,omitempty"`
-	StartedAt   time.Time       `json:"started_at"`
-	FinishedAt  *time.Time      `json:"finished_at,omitempty"`
-	Status      string          `json:"status"`
-	Summary     json.RawMessage `json:"summary,omitempty"`
-	Error       string          `json:"error,omitempty"`
+	WindowEndsAt   *time.Time      `json:"window_ends_at,omitempty"`
+	StartedAt      time.Time       `json:"started_at"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
+	Status         string          `json:"status"`
+	Summary        json.RawMessage `json:"summary,omitempty"`
+	Error          string          `json:"error,omitempty"`
 }
 
 // Store is the engine-facing persistence surface. The pg implementation runs
@@ -154,11 +155,11 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 		return uuid.Nil, err
 	}
 	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-		MerchantID:  tid.UUID(),
-		Mode:        string(mode),
-		Rails:       names,
+		MerchantID:     tid.UUID(),
+		Mode:           string(mode),
+		Rails:          names,
 		WindowStartsAt: since,
-		WindowEndsAt: until,
+		WindowEndsAt:   until,
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -638,8 +639,8 @@ func (s *PGStore) AppendFindingNotes(ctx context.Context, id uuid.UUID, note str
 func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 	evidence := unmarshalEvidence(row.Evidence)
 	provider, _ := evidence["provider"].(string)
-	if row.Rail != "" {
-		provider = row.Rail
+	if row.Rail != nil {
+		provider = *row.Rail
 	}
 	requiresReview := row.Status == string(FindingStatusRequiresReview)
 	rec := FindingRecord{
@@ -685,16 +686,16 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 
 func runRecordFromRow(row gen.BillingMaintenanceRun) RunRecord {
 	rec := RunRecord{
-		ID:          row.ID,
-		MerchantID:  row.MerchantID,
-		Mode:        Mode(row.Mode),
-		Providers:   row.Rails,
+		ID:             row.ID,
+		MerchantID:     row.MerchantID,
+		Mode:           Mode(models.DerefStr(row.Mode)),
+		Providers:      row.Rails,
 		WindowStartsAt: row.WindowStartsAt,
-		WindowEndsAt: row.WindowEndsAt,
-		StartedAt:   row.StartedAt,
-		FinishedAt:  row.FinishedAt,
-		Status:      row.Status,
-		Summary:     row.Summary,
+		WindowEndsAt:   row.WindowEndsAt,
+		StartedAt:      row.StartedAt,
+		FinishedAt:     row.FinishedAt,
+		Status:         row.Status,
+		Summary:        row.Summary,
 	}
 	if row.Error != nil {
 		rec.Error = *row.Error

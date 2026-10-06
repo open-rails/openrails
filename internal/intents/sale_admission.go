@@ -100,7 +100,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != "" {
+		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != nil {
 			return apperr.Conflictf("sale instrument changed before admission")
 		}
 		if err := terms.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {

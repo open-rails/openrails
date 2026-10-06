@@ -8,7 +8,7 @@ INSERT INTO billing.grants (
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.narg(product_id)::uuid,
-    sqlc.arg(kind)::text, sqlc.arg(source_type)::text, sqlc.arg(source_id)::text, sqlc.narg(payment_id)::uuid,
+    sqlc.arg(kind)::text, sqlc.arg(source_type)::text, NULLIF(sqlc.arg(source_id)::text, ''), sqlc.narg(payment_id)::uuid,
     sqlc.arg(event)::text, sqlc.narg(supersedes_id)::uuid, sqlc.narg(spec_snapshot)::jsonb,
     sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
     sqlc.narg(amount)::bigint, sqlc.narg(currency)::text, sqlc.narg(reason)::text
@@ -455,7 +455,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
-      AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text AND g.source_id <> ''
+      AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
 ) AS exists;
 
 -- CROSS-MERCHANT: merchants holding a past-expiry credit lot that was not

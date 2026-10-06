@@ -59,7 +59,7 @@ func canonicalWireFixtures() map[string]any {
 			BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "credit_line"}, {PolicyName: "monthly", Tier: "cloud"}},
 		},
 		"spend_delegations.json": billing.ListPage[billing.SpendDelegation]{Items: []billing.SpendDelegation{
-			{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker-1", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: "sha256:fixture"},
+			{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker-1", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: ptr("sha256:fixture")},
 			{Scope: billing.SpendDelegationInvokerTier, ScopeKey: "free", Windows: []billing.BudgetWindow{}},
 		}},
 		"checkout_session.json": checkoutsession.CheckoutSession{
@@ -119,7 +119,7 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 	return billing.Subscription{
 		CollectionPolicy: "provider",
 		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
-		Rail: "nmi", RailSubscriptionID: "rail-sub-1", Status: "active", ScheduledPriceID: ptr(scheduledPriceFixture), PaymentMethodID: &methodFixture,
+		Rail: "nmi", RailSubscriptionID: ptr("rail-sub-1"), Status: "active", ScheduledPriceID: ptr(scheduledPriceFixture), PaymentMethodID: &methodFixture,
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,
 		Price:            &price,
 		Product:          &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},

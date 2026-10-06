@@ -7,7 +7,7 @@ INSERT INTO billing.checkout_sessions (
     merchant_id, id_hash, customer_id, price_id, offer, success_url, origin, expires_at, purge_at, created_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id_hash)::bytea, sqlc.arg(customer_id)::uuid, sqlc.arg(price_id)::uuid,
-    sqlc.arg(offer)::jsonb, sqlc.arg(success_url)::text, sqlc.arg(origin)::text,
+    sqlc.arg(offer)::jsonb, NULLIF(sqlc.arg(success_url)::text, ''), NULLIF(sqlc.arg(origin)::text, ''),
     sqlc.arg(expires_at)::timestamptz, sqlc.arg(purge_at)::timestamptz, sqlc.arg(now)::timestamptz
 )
 ON CONFLICT (merchant_id, id_hash) DO NOTHING;

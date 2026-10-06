@@ -392,9 +392,9 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	// and a destructive run, which is permanent.
 	run := func(kind string, startedAgo time.Duration) uuid.UUID {
 		var id uuid.UUID
-		mode, actor := "advisory", ""
+		var mode, actor any = "advisory", nil
 		if kind != "reconciliation" {
-			mode, actor = "", "operator"
+			mode, actor = nil, "operator"
 		}
 		require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.maintenance_runs (merchant_id, kind, mode, actor, status, started_at, finished_at)
 			VALUES ($1, $2, $3, $4, 'completed', now() - $5::interval, now() - $5::interval) RETURNING id`), w.merchant, kind, mode, actor, startedAgo).Scan(&id))

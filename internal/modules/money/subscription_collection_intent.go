@@ -257,7 +257,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != p.Renewal.CustomerID || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
+		if method.CustomerID != p.Renewal.CustomerID || method.ParkReason != nil || method.ChargeVia != "pan_proxy" {
 			return charge.ErrInstrumentChanged
 		}
 		if err := p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {

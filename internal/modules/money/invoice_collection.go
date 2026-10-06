@@ -145,7 +145,7 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if method.MerchantID != tid.UUID() || method.CustomerID != payer.UUID() {
 			return ErrCollectionPaymentMethodInvalid
 		}
-		if strings.TrimSpace(method.ParkReason) != "" {
+		if strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
 			return fmt.Errorf("%w: payment method is parked", ErrCollectionPaymentMethodInvalid)
 		}
 		descriptor, ok := rails.Lookup(models.Rail(method.Rail))
@@ -155,7 +155,7 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if !descriptor.SupportsChargeSavedMethod {
 			return fmt.Errorf("%w: rail %q does not support invoice collection", ErrCollectionPaymentMethodInvalid, method.Rail)
 		}
-		if rails.IsNMI(models.Rail(method.Rail)) && strings.TrimSpace(method.StoredCredentialUnscheduledRef) == "" {
+		if rails.IsNMI(models.Rail(method.Rail)) && strings.TrimSpace(models.DerefStr(method.StoredCredentialUnscheduledRef)) == "" {
 			return fmt.Errorf("%w: approved unscheduled stored-credential agreement required for automatic collection", ErrCollectionPaymentMethodInvalid)
 		}
 		if err := s.ensureSettingsRowTx(ctx, q, tid.UUID(), payer.UUID(), currency, BillingModePrepaid, now); err != nil {
@@ -550,7 +550,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 		}
 		return nil, fmt.Errorf("load collection payment method: %w", err)
 	}
-	if method.MerchantID != merchantID || method.CustomerID != payerID || strings.TrimSpace(method.ParkReason) != "" {
+	if method.MerchantID != merchantID || method.CustomerID != payerID || strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
 		return nil, ErrCollectionPaymentMethodInvalid
 	}
 	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {

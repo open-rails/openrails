@@ -35,7 +35,7 @@ export interface RawSubscription {
   current_period_starts_at: string | null
   current_period_ends_at: string | null
   rail: Rail
-  rail_subscription_id: string
+  rail_subscription_id: string | null
   payment_method_id: string | null // pm_...
   retry_attempts: number | null
   next_retry_at: string | null

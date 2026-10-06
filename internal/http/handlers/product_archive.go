@@ -55,13 +55,13 @@ type purchaseReview struct {
 }
 
 type productArchiveOperation struct {
-	ID             uuid.UUID
-	ProductID      uuid.UUID
-	ProductKey     string
-	Action         billing.PurchaseAction
+	ID                     uuid.UUID
+	ProductID              uuid.UUID
+	ProductKey             string
+	Action                 billing.PurchaseAction
 	PurchaseWindowStartsAt *time.Time
-	Reason         string
-	CreatedAt      time.Time
+	Reason                 *string
+	CreatedAt              time.Time
 }
 
 // productArchiveFingerprint canonicalizes the caller's terms. A relative
@@ -327,11 +327,8 @@ func productArchiveRefundKey(op productArchiveOperation) string {
 func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op productArchiveOperation, act bool) (*billing.ProductArchive, error) {
 	out := &billing.ProductArchive{
 		ID: billing.ProductArchiveID(op.ID), ProductID: billing.ProductID(op.ProductID), ProductKey: op.ProductKey,
-		PurchaseAction: op.Action, PurchaseWindowStartsAt: op.PurchaseWindowStartsAt, CreatedAt: op.CreatedAt,
+		PurchaseAction: op.Action, PurchaseWindowStartsAt: op.PurchaseWindowStartsAt, Reason: op.Reason, CreatedAt: op.CreatedAt,
 		Complete: true, Purchases: []billing.ArchivedPurchase{},
-	}
-	if op.Reason != "" {
-		out.Reason = &op.Reason
 	}
 	purchases, err := qualifyingPurchases(ctx, r.State.DB, op)
 	if err != nil {
@@ -399,9 +396,9 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 		return item, nil
 	}
 	*budget--
-	reason := op.Reason
-	if reason == "" {
-		reason = "product archived"
+	reason := "product archived"
+	if op.Reason != nil {
+		reason = *op.Reason
 	}
 	refund, status, err := executeAdminRefund(ctx, r, purchase.ID, RefundRequest{Full: true, Reason: reason, RevokeAccess: true}, productArchiveRefundKey(op))
 	if err != nil {

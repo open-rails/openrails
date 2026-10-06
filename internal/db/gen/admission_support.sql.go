@@ -412,7 +412,7 @@ func (q *Queries) UpsertBillingPolicyBindingTier(ctx context.Context, arg Upsert
 const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
 INSERT INTO billing.invoker_spend_limits (
     id, merchant_id, customer_id, scope, scope_key, windows, provenance, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7::text, ''), $8, $9)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
     provenance = EXCLUDED.provenance,

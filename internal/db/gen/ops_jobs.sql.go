@@ -20,7 +20,7 @@ GROUP BY rail, finding_type
 `
 
 type CountOpenCatalogDriftByKindRow struct {
-	Rail string
+	Rail *string
 	Kind string
 	N    int64
 }

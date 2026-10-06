@@ -3,11 +3,12 @@ package charge
 import (
 	"errors"
 	"fmt"
+	"slices"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"slices"
-	"strings"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // FrozenInstrument is the saved method as its collection operation froze
@@ -47,8 +48,8 @@ var ErrNotDispatched = errors.New("charge refused before provider dispatch")
 func FreezeInstrument(method gen.BillingPaymentMethod, psp uuid.UUID) FrozenInstrument {
 	return FrozenInstrument{
 		PSPID: psp, Custodian: method.Custodian, CustodianID: method.CustodianID,
-		StoredCredentialRecurringRef: strings.TrimSpace(method.StoredCredentialRecurringRef), StoredCredentialUnscheduledRef: strings.TrimSpace(method.StoredCredentialUnscheduledRef),
-		RailCustomerRef: strings.TrimSpace(method.RailCustomerRef), RailMethodRef: strings.TrimSpace(method.RailMethodRef),
+		StoredCredentialRecurringRef: normalize.FromPtr(method.StoredCredentialRecurringRef), StoredCredentialUnscheduledRef: normalize.FromPtr(method.StoredCredentialUnscheduledRef),
+		RailCustomerRef: normalize.FromPtr(method.RailCustomerRef), RailMethodRef: normalize.FromPtr(method.RailMethodRef),
 	}
 }
 

@@ -59,7 +59,7 @@ WITH live_ownership AS (
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.event = 'grant' AND g.kind = 'ownership'
       AND g.product_id IS NOT NULL
       AND g.source_type IN ('purchase', 'subscription')
-      AND g.source_id NOT LIKE 'include:%'
+      AND (g.source_id IS NULL OR g.source_id NOT LIKE 'include:%')
       AND g.starts_at <= sqlc.arg(now)::timestamptz
       AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)
       AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)

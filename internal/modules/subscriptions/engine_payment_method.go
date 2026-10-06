@@ -48,7 +48,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 			return err
 		}
 		if observed.CustodianID != nil {
-			handle := paymentmethods.CustodianHandle{Custodian: *observed.CustodianID, Method: observed.RailMethodRef}
+			handle := paymentmethods.CustodianHandle{Custodian: *observed.CustodianID, Method: models.DerefStr(observed.RailMethodRef)}
 			if err := paymentmethods.LockCustodianHandles(ctx, q, mid.UUID(), handle); err != nil {
 				return err
 			}
@@ -64,7 +64,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 			// Another customer's method is indistinguishable from a missing one.
 			return apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "payment method not found")
 		}
-		if !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
+		if !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != nil || method.ChargeVia != "pan_proxy" {
 			return charge.ErrInstrumentChanged
 		}
 		if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method, charge.AgreementRecurring); err != nil {
@@ -98,7 +98,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, sub.PspID), binding, true); err != nil {
 			return apperr.Conflictf("replacement card requires a qualified recurring agreement")
 		}
-		if method.Rail == "stripe" && !stripeEngineID(method.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(method.StoredCredentialRecurringRef, "seti_") {
+		if method.Rail == "stripe" && !stripeEngineID(models.DerefStr(method.StoredCredentialRecurringRef), "pi_") && !stripeEngineID(models.DerefStr(method.StoredCredentialRecurringRef), "seti_") {
 			return apperr.Conflictf("replacement Stripe card requires a qualified recurring agreement")
 		}
 		now := s.now()

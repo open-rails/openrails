@@ -76,7 +76,7 @@ export type AdmitParams = {
 
 export type AlertWebhook = {
   id: string
-  name: string
+  name: string | null
   destination_host: string
   format: "discord" | "generic" | "slack"
   enabled: boolean
@@ -703,7 +703,7 @@ export type CreditGrant = {
   expired_amount: string
   state: "active" | "expired" | "revoked" | "scheduled" | "spent" | "terminated"
   source_type: string
-  source_id: string
+  source_id: string | null
   description: string | null
   starts_at: string
   expires_at: string | null
@@ -2157,7 +2157,7 @@ export type SpendDelegation = {
   scope: "invoker" | "invoker_tier" | "role"
   scope_key: string
   windows: BudgetWindow[]
-  provenance: string
+  provenance: string | null
 }
 
 export type SpendLimits = {
@@ -2200,7 +2200,7 @@ export type Subscription = {
   price_id: string
   psp_id: string
   rail: string
-  rail_subscription_id: string
+  rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_price_id?: string
   payment_method_id: string | null

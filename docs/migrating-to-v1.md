@@ -192,6 +192,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
+| `Subscription.RailSubscriptionID`, `SpendDelegation.Provenance`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |
 | `Invoice.PeriodFrom`, `PeriodTo`; `InvoiceListParams.PeriodFrom`, `PeriodTo` | `PeriodStartsAt`, `PeriodEndsAt`; the list filters are `PeriodStartsAfter` (inclusive) and `PeriodStartsBefore` (exclusive) |
 
 ### PSPs, configuration and operations
@@ -320,6 +321,9 @@ fields (`400 unknown_field`), and every error code is in
   `owed_amount`, `billing_mode`.
 - **Entitlements.** `ent_` ids, `starts_at`, `ends_at`; `/v1/me/entitlements` is
   a page.
+- **Absent is null.** `Subscription.rail_subscription_id` (an engine-collected
+  subscription has none), `SpendDelegation.provenance`, `CreditGrant.source_id`
+  and `AlertWebhook.name` are `null` when absent, no longer `""`.
 - **Instants end in `_at`.** Invoices: `period_starts_at`, `period_ends_at`,
   and the list filters `period_starts_after`, `period_starts_before` (were
   `period_from`, `period_to`). Delinquency, its host event and its
@@ -400,4 +404,5 @@ up there.
 | Session settings `app.merchant_id`, `app.billing_restore_id`, `app.catalog_batch`, `billing.decision`, `openrails.retention` | One namespace: `openrails.merchant_id`, `openrails.billing_restore_id`, `openrails.catalog_batch_merchant_id`, `openrails.subscription_decision`, `openrails.retention_table`. A host that sets the merchant for `billing.current_merchant_id()` sets `openrails.merchant_id` |
 | Column defaults: `CURRENT_TIMESTAMP` beside `now()`; defaults on columns every OpenRails writer sets (statuses, amounts and counters, flags, jsonb documents, fact times such as `payments.purchased_at`, `subscriptions.started_at`, `grants.starts_at`) | Ids default to `uuidv7()` and creation times to `now()`; every other column without a default in `api/schema.txt` must be named by a raw `INSERT` (`merchants.status`, `grants.event`, `subscriptions.status`, `collection_policy`, `started_at`, …). `payments.money_movement` keeps its fail-closed `'none'` |
 | `products.tier_group`, `subscriptions.tier_group` as `varchar(100)` | `text`; `products_tier_group_check` bounds a group name to 1–100 characters, and an empty name is stored as NULL (no group) |
+| `''` for an absent value, with `DEFAULT ''`: `subscriptions.rail_subscription_id`; `payment_methods.rail_customer_ref`, `rail_method_ref`, `stored_credential_recurring_ref`, `stored_credential_unscheduled_ref`, `fingerprint`, `network_token_id`, `network_token_status`, `network_token_par`, `park_reason`; `checkout_sessions.success_url`, `origin`; `grants.source_id`; `custody_migrations.from_rail_customer_ref`, `from_rail_method_ref`, `reason`; `invoker_spend_limits.provenance`; `maintenance_runs.actor`, `mode`; `merchant_webhooks.name`; `notifications.severity`, `title`, `body`, `link`; `product_archive_operations.reason`; `reconciliation_findings.rail`, `openrails_resource_type`; `reprice_batches.fallback_policy`; `subscription_reprices.blocked_reason`; `account_updater_batches.job_ref`, `failure_reason` | NULL when absent, no default; a CHECK refuses `''`. A query that matched `= ''` matches `IS NULL`, and `<> ''` becomes `IS NOT NULL`. `payment_attempts.step` and `nmi_history_months.reason` keep `''` (part of a key) |
 | Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |

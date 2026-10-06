@@ -18,7 +18,7 @@ INSERT INTO billing.reprice_batches (
     subscriptions_matched, subscriptions_skipped
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(to_price_id)::uuid, sqlc.arg(effective_at)::timestamptz,
-    'plan_change', sqlc.arg(source_price_id)::uuid, sqlc.arg(fallback_policy)::text,
+    'plan_change', sqlc.arg(source_price_id)::uuid, NULLIF(sqlc.arg(fallback_policy)::text, ''),
     sqlc.arg(subscriptions_matched)::int, sqlc.arg(subscriptions_skipped)::int
 )
 RETURNING *;

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -124,7 +125,7 @@ func runConvergeList(cmd *cobra.Command, merchantSlug string, limit int, format 
 			expected = fmt.Sprintf("%d", *r.ExpectedRows)
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, r.Status, psp, r.Actor, r.StartedAt.UTC().Format("2006-01-02T15:04:05Z"), expected, string(r.Affected))
+			r.ID, r.Status, psp, models.DerefStr(r.Actor), r.StartedAt.UTC().Format("2006-01-02T15:04:05Z"), expected, string(r.Affected))
 	}
 	return w.Flush()
 }

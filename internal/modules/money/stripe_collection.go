@@ -32,7 +32,7 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Billin
 	if a == nil || a.DB == nil || a.Service == nil {
 		return nil, fmt.Errorf("stripe collection adapter not initialized")
 	}
-	paymentMethodID := strings.TrimSpace(method.RailMethodRef)
+	paymentMethodID := strings.TrimSpace(models.DerefStr(method.RailMethodRef))
 	if paymentMethodID == "" || strings.HasPrefix(paymentMethodID, "stripe:") {
 		return nil, fmt.Errorf("stripe payment method missing reusable payment_method id")
 	}

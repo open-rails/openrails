@@ -11,7 +11,7 @@
 INSERT INTO billing.maintenance_runs (
     merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
 ) VALUES (
-    sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode), sqlc.arg(rails),
+    sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode)::text, sqlc.arg(rails),
     sqlc.narg(window_starts_at), sqlc.narg(window_ends_at), now(), 'running'
 )
 RETURNING *;
@@ -60,7 +60,7 @@ INSERT INTO billing.reconciliation_findings (
     CASE WHEN sqlc.arg(status)::text = 'auto_fixed' THEN 'enforced' ELSE NULL END,
     sqlc.narg(run_id), sqlc.narg(run_id), sqlc.narg(psp_id)::uuid,
     -- A pull finding carries its PSP's rail (the psps FK checks they agree).
-    COALESCE((SELECT p.rail FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id) AND p.id = sqlc.narg(psp_id)::uuid), '')
+    (SELECT p.rail FROM billing.psps p WHERE p.merchant_id = sqlc.arg(merchant_id) AND p.id = sqlc.narg(psp_id)::uuid)
 )
 ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
@@ -444,7 +444,7 @@ INSERT INTO billing.subscriptions (
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
-       sqlc.arg(rail), sqlc.arg(rail_subscription_id),
+       sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
@@ -454,7 +454,7 @@ JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
   AND NOT EXISTS (
       SELECT 1 FROM billing.subscriptions s
-      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_subscription_id)
+      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
         -- or#893: every writer resolves a PSP now, including the declared
@@ -1082,13 +1082,13 @@ SELECT EXISTS (
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
   AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> '';
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL;
 
 -- Callers pass a limit one above their bulk threshold.
 -- name: ListUnverifiedNMISubscriptionIDs :many
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 ORDER BY current_period_ends_at NULLS FIRST
 LIMIT sqlc.arg(row_limit)::bigint;
 
@@ -1096,7 +1096,7 @@ LIMIT sqlc.arg(row_limit)::bigint;
 SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND status = 'unverified' AND deleted_at IS NULL
-  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+  AND collection_policy <> 'engine' AND rail_subscription_id IS NOT NULL
 ORDER BY current_period_ends_at NULLS FIRST;
 
 -- name: RecordSubscriptionVerificationReads :exec

@@ -47,7 +47,7 @@ SELECT count(*) FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND rail = $2::text
   AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
-  AND rail_subscription_id <> ''
+  AND rail_subscription_id IS NOT NULL
   AND deleted_at IS NULL
 `
 

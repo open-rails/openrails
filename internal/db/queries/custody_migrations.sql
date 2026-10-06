@@ -65,9 +65,9 @@ UPDATE billing.payment_methods SET
     rail_method_ref = sqlc.arg(to_rail_method_ref)::text,
     fingerprint = COALESCE(NULLIF(sqlc.arg(fingerprint)::text, ''), fingerprint),
     charge_via = COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
-    network_token_id = sqlc.arg(network_token_id)::text,
-    network_token_status = sqlc.arg(network_token_status)::text,
-    network_token_par = sqlc.arg(network_token_par)::text,
+    network_token_id = NULLIF(sqlc.arg(network_token_id)::text, ''),
+    network_token_status = NULLIF(sqlc.arg(network_token_status)::text, ''),
+    network_token_par = NULLIF(sqlc.arg(network_token_par)::text, ''),
     psp_id = NULL,
     card_brand = COALESCE(sqlc.narg(card_brand)::text, card_brand),
     card_last4 = COALESCE(sqlc.narg(card_last4)::text, card_last4),
@@ -87,10 +87,10 @@ INSERT INTO billing.custody_migrations (
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(batch_id)::uuid, sqlc.arg(payment_method_id)::uuid, sqlc.arg(rail)::text,
     sqlc.arg(from_custodian)::text, sqlc.narg(from_custodian_id)::uuid,
-    sqlc.arg(from_rail_customer_ref)::text, sqlc.arg(from_rail_method_ref)::text, sqlc.narg(from_psp_id)::uuid,
+    NULLIF(sqlc.arg(from_rail_customer_ref)::text, ''), NULLIF(sqlc.arg(from_rail_method_ref)::text, ''), sqlc.narg(from_psp_id)::uuid,
     sqlc.arg(to_custodian)::text, sqlc.arg(to_custodian_id)::uuid, sqlc.arg(to_rail_method_ref)::text,
     sqlc.narg(to_psp_id)::uuid,
-    sqlc.narg(exported_at)::timestamptz, sqlc.arg(outcome)::text, sqlc.arg(reason)::text
+    sqlc.narg(exported_at)::timestamptz, sqlc.arg(outcome)::text, NULLIF(sqlc.arg(reason)::text, '')
 )
 RETURNING *;
 

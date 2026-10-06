@@ -68,7 +68,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: c.customerID()})
 	require.NoError(t, err)
 	for _, sub := range subs.Items {
-		if sub.RailSubscriptionID == l.railSub {
+		if str(sub.RailSubscriptionID) == l.railSub {
 			l.sub = sub.ID
 			require.Equal(t, "nmi_schedule", sub.CollectionPolicy, "every NMI schedule is dunned by OpenRails")
 		}

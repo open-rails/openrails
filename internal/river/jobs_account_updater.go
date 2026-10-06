@@ -290,7 +290,7 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 	for _, batch := range batches {
 		ctx := db.WithCustodianID(ctx, batch.CustodianID)
 		progress.Mark(ctx, "account updater batch "+batch.ID.String())
-		jobRef := strings.TrimSpace(batch.JobRef)
+		jobRef := strings.TrimSpace(models.DerefStr(batch.JobRef))
 		if batch.Status == "pending" || jobRef == "" {
 			// Never reached the custodian. The submit intent retries it; past
 			// the vendor's idempotency window a retry could pay twice, so the
@@ -432,7 +432,7 @@ func (w AccountUpdaterBatchWorker) submitMerchant(ctx context.Context, mid uuid.
 			month, year := instrumentExpiry(in.CardExpMonth, in.CardExpYear)
 			instruments = append(instruments, intents.AccountUpdaterBatchInstrument{
 				PaymentMethodID: in.ID,
-				Token:           in.RailMethodRef,
+				Token:           models.DerefStr(in.RailMethodRef),
 				ExpirationMonth: month,
 				ExpirationYear:  year,
 			})

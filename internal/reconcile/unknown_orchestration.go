@@ -194,7 +194,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			state := SubscriptionState{
 				Status:             string(models.StatusUnverified),
 				Rail:               rail,
-				RailSubscriptionID: r.RailSubscriptionID,
+				RailSubscriptionID: models.DerefStr(r.RailSubscriptionID),
 				PeriodStart:        r.CurrentPeriodStartsAt,
 				PeriodEnd:          r.CurrentPeriodEndsAt,
 			}
@@ -204,13 +204,13 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			// charge; any non-terminal NMI answer is confirmed by the
 			// per-subscription probe, which reads charges by schedule id.
 			needsProbe := decision.Kind == TransitionNone || (provider == ProviderNMI && decision.Kind == TransitionAdoptPeriodEnd)
-			if needsProbe && prober != nil && r.RailSubscriptionID != "" {
+			if needsProbe && prober != nil && r.RailSubscriptionID != nil {
 				// #665: the bulk window couldn't decide this row — ONE targeted
 				// per-sub probe, fed to the SAME decider. A probe failure keeps
 				// the row unknown (retried next pass).
 				res.Probed++
 				if psnap, perr := prober.ProbeSubscription(ctx, ProbeSubject{
-					LocalID: r.ID, RailSubscriptionID: r.RailSubscriptionID, PeriodStart: r.CurrentPeriodStartsAt, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
+					LocalID: r.ID, RailSubscriptionID: models.DerefStr(r.RailSubscriptionID), PeriodStart: r.CurrentPeriodStartsAt, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
 				}); perr != nil {
 					log.WithContext(ctx).WithError(perr).WithFields(log.Fields{
 						"subscription_id": r.ID, "rail": rail,

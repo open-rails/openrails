@@ -448,7 +448,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 			// have settled first. Its write-once agreement does not invalidate
 			// this operation's qualified payment. Compare the frozen instrument
 			// without that newly established anchor; capture below preserves it.
-			method.StoredCredentialUnscheduledRef = ""
+			method.StoredCredentialUnscheduledRef = nil
 			if err := p.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
 				return err
 			}

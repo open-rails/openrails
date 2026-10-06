@@ -598,7 +598,6 @@ func creditGrantTxn(g gen.BillingGrant) (*models.MoneyTransaction, error) {
 	if spec.Deposit == nil {
 		return nil, fmt.Errorf("deposit grant %s has no recorded provenance", g.ID)
 	}
-	sid := g.SourceID
 	return &models.MoneyTransaction{
 		ID:              g.ID,
 		MerchantID:      g.MerchantID,
@@ -609,7 +608,7 @@ func creditGrantTxn(g gen.BillingGrant) (*models.MoneyTransaction, error) {
 		TransactionType: "deposit",
 		Status:          "posted",
 		Source:          spec.Deposit.Source,
-		SourceID:        &sid,
+		SourceID:        g.SourceID,
 		ExpiresAt:       g.EndsAt,
 		Description:     g.Reason,
 		CreatedAt:       g.CreatedAt,

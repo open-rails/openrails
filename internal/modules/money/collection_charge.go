@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -17,7 +18,7 @@ func prepareUnscheduledCollection(method gen.BillingPaymentMethod, req ChargeReq
 	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		return nil, fmt.Errorf("collection: refusing to charge without an established currency: %w", err)
 	}
-	anchor := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
+	anchor := strings.TrimSpace(models.DerefStr(method.StoredCredentialUnscheduledRef))
 	posture := charge.UnscheduledMIT(anchor)
 	switch req.Initiator {
 	case charge.InitiatorCustomer:
@@ -44,8 +45,8 @@ func prepareUnscheduledCollection(method gen.BillingPaymentMethod, req ChargeReq
 		Instrument: charge.Instrument{
 			PaymentMethodID: method.ID,
 			Rail:            rail,
-			CustomerRef:     strings.TrimSpace(method.RailCustomerRef),
-			MethodRef:       strings.TrimSpace(method.RailMethodRef),
+			CustomerRef:     strings.TrimSpace(models.DerefStr(method.RailCustomerRef)),
+			MethodRef:       strings.TrimSpace(models.DerefStr(method.RailMethodRef)),
 		},
 		AmountMinor: req.AmountCents,
 		Currency:    currency,

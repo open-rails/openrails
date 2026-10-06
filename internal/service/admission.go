@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // AdmitInput is the host's admission request for payer capacity and delegated
@@ -237,7 +238,7 @@ func ValidateSpendDelegations(in []billing.SpendDelegation) ([]billing.SpendDele
 		scopeKey := strings.TrimSpace(item.ScopeKey)
 		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
 			Scope: scope, ScopeKey: scopeKey, Windows: budgetScopeWindowModels(item.Windows),
-			Provenance: item.Provenance,
+			Provenance: normalize.FromPtr(item.Provenance),
 		})
 		if err != nil {
 			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].%s", i, err))
@@ -249,7 +250,7 @@ func ValidateSpendDelegations(in []billing.SpendDelegation) ([]billing.SpendDele
 		seen[key] = struct{}{}
 		out = append(out, billing.SpendDelegation{
 			Scope: billing.SpendDelegationScope(row.Scope), ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
-			Provenance: row.Provenance,
+			Provenance: normalize.OptionalString(row.Provenance),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -261,7 +262,7 @@ func ValidateSpendDelegations(in []billing.SpendDelegation) ([]billing.SpendDele
 func invokerSpendLimitRow(in billing.SpendDelegation) admission.InvokerSpendLimit {
 	return admission.InvokerSpendLimit{
 		Scope: string(in.Scope), ScopeKey: in.ScopeKey, Windows: budgetScopeWindowModels(in.Windows),
-		Provenance: in.Provenance,
+		Provenance: normalize.FromPtr(in.Provenance),
 	}
 }
 
@@ -433,7 +434,7 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 	}
 	out := make([]billing.SpendDelegation, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, billing.SpendDelegation{Scope: billing.SpendDelegationScope(budgets.NormalizeScope(r.Scope)), ScopeKey: r.ScopeKey, Windows: spendLimitWindowInputs(r.Windows), Provenance: r.Provenance})
+		out = append(out, billing.SpendDelegation{Scope: billing.SpendDelegationScope(budgets.NormalizeScope(r.Scope)), ScopeKey: r.ScopeKey, Windows: spendLimitWindowInputs(r.Windows), Provenance: normalize.OptionalString(r.Provenance)})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return invokerSpendLimitKey(string(out[i].Scope), out[i].ScopeKey) < invokerSpendLimitKey(string(out[j].Scope), out[j].ScopeKey)

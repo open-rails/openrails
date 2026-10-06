@@ -25,7 +25,7 @@ func (w *world) rowStates() map[string]struct {
 	end    time.Time
 } {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), `SELECT rail_subscription_id, status::text, current_period_ends_at FROM `+pgx.Identifier{w.schema}.Sanitize()+`.subscriptions WHERE rail = 'nmi'`)
+	rows, err := w.pool.Query(w.t.Context(), `SELECT COALESCE(rail_subscription_id, ''), status::text, current_period_ends_at FROM `+pgx.Identifier{w.schema}.Sanitize()+`.subscriptions WHERE rail = 'nmi'`)
 	require.NoError(w.t, err)
 	defer rows.Close()
 	out := map[string]struct {

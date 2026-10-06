@@ -13158,7 +13158,14 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "destination_host": {
             "type": "string"
@@ -15904,7 +15911,14 @@
             "type": "string"
           },
           "source_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
             "oneOf": [
@@ -22331,7 +22345,14 @@
             }
           },
           "provenance": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -22517,7 +22538,14 @@
             "type": "string"
           },
           "rail_subscription_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "type": "string",

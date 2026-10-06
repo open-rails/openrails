@@ -79,7 +79,7 @@ const countNativeVaultAliases = `-- name: CountNativeVaultAliases :one
 SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
   AND custodian='psp' AND rail_customer_ref=$3::text
-  AND rail_customer_ref<>'' AND id<>$4::uuid
+  AND id<>$4::uuid
 `
 
 type CountNativeVaultAliasesParams struct {
@@ -158,7 +158,7 @@ UPDATE billing.payment_methods
 SET park_reason = 'delete:' || $1::uuid::text,
     parked_at = $2::timestamptz, updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND park_reason NOT LIKE 'delete:%'
+  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 `
 
 type FencePaymentMethodDeletionParams struct {
