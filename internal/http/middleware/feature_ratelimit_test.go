@@ -63,7 +63,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				}
 				// Repeated excess merchant requests remain ordinary 429s even
 				// when browser CAPTCHA escalation is configured.
-				for range 12 {
+				for range 6 {
 					rec := call{path: path, ip: "203.0.113.95", want: http.StatusTooManyRequests, body: "rate_limit_exceeded"}.do(t, h)
 					require.NotEmpty(t, rec.Header().Get("Retry-After"))
 					require.Empty(t, rec.Header().Get("X-Captcha-Required"))

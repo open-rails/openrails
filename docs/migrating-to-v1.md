@@ -419,3 +419,7 @@ use the normal configurable HTTP feature buckets described in
 [rate limiting](rate-limiting.md). The former separate per-merchant AI daily quota
 is removed. Standalone and embedded HTTP use the same Redis counters and memory
 fallback; trusted in-process Client operations retain their normal boundary.
+
+Merchant billing archives now use format 3 and preserve arbitrary application
+metadata. Regenerate format-2 archives from their source; see
+[merchant portability](merchant-portability.md#archive-format-and-metadata).

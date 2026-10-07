@@ -30,6 +30,18 @@ API requests retain their 1 MiB cap. The client verifies the archive footer and
 returns an error for incomplete downloads. The CLI publishes its private output
 file only after that verification succeeds.
 
+## Archive format and metadata
+
+Exports use archive format **3**, which retains application metadata previously
+omitted from some archive rows. Earlier format-2 archives have different row
+shapes and are refused; create a fresh export from the source using a build that
+supports format 3.
+
+Application metadata is preserved as stored, including arbitrary keys, nested
+JSON values and exact numbers. Export does not sanitize or redact that metadata.
+Dedicated credential storage remains excluded; protect archives as copies of the
+application's billing data.
+
 ## What moves
 
 The archive preserves the merchant UUID, billing record IDs, customer subject
@@ -42,8 +54,8 @@ This is a versioned billing snapshot, not a database dump or an identity backup.
 It does **not** transfer:
 
 - AuthKit users, groups, memberships, sessions, credentials, or merchant authority.
-- API keys, provider secrets, webhook secrets, encryption keys, card PANs, or
-  other credential material.
+- Dedicated API-key, provider-secret, webhook-secret and encryption-key storage.
+  Application metadata is copied as stored and is not screened for credentials.
 - River queues, live execution, or infrastructure state.
 - A payment provider's or card custodian's ownership of stored payment methods.
 
