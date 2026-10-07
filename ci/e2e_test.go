@@ -244,6 +244,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	customer := uuid.NewString()
 	request := billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(customer), VerifiedEmail: "reader@example.test"},
+		ProductKey:     product.Key,
 		PriceKey:       price.Key,
 		Entitlement:    "content:premium",
 		OfferKind:      billing.OfferPermanent,

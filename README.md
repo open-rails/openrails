@@ -35,7 +35,7 @@ OpenRails integrates with several payment-processors:
 
 You'll need a Go webserver, and Postgres (v18 or higher).
 
-Here we build a members-only video site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy a monthly "premium" plan with a card, and only premium members can watch.
+Here we build a members-only video site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy a monthly "premium" plan or an individual video with a card, and watch what they have access to.
 
 First install:
 
@@ -293,7 +293,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Our own route: only premium members can watch.
+	// Premium members can watch any video; a one-off buyer can watch the video they bought.
 	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		claims, _ := auth.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID)
@@ -307,8 +307,15 @@ func run(ctx context.Context) error {
 			return
 		}
 		if !premium {
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "premium_required"})
-			return
+			owned, err := bill.HasEntitlement(c, customer, "video:"+c.Param("id"), time.Now())
+			if err != nil {
+				c.AbortWithStatus(http.StatusServiceUnavailable)
+				return
+			}
+			if !owned {
+				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
+				return
+			}
 		}
 		c.File("videos/" + c.Param("id") + ".mp4")
 	})

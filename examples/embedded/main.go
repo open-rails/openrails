@@ -1,6 +1,6 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
-// members-only video site where users sign in with AuthKit, buy a monthly
-// "premium" plan and only premium members can watch. newBilling and run are
+// video site where users sign in with AuthKit and buy a monthly premium plan
+// or an individual video. newBilling and run are
 // the README's code; newAuth is a development AuthKit.
 //
 // Run it from this directory (it reads catalog.yaml) with DATABASE_URL and the
@@ -164,7 +164,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Our own route: only premium members can watch.
+	// Premium members can watch any video; a one-off buyer can watch the video they bought.
 	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		claims, _ := auth.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID)
@@ -178,8 +178,15 @@ func run(ctx context.Context) error {
 			return
 		}
 		if !premium {
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "premium_required"})
-			return
+			owned, err := bill.HasEntitlement(c, customer, "video:"+c.Param("id"), time.Now())
+			if err != nil {
+				c.AbortWithStatus(http.StatusServiceUnavailable)
+				return
+			}
+			if !owned {
+				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
+				return
+			}
 		}
 		c.File("videos/" + c.Param("id") + ".mp4")
 	})
