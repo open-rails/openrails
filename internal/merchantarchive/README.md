@@ -119,9 +119,8 @@ The destination must be empty, including its catalog. Creating a product before
 restore produces the ordinary `not_empty` refusal; the importer never rewrites
 incoming product IDs.
 
-Archive wire version 3 adds the previously omitted payment-method, discount and
-usage metadata columns to positional row profiles. Older artifacts are refused
-by their version before restoration; export a fresh archive with the current
+Archive format v1 is the only supported format and includes application metadata
+in the current positional row profiles. There are no legacy readers or converters.
+Artifacts from discarded draft formats must be exported again using the current
 library. Catalog revision and application receipts remain in the hashed snapshot,
-and replaying a completed restore cannot reset a later revision. Retain older
-backups as historical artifacts.
+and replaying a completed restore cannot reset a later revision.

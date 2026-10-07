@@ -32,10 +32,9 @@ file only after that verification succeeds.
 
 ## Archive format and metadata
 
-Exports use archive format **3**, which retains application metadata previously
-omitted from some archive rows. Earlier format-2 archives have different row
-shapes and are refused; create a fresh export from the source using a build that
-supports format 3.
+Exports use archive format **v1**, the only supported format. Export and import
+use the same current row layout; there are no legacy readers or format converters.
+Artifacts from discarded draft formats must be exported again from the source.
 
 Application metadata is preserved as stored, including arbitrary keys, nested
 JSON values and exact numbers. Export does not sanitize or redact that metadata.

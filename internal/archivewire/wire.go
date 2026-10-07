@@ -17,9 +17,8 @@ import (
 )
 
 const (
-	// Version 3 retains application metadata columns omitted from version 2's
-	// positional rows. A fresh export is required; their row shapes differ.
-	Version              = 3
+	// Version is the sole supported merchant export/import format.
+	Version              = 1
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )
