@@ -351,6 +351,7 @@ func TestCCBillFetcher(t *testing.T) {
 			`"EXPIRE","123","x","0999000000000000002","2026-06-03"`,
 			`"REFUND","123","x","0125217202000000017","2026-06-04","23.99"`,
 			`"CHARGEBACK","123","x","0125217202000000017","2026-06-05","23.99"`,
+			`"MYSTERY","123","x","0125217202000000017","2026-06-06","unclassified-data"`,
 		}, "\n"))
 	}))
 	t.Cleanup(srv.Close)
@@ -381,7 +382,7 @@ func TestCCBillFetcher(t *testing.T) {
 	require.Equal(t, "CANCELLATION", snap.Subscriptions[2].RawStatus)
 	require.Equal(t, SubscriptionStatusExpired, snap.Subscriptions[3].Status)
 
-	require.Len(t, snap.Transactions, 3)
+	require.Len(t, snap.Transactions, 4)
 	rebill, refund, chargeback := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
 	require.Equal(t, RemoteTransaction{TransactionID: "918273645", SubscriptionID: "0125217202000000017", Type: TransactionTypeSale, Success: true,
 		AmountCents: 2399, Currency: "USD", OccurredAt: time.Date(2026, 6, 1, 4, 5, 6, 0, time.UTC)}, withoutRaw(rebill))
@@ -391,10 +392,31 @@ func TestCCBillFetcher(t *testing.T) {
 	require.Equal(t, TransactionTypeChargeback, chargeback.Type)
 	require.Contains(t, string(chargeback.Raw), "ccbill_datalink_export")
 
+	local := &LocalState{Subscriptions: []LocalSubscription{{
+		ID: uuid.New(), RailSubscriptionID: active.RailSubscriptionID, Status: "past_due",
+	}}}
+	report := computeDunningForensics(ProviderCCBill, snap, local, nil, "not configured", until)
+	require.Len(t, report.Details, 1)
+	require.Zero(t, report.Details[0].RemoteDeclines, "unknown events are not failed charges")
+	require.Equal(t, 1, report.NoRemoteDeclines)
+	require.Zero(t, report.NeverAttempted)
+
+	unknown := snap.Transactions[3]
+	require.Equal(t, TransactionTypeUnknown, unknown.Type)
+	require.Equal(t, active.RailSubscriptionID, unknown.SubscriptionID)
+	require.JSONEq(t, `{"source":"ccbill_datalink_export","type":"MYSTERY","fields":["MYSTERY","123","x","0125217202000000017","2026-06-06","unclassified-data"]}`, string(unknown.Raw))
+
+	baseline := *snap
+	baseline.Transactions = snap.Transactions[:3]
+	start, end := since.Add(-24*time.Hour), until.Add(-24*time.Hour)
+	want := decideFromSnapshot(active.RailSubscriptionID, &start, &end, end, &baseline, until, PeriodGrace)
+	got := decideFromSnapshot(active.RailSubscriptionID, &start, &end, end, snap, until, PeriodGrace)
+	require.Equal(t, want, got, "unknown events must not change lifecycle or payment backfill")
+
 	narrowed, err := fetcher.Fetch(context.Background(), FetchParams{Since: since, Until: until, SubscriptionID: "0125217202000000017"})
 	require.NoError(t, err)
 	require.Len(t, narrowed.Subscriptions, 1, "the roster has no server-side filter; narrowing is client-side")
-	require.Len(t, narrowed.Transactions, 3)
+	require.Len(t, narrowed.Transactions, 4)
 	for _, txn := range narrowed.Transactions {
 		require.Equal(t, "0125217202000000017", txn.SubscriptionID)
 	}
