@@ -124,24 +124,28 @@ func toolDefDraftPriceChange() dashboard.ToolDef {
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
-				"price_key": {"type": "string", "description": "The key to change (its CURRENT version is the edit target)."},
+				"product_key": {"type": "string"},
+ "migrate_to_product_key": {"type": "string"},
+ "price_key": {"type": "string", "description": "The key to change (its CURRENT version is the edit target)."},
 				"new_amount": {"type": "integer", "description": "New amount in the price currency's native units (see the doctrine scale table)."},
 				"migration_mode": {"type": "string", "enum": ["grandfather", "migrate"], "description": "Optional; defaults per direction."},
 				"effective_date": {"type": "string", "description": "Optional YYYY-MM-DD; only meaningful when migration_mode=migrate. Defaults per doctrine."},
 				"migrate_to_price_key": {"type": "string", "description": "Optional: a DIFFERENT existing key the merchant wants to move price_key's subscribers onto. Out of scope (#778) — always refused; included only so the refusal can be typed and explained."}
 			},
-			"required": ["price_key", "new_amount"],
+			"required": ["product_key", "price_key", "new_amount"],
 			"additionalProperties": false
 		}`),
 	}
 }
 
 type draftPriceChangeArgs struct {
-	PriceKey          string `json:"price_key"`
-	NewAmount         int64  `json:"new_amount"`
-	MigrationMode     string `json:"migration_mode,omitempty"`
-	EffectiveDate     string `json:"effective_date,omitempty"`
-	MigrateToPriceKey string `json:"migrate_to_price_key,omitempty"`
+	ProductKey          string `json:"product_key"`
+	MigrateToProductKey string `json:"migrate_to_product_key,omitempty"`
+	PriceKey            string `json:"price_key"`
+	NewAmount           int64  `json:"new_amount"`
+	MigrationMode       string `json:"migration_mode,omitempty"`
+	EffectiveDate       string `json:"effective_date,omitempty"`
+	MigrateToPriceKey   string `json:"migrate_to_price_key,omitempty"`
 }
 
 func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) (string, *billing.CatalogDraft, error) {
@@ -150,20 +154,20 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		return "", nil, err
 	}
 	key := strings.TrimSpace(args.PriceKey)
-	if key == "" {
-		return "", nil, fmt.Errorf("price_key is required")
+	if key == "" || strings.TrimSpace(args.ProductKey) == "" {
+		return "", nil, fmt.Errorf("product_key and price_key are required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	current, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
+	current, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), args.ProductKey, key)
 	if err != nil {
 		return "", nil, fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
 	}
 
-	if toKey := strings.TrimSpace(args.MigrateToPriceKey); toKey != "" && toKey != key {
-		to, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), toKey)
+	if toKey := strings.TrimSpace(args.MigrateToPriceKey); toKey != "" && (toKey != key || args.MigrateToProductKey != args.ProductKey) {
+		to, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), args.MigrateToProductKey, toKey)
 		if err != nil {
 			return "", nil, fmt.Errorf("migrate_to_price_key %q not found", toKey)
 		}
@@ -211,7 +215,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	affected := 0
 	if s.reprices != nil {
-		if preview, err := s.reprices.PreviewBatch(ctx, key); err == nil {
+		if preview, err := s.reprices.PreviewBatch(ctx, args.ProductKey, key); err == nil {
 			affected = preview.Matched
 		}
 	}
@@ -225,6 +229,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 	sort.Strings(psps)
 
 	draft := &billing.PriceChangeDraft{
+		ProductKey:    args.ProductKey,
 		PriceKey:      key,
 		CurrentAmount: current.Amount,
 		NewAmount:     args.NewAmount,
@@ -240,7 +245,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		},
 	}
 	if mode == "migrate" {
-		draft.Reprice = &billing.CreateRepriceBatchParams{PriceKey: key, EffectiveAt: effectiveAt}
+		draft.Reprice = &billing.CreateRepriceBatchParams{ProductKey: args.ProductKey, PriceKey: key, EffectiveAt: effectiveAt}
 	}
 
 	content := fmt.Sprintf("draft ready: %s\nnext: requires human confirm via the price-change wizard — nothing has been changed yet.", reviewText)
@@ -316,7 +321,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 	if err != nil {
 		return "", nil, err
 	}
-	if _, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key); err == nil {
+	if _, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), productKey, key); err == nil {
 		return "", nil, fmt.Errorf("key %q is already in use by an existing price — pass a distinct new_price_key", key)
 	}
 

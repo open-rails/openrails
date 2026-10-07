@@ -230,7 +230,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		price, product := req.acceptedPurchase.catalog(mid.UUID())
 		return s.processOneTimePurchase(ctx, req, user, price, product, &CoverageInfo{}, req.Rail)
 	}
-	price, err := resolveCheckoutPrice(ctx, s.PriceService, req.PriceID, req.PriceKey)
+	price, err := resolveCheckoutPrice(ctx, s.PriceService, req.PriceID, req.ProductKey, req.PriceKey)
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
@@ -1287,8 +1287,8 @@ func (s *CheckoutService) tierChange(ctx context.Context, req *TierChangeRequest
 	if response, found, err := s.ReplayTierChange(ctx, req, user); found || err != nil {
 		return response, err
 	}
-	// 1. Parse and validate price (#774: price_id accepts a price_key too)
-	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
+	// 1. Resolve the typed target price ID.
+	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, "", req.PriceID)
 	if err != nil {
 		return nil, &TierChangeError{Code: codePriceNotFound, Message: "price not found"}
 	}
@@ -1421,8 +1421,8 @@ func utcPtr(t *time.Time) *time.Time {
 }
 
 func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
-	// #774: price_id accepts a price_key too.
-	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
+	// Resolve the typed target price ID.
+	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, "", req.PriceID)
 	if err != nil {
 		return nil, &TierChangeError{Code: codePriceNotFound, Message: "price not found"}
 	}

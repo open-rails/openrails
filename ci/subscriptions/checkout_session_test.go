@@ -211,8 +211,10 @@ func TestHostedCheckoutAcrossHosts(t *testing.T) {
 	app, pay := hostedHosts(t, nil)
 	buyer := app.newCustomer()
 	price := app.membership("content:members", 9_990_000)
+	product, err := app.client[embedded].GetProduct(t.Context(), price.ProductID)
+	require.NoError(t, err)
 
-	minted := buyer.mint(map[string]any{"price_key": price.Key, "success_url": hostedAppOrigin + "/welcome"})
+	minted := buyer.mint(map[string]any{"product_key": product.Key, "price_key": price.Key, "success_url": hostedAppOrigin + "/welcome"})
 	session := hostedSession{w: pay, id: minted["id"].(string)}
 	require.Equal(t, hostedPageURL+"#"+session.id, minted["url"], "the app frames the shared page")
 
@@ -432,11 +434,13 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 	t.Parallel()
 	app, pay := hostedHosts(t, nil)
 	price := app.membership("content:members", 9_990_000)
+	product, err := app.client[embedded].GetProduct(t.Context(), price.ProductID)
+	require.NoError(t, err)
 	for _, tp := range []topology{embedded, remote} {
 		buyer := app.newCustomer()
 		method := buyer.saveCard("nmi", visa)
 		link, err := app.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
-			Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceKey: price.Key,
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, ProductKey: product.Key, PriceKey: price.Key,
 		})
 		require.NoError(t, err, tp)
 		require.Equal(t, hostedPageURL+"#"+link.ID, *link.URL)
@@ -459,8 +463,8 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 		require.True(t, buyer.entitled("content:members"))
 	}
 
-	_, err := app.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString())}, PriceKey: "no-such-price",
+	_, err = app.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString())}, ProductKey: product.Key, PriceKey: "no-such-price",
 	})
 	require.ErrorIs(t, err, billing.ErrInvalid)
 }
@@ -479,7 +483,7 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	price, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 
-	minted := buyer.mint(map[string]any{"price_key": price.Key})
+	minted := buyer.mint(map[string]any{"product_key": product.Key, "price_key": price.Key})
 	require.Nil(t, minted["url"], "no payment page: the app renders <Checkout> itself")
 	session := hostedSession{w: w, id: minted["id"].(string)}
 	doc := session.read()
@@ -494,7 +498,7 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	require.Len(t, w.nmi.ledger(""), 1)
 
 	// Minting needs the signed-in customer.
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/me/checkout-sessions", strings.NewReader(`{"price_key":"`+price.Key+`"}`))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/me/checkout-sessions", strings.NewReader(`{"product_key":"`+product.Key+`","price_key":"`+price.Key+`"}`))
 	require.NoError(t, err)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -575,7 +579,7 @@ func TestCheckoutSessionPaysWithAStripeElementsCard(t *testing.T) {
 	}
 	w.start()
 	price := w.membership("content:members", 9_990_000)
-	option := w.options(price.Key)["stripe"]
+	option := w.options(billing.GetCheckoutConfigParams{PriceID: price.ID})["stripe"]
 	require.Equal(t, "stripe_elements", option.Driver)
 	require.Equal(t, "pk_test_e2e", option.PublicConfig["publishable_key"])
 

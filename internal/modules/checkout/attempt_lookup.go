@@ -21,7 +21,7 @@ func (s *CheckoutAttemptService) LookupSession(ctx context.Context, req *Checkou
 	}
 	// A lookup never uses a card; it only names the request being asked about.
 	defer describeCard(req)()
-	if err := validateCheckoutPriceSelector(req.PriceID, req.PriceKey); err != nil {
+	if err := validateCheckoutPriceSelector(req.PriceID, req.ProductKey, req.PriceKey); err != nil {
 		return nil, err
 	}
 	mid, err := merchant.Require(ctx)

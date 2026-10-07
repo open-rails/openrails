@@ -15,7 +15,7 @@ import (
 
 // ListCheckoutOptions returns the ready ways to sell a price, in routing
 // order. It does not probe providers or write.
-func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.PriceID, priceKey string) ([]billing.CheckoutOption, error) {
+func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.PriceID, productKey, priceKey string) ([]billing.CheckoutOption, error) {
 	engine, err := s.requireCheckoutAttemptService()
 	if err != nil {
 		return nil, err
@@ -34,7 +34,7 @@ func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.Price
 	var options []checkout.CheckoutOption
 	err = rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error {
 		var listErr error
-		options, listErr = engine.ListCheckoutOptions(scoped, id, priceKey)
+		options, listErr = engine.ListCheckoutOptions(scoped, id, productKey, priceKey)
 		return listErr
 	})
 	if err != nil {
@@ -255,8 +255,8 @@ func checkoutCreateRequest(req billing.CreateCheckoutAttemptParams, card *cardgu
 	}
 	payment := req.PaymentOptions
 	return &checkout.CheckoutAttemptCreateRequest{
-		PriceID:        priceID,
-		PriceKey:       req.PriceKey,
+		PriceID:  priceID,
+		PriceKey: req.PriceKey, ProductKey: req.ProductKey,
 		Entitlement:    req.Entitlement,
 		OfferKind:      req.OfferKind,
 		Metadata:       req.Metadata,

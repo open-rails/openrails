@@ -18,6 +18,7 @@ import (
 type MintCheckoutSessionParams struct {
 	PriceID    billing.PriceID `json:"price_id"`
 	PriceKey   string          `json:"price_key"`
+	ProductKey string          `json:"product_key,omitempty"`
 	SuccessURL string          `json:"success_url" binding:"omitempty,url"`
 }
 
@@ -45,7 +46,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	if user.Email != nil {
 		customer.VerifiedEmail = *user.Email
 	}
-	mintCheckoutSession(r, billing.CreateCheckoutSessionParams{Customer: customer, PriceID: body.PriceID, PriceKey: body.PriceKey, SuccessURL: body.SuccessURL})
+	mintCheckoutSession(r, billing.CreateCheckoutSessionParams{Customer: customer, PriceID: body.PriceID, PriceKey: body.PriceKey, ProductKey: body.ProductKey, SuccessURL: body.SuccessURL})
 }
 
 // ServiceCreateCheckoutSession handles POST /v1/merchant/checkout-sessions:

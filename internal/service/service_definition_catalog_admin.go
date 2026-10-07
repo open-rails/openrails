@@ -331,7 +331,7 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 		if err != nil {
 			return nil, err
 		}
-		displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), current.Key)
+		displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), current.ProductID, current.Key)
 		if dErr != nil && !errors.Is(dErr, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("resolve current holder of price key %q: %w", current.Key, dErr)
 		}
@@ -738,17 +738,10 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 	return &ProductReconcileResult{SyncStatus: syncStatus, Drift: residual, Action: "updated_remote"}, nil
 }
 
-// recreateStripePrice mints a fresh Stripe Price for the OpenRails price under
-// its content lookup_key and repoints the local rails map at the new id.
-// This is the missing→recreate path: the stored Stripe price 404'd, so we
-// re-mint one carrying the SAME content lookup_key + metadata (derived from the
-// product key + the price's immutable money terms) and point the row at it.
-//
-// There is no amount-drift / transfer_lookup_key path: a price's financial
-// terms are baked into its content key, so a change is a different price minted
-// upstream (create-new + archive-old), never an in-place re-mint+transfer.
+// recreateStripePrice repairs a missing remote object for the same immutable
+// local price. It never changes an existing remote object's money terms.
 func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.PriceService, prod *models.Product, local *models.Price, priceID uuid.UUID, stripeProductID string) (string, error) {
-	priceContentKey := openRailsPriceContentKey(prod.Key, local.Currency, local.Amount, local.RecurringCycleDays())
+	priceKey := priceID.String()
 	stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
 	unitAmountCents, err := moneyutil.NativeToRailMinorExact(local.Currency, local.Amount)
 	if err != nil {
@@ -759,12 +752,11 @@ func (s *Service) recreateStripePrice(ctx context.Context, prices *catalog.Price
 		UnitAmount:       int64(unitAmountCents),
 		Currency:         local.Currency,
 		BillingCycleDays: local.RecurringCycleDays(),
-		LookupKey:        internalStripeLookupKey(prod.Key, local.Currency, local.Amount, local.RecurringCycleDays()),
-		// Content key is the idempotency key: replaying recreate for the same
-		// price terms returns the same Stripe object rather than duplicating.
-		IdempotencyKey: "openrails-price-" + priceContentKey,
+		LookupKey:        internalStripeLookupKey(priceID),
+		// Repair retries use the retained local price identity.
+		IdempotencyKey: "openrails-price-" + priceKey,
 		Metadata: map[string]string{
-			catalog.StripeMetadataOpenRailsPriceKey:   priceContentKey,
+			catalog.StripeMetadataOpenRailsPriceKey:   priceKey,
 			catalog.StripeMetadataOpenRailsProductKey: strings.TrimSpace(prod.Key),
 			// Informational only — not used for matching.
 			catalog.StripeMetadataOpenRailsPriceID:   priceID.String(),

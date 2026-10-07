@@ -47,15 +47,17 @@ func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKey
 }
 
 const listPriceKeyMovements = `-- name: ListPriceKeyMovements :many
-SELECT id, merchant_id, key, price_id, effective_at, created_at, archived FROM billing.price_key_movements
-WHERE merchant_id = $1::uuid AND key = $2::text
- AND ($3::timestamptz IS NULL OR (effective_at, id) < ($3::timestamptz, $4::uuid))
-ORDER BY effective_at DESC, id DESC
-LIMIT $5::int
+SELECT movement.id, movement.merchant_id, movement.key, movement.price_id, movement.effective_at, movement.created_at, movement.archived FROM billing.price_key_movements movement
+JOIN billing.prices price ON price.merchant_id = movement.merchant_id AND price.id = movement.price_id
+WHERE movement.merchant_id = $1::uuid AND price.product_id = $2::uuid AND movement.key = $3::text
+ AND ($4::timestamptz IS NULL OR (movement.effective_at, movement.id) < ($4::timestamptz, $5::uuid))
+ORDER BY movement.effective_at DESC, movement.id DESC
+LIMIT $6::int
 `
 
 type ListPriceKeyMovementsParams struct {
 	MerchantID uuid.UUID
+	ProductID  uuid.UUID
 	Key        string
 	AfterAt    *time.Time
 	AfterID    *uuid.UUID
@@ -65,6 +67,7 @@ type ListPriceKeyMovementsParams struct {
 func (q *Queries) ListPriceKeyMovements(ctx context.Context, arg ListPriceKeyMovementsParams) ([]BillingPriceKeyMovement, error) {
 	rows, err := q.db.Query(ctx, listPriceKeyMovements,
 		arg.MerchantID,
+		arg.ProductID,
 		arg.Key,
 		arg.AfterAt,
 		arg.AfterID,

@@ -1,9 +1,8 @@
 # Example merchant: digital-ocean. Select the merchant outside this payload.
 # Amounts are integer USD micros. These are illustrative prices, not current quotes.
-# Declarative: apply this file on every boot. Unchanged, it replays; edited, or
-# after a console edit, it applies again and the file wins for what it declares.
-# To guard a one-off change against concurrent editors instead, add both
-# application_id and expected_revision (the current catalog revision).
+# Apply this partial batch on every boot. Its canonical content hash is remembered
+# permanently: replays never undo later client/API edits. Omitted entries remain.
+# New content applies atomically; hashes do not order previously unseen batches.
 schema_version: 1
 
 # ───────────────────────────────────────────────────────────────────────

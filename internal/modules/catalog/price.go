@@ -55,7 +55,7 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 	// canonical whatever minted it (service API, catalog manifest apply,
 	// importer).
 	price.Currency = moneyutil.NormalizeCurrency(price.Currency)
-	rows, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
+	row, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  price.ID,
 		MerchantID:          price.MerchantID,
 		ProductID:           price.ProductID,
@@ -73,9 +73,7 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 	if err != nil {
 		return err
 	}
-	if rows < 1 {
-		return pgx.ErrNoRows
-	}
+	price.Revision = row.Revision
 	return nil
 }
 
@@ -407,37 +405,13 @@ func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived b
 // the #662 substance UUID; these methods manage the key label + the
 // pointer-movement history log, never the immutable financial columns.
 
-// SetKey relabels a price row's key in place. This is a pure label mutation
-// (like UpdateRails) — it never changes row identity. Used both when a
-// version bump repoints a NEW/reactivated row to a key, and when MODE 1's
-// YAML-is-truth converge detects a plain key rename on an otherwise-unchanged
-// price (the same substance, matched by matchPrice, now declared under a
-// different key string).
-func (s *PriceService) SetKey(ctx context.Context, id uuid.UUID, key string) error {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return queryScopeErr
-	}
-
-	rows, err := s.db.Gen(ctx).UpdatePriceKey(ctx, gen.UpdatePriceKeyParams{MerchantID: queryMerchant.UUID(),
-		ID:  id,
-		Key: key,
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return pgx.ErrNoRows
-	}
-	return nil
-}
-
 // GetCurrentByKey returns the CURRENT (non-archived) row for a key, or
 // pgx.ErrNoRows if the key names no live price. At most one such row can
-// exist per (merchant, key) — enforced by prices_key_key.
-func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID, key string) (*models.Price, error) {
+// exist per (merchant, product, key) — enforced by prices_key_key.
+func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID, productID uuid.UUID, key string) (*models.Price, error) {
 	row, err := s.db.Gen(ctx).GetCurrentPriceByKey(ctx, gen.GetCurrentPriceByKeyParams{
 		MerchantID: merchantID,
+		ProductID:  productID,
 		Key:        key,
 	})
 	if err != nil {
@@ -446,11 +420,21 @@ func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID
 	return s.db.PriceFromGen(ctx, row)
 }
 
+// GetCurrentByProductKey resolves the product and price keys as an opaque pair.
+func (s *PriceService) GetCurrentByProductKey(ctx context.Context, merchantID uuid.UUID, productKey, key string) (*models.Price, error) {
+	row, err := s.db.Gen(ctx).GetCurrentPriceByProductKey(ctx, gen.GetCurrentPriceByProductKeyParams{MerchantID: merchantID, ProductKey: productKey, Key: key})
+	if err != nil {
+		return nil, err
+	}
+	return s.db.PriceFromGen(ctx, row)
+}
+
 // ListChainByKey returns every row (archived + current) that has ever been
 // named by this key — the version chain.
-func (s *PriceService) ListChainByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error) {
+func (s *PriceService) ListChainByKey(ctx context.Context, merchantID, productID uuid.UUID, key string) ([]*models.Price, error) {
 	rows, err := s.db.Gen(ctx).ListPriceChainByKey(ctx, gen.ListPriceChainByKeyParams{
 		MerchantID: merchantID,
+		ProductID:  productID,
 		Key:        key,
 	})
 	if err != nil {
@@ -462,9 +446,10 @@ func (s *PriceService) ListChainByKey(ctx context.Context, merchantID uuid.UUID,
 // ListPriorVersionsByKey returns the archived members of a key's chain —
 // #773's "all prior versions of key K", the reprice_all_prior_versions bulk
 // target set.
-func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error) {
+func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID, productID uuid.UUID, key string) ([]*models.Price, error) {
 	rows, err := s.db.Gen(ctx).ListPriorVersionsByKey(ctx, gen.ListPriorVersionsByKeyParams{
 		MerchantID: merchantID,
+		ProductID:  productID,
 		Key:        key,
 	})
 	if err != nil {
@@ -524,7 +509,7 @@ func (s *PriceService) CurrentByProducts(ctx context.Context, productIDs []uuid.
 
 // ListKeyMovements returns one keyset page of a key's movement history,
 // most recent first.
-func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error) {
+func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID, productID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error) {
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return billing.ListPage[*models.PriceKeyMovement]{}, err
@@ -535,6 +520,7 @@ func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUI
 	}
 	rows, err := s.db.Gen(ctx).ListPriceKeyMovements(ctx, gen.ListPriceKeyMovementsParams{
 		MerchantID: merchantID,
+		ProductID:  productID,
 		Key:        key,
 		AfterAt:    afterAt,
 		AfterID:    afterID,
@@ -544,4 +530,21 @@ func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID uuid.UUI
 		return billing.ListPage[*models.PriceKeyMovement]{}, err
 	}
 	return pagination.Cut(models.PriceKeyMovementsFromGen(rows), limit, func(m *models.PriceKeyMovement) any { return pagination.TimeID{At: m.EffectiveAt, ID: m.ID} }), nil
+}
+
+// FindByTerms retains existing immutable price IDs, including imported history.
+func (s *PriceService) FindByTerms(ctx context.Context, req billing.CreatePriceParams, key string) (*models.Price, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.db.Gen(ctx).GetPriceByTerms(ctx, gen.GetPriceByTermsParams{
+		MerchantID: mid.UUID(), ProductID: req.ProductID.UUID(), Key: key,
+		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), AutoRenew: req.AutoRenew,
+		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.db.PriceFromGen(ctx, row)
 }

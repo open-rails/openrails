@@ -21,6 +21,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			return nil
 		}
 		p := Profiles[table]
+		// Earlier archives predate product and price revisions.
+		// This column was added immediately after merchant_id; the original
+		// wire reader still verifies the untouched stream's digest.
+		if len(r.Values) == len(p.Columns)-1 && (p.Name == "prices" || p.Name == "products") {
+			values := make([]*string, len(p.Columns))
+			values[0] = r.Values[0]
+			copy(values[2:], r.Values[1:])
+			r.Values = values
+		}
 		if err := ValidateValues(p, r.Values); err != nil {
 			return err
 		}

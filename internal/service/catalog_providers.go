@@ -17,7 +17,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -143,12 +142,7 @@ type autoCreateContext struct {
 	PriceID   uuid.UUID
 	ProductID uuid.UUID
 	Product   *models.Product
-	// ProductKey is the product's stable identity. Together with the immutable
-	// money terms (UnitAmount / Currency / provider-day cadence for day-granularity
-	// providers, AccessDurationHours for hour-granularity providers) it forms the
-	// CONTENT identity of this price, which drives deterministic provider keys
-	// and metadata content keys — so find-or-create survives a DB rebuild that
-	// regenerates row UUIDs.
+	// ProductKey labels the remote product; PriceID identifies each immutable price.
 	ProductKey          string
 	UnitAmount          int64
 	Currency            string
@@ -190,36 +184,10 @@ func sortedAdapterNames(adapters map[string]providerAdapter) []string {
 	return names
 }
 
-// openRailsPriceContentKey is the content key derived from a price's FINANCIAL
-// SUBSTANCE — the product's stable key plus the immutable money terms
-// (currency, unit amount, provider cadence). It is NOT derived from any row UUID,
-// so it survives a DB wipe + resync: re-seeding the same product+price terms
-// reproduces byte-identical keys and re-attaches to the existing provider
-// objects rather than duplicating them.
-//
-// Because the amount lives IN the key, a different amount yields a different key
-// and therefore a different price — a price change is modeled as create-new +
-// archive-old, never an in-place mutation/transfer.
-//
-// Format: "<product_key>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
-// provider day cadence for a recurring price or "onetime" for a one-time price.
-// Example: "pro.usd.2900.30" or "pro.usd.500.onetime".
-// Canonical implementation: catalog.OpenRailsPriceContentKey (shared with the
-// #358 archive-intent relevance checks).
-func openRailsPriceContentKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
-	return catalog.OpenRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
-}
-
-// internalStripeLookupKey is the deterministic Stripe lookup_key OpenRails
-// assigns to every price it auto-creates. It is the price content key prefixed
-// with "openrails." so OpenRails-owned prices are unmistakable on the Stripe
-// account. Content-addressed (see openRailsPriceContentKey), so it is stable
-// across DB rebuilds and reconstructable without the caller supplying anything.
-//
-// Format: "openrails.<product_key>.<currency>.<unit_amount>.<cycle>".
-// Example: "openrails.pro.usd.2900.30".
-func internalStripeLookupKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
-	return "openrails." + openRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
+// internalStripeLookupKey addresses one immutable local price. The local ID
+// includes its product, key and complete terms, and persisted IDs survive imports.
+func internalStripeLookupKey(priceID uuid.UUID) string {
+	return "openrails." + priceID.String()
 }
 
 // resolveProviders walks the declared `providers` + `provider_links` from a
@@ -342,10 +310,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		}
 	}
 
-	// The price substance (product key + immutable money terms) is the same for the
-	// Attach (link-validation) and AutoCreate (mint) paths. lookup_key + content
-	// keys are derived from the product key + money terms, not the row UUIDs, so
-	// re-syncing after a DB wipe finds the same provider objects.
+	// Retain the local price identity across every provider publication path.
 	productKey := ""
 	if product != nil {
 		productKey = strings.TrimSpace(product.Key)
@@ -363,7 +328,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		Currency:             req.Currency,
 		BillingCycleDays:     reqCycle,
 		AccessDurationHours:  req.AccessDurationHours,
-		LookupKey:            internalStripeLookupKey(productKey, req.Currency, req.UnitAmount, reqCycle),
+		LookupKey:            internalStripeLookupKey(priceID),
 		RemoteWritesDisabled: remoteWritesDisabled,
 	}
 
@@ -597,7 +562,7 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 			pctx.ProductKey = strings.TrimSpace(product.Key)
 		}
 	}
-	pctx.LookupKey = internalStripeLookupKey(pctx.ProductKey, pctx.Currency, pctx.UnitAmount, pctx.BillingCycleDays)
+	pctx.LookupKey = internalStripeLookupKey(price.ID)
 	return pctx, nil
 }
 

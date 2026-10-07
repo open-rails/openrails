@@ -524,10 +524,16 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "copilot", "load-price-draft"],
-      mutationFn: async (priceKey: string) => {
-        const price = await getPriceByKey(priceKey)
+      mutationFn: async ({
+        productKey,
+        priceKey,
+      }: {
+        productKey: string
+        priceKey: string
+      }) => {
+        const price = await getPriceByKey(productKey, priceKey)
         const product = await getProduct(price.product_id)
-        return { price, productName: product.display_name }
+        return { price, productName: product.display_name, productKey: product.key }
       },
     })
   },
@@ -715,7 +721,13 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "prices", "preview-change"],
-      mutationFn: (priceKey: string) => previewRepriceBatch(priceKey),
+      mutationFn: ({
+        productKey,
+        priceKey,
+      }: {
+        productKey: string
+        priceKey: string
+      }) => previewRepriceBatch(productKey, priceKey),
     })
   },
   changePrice: (queryClient: QueryClient) => {
@@ -727,11 +739,19 @@ export const adminMutations = {
         migration,
       }: {
         price: CreatePriceParams
-        migration?: { priceKey: string; effectiveAt: string }
+        migration?: {
+          productKey: string
+          priceKey: string
+          effectiveAt: string
+        }
       }) => {
         const created = await createPrice(price)
         if (migration) {
-          await createRepriceBatch(migration.priceKey, migration.effectiveAt)
+          await createRepriceBatch(
+            migration.productKey,
+            migration.priceKey,
+            migration.effectiveAt
+          )
         }
         return created
       },

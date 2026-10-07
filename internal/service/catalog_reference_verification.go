@@ -52,7 +52,7 @@ func (s *Service) verifyCatalogProviderReference(ctx context.Context, providerKe
 		if s.rt.SolanaRPCResolver != nil {
 			reader = s.rt.SolanaRPCResolver.ChainReader()
 		}
-		out, err = verifySolanaCatalogReference(ctx, s.rt.SolanaPlanService, reader, (&solanaAdapter{svc: s}).defaultRecurringToken(), productKey, req, link)
+		out, err = verifySolanaCatalogReference(ctx, s.rt.SolanaPlanService, reader, req, link)
 	case "ccbill":
 		out, err = declaredCCBillCatalogReference(link)
 	default:
@@ -178,7 +178,7 @@ type catalogReferenceChainReader interface {
 	GetAccountData(context.Context, solanago.PublicKey) ([]byte, error)
 }
 
-func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, defaultToken, productKey string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
+func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanService, reader catalogReferenceChainReader, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant); err != nil {
 		return nil, err
 	}
@@ -211,20 +211,25 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	}
 	pdaText := strings.TrimSpace(link[solanaKeyPlanPDA])
 	selectedToken := strings.ToUpper(strings.TrimSpace(link[solanaKeyToken]))
+	var declaredPlanID *uint64
+	if text := strings.TrimSpace(link[solanaKeyPlanID]); text != "" {
+		id, err := strconv.ParseUint(text, 10, 64)
+		if err != nil {
+			return nil, apperr.Invalidf("Solana plan_id must be an unsigned 64-bit decimal integer")
+		}
+		declaredPlanID = &id
+	}
 	if pdaText == "" {
-		if selectedToken == "" {
-			selectedToken = defaultToken
+		if declaredPlanID == nil {
+			return nil, apperr.Invalidf("an existing Solana plan_pda or explicit plan_id is required; provision it through the separate provider workflow")
 		}
-		mint, err := plan.ResolveMint(selectedToken)
+		// The program address depends only on the selected merchant and this
+		// explicit provider ID, never on mutable catalog labels or money terms.
+		address, _, err := subscriptions.DerivePlanPDA(owner, *declaredPlanID)
 		if err != nil {
 			return nil, err
 		}
-		planID := solanaPlanID(productKey, req.Currency, req.UnitAmount, req.AccessDurationHours, mint)
-		pda, _, err := subscriptions.DerivePlanPDA(owner, planID)
-		if err != nil {
-			return nil, err
-		}
-		pdaText = pda.String()
+		pdaText = address.String()
 	}
 	pda, err := solanago.PublicKeyFromBase58(pdaText)
 	if err != nil {
@@ -240,6 +245,9 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	account, err := subscriptions.DecodePlanAccount(raw)
 	if err != nil {
 		return nil, apperr.Invalidf("referenced Solana account is not a valid subscription plan")
+	}
+	if declaredPlanID != nil && account.PlanID != *declaredPlanID {
+		return nil, apperr.Invalidf("Solana plan_id does not match the verified plan")
 	}
 	derived, bump, err := subscriptions.DerivePlanPDA(owner, account.PlanID)
 	if err != nil {
@@ -271,7 +279,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	}
 	out := map[string]string{solanaKeyPlanPDA: pdaText, solanaKeyPlanID: strconv.FormatUint(account.PlanID, 10), solanaKeyMint: account.Mint.String(), solanaKeyAmountBaseUnits: strconv.FormatUint(account.Amount, 10), solanaKeyPeriodHours: strconv.FormatUint(account.PeriodHours, 10), solanaKeyCreatedAt: strconv.FormatInt(account.CreatedAt, 10), solanaKeyMerchant: owner.String(), solanaKeyMintSymbol: token}
 	for key, value := range link {
-		if key == models.RailKeyRail || key == models.RailKeyProvider || key == solanaKeyToken {
+		if key == models.RailKeyRail || key == models.RailKeyProvider || key == solanaKeyToken || key == solanaKeyPlanID {
 			continue
 		}
 		if strings.TrimSpace(value) != out[key] {

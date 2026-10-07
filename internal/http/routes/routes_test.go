@@ -229,7 +229,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 		}
 		require.Equal(t, allow, mutations > 0)
 		if allow {
-			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /merchant/catalog/prices"} {
+			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{product_key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /merchant/catalog/prices"} {
 				require.Contains(t, keys, key)
 			}
 		}

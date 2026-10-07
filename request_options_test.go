@@ -52,7 +52,7 @@ func targetCredential(_ context.Context, target CredentialTarget) (string, error
 }
 
 func catalogApplication() *catalog.Application {
-	return &catalog.Application{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
+	return &catalog.Application{SchemaVersion: 1,
 		Products: []catalog.ApplyProduct{{Key: "post", DisplayName: catalog.Value("Post")}}}
 }
 

@@ -31,12 +31,12 @@ func planMigrationServiceRequest(r *httprequest.Request, b billing.CreatePlanMig
 		r.ErrorCode(billing.CodeInternalError, "plan migration service unavailable")
 		return out, false
 	}
-	source, err := catalog.ResolveReference(ctx, r.State.PriceService, b.SourcePrice)
+	source, err := catalog.ResolveReference(ctx, r.State.PriceService, b.SourceProductKey, b.SourcePrice)
 	if err != nil {
 		r.ErrorCode(billing.CodeResourceNotFound, "source_price not found")
 		return out, false
 	}
-	target, err := catalog.ResolveReference(ctx, r.State.PriceService, b.TargetPrice)
+	target, err := catalog.ResolveReference(ctx, r.State.PriceService, b.TargetProductKey, b.TargetPrice)
 	if err != nil {
 		r.ErrorCode(billing.CodeResourceNotFound, "target_price not found")
 		return out, false

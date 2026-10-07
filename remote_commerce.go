@@ -83,12 +83,16 @@ func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.GetCheckou
 	if !query.PriceID.IsZero() && strings.TrimSpace(query.PriceKey) != "" {
 		return nil, invalidErr("price_id and price_key are exclusive")
 	}
+	if (strings.TrimSpace(query.PriceKey) != "") != (strings.TrimSpace(query.ProductKey) != "") {
+		return nil, invalidErr("product_key and price_key must be supplied together")
+	}
 	values := url.Values{}
 	if !query.PriceID.IsZero() {
 		values.Set("price_id", query.PriceID.String())
 	}
 	if strings.TrimSpace(query.PriceKey) != "" {
 		values.Set("price_key", query.PriceKey)
+		values.Set("product_key", query.ProductKey)
 	}
 	path := "/v1/merchant/checkout-config"
 	if len(values) > 0 {

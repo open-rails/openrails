@@ -292,8 +292,6 @@ var errorCodes = []ErrorCode{
 	{"product_tier_group_conflict", 409, invalid, "A customer holds live subscriptions to more than one product of the tier group."},
 	{"product_tier_group_in_use", 409, invalid, "The tier group cannot change while a subscription has a plan change in flight."},
 	{"catalog_updates_disabled", 403, invalid, "Catalog updates over HTTP are disabled in this deployment."},
-	{"catalog_declared", 405, invalid, "The catalog is declared by the host; change the declaration and restart."},
-	{"catalog_application_conflict", 409, invalid, "The application id already committed with different content."},
 	{"catalog_revision_conflict", 409, invalid, "The catalog changed during the application; retry."},
 	{"usage_meter_not_found", 404, invalid, "The usage meter does not exist."},
 	{"default_rate_card_not_found", 404, invalid, "The meter has no default rate card."},

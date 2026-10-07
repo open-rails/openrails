@@ -1,6 +1,6 @@
 -- billing.prices.
 
--- name: CreatePrice :execrows
+-- name: CreatePrice :one
 INSERT INTO billing.prices (
     id, merchant_id, product_id, archived, amount, currency,
     access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, created_at, updated_at
@@ -16,7 +16,8 @@ INSERT INTO billing.prices (
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 FROM billing.products catalog_product
 WHERE catalog_product.merchant_id=sqlc.arg(merchant_id)::uuid
-  AND catalog_product.id=sqlc.arg(product_id)::uuid;
+  AND catalog_product.id=sqlc.arg(product_id)::uuid
+RETURNING prices.*;
 
 -- name: GetPriceByID :one
 SELECT price.* FROM billing.prices price
@@ -117,23 +118,33 @@ UPDATE billing.prices AS price SET
     archived=sqlc.arg(archived)::boolean, updated_at=now()
 WHERE price.merchant_id=sqlc.arg(merchant_id)::uuid AND price.id=sqlc.arg(id)::uuid;
 
--- name: UpdatePriceKey :execrows
-UPDATE billing.prices AS price SET
-    key=sqlc.arg(key)::text, updated_at=now()
-WHERE price.merchant_id=sqlc.arg(merchant_id)::uuid AND price.id=sqlc.arg(id)::uuid;
-
 -- name: GetCurrentPriceByKey :one
 SELECT * FROM billing.prices
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text AND NOT archived;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND NOT archived;
+
+-- name: GetCurrentPriceByProductKey :one
+SELECT price.* FROM billing.prices price
+JOIN billing.products product ON product.merchant_id = price.merchant_id AND product.id = price.product_id
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND product.key = sqlc.arg(product_key)::text
+  AND price.key = sqlc.arg(key)::text AND NOT price.archived;
 
 -- All rows (archived + current) ever pointed at by this key — the version chain.
 -- name: ListPriceChainByKey :many
 SELECT * FROM billing.prices
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text
 ORDER BY created_at ASC;
 
 -- The archived members of a key's chain — #773's "all prior versions of key K".
 -- name: ListPriorVersionsByKey :many
 SELECT * FROM billing.prices
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(key)::text AND archived
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND archived
 ORDER BY created_at ASC;
+
+-- name: GetPriceByTerms :one
+SELECT * FROM billing.prices
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND product_id=sqlc.arg(product_id)::uuid AND key=sqlc.arg(key)::text
+  AND amount=sqlc.arg(amount)::bigint AND currency=sqlc.arg(currency)::text
+  AND access_duration_hours IS NOT DISTINCT FROM sqlc.narg(access_duration_hours)::int
+  AND auto_renew=sqlc.arg(auto_renew)::boolean
+  AND trial_unit_amount IS NOT DISTINCT FROM sqlc.narg(trial_unit_amount)::bigint
+  AND trial_duration_hours IS NOT DISTINCT FROM sqlc.narg(trial_duration_hours)::int;

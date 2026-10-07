@@ -74,19 +74,10 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"nmi seam on live":            {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
 		"clock seam on live":          {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
 		"catalog without merchant":    {with(sandbox, func(c *config.Config) { c.Catalog = &catalog.Application{SchemaVersion: 1} }), config.Deps{}, "set Config.Merchant"},
-		"guarded catalog": {with(sandbox, func(c *config.Config) {
-			revision := int64(3)
-			c.Merchant.Slug = "m"
-			c.Catalog = &catalog.Application{SchemaVersion: 1, ApplicationID: "once", ExpectedRevision: &revision}
-		}), config.Deps{}, "is the desired state"},
 		"invalid catalog": {with(sandbox, func(c *config.Config) {
 			c.Merchant.Slug = "m"
 			c.Catalog = &catalog.Application{}
 		}), config.Deps{}, "Config.Catalog: "},
-		"unversioned catalog": {with(sandbox, func(c *config.Config) {
-			c.Merchant.Slug = "m"
-			c.Catalog = &catalog.Application{SchemaVersion: 1}
-		}), config.Deps{}, "requires a positive catalog_version"},
 		"catalog with control plane": {with(sandbox, func(c *config.Config) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.Merchant.Slug = "m"
@@ -251,4 +242,18 @@ func TestHostTransactionsBindEngineMerchant(t *testing.T) {
 	require.NoError(t, err)
 	_, err = e.bind(merchant.WithID(context.Background(), other))
 	require.ErrorIs(t, err, billing.ErrConflict)
+}
+
+// Startup catalogs are ordinary partial batches, with a private copy retained
+// for any background retry. They need no caller-managed identity or revision.
+func TestStartupCatalogNeedsOnlyItsContent(t *testing.T) {
+	cfg := config.Config{Catalog: &catalog.Application{SchemaVersion: 1,
+		Products: []catalog.ApplyProduct{{Key: "premium", DisplayName: catalog.Value("Premium")}},
+	}}
+	cfg.Merchant.Slug = "merchant"
+	copied, err := declaredCatalog(cfg)
+	require.NoError(t, err)
+	require.Equal(t, cfg.Catalog, copied)
+	cfg.Catalog.Products[0].DisplayName = catalog.Value("Changed after construction")
+	require.Equal(t, "Premium", copied.Products[0].DisplayName.Value)
 }

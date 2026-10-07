@@ -32,7 +32,6 @@ export function CatalogApplicationDialog() {
   const [message, setMessage] = React.useState("")
   const [canEdit, setCanEdit] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
-  const [currentRevision, setCurrentRevision] = React.useState<number>()
   const [draftMerchant, setDraftMerchant] = React.useState<string>()
   const apply = useMutation(adminMutations.applyCatalog(useQueryClient()))
 
@@ -40,10 +39,10 @@ export function CatalogApplicationDialog() {
     const merchant = selectedMerchant()
     setLoading(true)
     try {
-      const { revision, writes_allowed } = await getCatalogRevision()
+      const { writes_allowed } = await getCatalogRevision()
       if (selectedMerchant() !== merchant) {
         setMessage(
-          "The selected merchant changed. Load its catalog revision before preparing an application."
+          "The selected merchant changed. Reload its catalog access before preparing a batch."
         )
         return
       }
@@ -58,8 +57,6 @@ export function CatalogApplicationDialog() {
         JSON.stringify(
           {
             schema_version: 1,
-            application_id: crypto.randomUUID(),
-            expected_revision: revision,
             prune: false,
             products: [],
           },
@@ -67,7 +64,6 @@ export function CatalogApplicationDialog() {
           2
         )
       )
-      setCurrentRevision(revision)
       setSubmitted(undefined)
       setReceipt(undefined)
       setReviewed(false)
@@ -75,25 +71,9 @@ export function CatalogApplicationDialog() {
       setMessage("")
     } catch (err) {
       setMessage(
-        "Could not load the catalog revision. Retry loading before preparing an application."
+        "Could not check catalog access. Retry loading before preparing a batch."
       )
-      toastApiError(err, "Load catalog revision")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const reviewCurrentRevision = async () => {
-    setLoading(true)
-    try {
-      const { revision } = await getCatalogRevision()
-      setCurrentRevision(revision)
-      // Reading current state never changes the submitted precondition or ID.
-      setMessage(
-        `Current revision: ${revision}. Review the catalog, then edit the document with a new application ID and the intended revision.`
-      )
-    } catch (err) {
-      toastApiError(err, "Load catalog revision")
+      toastApiError(err, "Check catalog access")
     } finally {
       setLoading(false)
     }
@@ -115,13 +95,13 @@ export function CatalogApplicationDialog() {
       setReceipt(result)
       setMessage(
         result.replayed
-          ? "This application was already applied. No changes were repeated. Review the current catalog before starting a new application."
-          : "Application committed. Review the current catalog before starting another application."
+          ? "This batch was already applied. No changes were repeated, and later catalog edits were preserved."
+          : "Batch applied. Review the current catalog before preparing another batch."
       )
       toast.success(
         result.replayed
-          ? "Original application receipt returned"
-          : "Catalog application committed"
+          ? "Original batch receipt returned"
+          : "Catalog batch applied"
       )
     } catch (err) {
       const refused =
@@ -132,8 +112,8 @@ export function CatalogApplicationDialog() {
       setCanEdit(refused)
       setMessage(
         refused
-          ? "Application refused. Review the current catalog and document before editing. The application ID and expected revision have not changed."
-          : "The outcome could not be confirmed. Retry the exact application to retrieve its result; its ID, revision and contents are preserved."
+          ? "Batch refused. Review the error and edit the document before trying again."
+          : "The outcome could not be confirmed. Retry this exact document to retrieve its receipt without repeating changes."
       )
       toastApiError(err, "Apply catalog")
     }
@@ -159,14 +139,14 @@ export function CatalogApplicationDialog() {
         <DialogHeader>
           <DialogTitle>Apply catalog changes</DialogTitle>
           <DialogDescription>
-            Paste a complete JSON or YAML application. Omitted records stay
-            unchanged unless prune is true. With prune, omitted prices are
-            archived even under a listed product. Keep the application ID and
-            expected revision unchanged when retrying.
+            Paste a JSON or YAML catalog batch. Each distinct batch applies once
+            per merchant; retries preserve later catalog edits. Omitted records
+            stay unchanged unless prune is true. With prune, omitted products
+            and prices are archived, including prices under a listed product.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <Label htmlFor="catalog-application">Application document</Label>
+          <Label htmlFor="catalog-application">Catalog document</Label>
           <Textarea
             id="catalog-application"
             className="max-h-80 min-h-48 font-mono text-xs"
@@ -178,11 +158,6 @@ export function CatalogApplicationDialog() {
               setReviewed(false)
             }}
           />
-          {currentRevision !== undefined && (
-            <p className="text-sm text-muted-foreground">
-              Last loaded catalog revision: {currentRevision}
-            </p>
-          )}
           {reviewed && !submitted && (
             <p className="text-sm">
               Review complete. Applying sends this exact document; this is not a
@@ -196,7 +171,7 @@ export function CatalogApplicationDialog() {
           )}
           {receipt && (
             <pre
-              aria-label="Application receipt"
+              aria-label="Batch receipt"
               className="max-h-48 overflow-auto rounded-md border p-3 text-xs"
             >
               {JSON.stringify(receipt, null, 2)}
@@ -206,54 +181,46 @@ export function CatalogApplicationDialog() {
         <DialogFooter>
           {!document && (
             <Button disabled={loading} onClick={() => void start()}>
-              Load catalog revision
+              Check catalog access
             </Button>
           )}
           {canEdit && (
-            <>
-              <Button
-                variant="outline"
-                disabled={loading}
-                onClick={() => void reviewCurrentRevision()}
-              >
-                Review current revision
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSubmitted(undefined)
-                  setReviewed(false)
-                  setCanEdit(false)
-                }}
-              >
-                Edit application
-              </Button>
-            </>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSubmitted(undefined)
+                setReviewed(false)
+                setCanEdit(false)
+                setMessage("")
+              }}
+            >
+              Edit batch
+            </Button>
           )}
           {receipt ? (
             <Button disabled={loading} onClick={() => void start()}>
-              New application
+              New batch
             </Button>
           ) : submitted !== undefined ? (
             <Button
               disabled={apply.isPending || loading || canEdit}
               onClick={() => void run()}
             >
-              {apply.isPending ? "Applying…" : "Retry exact application"}
+              {apply.isPending ? "Applying…" : "Retry exact batch"}
             </Button>
           ) : reviewed ? (
             <Button
               disabled={loading || !document.trim()}
               onClick={() => void run()}
             >
-              Apply reviewed application
+              Apply reviewed batch
             </Button>
           ) : (
             <Button
               disabled={loading || !document.trim()}
               onClick={() => setReviewed(true)}
             >
-              Review application
+              Review batch
             </Button>
           )}
         </DialogFooter>

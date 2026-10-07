@@ -65,7 +65,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1
 `
 
 type GetProductByIDParams struct {
@@ -88,12 +88,13 @@ func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getProductByKey = `-- name: GetProductByKey :one
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1
 `
 
 type GetProductByKeyParams struct {
@@ -116,12 +117,13 @@ func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
 `
 
 func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
@@ -145,6 +147,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -157,7 +160,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision FROM billing.products
 WHERE products.merchant_id = $1::uuid
 `
 
@@ -182,6 +185,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -194,7 +198,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
 
 type ListProductsByIDsParams struct {
@@ -223,6 +227,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -235,7 +240,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 }
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM billing.products
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision FROM billing.products
 WHERE products.merchant_id = $1::uuid
   AND ($2::boolean IS NULL OR archived = $2::boolean)
   AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
@@ -282,6 +287,7 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +309,7 @@ UPDATE billing.products SET
     archived = COALESCE($9::boolean, archived),
     updated_at = now()
 WHERE products.merchant_id = $10::uuid AND id = $11::uuid
-RETURNING id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id
+RETURNING id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision
 `
 
 type PatchProductParams struct {
@@ -348,6 +354,7 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Bil
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
+		&i.Revision,
 	)
 	return i, err
 }

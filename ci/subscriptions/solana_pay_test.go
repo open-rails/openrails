@@ -76,8 +76,8 @@ func newSolanaPay(t *testing.T) *solanaPay {
     psps: [solana]
 `)
 	require.NoError(t, err)
-	p.price = priceID(t, w, key+"-once")
-	p.rail = w.options(key + "-once")["solana"]
+	p.price = priceID(t, w, key, key+"-once")
+	p.rail = w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: key + "-once"})["solana"]
 	require.NotEmpty(t, p.rail.PSPID, "solana is offered")
 	return p
 }

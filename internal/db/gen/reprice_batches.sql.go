@@ -174,14 +174,20 @@ CROSS JOIN LATERAL (
 ) c
 WHERE b.merchant_id = $1::uuid
   AND ($2::text IS NULL OR b.price_key = $2::text)
-  AND ($3::timestamptz IS NULL OR (b.created_at, b.id) < ($3::timestamptz, $4::uuid))
+  AND ($3::text = '' OR EXISTS (
+      SELECT 1 FROM billing.prices price
+      JOIN billing.products product ON product.merchant_id=price.merchant_id AND product.id=price.product_id
+      WHERE price.merchant_id=b.merchant_id AND price.id=b.to_price_id AND product.key=$3::text
+  ))
+  AND ($4::timestamptz IS NULL OR (b.created_at, b.id) < ($4::timestamptz, $5::uuid))
 ORDER BY b.created_at DESC, b.id DESC
-LIMIT $5::int
+LIMIT $6::int
 `
 
 type ListRepriceBatchesPageParams struct {
 	MerchantID uuid.UUID
 	PriceKey   *string
+	ProductKey string
 	AfterAt    *time.Time
 	AfterID    *uuid.UUID
 	RowLimit   int32
@@ -199,6 +205,7 @@ func (q *Queries) ListRepriceBatchesPage(ctx context.Context, arg ListRepriceBat
 	rows, err := q.db.Query(ctx, listRepriceBatchesPage,
 		arg.MerchantID,
 		arg.PriceKey,
+		arg.ProductKey,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.RowLimit,

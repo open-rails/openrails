@@ -12,9 +12,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
-func validateCheckoutPriceSelector(id, key string) error {
+func validateCheckoutPriceSelector(id, productKey, key string) error {
 	if (strings.TrimSpace(id) == "") == (strings.TrimSpace(key) == "") {
 		return fmt.Errorf("%w: exactly one of price_id or price_key is required", ErrCheckoutAttemptValidation)
+	}
+	if (strings.TrimSpace(productKey) != "") != (strings.TrimSpace(key) != "") {
+		return fmt.Errorf("%w: product_key and price_key must be supplied together", ErrCheckoutAttemptValidation)
 	}
 	if id != "" {
 		if parsed, err := billing.ParsePriceID(id); err != nil || parsed.IsZero() {
@@ -44,8 +47,8 @@ func validateOfferAssertion(price *models.Price, product *models.Product, key st
 	return nil
 }
 
-func resolveCheckoutPrice(ctx context.Context, prices *catalog.PriceService, id, key string) (*models.Price, error) {
-	if err := validateCheckoutPriceSelector(id, key); err != nil {
+func resolveCheckoutPrice(ctx context.Context, prices *catalog.PriceService, id, productKey, key string) (*models.Price, error) {
+	if err := validateCheckoutPriceSelector(id, productKey, key); err != nil {
 		return nil, err
 	}
 	if id != "" {
@@ -56,5 +59,5 @@ func resolveCheckoutPrice(ctx context.Context, prices *catalog.PriceService, id,
 	if err != nil {
 		return nil, err
 	}
-	return prices.GetCurrentByKey(ctx, mid.UUID(), key)
+	return prices.GetCurrentByProductKey(ctx, mid.UUID(), productKey, key)
 }

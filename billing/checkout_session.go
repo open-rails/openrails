@@ -6,9 +6,10 @@ import "time"
 // one price, handed to that customer's browser. Supply exactly one of PriceID
 // or PriceKey.
 type CreateCheckoutSessionParams struct {
-	Customer CheckoutCustomerIdentity `json:"customer"`
-	PriceID  PriceID                  `json:"price_id"`
-	PriceKey string                   `json:"price_key"`
+	Customer   CheckoutCustomerIdentity `json:"customer"`
+	PriceID    PriceID                  `json:"price_id"`
+	PriceKey   string                   `json:"price_key"`
+	ProductKey string                   `json:"product_key,omitempty"`
 	// SuccessURL is where a redirect step returns the buyer; its origin must
 	// be one of Config.ReturnOrigins.
 	SuccessURL string `json:"success_url"`

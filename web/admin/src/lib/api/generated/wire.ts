@@ -92,8 +92,6 @@ export type Allowance = {
 
 export type Application = {
   schema_version?: number
-  application_id?: string
-  expected_revision?: number
   prune?: boolean
   products?: ApplyProduct[]
   meters?: ApplyMeter[]
@@ -558,6 +556,7 @@ export type CreateCheckoutAttemptParams = {
   customer?: CheckoutCustomerIdentity
   price_id?: string
   price_key?: string
+  product_key?: string
   entitlement?: string
   offer_kind?: "finite" | "permanent" | "recurring"
   payment?: CheckoutPaymentOptions
@@ -570,6 +569,7 @@ export type CreateCheckoutSessionParams = {
   customer?: CheckoutCustomerIdentity
   price_id?: string
   price_key?: string
+  product_key?: string
   success_url?: string
 }
 
@@ -628,7 +628,9 @@ export type CreatePaymentMethodParams = {
 
 export type CreatePlanMigrationParams = {
   source_price?: string
+  source_product_key?: string
   target_price?: string
+  target_product_key?: string
   effective_at?: string
   notice_days?: number
   immediate?: boolean
@@ -675,6 +677,7 @@ export type CreateProductParams = {
 }
 
 export type CreateRepriceBatchParams = {
+  product_key: string
   price_key: string
   effective_at: string
   acknowledge_short_notice: boolean
@@ -1330,6 +1333,7 @@ export type MetricsSchema = {
 export type MintCheckoutSessionParams = {
   price_id?: string
   price_key?: string
+  product_key?: string
   success_url?: string
 }
 
@@ -1727,10 +1731,12 @@ export type PreviewPSPRoutingParams = {
 }
 
 export type PreviewRepriceBatchParams = {
+  product_key?: string
   price_key?: string
 }
 
 export type Price = {
+  revision: number
   id: string
   key: string
   product_id: string
@@ -1748,6 +1754,7 @@ export type Price = {
 }
 
 export type PriceChangeDraft = {
+  product_key: string
   price_key: string
   current_amount: string
   new_amount: string
@@ -1765,6 +1772,7 @@ export type PriceKeyMovement = {
 }
 
 export type Product = {
+  revision: number
   id: string
   key: string
   display_name: string
@@ -2022,6 +2030,7 @@ export type RepriceBatchCancel = {
 }
 
 export type RepriceBatchPreview = {
+  product_key: string
   price_key: string
   to_price_id: string
   matched: number
@@ -2360,7 +2369,6 @@ export type UpdatePSPParams = {
 }
 
 export type UpdatePriceParams = {
-  key?: string | null
   archived?: boolean | null
   psp_links?: Record<string, Record<string, string>>
 }

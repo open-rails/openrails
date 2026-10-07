@@ -49,6 +49,11 @@ CROSS JOIN LATERAL (
 ) c
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(price_key)::text IS NULL OR b.price_key = sqlc.narg(price_key)::text)
+  AND (sqlc.arg(product_key)::text = '' OR EXISTS (
+      SELECT 1 FROM billing.prices price
+      JOIN billing.products product ON product.merchant_id=price.merchant_id AND product.id=price.product_id
+      WHERE price.merchant_id=b.merchant_id AND price.id=b.to_price_id AND product.key=sqlc.arg(product_key)::text
+  ))
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (b.created_at, b.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY b.created_at DESC, b.id DESC
 LIMIT sqlc.arg(row_limit)::int;

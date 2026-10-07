@@ -312,6 +312,7 @@ export type InvoicePayment = {
 export type MintCheckoutSessionParams = {
   price_id?: string
   price_key?: string
+  product_key?: string
   success_url?: string
 }
 
@@ -486,6 +487,7 @@ export type PortalResponse = {
 }
 
 export type Price = {
+  revision: number
   id: string
   key: string
   product_id: string
@@ -503,6 +505,7 @@ export type Price = {
 }
 
 export type Product = {
+  revision: number
   id: string
   key: string
   display_name: string

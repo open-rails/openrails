@@ -35,7 +35,10 @@ import { Checkout, CheckoutFrame } from "@openrails/billing-ui"
 import "@openrails/billing-ui/styles.css"
 
 const billing = createBillingClient({ fetch: auth.authFetch })
-const session = await billing.createCheckoutSession({ priceKey: "pro-monthly" })
+const session = await billing.createCheckoutSession({
+  productKey: "pro",
+  priceKey: "monthly",
+})
 
 // A shared payment page (Config.HTTP.Checkout.PageURL) answers with a url:
 <CheckoutFrame url={session.url} theme="dark" onComplete={() => refetchAccess()} />

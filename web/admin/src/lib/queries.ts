@@ -307,26 +307,26 @@ export const adminQueries = {
       queryFn: ({ signal }) => getProduct(id!, signal),
       enabled: Boolean(id),
     }),
-  priceHistory: (priceKey?: string) =>
+  priceHistory: (productKey?: string, priceKey?: string) =>
     queryOptions({
       queryKey: [
         ...queryKeys.catalog(),
         "prices",
         "history",
-        priceKey ?? "unselected",
+        { productKey, priceKey },
       ],
-      queryFn: ({ signal }) => getPriceKeyHistory(priceKey!, signal),
-      enabled: Boolean(priceKey),
+      queryFn: ({ signal }) => getPriceKeyHistory(productKey!, priceKey!, signal),
+      enabled: Boolean(productKey && priceKey),
     }),
-  repriceBatches: (priceKey?: string, limit = 5) =>
+  repriceBatches: (productKey?: string, priceKey?: string, limit = 5) =>
     queryOptions({
       queryKey: [
         ...queryKeys.catalog(),
         "reprice-batches",
-        { priceKey, limit },
+        { productKey, priceKey, limit },
       ],
-      queryFn: ({ signal }) => listRepriceBatches(priceKey!, limit, signal),
-      enabled: Boolean(priceKey),
+      queryFn: ({ signal }) => listRepriceBatches(productKey!, priceKey!, limit, signal),
+      enabled: Boolean(productKey && priceKey),
     }),
   catalogRevision: () =>
     queryOptions({

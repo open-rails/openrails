@@ -90,12 +90,12 @@ explicit:
 | `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
 | `Schema` | default `billing` | The Postgres schema of OpenRails' tables. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
-| `Catalog` | no | The merchant's declared catalog, applied by `New` (section 5). Requires `Merchant`. |
+| `Catalog` | no | Optional startup batch, equivalent to calling `ApplyCatalog` once (section 5). Requires `Merchant`. |
 | `HTTP` | no | The route groups `Client.Routes` publishes (section 6); nil publishes none. |
 | `River`, `RiverSchema` | default managed | Who runs the job fleet (section 4). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Merchant`, delegated credentials). The in-process Client writes its own catalog without it. A declared `Catalog` stays read-only either way. |
+| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Merchant`, delegated credentials). The in-process Client writes its own catalog without it. The in-process client remains available either way. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
 | `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`), for billing and control-plane mail alike. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.EmailSender`, OpenRails sends no email. |
 
@@ -235,40 +235,40 @@ managed PSP credentials are published through `Client.CreatePSP`/`UpdatePSP`
 with an operation ID and the expected PSP revision. `HTTP.Merchant` publishes
 these routes with the rest of the merchant API, each gated by its permission.
 
-**Declared catalog**: a host whose `catalog.yaml` is the truth sets
-`Config.Catalog` (`catalog.ParseApplicationYAML` of the file). `New`
-applies it before returning, so checkout never sells an unapplied catalog:
-the file requires a positive `catalog_version`, scoped to the merchant. A higher
-version applies atomically, the same version and content replays, and a lower
-version is superseded without changing the database. Reusing the current version
-with different content fails: increase `catalog_version` when editing the file.
-Replicas with different versions therefore cannot roll the catalog back. For an
-intentional rollback, put the earlier contents in a file with a new, higher
-`catalog_version`. `application_id` and `expected_revision` are omitted.
+**Startup catalog batch:** parse a YAML document with `catalog.ParseApplicationYAML`
+and call `client.ApplyCatalog(ctx, document)`. Set `AllowCatalogUpdates: false` to
+omit catalog-write HTTP routes; the authorized in-process client still edits the
+catalog. YAML batches and individual client/API edits operate on the same merchant
+catalog. `Config.Catalog` is an optional startup convenience for the same batch.
 
-Version ordering, the content checksum, and the catalog changes commit together;
-failed applications consume no version. Formatting and declaration ordering do
-not affect the checksum. The database retains this state with merchant archives.
-API-managed catalogs omit `catalog_version` and keep their existing update rules. A catalog the engine refuses fails `New` with the
-reason; a transient database error is retried within `ctx`. The apply makes no
-provider writes. It reads a provider only to confirm a new or changed
-`psp_links` reference (a Stripe price, an NMI plan, a Solana plan); if that
-read gets no answer within seconds, `New` returns and the application finishes
-in the background, with `Ready` failing until it commits. While declared, writes
-to the merchant's catalog (products, prices, meters, rate cards,
-`ApplyCatalog`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
-from every caller, the host included: the next boot would overwrite them.
-Negotiated customer rates stay writable.
+The server computes a canonical content hash and commits it with the batch. The
+same document replays forever, even after intervening API edits or an archive
+restore. Concurrent applications of identical content commit once. Failed batches
+are not marked applied. No caller `application_id`, `expected_revision`, or
+`catalog_version` is needed or accepted. Hashes deduplicate; they do not order
+previously unseen batches. Intentionally restoring old state requires a new
+operation rather than replaying an already-applied document.
 
-**Catalog authoring** (no `Config.Catalog`): storage is always the database.
+Omitted products, prices and fields keep their stored values. Use `archived: true`
+to retire an entry and `archived: false` to restore it. `prune: true` explicitly
+opts into archiving omitted products/prices; no catalog operation deletes them.
+The apply makes no provider writes. It may read a provider to verify an explicit
+reference. `Config.Catalog` can finish a temporarily unavailable provider check in
+the background, with `Ready` failing until that startup batch succeeds.
+
+**Catalog authoring**: storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
 (`ApplyCatalog`, or `CreateProduct`, `CreatePrice`, `UpdatePrice`);
 `AllowCatalogUpdates` only publishes catalog mutations to HTTP callers. YAML is
 decoded into the same `catalog.Application` as JSON (`catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
-record, and `prune: true` archives omitted products and prices. Price keys name
-immutable financial versions; changing a price never silently reprices existing
-subscriptions. For dynamic products with host-owned Stripe credentials use
+record, and `prune: true` archives omitted products and prices. Price keys are unique within their product. Key lookups and checkout selections
+therefore carry both `product_key` and `price_key`; price IDs select one immutable
+record directly. Each product/key chain has automatic price revisions starting at
+zero. New financial terms create a new revision; repeating or reactivating old
+terms reuses their original ID and revision. Keys, terms and product association
+are immutable; products and prices can be archived but never deleted. Changing a
+price never silently reprices existing subscriptions. For dynamic products with host-owned Stripe credentials use
 `SecretBackend: openrails.SecretBackendSnapshot` with the account in
 `Config.Merchant`; rotate by updating configuration and constructing a new engine.
 

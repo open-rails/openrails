@@ -7,17 +7,14 @@ SELECT catalog_revision FROM billing.merchants WHERE id=sqlc.arg(merchant_id)::u
 -- name: AdvanceCatalogRevision :one
 UPDATE billing.merchants SET catalog_revision=catalog_revision+1 WHERE id=sqlc.arg(merchant_id)::uuid RETURNING catalog_revision;
 
--- name: GetCatalogApplication :one
-SELECT * FROM billing.catalog_applications WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND application_id=sqlc.arg(application_id)::text;
-
--- name: GetLatestDeclaredCatalogApplication :one
+-- name: GetCatalogApplicationByHash :one
 SELECT * FROM billing.catalog_applications
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND catalog_version IS NOT NULL
-ORDER BY catalog_version DESC LIMIT 1;
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND request_sha256=sqlc.arg(request_sha256)::bytea
+ORDER BY applied_revision DESC LIMIT 1;
 
 -- name: InsertCatalogApplication :exec
-INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result,catalog_version)
-VALUES (sqlc.arg(merchant_id)::uuid,sqlc.arg(application_id)::text,sqlc.arg(schema_version)::bigint,sqlc.arg(request_sha256)::bytea,sqlc.arg(base_revision)::bigint,sqlc.arg(applied_revision)::bigint,sqlc.arg(result)::jsonb,NULLIF(sqlc.arg(catalog_version)::bigint,0));
+INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result)
+VALUES (sqlc.arg(merchant_id)::uuid,sqlc.arg(application_id)::text,sqlc.arg(schema_version)::bigint,sqlc.arg(request_sha256)::bytea,sqlc.arg(base_revision)::bigint,sqlc.arg(applied_revision)::bigint,sqlc.arg(result)::jsonb);
 
 -- name: SetCatalogBatchMerchant :exec
 SELECT set_config('openrails.catalog_batch_merchant_id',sqlc.arg(merchant_id)::text,true);

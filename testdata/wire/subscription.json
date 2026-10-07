@@ -16,6 +16,7 @@
       "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       "price": {
+        "revision": 0,
         "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         "key": "pro-monthly",
         "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -87,6 +88,7 @@
   "cancel_scheduled": false,
   "cancel_mode": "reversible",
   "price": {
+    "revision": 0,
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "key": "pro-monthly",
     "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -121,6 +123,7 @@
     "archived": false
   },
   "scheduled_price": {
+    "revision": 0,
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
     "key": "pro-annual",
     "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

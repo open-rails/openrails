@@ -80,7 +80,7 @@ func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]c
 			}
 			grand := 0
 			if s.reprices != nil {
-				preview, err := s.reprices.PreviewBatch(ctx, price.Key)
+				preview, err := s.reprices.PreviewBatch(ctx, p.Key, price.Key)
 				if err == nil && preview.Matched > active {
 					grand = preview.Matched - active
 				}
@@ -157,15 +157,16 @@ func toolDefGetPrice() dashboard.ToolDef {
 		Description: "Full detail for ONE price key: amount, currency, interval, product, active-subscriber count, grandfathered count, and whether a reprice migration is currently pending for it. The escape hatch beyond list_catalog's lean rows. Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
-			"properties": {"price_key": {"type": "string"}},
-			"required": ["price_key"],
+			"properties": {"product_key": {"type": "string"}, "price_key": {"type": "string"}},
+			"required": ["product_key", "price_key"],
 			"additionalProperties": false
 		}`),
 	}
 }
 
 type getPriceArgs struct {
-	PriceKey string `json:"price_key"`
+	ProductKey string `json:"product_key"`
+	PriceKey   string `json:"price_key"`
 }
 
 func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -174,14 +175,14 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 		return "", err
 	}
 	key := strings.TrimSpace(args.PriceKey)
-	if key == "" {
-		return "", fmt.Errorf("price_key is required")
+	if key == "" || strings.TrimSpace(args.ProductKey) == "" {
+		return "", fmt.Errorf("product_key and price_key are required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", err
 	}
-	price, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
+	price, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), args.ProductKey, key)
 	if err != nil {
 		return "", fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
 	}
@@ -196,10 +197,10 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 	grand := 0
 	pending := "no pending migration"
 	if s.reprices != nil {
-		if preview, err := s.reprices.PreviewBatch(ctx, key); err == nil && preview.Matched > active {
+		if preview, err := s.reprices.PreviewBatch(ctx, args.ProductKey, key); err == nil && preview.Matched > active {
 			grand = preview.Matched - active
 		}
-		if batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 1}, PriceKey: key}); err == nil && len(batches.Items) > 0 {
+		if batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 1}, PriceKey: key, ProductKey: args.ProductKey}); err == nil && len(batches.Items) > 0 {
 			b := batches.Items[0]
 			pending = fmt.Sprintf("pending migration: batch effective %s, %d/%d scheduled, %d skipped",
 				b.EffectiveAt.Format("2006-01-02"), b.Scheduled, b.Matched, b.Skipped)
@@ -227,8 +228,8 @@ func toolDefPriceHistory() dashboard.ToolDef {
 		Description: "The full version-chain history for a price key, most-recent-first, resolved from the durable pointer-movement log (not each row's own creation date — a reactivated amount shows its most recent movement). Each entry carries the active-subscriber count STILL on that specific historical amount (\"who's still on the old price?\"). Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
-			"properties": {"price_key": {"type": "string"}},
-			"required": ["price_key"],
+			"properties": {"product_key": {"type": "string"}, "price_key": {"type": "string"}},
+			"required": ["product_key", "price_key"],
 			"additionalProperties": false
 		}`),
 	}
@@ -240,14 +241,18 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 		return "", err
 	}
 	key := strings.TrimSpace(args.PriceKey)
-	if key == "" {
-		return "", fmt.Errorf("price_key is required")
+	if key == "" || strings.TrimSpace(args.ProductKey) == "" {
+		return "", fmt.Errorf("product_key and price_key are required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return "", err
 	}
-	page, err := s.prices.ListKeyMovements(ctx, tid.UUID(), key, billing.PageRequest{Limit: billing.MaxPageLimit})
+	product, err := s.products.GetByKey(ctx, args.ProductKey)
+	if err != nil {
+		return "", err
+	}
+	page, err := s.prices.ListKeyMovements(ctx, tid.UUID(), product.ID, key, billing.PageRequest{Limit: billing.MaxPageLimit})
 	movements := page.Items
 	if err != nil || len(movements) == 0 {
 		return "", fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
@@ -284,8 +289,8 @@ func toolDefListRepriceBatches() dashboard.ToolDef {
 		Description: "List a price key's bulk reprice (migration) operations, most-recent-first, with progress (applied/scheduled/canceled counts out of the total matched). \"0 pending migrations\" is stated explicitly, never an empty list to interpret. Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
-			"properties": {"price_key": {"type": "string"}},
-			"required": ["price_key"],
+			"properties": {"product_key": {"type": "string"}, "price_key": {"type": "string"}},
+			"required": ["product_key", "price_key"],
 			"additionalProperties": false
 		}`),
 	}
@@ -297,13 +302,13 @@ func (s *Service) runListRepriceBatches(ctx context.Context, raw json.RawMessage
 		return "", err
 	}
 	key := strings.TrimSpace(args.PriceKey)
-	if key == "" {
-		return "", fmt.Errorf("price_key is required")
+	if key == "" || strings.TrimSpace(args.ProductKey) == "" {
+		return "", fmt.Errorf("product_key and price_key are required")
 	}
 	if s.reprices == nil {
 		return "", fmt.Errorf("reprice service unavailable")
 	}
-	batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 20}, PriceKey: key})
+	batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 20}, PriceKey: key, ProductKey: args.ProductKey})
 	if err != nil {
 		return "", err
 	}

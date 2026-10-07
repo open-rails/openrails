@@ -73,16 +73,16 @@ func TestClientRequestShapes(t *testing.T) {
 			require.NotContains(t, b, "mode", "the price selects the operation")
 		}},
 		{"checkout session", func() error {
-			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: who, PriceKey: "pro-monthly"})
+			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: who, ProductKey: "pro", PriceKey: "pro-monthly"})
 			return err
 		}, http.MethodPost, "/v1/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, "pro-monthly", b["price_key"])
 			require.Equal(t, who.ID.String(), b["customer"].(map[string]any)["id"])
 		}},
 		{"checkout config for a price", func() error {
-			_, err := client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{PriceKey: "pro-monthly"})
+			_, err := client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "pro-monthly"})
 			return err
-		}, http.MethodGet, "/v1/merchant/checkout-config", "price_key=pro-monthly", nil},
+		}, http.MethodGet, "/v1/merchant/checkout-config", "price_key=pro-monthly&product_key=pro", nil},
 		{"settings carry named policies and tier bindings", func() error {
 			revision := "r1"
 			_, err := client.ApplyMerchantConfiguration(t.Context(), billing.ApplyMerchantConfigurationParams{ApplicationID: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
@@ -198,11 +198,14 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
-		"product key":   func(id string) error { _, err := c.GetProductByKey(ctx, id); return err },
-		"price key":     func(id string) error { _, err := c.GetPriceByKey(ctx, id); return err },
-		"price history": func(id string) error { _, err := c.ListPriceKeyHistory(ctx, id, billing.PageRequest{}); return err },
-		"meter":         func(id string) error { _, err := c.GetMeter(ctx, id); return err },
-		"set meter":     func(id string) error { _, err := c.SetMeter(ctx, id, billing.SetMeterParams{}); return err },
+		"product key": func(id string) error { _, err := c.GetProductByKey(ctx, id); return err },
+		"price key":   func(id string) error { _, err := c.GetPriceByKey(ctx, "product", id); return err },
+		"price history": func(id string) error {
+			_, err := c.ListPriceKeyHistory(ctx, "product", id, billing.PageRequest{})
+			return err
+		},
+		"meter":     func(id string) error { _, err := c.GetMeter(ctx, id); return err },
+		"set meter": func(id string) error { _, err := c.SetMeter(ctx, id, billing.SetMeterParams{}); return err },
 		"set rate card": func(id string) error {
 			_, err := c.SetMeterRateCard(ctx, id, billing.SetMeterRateCardParams{})
 			return err

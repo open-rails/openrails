@@ -99,7 +99,7 @@ func solanaCtx() context.Context {
 }
 
 func recurringTerms(micros int64) autoCreateContext {
-	return autoCreateContext{PriceID: uuid.New(), ProductKey: "premium", Currency: "usd", UnitAmount: micros, AccessDurationHours: intPtr(30 * 24), BillingCycleDays: intPtr(30)}
+	return autoCreateContext{PriceID: priceDeterministicID(uuid.MustParse("11111111-1111-4111-8111-111111111111"), "monthly", micros, "USD", intPtr(720), true, nil, nil), ProductKey: "premium", Currency: "usd", UnitAmount: micros, AccessDurationHours: intPtr(30 * 24), BillingCycleDays: intPtr(30)}
 }
 
 // #817: catalog micros become token BASE UNITS using the mint's on-chain
@@ -216,7 +216,7 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 		chain := newFakeChain(map[string]uint8{usdcMint: 6})
 		chain.readOnly = true
 		mint := solanago.MustPublicKeyFromBase58(usdcMint)
-		id := solanaPlanID("premium", "usd", 23_000_000, intPtr(720), usdcMint)
+		id := solanaPlanID(recurringTerms(23_000_000).PriceID, usdcMint)
 		address, bump, err := subscriptions.DerivePlanPDA(chain.owner, id)
 		require.NoError(t, err)
 		raw := make([]byte, subscriptions.PlanAccountSize)
@@ -233,11 +233,38 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 	}
 
 	chain, plan, address := setup()
-	_, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, "USDC", "premium", req, map[string]string{solanaKeyPlanPDA: address.String()})
+	_, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, req, map[string]string{solanaKeyPlanPDA: address.String()})
 	require.NoError(t, err)
 
+	planID := solanaPlanID(recurringTerms(req.UnitAmount).PriceID, usdcMint)
+	for _, link := range []map[string]string{
+		{solanaKeyPlanID: strconv.FormatUint(planID, 10)},
+		{solanaKeyPlanID: strconv.FormatUint(planID, 10), solanaKeyMint: usdcMint, solanaKeyMerchant: chain.owner.String()},
+		{solanaKeyPlanID: "0" + strconv.FormatUint(planID, 10), solanaKeyToken: "USDC"},
+	} {
+		verified, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, req, link)
+		require.NoError(t, err, link)
+		require.Equal(t, address.String(), verified[solanaKeyPlanPDA])
+		require.Equal(t, strconv.FormatUint(planID, 10), verified[solanaKeyPlanID])
+	}
+	for name, link := range map[string]map[string]string{
+		"negative ID":         {solanaKeyPlanID: "-1"},
+		"overflow ID":         {solanaKeyPlanID: "18446744073709551616"},
+		"nondecimal ID":       {solanaKeyPlanID: "0x10"},
+		"wrong ID beside PDA": {solanaKeyPlanID: strconv.FormatUint(planID+1, 10), solanaKeyPlanPDA: address.String()},
+		"wrong mint":          {solanaKeyPlanID: strconv.FormatUint(planID, 10), solanaKeyMint: solanago.NewWallet().PublicKey().String()},
+		"wrong owner":         {solanaKeyPlanID: strconv.FormatUint(planID, 10), solanaKeyMerchant: solanago.NewWallet().PublicKey().String()},
+	} {
+		_, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, req, link)
+		require.Error(t, err, name)
+	}
+	require.Zero(t, chain.submits, "explicit reference verification never publishes a plan")
+
 	delete(chain.accounts, address)
-	_, err = verifySolanaCatalogReference(solanaCtx(), plan, chain, "USDC", "premium", req, nil)
+	_, err = verifySolanaCatalogReference(solanaCtx(), plan, chain, req, map[string]string{solanaKeyPlanID: strconv.FormatUint(planID, 10)})
+	require.ErrorContains(t, err, "is missing")
+	require.Zero(t, chain.submits)
+	_, err = verifySolanaCatalogReference(solanaCtx(), plan, chain, req, nil)
 	require.ErrorContains(t, err, "separate provider workflow")
 
 	for name, corrupt := range map[string]func([]byte){
@@ -248,7 +275,7 @@ func TestSolanaCatalogReferencePreflight(t *testing.T) {
 	} {
 		chain, plan, address := setup()
 		corrupt(chain.accounts[address])
-		_, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, "USDC", "premium", req, map[string]string{solanaKeyPlanPDA: address.String()})
+		_, err := verifySolanaCatalogReference(solanaCtx(), plan, chain, req, map[string]string{solanaKeyPlanPDA: address.String()})
 		require.Error(t, err, name)
 		require.Zero(t, chain.submits, name)
 	}

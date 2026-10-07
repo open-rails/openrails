@@ -29,7 +29,7 @@ import (
 //     operator-chosen AND client-creatable, so a link to a plan that exists is
 //     verified (amount + frequency must match the price) while a link to one that
 //     does not yet exist is CREATED from the price's terms (+ optional provider override).
-//   - AutoCreate: content-addressed plan_id `<key>-<cur>-<amt>-<cycle>`; find-or-attach
+//   - AutoCreate: local-price-addressed plan_id `or-<32-hex-UUID>`; find-or-attach
 //     against NMI, falling back to creating the plan. Requires
 //     a recurring provider day cadence (NMI requires a frequency). When no NMI rail is
 //     configured, falls back to errPendingManualLink so the operator can link
@@ -122,10 +122,13 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 }
 
 // createPlan adds an NMI Recurring Plan at the given plan_id from the price's
-// money terms. Shared by AutoCreate (content-addressed id) and Attach (operator
+// money terms. Shared by AutoCreate (local price ID) and Attach (operator
 // id). NMI plans are inherently recurring, so a fixed billing frequency and a
 // positive amount are required.
 func (a *nmiAdapter) createPlan(ctx context.Context, client *nmi.NMIClient, planID string, in autoCreateContext) error {
+	if in.RemoteWritesDisabled {
+		return errRemoteWritesDisabled
+	}
 	if in.BillingCycleDays == nil || *in.BillingCycleDays <= 0 {
 		return fmt.Errorf("recurring day cadence is required (NMI plans need a recurring frequency)")
 	}
@@ -147,21 +150,11 @@ func (a *nmiAdapter) createPlan(ctx context.Context, client *nmi.NMIClient, plan
 	return client.AddRecurringPlan(ctx, planID, planName, moneyutil.Cents(amountCents), in.Currency, *in.BillingCycleDays, 0)
 }
 
-// nmiDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
-// It is CONTENT-addressed — derived from the price content key (product key +
-// immutable money terms), NOT the per-DB price UUID — so it is stable across a
-// FRESH OpenRails DB: a rebuilt catalog re-derives the same plan_id and
-// find-or-attach reattaches to the existing NMI Recurring Plan instead of
-// creating a duplicate. Cosmetic edits (display_name/description/providers) do
-// not change it. Dots in the content key become hyphens to stay within NMI's
-// plan_id charset, e.g. "premium-usd-2300-30".
-//
-// The plan_id carries NO "openrails-"/merchant/application prefix: the content key
-// is the whole id. Operator-supplied (Attach) plan_ids are owned by the operator
-// and never renamed by OpenRails, even when this template changes.
-func nmiDeterministicPlanID(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
-	key := openRailsPriceContentKey(productKey, currency, unitAmount, billingCycleDays)
-	return strings.ReplaceAll(key, ".", "-")
+// nmiDeterministicPlanID addresses the immutable local price. Its short
+// prefixed UUID distinguishes sibling keys and all versions of their terms.
+// Explicitly attached operator plan IDs are preserved unchanged.
+func nmiDeterministicPlanID(priceID uuid.UUID) string {
+	return "or-" + strings.ReplaceAll(priceID.String(), "-", "")
 }
 
 // nmiClient resolves the ctx merchant's active NMI client; see nmiClientFor.
@@ -216,14 +209,25 @@ func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[
 		return nil, fmt.Errorf("nmi create-mode requires recurring day cadence (NMI plans need a recurring frequency)")
 	}
 
-	planID := nmiDeterministicPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
+	if in.PriceID == uuid.Nil {
+		return nil, fmt.Errorf("nmi auto-create requires a local price ID")
+	}
+	planID := nmiDeterministicPlanID(in.PriceID)
 
 	// Find-or-create: prefer an existing plan with this deterministic id.
-	found, _, _, err := client.GetRecurringPlanByID(ctx, planID, in.Currency)
+	detail, err := client.GetRecurringPlanDetailByID(ctx, planID, in.Currency)
 	if err != nil {
 		return nil, fmt.Errorf("lookup recurring plan: %w", err)
 	}
-	if !found {
+	if detail.Found {
+		remoteAmount, err := moneyutil.RailMinorToNative(in.Currency, moneyutil.Cents(detail.AmountCents))
+		if err != nil {
+			return nil, err
+		}
+		if remoteAmount != in.UnitAmount || detail.DayFrequency > 0 && detail.DayFrequency != *in.BillingCycleDays {
+			return nil, fmt.Errorf("NMI recurring plan %q does not match the local price terms", planID)
+		}
+	} else {
 		if err := a.createPlan(ctx, client, planID, in); err != nil {
 			return nil, fmt.Errorf("create recurring plan: %w", err)
 		}

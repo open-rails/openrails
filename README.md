@@ -48,18 +48,115 @@ Next, declare your catalog as a YAML config file:
 ```yaml
 # catalog.yaml
 schema_version: 1 # the file format
-catalog_version: 1 # increase whenever this merchant's catalog changes
 products:
   - key: premium
     display_name: Premium
     entitlements_spec: {premium: null} # owning this product grants the "premium" entitlement
     prices:
-      - key: premium-monthly
+      - key: monthly
         currency: USD
         unit_amount: 9990000 # $9.99; every amount is micros (millionths of a dollar)
         access_duration_hours: 720 # 30 days of access per payment
         auto_renew: true # rebill every 30 days until canceled
+
+  - key: video-101
+    display_name: Video 101
+    entitlements_spec: {"video:101": null}
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 4990000 # $4.99, paid once
+        access_duration_hours: null # permanent access to this video
+        auto_renew: false
 ```
+
+Product keys are merchant-wide; price keys belong to their product. `premium.monthly`
+therefore identifies this subscription offer. OpenRails assigns immutable price
+revisions automatically (`premium.monthly.v0`, then `v1` when its terms change).
+Existing subscribers keep their accepted price and benefits until explicitly
+migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
+A video buyer's permanent access is checked with the `video:101` entitlement.
+
+**Prepaid API credits** are a spendable balance. After your trusted payment flow
+confirms a payment specifically for credit funding, grant its paid amount once:
+
+```go
+func grantPurchasedAPICredits(ctx context.Context, bill *openrails.Client, paid billing.PaymentSettledEvent) error {
+    _, err := bill.CreateCreditGrant(ctx, paid.CustomerID, billing.CreateCreditGrantParams{
+        Currency: paid.Currency,
+        Amount:   paid.Amount,             // e.g. 10000000 = $10 of USD credit
+        Source:   "purchase",
+        SourceID: paid.PaymentID.String(), // retries cannot grant twice
+    })
+    return err
+}
+```
+
+Only invoke this for a verified credit-funding payment, never for the Premium
+subscription or video payment. A host-event consumer acknowledges the event after
+the grant succeeds. `CreateCreditGrant` records credit; it does not collect payment.
+Native repeat-buyable credit packs and recurring credit benefits declared on a
+product are [covered by the credit-benefit design](https://github.com/open-rails/tracker/blob/master/openrails/1132.md),
+but are not implemented yet, so the YAML above includes only the supported products.
+
+### Evolving the catalog
+
+Keep the product and price keys when editing an offer. For example, apply this
+second file after the initial catalog:
+
+```yaml
+# catalog-update.yaml
+schema_version: 1
+products:
+  - key: premium
+    display_name: Premium Plus # update the existing product in place
+    prices:
+      - key: monthly
+        unit_amount: 12990000 # new customers pay $12.99; omitted terms stay unchanged
+  - key: video-101
+    archived: true # stop new sales; existing buyers keep their access
+```
+
+Apply it with the same `catalog.ParseApplicationYAML` → `client.ApplyCatalog` calls.
+On a fresh merchant this changes `premium.monthly.v0` ($9.99) to a new immutable
+`premium.monthly.v1` ($12.99) and archives v0 for new sales. Existing subscribers
+keep their exact old price and accepted entitlements indefinitely; a price edit
+or archive does not schedule a subscription migration. To move existing
+subscribers later, explicitly preview and create a reprice batch for the product
+and price key with an effective date. Changing accepted benefits uses the
+[planned agreement-change workflow](https://github.com/open-rails/tracker/blob/master/openrails/1132.md).
+
+Omission preserves both records and fields. Explicit `archived: false` restores
+an offer; restoring an earlier price's exact terms reuses its original immutable
+ID and revision. Products update in place and have an automatic revision counter,
+without a separate history of product versions. Purchases and subscriptions retain
+the entitlement terms they accepted.
+
+The server remembers each successfully applied batch's content hash **per merchant**.
+Reapplying either file returns its receipt and changes nothing—even after later
+programmatic or HTTP edits. Comments, formatting, and product/price ordering do
+not create a new batch. A modified file is a new batch, committed atomically.
+There is no ordering guarantee between different, previously unseen files; an
+already-applied file is not a rollback command.
+
+### Turning catalog HTTP writes on and off
+
+Set these options **before constructing the client**:
+
+```go
+cfg.HTTP = &openrails.HTTPConfig{Merchant: true} // authenticated merchant API
+cfg.AllowCatalogUpdates = false                // omit its catalog-write routes
+// Set AllowCatalogUpdates to true and restart to enable catalog HTTP editing.
+```
+
+| `AllowCatalogUpdates` | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
+|---|---|---|
+| `false` | Unavailable | Available |
+| `true` | Available to authorized callers | Available |
+
+Catalog reads remain available on the merchant API. Turning HTTP writes off does
+not make the database read-only or prevent later client edits. The startup example
+below turns them off and applies the YAML through the client on every boot.
 
 Now let's build the billing client:
 
@@ -93,8 +190,8 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		return nil, err
 	}
 
-	// What you sell. OpenRails applies it in New: an unchanged file is a no-op, an edited one
-	// is applied, and the catalog is read-only to everything else until you edit the file.
+	// What you sell. Each distinct catalog batch is applied once, even across restarts.
+	// Later programmatic edits remain available and are not undone by a replay.
 	raw, err := os.ReadFile("catalog.yaml")
 	if err != nil {
 		return nil, err
@@ -112,8 +209,9 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			Slug: "myvideos", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
-		Catalog: declared,
+		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
 		HTTP: &openrails.HTTPConfig{
+			Merchant: true,                        // authenticated merchant routes; catalog HTTP writes stay disabled
 			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
 				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
@@ -129,10 +227,18 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 
 	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
 	// who is calling, and each user is their own paying customer.
-	return openrails.New(ctx, cfg, openrails.Deps{
+	client, err := openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db,   // required: the same pool your app uses
 		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
 	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.ApplyCatalog(ctx, declared); err != nil {
+		_ = client.Close(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	return client, nil
 }
 ```
 
@@ -321,7 +427,7 @@ function UpgradeButton() {
   const [sessionId, setSessionId] = useState<string>()
   async function upgrade() {
     // POST /billing/v1/me/checkout-sessions: OpenRails prices it from the catalog, for the signed-in user.
-    const session = await billing.createCheckoutSession({ priceKey: "premium-monthly" })
+    const session = await billing.createCheckoutSession({ productKey: "premium", priceKey: "monthly" })
     setSessionId(session.id)
   }
   return (
@@ -363,20 +469,20 @@ Customer side (your users):
 
 ### Checkout catalog references
 
-Use a stable offer key such as `post-123-usd`. `ApplyCatalog` reprices it by
+Use a stable product/price key pair such as `post-123.purchase`. `ApplyCatalog` changes its terms by
 creating an immutable price version and retiring its predecessor. Checkout owns
 current availability, amount, permanent ownership eligibility and payment
 idempotency; a host wrapper supplies verified identity and its content policy.
 
 | Operation | Reference contract |
 | --- | --- |
-| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey` |
-| `CreateCheckoutAttempt` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
+| `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
+| `CreateCheckoutAttempt` | Either `PriceID` or the pair `ProductKey` + `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
 | `HasEntitlement` / `ListEntitlements` | Exact grant-backed access; `ListEntitlements` reads up to 500 customers at once |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `GetCheckoutConfig` | `GetCheckoutConfigParams`: a `PriceID` or `PriceKey` lists the options that can sell it |
+| `GetCheckoutConfig` | `GetCheckoutConfigParams`: `PriceID` or `ProductKey` + `PriceKey` lists the options that can sell it |
 | `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
 | Catalog reads | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
 | Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |

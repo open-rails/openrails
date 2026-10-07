@@ -61,7 +61,7 @@ func TestCadencePriceKeys(t *testing.T) {
 				price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, id), billing.GetPriceParams{})
 				require.NoError(t, err)
 				require.False(t, price.Archived, "%dh price stays current", hours)
-				current, err := w.client[tp].GetPriceByKey(t.Context(), product+"-"+want[hours])
+				current, err := w.client[tp].GetPriceByKey(t.Context(), product, product+"-"+want[hours])
 				require.NoError(t, err)
 				require.Equal(t, id, current.ID.String(), "%dh key names its own price", hours)
 			}
@@ -79,7 +79,7 @@ func TestCadencePriceKeys(t *testing.T) {
 			if errors.As(err, &status) {
 				require.Equal(t, "price_key_cadence_conflict", status.Code)
 			}
-			still, err := w.client[tp].GetPriceByKey(t.Context(), product+"-2d")
+			still, err := w.client[tp].GetPriceByKey(t.Context(), product, product+"-2d")
 			require.NoError(t, err)
 			require.Equal(t, held.ID, still.ID)
 			require.False(t, still.Archived)

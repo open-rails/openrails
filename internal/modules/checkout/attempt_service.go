@@ -257,7 +257,7 @@ func (s *CheckoutAttemptService) createSession(ctx context.Context, req *Checkou
 	if req.Mode == string(models.CheckoutAttemptModePaymentMethod) {
 		return s.createPaymentMethodSetup(ctx, req, user)
 	}
-	if err := validateCheckoutPriceSelector(req.PriceID, req.PriceKey); err != nil {
+	if err := validateCheckoutPriceSelector(req.PriceID, req.ProductKey, req.PriceKey); err != nil {
 		return nil, err
 	}
 	if err := s.requireProviderWrites(); err != nil {
@@ -382,6 +382,7 @@ func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest,
 	payload, _ := json.Marshal(struct {
 		PriceID     string
 		PriceKey    string `json:",omitempty"`
+		ProductKey  string `json:",omitempty"`
 		Mode        string
 		Payment     CheckoutAttemptPaymentRequest
 		Metadata    map[string]string
@@ -390,8 +391,8 @@ func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest,
 		Entitlement string            `json:",omitempty"`
 		OfferKind   billing.OfferKind `json:",omitempty"`
 	}{
-		PriceID:     strings.TrimSpace(req.PriceID),
-		PriceKey:    req.PriceKey,
+		PriceID:  strings.TrimSpace(req.PriceID),
+		PriceKey: req.PriceKey, ProductKey: req.ProductKey,
 		Mode:        strings.TrimSpace(req.Mode),
 		Payment:     payment,
 		Metadata:    normalizeMetadata(req.Metadata),
@@ -441,7 +442,7 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		}
 	}
 
-	price, err := resolveCheckoutPrice(ctx, s.priceService, req.PriceID, req.PriceKey)
+	price, err := resolveCheckoutPrice(ctx, s.priceService, req.PriceID, req.ProductKey, req.PriceKey)
 	if err != nil {
 		return nil, fmt.Errorf("%w: price not found", ErrCheckoutAttemptValidation)
 	}
@@ -1177,6 +1178,7 @@ func rejectCheckoutAttemptPAN(req *CheckoutAttemptCreateRequest) error {
 		"mode":                 req.Mode,
 		"price_id":             req.PriceID,
 		"price_key":            req.PriceKey,
+		"product_key":          req.ProductKey,
 	}
 	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
 		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutAttemptValidation, err)

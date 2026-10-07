@@ -564,25 +564,31 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * Mints a hosted checkout session for the signed-in customer and one
      * price. Render it with `<CheckoutFrame url>` when the session has a
      * `url`, else with `<Checkout source={client.checkoutSource(id)}>`.
+     * Select a price by `priceId`, or by both `productKey` and `priceKey`.
      * `successUrl` brings the buyer back from a redirect rail; it must be on
      * one of this app's return origins.
      */
     createCheckoutSession(input: {
       priceKey?: string
+      productKey?: string
       priceId?: string
       successUrl?: string
     }): Promise<CheckoutSessionLink> {
-      if (!input.priceKey === !input.priceId)
+      if (
+        !input.priceKey === !input.priceId ||
+        !!input.priceKey !== !!input.productKey
+      )
         return Promise.reject(
           localError(
             "invalid_request",
-            "Pass exactly one of priceKey or priceId."
+            "Pass priceId, or both productKey and priceKey."
           )
         )
       return json(checkoutSessionLinkSchema, "/me/checkout-sessions", {
         method: "POST",
         body: {
           price_key: input.priceKey,
+          product_key: input.productKey,
           price_id: input.priceId,
           success_url: input.successUrl,
         } satisfies wire.MintCheckoutSessionParams,

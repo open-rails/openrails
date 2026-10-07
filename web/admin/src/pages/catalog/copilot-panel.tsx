@@ -203,7 +203,10 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
 
   const openWizard = async () => {
     try {
-      await loadDraft.mutateAsync(draft.price_key)
+      await loadDraft.mutateAsync({
+        productKey: draft.product_key,
+        priceKey: draft.price_key,
+      })
     } catch (err) {
       toastApiError(err, "Load draft for review")
     }
@@ -236,6 +239,7 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
         <PriceChangeWizard
           price={loadDraft.data.price}
           productName={loadDraft.data.productName}
+          productKey={loadDraft.data.productKey}
           draft={draft}
           onDone={() => loadDraft.reset()}
         />

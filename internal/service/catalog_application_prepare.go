@@ -33,17 +33,14 @@ type catalogReferenceCheck struct {
 type catalogApplicationPreparation struct {
 	replay   *billing.CatalogApplicationReceipt
 	revision int64
-	links    map[string]map[string]map[string]string
+	links    map[[2]string]map[string]map[string]string
 	accounts map[uuid.UUID]gen.BillingPsp
 	checks   []catalogReferenceCheck
 }
 
-// catalogApplicationGate runs under the merchant lock. Configuration versions
-// advance monotonically; stale replicas return the latest receipt unchanged. A guarded application
-// replays by its ID and otherwise requires its expected revision. A declarative
-// one replays only while the catalog is still at the revision it produced;
-// after any other authored write it applies again, so the document wins.
-func (s *Service) catalogApplicationGate(ctx context.Context, params catalogwire.Application, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
+// catalogApplicationGate runs under the merchant lock. An already committed
+// content hash replays forever, even after other catalog writes.
+func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, nil, err
@@ -53,51 +50,19 @@ func (s *Service) catalogApplicationGate(ctx context.Context, params catalogwire
 	if err != nil {
 		return 0, nil, err
 	}
-	if params.CatalogVersion > 0 {
-		previous, err := q.GetLatestDeclaredCatalogApplication(ctx, mid.UUID())
-		if errors.Is(err, pgx.ErrNoRows) {
-			return revision, nil, nil
-		}
-		if err != nil {
-			return 0, nil, err
-		}
-		if params.CatalogVersion > *previous.CatalogVersion {
-			return revision, nil, nil
-		}
-		if params.CatalogVersion == *previous.CatalogVersion && !bytes.Equal(previous.RequestSha256, digest[:]) {
-			return 0, nil, apperr.New(409, "catalog_application_conflict", "catalog version already applied with different content; increase catalog_version")
-		}
-		var receipt billing.CatalogApplicationReceipt
-		if err := json.Unmarshal(previous.Result, &receipt); err != nil {
-			return 0, nil, err
-		}
-		receipt.Superseded = params.CatalogVersion < *previous.CatalogVersion
-		receipt.Replayed = !receipt.Superseded
-		return revision, &receipt, nil
+	previous, err := q.GetCatalogApplicationByHash(ctx, gen.GetCatalogApplicationByHashParams{MerchantID: mid.UUID(), RequestSha256: digest[:]})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return revision, nil, nil
 	}
-	id := params.ApplicationID
-	if params.Declarative() {
-		id = declarativeApplicationID(digest, revision)
-	}
-	previous, err := q.GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: id})
-	if err == nil {
-		if !bytes.Equal(previous.RequestSha256, digest[:]) {
-			return 0, nil, apperr.New(409, "catalog_application_conflict", "application_id already committed with different content")
-		}
-		var receipt billing.CatalogApplicationReceipt
-		if err := json.Unmarshal(previous.Result, &receipt); err != nil {
-			return 0, nil, err
-		}
-		receipt.Replayed = true
-		return revision, &receipt, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil {
 		return 0, nil, err
 	}
-	if !params.Declarative() && revision != *params.ExpectedRevision {
-		return 0, nil, apperr.New(409, "catalog_revision_conflict", fmt.Sprintf("catalog revision is %d; expected %d", revision, *params.ExpectedRevision))
+	var receipt billing.CatalogApplicationReceipt
+	if err := json.Unmarshal(previous.Result, &receipt); err != nil {
+		return 0, nil, err
 	}
-	return revision, nil, nil
+	receipt.Replayed = true
+	return revision, &receipt, nil
 }
 
 // Prepare only observes remote references. Snapshot collection and the final
@@ -105,11 +70,11 @@ func (s *Service) catalogApplicationGate(ctx context.Context, params catalogwire
 // A committed retry returns before resolving targets or contacting a provider.
 func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
-		revision, replay, err := scoped.catalogApplicationGate(ctx, params, digest)
+		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
 		if err != nil {
 			return nil, err
 		}
-		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[string]map[string]map[string]string{}, accounts: map[uuid.UUID]gen.BillingPsp{}}
+		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[[2]string]map[string]map[string]string{}, accounts: map[uuid.UUID]gen.BillingPsp{}}
 		if replay != nil {
 			return out, nil
 		}
@@ -172,7 +137,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					return nil, err
 				}
 				links := catalogPriceLinks(current)
-				same := current != nil && current.ID.UUID() == priceDeterministicID(product.ID.UUID(), request.UnitAmount, request.Currency, request.AccessDurationHours, request.AutoRenew, request.TrialUnitAmount, request.TrialDurationHours)
+				same := current != nil && samePriceTerms(*current, request)
 				wanted := map[string]bool{}
 				if decl.PSPs.Set {
 					for _, key := range decl.PSPs.Value {
@@ -201,7 +166,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						}
 					}
 				}
-				out.links[decl.Key] = map[string]map[string]string{}
+				out.links[[2]string{product.Key, decl.Key}] = map[string]map[string]string{}
 				names := make([]string, 0, len(wanted))
 				for key := range wanted {
 					names = append(names, key)
@@ -215,7 +180,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					}
 					unchanged := same && catalogLinkContains(links[key], link) && (request.Archived || (!current.Archived && !reactivatingProduct))
 					if unchanged {
-						out.links[decl.Key][key] = cloneStringMap(links[key])
+						out.links[[2]string{product.Key, decl.Key}][key] = cloneStringMap(links[key])
 						rail := links[key]["rail"]
 						if rail == "" {
 							rail = key
@@ -284,7 +249,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		}
 		verified["rail"] = check.account.Rail
 		verified["psp_id"] = check.account.ID.String()
-		prepared.links[check.key][check.provider] = verified
+		prepared.links[[2]string{check.productKey, check.key}][check.provider] = verified
 	}
 	return prepared, nil
 }

@@ -149,9 +149,9 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+products[0].ID.String(), map[string]any{"set_tier_group": true}, nil))
 }
 
-// A product patch is a merge: omitted fields stay, null clears; a price patch
-// moves the key, archiving its previous holder, and the key's history records
-// both moves.
+// A product patch is a merge: omitted fields stay, null clears. New financial
+// terms create a price version under the same immutable key; patch only changes
+// its lifecycle metadata.
 func TestCatalogPatchSemantics(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -171,30 +171,32 @@ func TestCatalogPatchSemantics(t *testing.T) {
 
 		first, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-a", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		second, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-b", UnitAmount: 2_000_000, Currency: "USD"})
+		second, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: first.Key, UnitAmount: 2_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		moved, err := c.UpdatePrice(t.Context(), second.ID, billing.UpdatePriceParams{Key: catalog.Value(first.Key)})
-		require.NoError(t, err)
-		require.Equal(t, first.Key, moved.Key)
-		current, err := c.GetPriceByKey(t.Context(), first.Key)
+		require.Equal(t, first.Key, second.Key)
+		require.EqualValues(t, 0, first.Revision)
+		require.EqualValues(t, 1, second.Revision)
+		require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/merchant/catalog/prices/"+second.ID.String(), map[string]any{"key": "renamed"}, nil), "a key rename cannot rewrite price identity")
+		current, err := c.GetPriceByKey(t.Context(), product.Key, first.Key)
 		require.NoError(t, err)
 		require.Equal(t, second.ID, current.ID)
 		displaced, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
 		require.NoError(t, err)
 		require.True(t, displaced.Archived, "the key's previous holder is archived")
 
-		history, err := c.ListPriceKeyHistory(t.Context(), first.Key, billing.PageRequest{Limit: 1})
+		history, err := c.ListPriceKeyHistory(t.Context(), product.Key, first.Key, billing.PageRequest{Limit: 1})
 		require.NoError(t, err)
 		require.Len(t, history.Items, 1)
 		require.Equal(t, second.ID, history.Items[0].Price.ID, "most recent first")
 		require.NotEmpty(t, history.Next)
-		rest, err := c.ListPriceKeyHistory(t.Context(), first.Key, billing.PageRequest{Cursor: history.Next})
+		rest, err := c.ListPriceKeyHistory(t.Context(), product.Key, first.Key, billing.PageRequest{Cursor: history.Next})
 		require.NoError(t, err)
 		require.NotEmpty(t, rest.Items)
 
 		restored, err := c.UpdatePrice(t.Context(), first.ID, billing.UpdatePriceParams{Archived: catalog.Value(false)})
 		require.NoError(t, err)
 		require.False(t, restored.Archived)
+		require.Equal(t, first.Revision, restored.Revision)
 	}
 }
 

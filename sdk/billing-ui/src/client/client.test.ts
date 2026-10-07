@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import errorFixture from "../test/fixtures/wire/error_envelope.json"
 import subscriptionFixture from "../test/fixtures/wire/subscription.json"
-import { fakeBilling, json, subscription } from "../test/billing-server"
+import { fakeBilling, json, price, product, subscription } from "../test/billing-server"
 import {
   createBillingClient,
   RETRY_BUDGET_MS,
@@ -10,9 +10,16 @@ import {
   WalletRejectedError,
 } from "./client"
 import { BillingError, isServerError } from "./errors"
-import { subscriptionSchema } from "./types"
+import { priceSchema, productSchema, subscriptionSchema } from "./types"
 
 describe("wire fixtures", () => {
+  it("preserves catalog revisions and accepts prices from older servers", () => {
+    expect(priceSchema.parse(price(720, true, { revision: 2 })).revision).toBe(2)
+    expect(priceSchema.parse(price(720, true)).revision).toBeUndefined()
+    expect(productSchema.parse(product({ revision: 3 })).revision).toBe(3)
+    expect(productSchema.parse(product()).revision).toBeUndefined()
+  })
+
   it("decodes the canonical OpenRails subscription", () => {
     const parsed = subscriptionSchema.parse(subscriptionFixture)
     expect(parsed).toMatchObject({
@@ -202,6 +209,33 @@ describe("server errors", () => {
 })
 
 describe("checkout sessions", () => {
+  it.each([
+    {},
+    { priceKey: "monthly" },
+    { productKey: "premium" },
+    { priceId: "price_1", productKey: "premium" },
+    { priceId: "price_1", priceKey: "monthly" },
+    { priceId: "price_1", productKey: "premium", priceKey: "monthly" },
+  ])("rejects incomplete or ambiguous price selectors before making a request: %j", async (input) => {
+    const fetch = vi.fn()
+    const client = createBillingClient({ fetch })
+    await expect(client.createCheckoutSession(input)).rejects.toMatchObject({
+      code: "invalid_request",
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("accepts a price id without a product key", async () => {
+    const fetch = vi.fn(async () => Response.json({
+      id: `ocs_${"a".repeat(64)}`,
+      url: "https://pay.example/checkout#ocs_x",
+      expires_at: "2026-10-03T00:00:00Z",
+    }, { status: 201 }))
+    await createBillingClient({ fetch }).createCheckoutSession({ priceId: "price_1" })
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ price_id: "price_1" })
+  })
+
   it("mints with the customer's bearer and pays with the id alone", async () => {
     const calls: { url: string; init: RequestInit }[] = []
     const replies = [
@@ -223,6 +257,7 @@ describe("checkout sessions", () => {
       },
     })
     const link = await client.createCheckoutSession({
+      productKey: "premium",
       priceKey: "monthly",
       successUrl: "https://host-one.example/welcome",
     })
@@ -237,6 +272,7 @@ describe("checkout sessions", () => {
       "Bearer user-token"
     )
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      product_key: "premium",
       price_key: "monthly",
       success_url: "https://host-one.example/welcome",
     })

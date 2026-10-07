@@ -43,8 +43,12 @@ export function PriceDetailPage() {
     refetch: reload,
   } = useQuery(adminQueries.price(id, { verify, errorAction: "Load price" }))
   const { data: product } = useQuery(adminQueries.product(price?.product_id))
-  const { data: history } = useQuery(adminQueries.priceHistory(price?.key))
-  const { data: batches } = useQuery(adminQueries.repriceBatches(price?.key))
+  const { data: history } = useQuery(
+    adminQueries.priceHistory(product?.key, price?.key)
+  )
+  const { data: batches } = useQuery(
+    adminQueries.repriceBatches(product?.key, price?.key)
+  )
   const latestBatch = batches?.data?.[0]
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
@@ -71,7 +75,9 @@ export function PriceDetailPage() {
         </Button>
         <div>
           <h2 className="flex items-center gap-2 text-sm">
-            {price.key}
+            {product
+              ? `${product.key}.${price.key}.v${price.revision}`
+              : price.key}
             {price.archived && <Badge variant="secondary">archived</Badge>}
           </h2>
           <p className="text-xs text-muted-foreground">
@@ -83,6 +89,7 @@ export function PriceDetailPage() {
             <PriceChangeWizard
               price={price}
               productName={product?.display_name ?? "…"}
+              productKey={product?.key}
             />
           )}
         </div>
@@ -154,8 +161,11 @@ export function PriceDetailPage() {
                       <Link
                         className="text-xs underline-offset-2 hover:underline"
                         to={`/catalog/prices/${entry.price.id}`}
+                        title={entry.price.id}
                       >
-                        {shortId(entry.price.id, 13)}
+                        {product
+                          ? `${product.key}.${entry.price.key}.v${entry.price.revision}`
+                          : shortId(entry.price.id, 13)}
                       </Link>
                     </TableCell>
                   </TableRow>

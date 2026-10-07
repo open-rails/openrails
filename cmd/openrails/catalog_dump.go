@@ -11,8 +11,7 @@ import (
 )
 
 type catalogDumpOptions struct {
-	merchant      string
-	applicationID string
+	merchant string
 }
 
 func newDumpCatalogCmd() *cobra.Command {
@@ -26,7 +25,6 @@ func newDumpCatalogCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.merchant, "slug", "", "merchant slug to dump")
-	cmd.Flags().StringVar(&opts.applicationID, "application-id", "", "identity for the exported application (default: new UUID)")
 	return cmd
 }
 
@@ -37,9 +35,8 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 	}
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	return hosttools.DumpMerchantCatalog(cmd.Context(), hosttools.CatalogDumpOptions{
-		Config:        cfg,
-		Merchant:      slug,
-		ApplicationID: opts.applicationID,
-		Out:           cmd.OutOrStdout(),
+		Config:   cfg,
+		Merchant: slug,
+		Out:      cmd.OutOrStdout(),
 	})
 }

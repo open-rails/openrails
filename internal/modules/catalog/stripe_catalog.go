@@ -79,21 +79,19 @@ type stripeObject struct {
 // Stripe metadata keys used by OpenRails to mark catalog items it owns.
 // These are read on both reconciliation and orphan-discovery paths.
 //
-// Identity / matching keys are CONTENT-based (derived from catalog product keys) so
-// they survive a DB rebuild (which regenerates row UUIDs). The *ID keys are
-// retained as informational breadcrumbs only — never used for matching.
+// Products match their declared keys; prices match their retained local IDs.
+// Stored provider bindings always take precedence over metadata discovery.
 const (
 	// StripeMetadataOpenRailsProductKey is the content key stamped on a Stripe
 	// Product: the OpenRails product key. This is the field SEARCHED on to
 	// find-or-create the Stripe Product, so it must be stable across DB wipes.
 	StripeMetadataOpenRailsProductKey = "openrails_product_key"
-	// StripeMetadataOpenRailsPriceKey is the content key stamped on a Stripe
-	// Price for symmetry: "<product_key>.<price_terms>".
+	// StripeMetadataOpenRailsPriceKey holds the immutable local price UUID.
+	// Older objects may retain their historical financial-content marker.
 	StripeMetadataOpenRailsPriceKey = "openrails_price_key"
 
-	// StripeMetadataOpenRailsProductID / ...PriceID carry the OpenRails row
-	// UUIDs as informational breadcrumbs. They change on every DB rebuild and
-	// are NOT used for identity or matching.
+	// StripeMetadataOpenRailsProductID / ...PriceID retain local identities.
+	// Price IDs distinguish sibling keys and immutable revisions during discovery.
 	StripeMetadataOpenRailsProductID = "openrails_product_id"
 	StripeMetadataOpenRailsPriceID   = "openrails_price_id"
 
@@ -154,8 +152,7 @@ type CreatePriceParams struct {
 	Currency         string
 	BillingCycleDays *int
 	// LookupKey is set on the Stripe Price so it can be retrieved without
-	// knowing the ID. Format is deterministic per OpenRails:
-	// "<app_namespace>.<tier_group>.<product>.<price>.<currency>.<amount>.<interval>.<count>".
+	// knowing the remote ID: "openrails.<local-price-uuid>".
 	LookupKey      string
 	Metadata       map[string]string
 	IdempotencyKey string

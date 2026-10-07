@@ -6,7 +6,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -38,20 +37,4 @@ func Check(ctx context.Context, cfg *config.Config) error {
 		return nil
 	}
 	return ErrUpdatesDisabled
-}
-
-var ErrDeclared = apperr.New(http.StatusMethodNotAllowed, billing.CodeCatalogDeclared,
-	"the catalog is declared by the host (Config.Catalog); change the declaration and restart")
-
-// Declared reports whether the host declares the merchant's catalog.
-func Declared(cfg *config.Config) bool { return cfg != nil && cfg.Catalog != nil }
-
-// CheckDeclared refuses a write to a declared catalog from anyone, the host
-// included: the next boot would overwrite it. Only the boot application,
-// with operator authority, writes it.
-func CheckDeclared(ctx context.Context, cfg *config.Config) error {
-	if !Declared(cfg) || ctx.Value(operatorKey{}) == true {
-		return nil
-	}
-	return ErrDeclared
 }

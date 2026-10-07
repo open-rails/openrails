@@ -151,7 +151,7 @@ func PaymentsFromGen(rows []gen.BillingPayment) ([]*Payment, error) {
 }
 
 func PriceFromGen(p gen.BillingPrice) (*Price, error) {
-	m := &Price{
+	m := &Price{Revision: p.Revision,
 		ID:                  p.ID,
 		MerchantID:          p.MerchantID,
 		ProductID:           p.ProductID,
@@ -170,7 +170,7 @@ func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 }
 
 func ProductFromGen(p gen.BillingProduct) (*Product, error) {
-	m := &Product{
+	m := &Product{Revision: p.Revision,
 		ID:          p.ID,
 		MerchantID:  p.MerchantID,
 		Key:         p.Key,

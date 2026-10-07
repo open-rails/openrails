@@ -56,13 +56,7 @@ func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Nod
 
 // seedCards applies prices only the armed card PSP sells.
 func seedCards(ctx context.Context, c *openrails.Client) (string, string, error) {
-	revision, err := c.GetCatalogRevision(ctx)
-	if err != nil {
-		return "", "", err
-	}
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
-application_id: billing-ui-e2e-cards
-expected_revision: %d
 products:
 - key: e2e-card
   display_name: Card membership
@@ -81,18 +75,18 @@ products:
     psps: [%s]
   entitlements_spec:
     e2e-card: null
-`, revision.Revision, CardPSPKey, CardPSPKey)))
+`, CardPSPKey, CardPSPKey)))
 	if err != nil {
 		return "", "", err
 	}
 	if _, err := c.ApplyCatalog(ctx, params); err != nil {
 		return "", "", err
 	}
-	once, err := c.GetPriceByKey(ctx, "e2e-card-once")
+	once, err := c.GetPriceByKey(ctx, "e2e-card", "e2e-card-once")
 	if err != nil {
 		return "", "", err
 	}
-	monthly, err := c.GetPriceByKey(ctx, "e2e-card-monthly")
+	monthly, err := c.GetPriceByKey(ctx, "e2e-card", "e2e-card-monthly")
 	if err != nil {
 		return "", "", err
 	}
@@ -106,13 +100,7 @@ func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node
 	if err != nil {
 		return "", "", err
 	}
-	revision, err := c.GetCatalogRevision(ctx)
-	if err != nil {
-		return "", "", err
-	}
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
-application_id: billing-ui-e2e-crypto
-expected_revision: %d
 products:
 - key: e2e-crypto
   display_name: Crypto membership
@@ -135,18 +123,18 @@ products:
         plan_id: "1078"
   entitlements_spec:
     e2e-crypto: null
-`, revision.Revision, plan)))
+`, plan)))
 	if err != nil {
 		return "", "", err
 	}
 	if _, err := c.ApplyCatalog(ctx, params); err != nil {
 		return "", "", err
 	}
-	pass, err := c.GetPriceByKey(ctx, "e2e-crypto-pass")
+	pass, err := c.GetPriceByKey(ctx, "e2e-crypto", "e2e-crypto-pass")
 	if err != nil {
 		return "", "", err
 	}
-	monthly, err := c.GetPriceByKey(ctx, "e2e-crypto-monthly")
+	monthly, err := c.GetPriceByKey(ctx, "e2e-crypto", "e2e-crypto-monthly")
 	if err != nil {
 		return "", "", err
 	}

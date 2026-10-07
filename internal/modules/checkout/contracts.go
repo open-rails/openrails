@@ -39,6 +39,7 @@ type CheckoutRequest struct {
 	attempt         cardAttempt
 	PriceID         string `json:"price_id"`
 	PriceKey        string `json:"price_key,omitempty"`
+	ProductKey      string `json:"product_key,omitempty"`
 	PaymentMethodID string `json:"payment_method_id,omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
 	// Card is a new card for a PSP whose card_entry is server (#1129).

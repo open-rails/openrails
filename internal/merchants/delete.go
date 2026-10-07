@@ -40,23 +40,17 @@ var merchantOwnedTables = []string{
 	"provider_mutation_logs", "provider_intents",
 	"checkout_attempts", "entitlements", "payments", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
-	"prices", "products",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
 	// (REVOKE DELETE) and intentionally NOT row-purged here — which is also why a
 	// merchant whose grants pin payments/products cannot be purged at all; see
-	// ErrPurgeBlockedByRetainedHistory. Catalog identities/owner bindings are
-	// retained with the tombstoned merchant; deleting product children never
-	// transfers or recreates those immutable business identities.
+	// ErrPurgeBlockedByRetainedHistory. Products, prices and their owner bindings are retained
+	// with the tombstoned merchant; they can only be archived.
 }
 
 // countMerchantRows dispatches to the table's generated count query.
 func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) (int64, error) {
 	switch table {
-	case "products":
-		return q.CountMerchantRowsProducts(ctx, id)
-	case "prices":
-		return q.CountMerchantRowsPrices(ctx, id)
 	case "catalog_drift_events":
 		return q.CountMerchantRowsCatalogDriftEvents(ctx, id)
 	case "payment_methods":
@@ -99,10 +93,6 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 // purgeMerchantRows dispatches to the table's generated purge query.
 func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uuid.UUID) error {
 	switch table {
-	case "products":
-		return q.PurgeMerchantRowsProducts(ctx, id)
-	case "prices":
-		return q.PurgeMerchantRowsPrices(ctx, id)
 	case "catalog_drift_events":
 		return q.PurgeMerchantRowsCatalogDriftEvents(ctx, id)
 	case "payment_methods":

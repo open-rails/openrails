@@ -319,8 +319,8 @@ func (s *CheckoutAttemptService) evaluateCandidate(ctx context.Context, targets 
 // creating anything. It resolves the price/product exactly as checkout does and
 // runs the SAME Route call, so the trace it returns is the decision a real
 // session would record — not a re-implementation that can drift.
-func (s *CheckoutAttemptService) DryRunRouting(ctx context.Context, priceID, priceKey, country, selector string) (*RoutingDecision, models.CheckoutAttemptMode, error) {
-	if err := validateCheckoutPriceSelector(priceID, priceKey); err != nil {
+func (s *CheckoutAttemptService) DryRunRouting(ctx context.Context, priceID, productKey, priceKey, country, selector string) (*RoutingDecision, models.CheckoutAttemptMode, error) {
+	if err := validateCheckoutPriceSelector(priceID, productKey, priceKey); err != nil {
 		return nil, "", err
 	}
 	if s == nil || s.priceService == nil || s.productService == nil {
@@ -330,7 +330,7 @@ func (s *CheckoutAttemptService) DryRunRouting(ctx context.Context, priceID, pri
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve checkout merchant: %w", err)
 	}
-	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, priceKey)
+	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, productKey, priceKey)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve checkout price: %w", err)
 	}

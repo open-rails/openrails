@@ -22,17 +22,19 @@ func (q *Queries) AdvanceCatalogRevision(ctx context.Context, merchantID uuid.UU
 	return catalog_revision, err
 }
 
-const getCatalogApplication = `-- name: GetCatalogApplication :one
-SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at, catalog_version FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
+const getCatalogApplicationByHash = `-- name: GetCatalogApplicationByHash :one
+SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications
+WHERE merchant_id=$1::uuid AND request_sha256=$2::bytea
+ORDER BY applied_revision DESC LIMIT 1
 `
 
-type GetCatalogApplicationParams struct {
+type GetCatalogApplicationByHashParams struct {
 	MerchantID    uuid.UUID
-	ApplicationID string
+	RequestSha256 []byte
 }
 
-func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogApplicationParams) (BillingCatalogApplication, error) {
-	row := q.db.QueryRow(ctx, getCatalogApplication, arg.MerchantID, arg.ApplicationID)
+func (q *Queries) GetCatalogApplicationByHash(ctx context.Context, arg GetCatalogApplicationByHashParams) (BillingCatalogApplication, error) {
+	row := q.db.QueryRow(ctx, getCatalogApplicationByHash, arg.MerchantID, arg.RequestSha256)
 	var i BillingCatalogApplication
 	err := row.Scan(
 		&i.MerchantID,
@@ -43,7 +45,6 @@ func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogAppli
 		&i.AppliedRevision,
 		&i.Result,
 		&i.AppliedAt,
-		&i.CatalogVersion,
 	)
 	return i, err
 }
@@ -59,32 +60,9 @@ func (q *Queries) GetCatalogRevision(ctx context.Context, merchantID uuid.UUID) 
 	return catalog_revision, err
 }
 
-const getLatestDeclaredCatalogApplication = `-- name: GetLatestDeclaredCatalogApplication :one
-SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at, catalog_version FROM billing.catalog_applications
-WHERE merchant_id=$1::uuid AND catalog_version IS NOT NULL
-ORDER BY catalog_version DESC LIMIT 1
-`
-
-func (q *Queries) GetLatestDeclaredCatalogApplication(ctx context.Context, merchantID uuid.UUID) (BillingCatalogApplication, error) {
-	row := q.db.QueryRow(ctx, getLatestDeclaredCatalogApplication, merchantID)
-	var i BillingCatalogApplication
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ApplicationID,
-		&i.SchemaVersion,
-		&i.RequestSha256,
-		&i.BaseRevision,
-		&i.AppliedRevision,
-		&i.Result,
-		&i.AppliedAt,
-		&i.CatalogVersion,
-	)
-	return i, err
-}
-
 const insertCatalogApplication = `-- name: InsertCatalogApplication :exec
-INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result,catalog_version)
-VALUES ($1::uuid,$2::text,$3::bigint,$4::bytea,$5::bigint,$6::bigint,$7::jsonb,NULLIF($8::bigint,0))
+INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result)
+VALUES ($1::uuid,$2::text,$3::bigint,$4::bytea,$5::bigint,$6::bigint,$7::jsonb)
 `
 
 type InsertCatalogApplicationParams struct {
@@ -95,7 +73,6 @@ type InsertCatalogApplicationParams struct {
 	BaseRevision    int64
 	AppliedRevision int64
 	Result          []byte
-	CatalogVersion  int64
 }
 
 func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalogApplicationParams) error {
@@ -107,7 +84,6 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 		arg.BaseRevision,
 		arg.AppliedRevision,
 		arg.Result,
-		arg.CatalogVersion,
 	)
 	return err
 }

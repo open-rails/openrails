@@ -75,13 +75,10 @@ type Config struct {
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
 	Merchant MerchantDeclaration
-	// Catalog declares Merchant's catalog (catalog.ParseApplicationYAML
-	// of the host's catalog.yaml). New applies it before returning: unchanged
-	// it replays, and a higher CatalogVersion applies edits. Older versions
-	// are superseded; the same version with different content is refused. While it is set, writes to the
-	// merchant's catalog are refused (billing.ErrCatalogDeclared); creator
-	// catalogs and negotiated payer rates stay writable. Nil leaves the
-	// catalog to the API.
+	// Catalog optionally applies one merchant-scoped batch at startup, using
+	// the same permanent content-hash replay as Client.ApplyCatalog. Later
+	// programmatic edits remain available; AllowCatalogUpdates only controls
+	// HTTP catalog-write route exposure. Requires Merchant. Nil skips the batch.
 	Catalog *catalog.Application
 	// HTTP selects the route groups Client.Routes publishes; nil publishes none.
 	HTTP *HTTPConfig
@@ -142,7 +139,7 @@ type Config struct {
 	AlertSecretBackend string
 	// AllowCatalogUpdates enables the product, price, catalog and metering
 	// mutation routes. An in-process Client applies its own catalog without
-	// it; a declared Catalog still refuses the merchant's own catalog.
+	// it; Config.Catalog does not restrict later programmatic changes.
 	AllowCatalogUpdates bool
 
 	// CatalogReconciliationInterval schedules the alert-only catalog

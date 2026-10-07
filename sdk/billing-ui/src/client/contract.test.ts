@@ -43,7 +43,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.listPayments(),
     () => client.listInvoices(),
     () => client.getInvoice("inv_1"),
-    () => client.createCheckoutSession({ priceKey: "monthly" }),
+    () => client.createCheckoutSession({ productKey: "premium", priceKey: "monthly" }),
   ]
   for (const call of calls) await call().catch(() => undefined)
 

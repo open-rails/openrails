@@ -30,8 +30,8 @@ type CheckoutOption struct {
 // It performs no remote provider probes and no writes; readiness means the
 // active local account, required credentials, price link, checkout mode, and
 // runtime services are all present.
-func (s *CheckoutAttemptService) ListCheckoutOptions(ctx context.Context, priceID, priceKey string) ([]CheckoutOption, error) {
-	if err := validateCheckoutPriceSelector(priceID, priceKey); err != nil {
+func (s *CheckoutAttemptService) ListCheckoutOptions(ctx context.Context, priceID, productKey, priceKey string) ([]CheckoutOption, error) {
+	if err := validateCheckoutPriceSelector(priceID, productKey, priceKey); err != nil {
 		return nil, err
 	}
 	if s == nil || s.priceService == nil || s.productService == nil {
@@ -49,7 +49,7 @@ func (s *CheckoutAttemptService) ListCheckoutOptions(ctx context.Context, priceI
 		return nil, fmt.Errorf("resolve checkout merchant: %w", err)
 	}
 
-	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, priceKey)
+	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, productKey, priceKey)
 	if err != nil {
 		return nil, fmt.Errorf("resolve checkout price: %w", err)
 	}

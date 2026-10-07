@@ -26,7 +26,7 @@ type Service struct {
 	localCatalogOnly     bool
 	catalogWriteLocked   bool
 	catalogCommittedWork *[]func(context.Context, *Service)
-	catalogPreparedLinks map[string]map[string]map[string]string
+	catalogPreparedLinks map[[2]string]map[string]map[string]string
 }
 
 func New(rt *app.Runtime) (*Service, error) {

@@ -189,11 +189,7 @@ func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	client := f.runtime(t, "metered-"+uuid.NewString()[:8])
 	key := "metered-" + uuid.NewString()[:8]
 	apply := func(unitAmount string) {
-		revision, err := client.GetCatalogRevision(t.Context())
-		require.NoError(t, err)
 		params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
-application_id: gf-%[1]s-%[3]s
-expected_revision: %[2]d
 meters:
 - key: %[1]s-runtime
   event_type: droplet.usage
@@ -208,8 +204,8 @@ products:
       model: per_unit
       currency: usd
       per_unit:
-        unit_amount: "%[3]s"
-`, key, revision.Revision, unitAmount)))
+        unit_amount: "%[2]s"
+`, key, unitAmount)))
 		require.NoError(t, err)
 		_, err = client.ApplyCatalog(t.Context(), params)
 		require.NoError(t, err)

@@ -11,8 +11,8 @@ import (
 // CreateRepriceBatch schedules every active subscription on a prior version
 // of a price key to move to the key's current price.
 func (c *Client) CreateRepriceBatch(ctx context.Context, params billing.CreateRepriceBatchParams, requestOptions ...RequestOption) (*billing.RepriceBatchResult, error) {
-	if strings.TrimSpace(params.PriceKey) == "" {
-		return nil, invalidErr("price_key is required")
+	if strings.TrimSpace(params.PriceKey) == "" || strings.TrimSpace(params.ProductKey) == "" {
+		return nil, invalidErr("product_key and price_key are required")
 	}
 	if params.EffectiveAt.IsZero() {
 		return nil, invalidErr("effective_at is required")
@@ -27,8 +27,8 @@ func (c *Client) CreateRepriceBatch(ctx context.Context, params billing.CreateRe
 // PreviewRepriceBatch counts the subscribers a batch for a price key would
 // move, without writing anything.
 func (c *Client) PreviewRepriceBatch(ctx context.Context, params billing.PreviewRepriceBatchParams, requestOptions ...RequestOption) (*billing.RepriceBatchPreview, error) {
-	if strings.TrimSpace(params.PriceKey) == "" {
-		return nil, invalidErr("price_key is required")
+	if strings.TrimSpace(params.PriceKey) == "" || strings.TrimSpace(params.ProductKey) == "" {
+		return nil, invalidErr("product_key and price_key are required")
 	}
 	var out billing.RepriceBatchPreview
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/reprice-batches/preview", params, &out, requestOptions...); err != nil {
@@ -42,6 +42,7 @@ func (c *Client) ListRepriceBatches(ctx context.Context, params billing.RepriceB
 	q := pageValues(nil, params.PageRequest)
 	if key := strings.TrimSpace(params.PriceKey); key != "" {
 		q.Set("price_key", key)
+		q.Set("product_key", params.ProductKey)
 	}
 	var out billing.ListPage[billing.RepriceBatch]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprice-batches?"+q.Encode(), nil, &out, requestOptions...); err != nil {

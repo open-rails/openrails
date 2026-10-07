@@ -213,28 +213,27 @@ func verifySolanaPlans(ctx context.Context, verify SolanaPlanVerifier, prices []
 }
 
 // DriftSnapshot is the local catalog as seen by one PSP account. Remote objects
-// match by content key; stored provider ids come only from that account's links.
+// match stored bindings first, then exact price IDs or product keys. Stored
+// provider IDs come only from that account's links.
 type DriftSnapshot struct {
-	ProductByID       map[string]*models.Product
-	PriceByID         map[string]*models.Price
-	ProductByKey      map[string]*models.Product
-	PriceByContentKey map[string]*models.Price
-	StripeProductIDs  map[string]string // stripe product id -> local product id
-	StripePriceIDs    map[string]string // stripe price id -> local price id
-	NMIPlanByPriceID  map[string]string // local price id -> nmi plan id
+	ProductByID      map[string]*models.Product
+	PriceByID        map[string]*models.Price
+	ProductByKey     map[string]*models.Product
+	StripeProductIDs map[string]string // stripe product id -> local product id
+	StripePriceIDs   map[string]string // stripe price id -> local price id
+	NMIPlanByPriceID map[string]string // local price id -> nmi plan id
 }
 
 // BuildDriftSnapshot is pure; tests use it without a database. A zero pspID
 // includes links of every account (the catalog-extras view).
 func BuildDriftSnapshot(products []*models.Product, prices []*models.Price, pspID uuid.UUID) DriftSnapshot {
 	snap := DriftSnapshot{
-		ProductByID:       make(map[string]*models.Product, len(products)),
-		PriceByID:         make(map[string]*models.Price, len(prices)),
-		ProductByKey:      make(map[string]*models.Product, len(products)),
-		PriceByContentKey: make(map[string]*models.Price, len(prices)),
-		StripeProductIDs:  map[string]string{},
-		StripePriceIDs:    map[string]string{},
-		NMIPlanByPriceID:  map[string]string{},
+		ProductByID:      make(map[string]*models.Product, len(products)),
+		PriceByID:        make(map[string]*models.Price, len(prices)),
+		ProductByKey:     make(map[string]*models.Product, len(products)),
+		StripeProductIDs: map[string]string{},
+		StripePriceIDs:   map[string]string{},
+		NMIPlanByPriceID: map[string]string{},
 	}
 	for _, p := range products {
 		snap.ProductByID[p.ID.String()] = p
@@ -244,9 +243,6 @@ func BuildDriftSnapshot(products []*models.Product, prices []*models.Price, pspI
 	}
 	for _, pr := range prices {
 		snap.PriceByID[pr.ID.String()] = pr
-		if prod := snap.ProductByID[pr.ProductID.String()]; prod != nil && strings.TrimSpace(prod.Key) != "" {
-			snap.PriceByContentKey[OpenRailsPriceContentKey(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())] = pr
-		}
 		account := pr
 		if pspID != uuid.Nil {
 			account = pr.ForPSP(pspID)
@@ -314,8 +310,11 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 	for _, sp := range remoteProducts {
 		seenProducts[sp.ID] = struct{}{}
 		productKey := strings.TrimSpace(sp.Metadata[StripeMetadataOpenRailsProductKey])
-		local, ok := snap.ProductByKey[productKey]
-		if productKey == "" || !ok {
+		local := snap.ProductByID[snap.StripeProductIDs[sp.ID]]
+		if local == nil {
+			local = snap.ProductByKey[productKey]
+		}
+		if local == nil {
 			events = append(events, stripeEvent(models.CatalogDriftOrphanInStripe, models.CatalogDriftResourceProduct, productKey, sp.ID))
 			continue
 		}
@@ -333,9 +332,12 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 	seenPrices := make(map[string]struct{}, len(remotePrices))
 	for _, sp := range remotePrices {
 		seenPrices[sp.ID] = struct{}{}
-		priceKey := RemoteStripePriceContentKey(sp)
-		local, ok := snap.PriceByContentKey[priceKey]
-		if priceKey == "" || !ok {
+		priceKey := RemoteStripePriceKey(sp)
+		local := snap.PriceByID[snap.StripePriceIDs[sp.ID]]
+		if local == nil {
+			local = snap.PriceByID[priceKey]
+		}
+		if local == nil {
 			events = append(events, stripeEvent(models.CatalogDriftOrphanInStripe, models.CatalogDriftResourcePrice, priceKey, sp.ID))
 			continue
 		}

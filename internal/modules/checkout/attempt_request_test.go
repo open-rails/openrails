@@ -155,7 +155,11 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 		{"pro-monthly", "", false},
 		{"price_00000000-0000-0000-0000-000000000000", "", false},
 	} {
-		err := validateCheckoutPriceSelector(tc.id, tc.key)
+		productKey := ""
+		if tc.key != "" {
+			productKey = "pro"
+		}
+		err := validateCheckoutPriceSelector(tc.id, productKey, tc.key)
 		if tc.ok {
 			require.NoError(t, err, "%q %q", tc.id, tc.key)
 		} else {

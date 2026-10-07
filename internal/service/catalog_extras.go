@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,7 +62,7 @@ import (
 // OWNERSHIP-MARKER GUARD: only objects bearing OUR markers are ever archived —
 // Stripe objects must carry the openrails_product_key / openrails_price_key
 // metadata or an "openrails."-prefixed lookup_key; NMI plans must match the
-// content-addressed "<slug>-<currency>-<amount>-<cycle>" plan_id shape; Solana
+// local-price "or-<32-hex-UUID>" or historical financial plan_id shape; Solana
 // sunset candidates come from our own stored plan handles. Foreign (merchant-
 // owned, unrelated) provider objects are LISTED in the report but NEVER
 // touched, even under --prune.
@@ -318,7 +319,7 @@ func extrasIndex(snap catalog.DriftSnapshot) catalog.ExtrasIndex {
 		StripeProductIDs: make(map[string]struct{}, len(snap.StripeProductIDs)),
 		StripePriceIDs:   make(map[string]struct{}, len(snap.StripePriceIDs)),
 		ProductKeys:      make(map[string]struct{}, len(snap.ProductByKey)),
-		PriceContentKeys: make(map[string]struct{}, len(snap.PriceByContentKey)),
+		PriceIDs:         make(map[string]struct{}, len(snap.PriceByID)),
 	}
 	for id := range snap.StripeProductIDs {
 		ix.StripeProductIDs[id] = struct{}{}
@@ -329,17 +330,16 @@ func extrasIndex(snap catalog.DriftSnapshot) catalog.ExtrasIndex {
 	for key := range snap.ProductByKey {
 		ix.ProductKeys[key] = struct{}{}
 	}
-	for ck := range snap.PriceByContentKey {
-		ix.PriceContentKeys[ck] = struct{}{}
+	for id := range snap.PriceByID {
+		ix.PriceIDs[id] = struct{}{}
 	}
 	return ix
 }
 
 // computeNMIExtras is the pure NMI diff: recurring plans on the account whose
-// plan_id is not referenced by any local price. Owned = the plan_id matches the
-// content-addressed "<product-key>-<currency>-<amount>-<cycle>" shape OpenRails mints
-// (nmiDeterministicPlanID). NMI plans have no active flag, so Active is
-// always true.
+// plan_id is not referenced by any local price. Ownership recognizes current
+// local-price IDs and historical OpenRails financial markers. NMI plans have
+// no active flag, so Active is always true.
 func computeNMIExtras(plans []catalog.NMIPlan, snap catalog.DriftSnapshot) []CatalogExtra {
 	known := make(map[string]struct{}, len(snap.NMIPlanByPriceID))
 	for _, planID := range snap.NMIPlanByPriceID {
@@ -400,7 +400,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 		}
 		if st.label == "" {
 			if prod := snap.ProductByID[pr.ProductID.String()]; prod != nil {
-				st.label = openRailsPriceContentKey(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
+				st.label = prod.Key + "." + pr.Key + ".v" + strconv.FormatInt(pr.Revision, 10)
 			}
 		}
 	}
@@ -448,13 +448,17 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 	return out, scanned, notes
 }
 
-// isContentAddressedNMIPlanID reports whether a plan_id matches the
-// content-addressed shape OpenRails mints: "<product-key>-<currency>-<amount>-<cycle>"
+// isContentAddressedNMIPlanID recognizes current prefixed local price IDs and
+// the historical financial shape: "<product-key>-<currency>-<amount>-<cycle>"
 // where currency is a 3-letter code, amount is an integer, and cycle is a day
 // count or "onetime" (see nmiDeterministicPlanID). The product key may itself
 // contain hyphens, so the id is parsed from the right. Operator-chosen plan ids
 // that happen not to match this shape are treated as foreign (never archived).
 func isContentAddressedNMIPlanID(planID string) bool {
+	if raw, ok := strings.CutPrefix(strings.TrimSpace(planID), "or-"); ok {
+		id, err := uuid.Parse(raw)
+		return err == nil && id != uuid.Nil && len(raw) == 32
+	}
 	parts := strings.Split(strings.TrimSpace(planID), "-")
 	if len(parts) < 4 {
 		return false

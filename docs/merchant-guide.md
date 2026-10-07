@@ -13,67 +13,27 @@ just readability — there are no dollar-string amounts in the catalog document.
 
 ### The mental model
 
-The database is the catalog. Authorized clients can edit individual records when
-`allow_catalog_updates: true`, or submit a JSON/YAML batch of changes. The flag
-defaults false; a trusted local operator can still apply bootstrap documents.
+The database is the catalog. The authorized in-process client can always edit
+individual records or apply a JSON/YAML batch. `allow_catalog_updates` controls
+whether catalog-write HTTP routes are exposed; it defaults false.
 
-A batch is declarative or guarded:
+Each batch is applied atomically once per merchant, identified by a canonical
+content hash. Reapplying identical content returns the saved receipt even after
+later API edits. Omission preserves records and fields; explicit `archived: true`
+retires an entry, and `prune: true` opts into archiving omitted products and prices.
+Batches have no ordering guarantee: previously unseen content applies to current
+state. Already-applied content never becomes an implicit rollback command.
 
-- **Declarative** (no `application_id`, no `expected_revision`) — the document is
-  the desired state; apply it on every boot. Unchanged, it replays its receipt.
-  Edited, or after any other catalog edit (console, API), it applies again and the
-  file wins for everything it declares.
-- **Guarded** (both fields) — a one-off change that must not overwrite concurrent
-  editors, as the admin console sends. Reusing an applied ID with identical
-  contents returns the original receipt, even after later edits; the same ID with
-  different contents, or a stale revision, is a conflict.
-
-Supplying only one of the two fields is rejected. Omitted records survive unless
-`prune: true`; explicit `archived: true` retires a known record independently.
-
-Products have stable keys. Prices have immutable financial terms; changing terms
-under a stable price key selects a new financial version. Existing subscriptions
-retain their historical price. Provider reconciliation detects drift separately;
-it does not make a startup file continuously authoritative.
-
-Products grant **entitlements** — plain strings (e.g. `premium`, `tier:novice`). Your
-application reads a user's entitlement timeline for access decisions, *not*
-subscription rows. Subscriptions produce entitlement windows; so do one-off purchases,
-admin grants, and grace. See [Entitlements](#entitlements).
-
-### Applying through the Go Client
-
-An embedded host whose `catalog.yaml` is the truth declares it instead:
-`Config.Catalog`, applied by `openrails.New` before it returns, after which the
-merchant's catalog refuses other writes (`catalog_declared`) until the file
-changes. See [embedded-integration.md](embedded-integration.md).
-
-Otherwise use `client.ApplyCatalog(ctx, document)` for embedded and remote Clients.
-Decode YAML with `catalog.ParseApplicationYAML` (JSON: `catalog.ParseApplicationJSON`);
-both encodings share the same validation and authorization as individual writes. The
-HTTP operation is `POST /v1/merchant/catalog/applications`; a guarded application reads
-its base revision through `client.GetCatalogRevision(ctx)` or
-`GET /v1/merchant/catalog/revision`.
-
-The server commits local products, prices, related definitions, history and the
-application receipt atomically. Unsupported provider changes fail before mutation;
-supported external work is durable and reported separately. Retry an uncertain
-response with exactly the same document. For a guarded application a changed
-revision is a conflict, not permission to refresh the precondition and overwrite
-intervening edits; overwriting them is what a declarative document is for.
-
-Meter/rate-card dependency checks still apply; prune does not delete historical
-billing definitions or customer rate overrides.
-
-For bootstrap, the trusted local operator path (`openrails apply-catalog`) applies
-the same document with local authority.
+The API is `POST /v1/merchant/catalog/applications`, and the in-process client
+method is `ApplyCatalog`. The operator CLI (`openrails apply-catalog`) applies the
+same document with local authority. No application ID or expected revision is
+written by the caller.
 
 ### Authoring the catalog
 
 One application selects one authorized merchant outside the document and includes
-`schema_version`, `prune`, `products` and supported
-`meters`, plus `application_id` and `expected_revision` together for a guarded
-application. See `config/catalog.example.yaml`.
+`schema_version`, optional `prune`, `products` and supported `meters`.
+Product-local `prices` and `rate_cards` are nested under each product. See `config/catalog.example.yaml`.
 
 **A tiered subscription** — `tier_group` + `tier_rank` make products an ordered plan
 family, which is what enables upgrade/downgrade between them:
@@ -170,13 +130,10 @@ manifest path is used. Managed DB/Vault deployments read their configured backen
 and fail if it is unavailable. Recurring Solana references use public account and
 chain reads; catalog application does not construct a signer or submit a plan.
 
-Identity, expected revision and prune belong in the document, not CLI mutation
-flags. A declarative receipt's `application_id` is derived:
-`sha256:<content digest>@<applied revision>`. The returned receipt proves what
-committed, not that no one has edited the catalog since.
-
-Catalog exports are inspection snapshots; author explicit application identity and
-revision before applying changes from an export.
+The returned receipt's `application_id` is generated as `sha256:<content digest>`.
+It records what committed and whether the call replayed, not whether later edits
+have changed the catalog. Exports are inspection snapshots that can be edited and
+submitted as another batch; submitting already-applied content remains a replay.
 
 Provider support for individual catalog operations (batch applications reject unsupported external workflows before local mutation):
 

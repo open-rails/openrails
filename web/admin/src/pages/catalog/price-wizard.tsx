@@ -72,11 +72,13 @@ const priceChangeFormValues = (
 export function PriceChangeWizard({
   price,
   productName,
+  productKey,
   draft,
   onDone,
 }: {
   price: Price
   productName: string
+  productKey: string | undefined
   draft?: PriceChangeDraft
   onDone?: () => void
 }) {
@@ -99,6 +101,7 @@ export function PriceChangeWizard({
   const form = useForm({
     defaultValues: priceChangeFormValues(price, draft),
     onSubmit: async ({ value }) => {
+      if (!productKey) return
       const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
       if (newAmount === null || BigInt(newAmount) <= 0n) return
 
@@ -118,6 +121,7 @@ export function PriceChangeWizard({
           migration:
             value.mode === "migrate"
               ? {
+                  productKey,
                   priceKey: price.key,
                   effectiveAt: new Date(value.effectiveAt).toISOString(),
                 }
@@ -156,6 +160,7 @@ export function PriceChangeWizard({
   }
 
   const enterStep2 = () => {
+    if (!productKey) return
     const amount = nativeAmountFromInput(
       form.state.values.amountInput,
       price.currency
@@ -171,21 +176,26 @@ export function PriceChangeWizard({
     )
     setStep(2)
     previewPriceChange.reset()
-    previewPriceChange.mutate(price.key, {
-      onError: (err) => toastApiError(err, "Preview affected subscribers"),
-    })
+    previewPriceChange.mutate(
+      { productKey, priceKey: price.key },
+      { onError: (err) => toastApiError(err, "Preview affected subscribers") }
+    )
   }
 
   // Archived (prior-version) rows are history, not the editable current
-  // price — editing rides the key's CURRENT row (GET .../prices/by-key/:key
-  // always resolves it) so there is exactly one live edit target per key.
-  if (price.archived) {
+  // price. Each product/key pair has exactly one live edit target.
+  // Wait for the product before allowing previews or scheduling a migration.
+  if (price.archived || !productKey) {
     return (
       <Button
         variant="outline"
         size="sm"
         disabled
-        title="This is an archived version. Change the current price for this key instead."
+        title={
+          price.archived
+            ? "This is an archived version. Change the current price for this key instead."
+            : "Load the product before changing its price."
+        }
       >
         Change price
       </Button>

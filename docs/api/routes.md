@@ -107,14 +107,14 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
 | PATCH | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:update` | `UpdateProductParams` | 200 `Product` | catalog write |
-| GET | `/v1/merchant/catalog/products/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
-| PUT | `/v1/merchant/catalog/products/by-key/{key}` | merchant | `merchant:catalog:update` | `CreateProductParams` | 200 `Product` | catalog write |
+| GET | `/v1/merchant/catalog/products/by-key/{product_key}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
+| PUT | `/v1/merchant/catalog/products/by-key/{product_key}` | merchant | `merchant:catalog:update` | `CreateProductParams` | 200 `Product` | catalog write |
 | POST | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:update` | `CreatePriceParams` | 201 `Price` | catalog write |
 | GET | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Price>` |  |
 | GET | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
 | PATCH | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:update` | `UpdatePriceParams` | 200 `Price` | catalog write |
-| GET | `/v1/merchant/catalog/prices/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
-| GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | merchant | `merchant:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| GET | `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
+| GET | `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}/history` | merchant | `merchant:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | POST | `/v1/merchant/catalog/offers/lookup` | merchant | `merchant:catalog:read` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
 | GET | `/v1/merchant/subscriptions` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/merchant/subscriptions/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Subscription` |  |

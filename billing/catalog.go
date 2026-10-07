@@ -11,7 +11,9 @@ import (
 // group is one tier of a plan family, ranked by TierRank. Archived products
 // keep their purchases and subscribers but are not sold.
 type Product struct {
-	ID ProductID `json:"id"`
+	// Revision advances automatically when this product changes, without retaining product versions.
+	Revision int64     `json:"revision"`
+	ID       ProductID `json:"id"`
 	// Key is the product's merchant-unique name.
 	Key         string `json:"key"`
 	DisplayName string `json:"display_name"`
@@ -69,6 +71,8 @@ type ProductListParams struct {
 // means a new price under the same key. PSPs is the price's state on each PSP
 // it is linked to.
 type Price struct {
+	// Revision is assigned automatically within this product/key, starting at zero.
+	Revision            int64                   `json:"revision"`
 	ID                  PriceID                 `json:"id"`
 	Key                 string                  `json:"key"`
 	ProductID           ProductID               `json:"product_id"`
@@ -188,11 +192,10 @@ type CreatePriceProduct struct {
 }
 
 // UpdatePriceParams changes what about a price can change; omitted fields are
-// left as they are. Key moves the price onto another key, archiving the live
-// price that held it. PSPLinks merges into the price's links: a PSP set to
+// left as they are. Keys and financial terms are immutable.
+// PSPLinks merges into the price's links: a PSP set to
 // null is unlinked.
 type UpdatePriceParams struct {
-	Key      catalog.Field[string]                       `json:"key,omitzero"`
 	Archived catalog.Field[bool]                         `json:"archived,omitzero"`
 	PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`
 }

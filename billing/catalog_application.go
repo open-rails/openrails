@@ -8,12 +8,8 @@ type CatalogApplicationReceipt struct {
 	BaseRevision    int64  `json:"base_revision"`
 	AppliedRevision int64  `json:"applied_revision"`
 	Replayed        bool   `json:"replayed"`
-	// CatalogVersion is the applied configuration catalog's version. Superseded
-	// means a newer version was already applied and this request changed nothing.
-	CatalogVersion  int64 `json:"catalog_version,omitempty"`
-	Superseded      bool  `json:"superseded,omitempty"`
-	ProductsChanged int   `json:"products_changed"`
-	PricesChanged   int   `json:"prices_changed"`
+	ProductsChanged int    `json:"products_changed"`
+	PricesChanged   int    `json:"prices_changed"`
 }
 
 // CatalogRevision is the merchant's catalog revision, which every catalog
@@ -22,10 +18,3 @@ type CatalogRevision struct {
 	Revision      int64 `json:"revision"`
 	WritesAllowed bool  `json:"writes_allowed"`
 }
-
-// CodeCatalogDeclared refuses a catalog write while Config.Catalog declares
-// the catalog (HTTP 405): the next boot would overwrite it. Change the
-// declaration and restart instead.
-const CodeCatalogDeclared = "catalog_declared"
-
-var ErrCatalogDeclared error = newCodedError(CodeCatalogDeclared, ErrInvalid)

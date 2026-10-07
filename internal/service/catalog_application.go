@@ -23,12 +23,6 @@ import (
 // ApplyCatalog applies one durable local operation. It never invokes provider
 // network writes; unsupported provider-link changes fail before local mutation.
 func (s *Service) ApplyCatalog(ctx context.Context, params catalogwire.Application) (*billing.CatalogApplicationReceipt, error) {
-	if params.CatalogVersion != 0 {
-		if err := s.checkCatalogWritePolicy(ctx); err != nil {
-			return nil, err
-		}
-		return nil, apperr.Invalidf("catalog_version belongs to Config.Catalog; API-managed catalogs omit it")
-	}
 	return s.applyCatalog(ctx, params, s.verifyCatalogProviderReference)
 }
 
@@ -37,8 +31,7 @@ func (s *Service) ApplyCatalog(ctx context.Context, params catalogwire.Applicati
 // committed; the same application can be retried.
 var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference unconfirmed")
 
-// ApplyDeclaredCatalog applies the host's Config.Catalog, the one write a
-// declared catalog accepts. Provider reference reads end at deadline (zero:
+// ApplyDeclaredCatalog applies the host's Config.Catalog startup batch. Provider reference reads end at deadline (zero:
 // none); one that fails without a provider refusal is
 // ErrCatalogProviderUnconfirmed.
 func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params catalogwire.Application, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
@@ -96,17 +89,11 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 	}
 }
 
-// Only a declarative application can observe this; a guarded one pins the
-// revision its preparation read.
+// A concurrent catalog edit invalidates prepared provider references. Retry
+// from a fresh snapshot without changing the batch identity.
 var errCatalogSnapshotMoved = errors.New("catalog changed after preparation")
 
 const maxCatalogSnapshotAttempts = 3
-
-// declarativeApplicationID names a declarative application by its content and
-// the revision it produces, so an unchanged catalog replays it.
-func declarativeApplicationID(digest [32]byte, revision int64) string {
-	return fmt.Sprintf("%s%x@%d", catalogwire.DeclarativeIDPrefix, digest, revision)
-}
 
 func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, prepared *catalogApplicationPreparation) (*billing.CatalogApplicationReceipt, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.CatalogApplicationReceipt, error) {
@@ -115,7 +102,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 			return nil, err
 		}
 		q := scoped.catalogDatabase().Gen(ctx)
-		revision, replay, err := scoped.catalogApplicationGate(ctx, params, digest)
+		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
 		if err != nil || replay != nil {
 			return replay, err
 		}
@@ -133,7 +120,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
-		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, BaseRevision: revision, CatalogVersion: params.CatalogVersion}
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision}
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -155,16 +142,11 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		if params.CatalogVersion > 0 {
-			receipt.ApplicationID = fmt.Sprintf("%s%d", catalogwire.VersionedIDPrefix, params.CatalogVersion)
-		} else if params.Declarative() {
-			receipt.ApplicationID = declarativeApplicationID(digest, receipt.AppliedRevision)
-		}
 		result, err := json.Marshal(receipt)
 		if err != nil {
 			return nil, err
 		}
-		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result, CatalogVersion: params.CatalogVersion})
+		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
 		if err != nil {
 			return nil, err
 		}
@@ -291,8 +273,8 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 		if err != nil {
 			return err
 		}
-		same := current != nil && current.ID.UUID() == priceDeterministicID(product.ID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
-		preparedLinks, ok := s.catalogPreparedLinks[decl.Key]
+		same := current != nil && samePriceTerms(*current, req)
+		preparedLinks, ok := s.catalogPreparedLinks[[2]string{product.Key, decl.Key}]
 		if !ok {
 			return fmt.Errorf("price %q has no prepared application state", decl.Key)
 		}
@@ -324,21 +306,10 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 			}
 			continue
 		}
-		expectedID := billing.PriceID(priceDeterministicID(product.ID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours))
-		if prior, lookupErr := s.GetPrice(ctx, expectedID); lookupErr == nil && prior.Key != decl.Key {
-			return ErrCatalogConflict
-		} else if lookupErr != nil && !errors.Is(lookupErr, billing.ErrNotFound) {
-			return lookupErr
-		}
-		out, e := s.CreatePrice(ctx, req)
-		if e != nil {
-			return e
+		if _, err := s.CreatePrice(ctx, req); err != nil {
+			return err
 		}
 		receipt.PricesChanged++
-		// Subsequent declarations cannot steal an immutable financial row's key.
-		if out.Key != decl.Key {
-			return ErrCatalogConflict
-		}
 	}
 	if prune {
 		for _, p := range prices {
@@ -524,5 +495,18 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 		return nil, req, apperr.Invalidf("cannot explicitly activate price %q under archived product", decl.Key)
 	}
 	req.Currency = money.NormalizeCurrency(req.Currency)
+	if decl.ID != "" && !samePriceTerms(*current, req) {
+		return nil, req, apperr.Invalidf("price id pins immutable terms; omit id to create a new price revision")
+	}
+	// A rollback or archived declaration may select a historical financial
+	// version. Preserve that version's own provider bindings, not the currently
+	// active version's links, when links were omitted.
+	for _, candidate := range byKey[decl.Key] {
+		if samePriceTerms(candidate, req) {
+			copy := candidate
+			current = &copy
+			break
+		}
+	}
 	return current, req, nil
 }

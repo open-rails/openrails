@@ -205,14 +205,10 @@ func TestStripeCatalogIndexesRetainEveryAccount(t *testing.T) {
 	}
 }
 
-func TestExtrasIndexAndContentKeys(t *testing.T) {
-	days := func(d int) *int { return &d }
-	require.Equal(t, "prod.usd.9990000.onetime", OpenRailsPriceContentKey(" prod ", " USD ", 9_990_000, nil))
-	require.Equal(t, "prod.usd.9990000.onetime", OpenRailsPriceContentKey("prod", "usd", 9_990_000, days(0)))
-	require.Equal(t, "prod.jpy.1230000.30", OpenRailsPriceContentKey("prod", "JPY", 1_230_000, days(30)))
-	require.Equal(t, "k", RemoteStripePriceContentKey(StripePrice{Metadata: map[string]string{StripeMetadataOpenRailsPriceKey: " k "}, LookupKey: "openrails.other"}), "metadata wins")
-	require.Equal(t, "other", RemoteStripePriceContentKey(StripePrice{LookupKey: "openrails.other"}))
-	require.Empty(t, RemoteStripePriceContentKey(StripePrice{LookupKey: "native"}))
+func TestExtrasIndexAndPriceIdentity(t *testing.T) {
+	require.Equal(t, "k", RemoteStripePriceKey(StripePrice{Metadata: map[string]string{StripeMetadataOpenRailsPriceKey: " k "}, LookupKey: "openrails.other"}), "metadata wins")
+	require.Equal(t, "other", RemoteStripePriceKey(StripePrice{LookupKey: "openrails.other"}))
+	require.Empty(t, RemoteStripePriceKey(StripePrice{LookupKey: "native"}))
 
 	productID := uuid.New()
 	hours := 30 * 24
@@ -224,7 +220,7 @@ func TestExtrasIndexAndContentKeys(t *testing.T) {
 		extra bool
 	}{
 		{StripePrice{ID: "price_linked"}, false},
-		{StripePrice{ID: "price_x", LookupKey: "openrails.prod.usd.9990000.30"}, false},
+		{StripePrice{ID: "price_x", LookupKey: "openrails." + recurring.ID.String()}, false},
 		{StripePrice{ID: "price_x", LookupKey: "openrails.prod.usd.9990000.onetime"}, true},
 		{StripePrice{ID: "price_native"}, true},
 	} {
@@ -249,4 +245,27 @@ func TestExtrasIndexAndContentKeys(t *testing.T) {
 func interval(days int) [2]any {
 	unit, count := StripeIntervalForDays(days)
 	return [2]any{unit, count}
+}
+
+func TestStripeDriftKeepsSameMoneyPriceIdentities(t *testing.T) {
+	product := &models.Product{ID: uuid.New(), Key: "premium"}
+	first := &models.Price{ID: uuid.New(), ProductID: product.ID, Key: "monthly", Amount: 10_000_000, Currency: "USD"}
+	second := &models.Price{ID: uuid.New(), ProductID: product.ID, Key: "special", Amount: 10_000_000, Currency: "USD", Archived: true}
+	rows := []*models.Price{first, second}
+	snap := BuildDriftSnapshot([]*models.Product{product}, rows, uuid.Nil)
+	remote := []StripePrice{
+		{ID: "price_first", UnitAmount: 1000, Currency: "usd", Active: true, LookupKey: "openrails." + first.ID.String()},
+		{ID: "price_second", UnitAmount: 1000, Currency: "usd", Metadata: map[string]string{StripeMetadataOpenRailsPriceID: second.ID.String(), StripeMetadataOpenRailsPriceKey: "premium.usd.10000000.onetime"}},
+	}
+	require.Empty(t, ComputeStripeDrift(nil, remote, snap, time.Now()))
+	ix := BuildExtrasIndex([]*models.Product{product}, rows)
+	for _, price := range remote {
+		extra, _ := ix.StripePriceExtra(price)
+		require.False(t, extra, price.ID)
+	}
+	// Old financial markers cannot select whichever sibling overwrote a map slot.
+	ambiguous := StripePrice{ID: "price_unbound", UnitAmount: 1000, Currency: "usd", LookupKey: "openrails.premium.usd.10000000.onetime"}
+	events := ComputeStripeDrift(nil, []StripePrice{ambiguous}, snap, time.Now())
+	require.Len(t, events, 1)
+	require.Equal(t, models.CatalogDriftOrphanInStripe, events[0].Kind)
 }

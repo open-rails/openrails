@@ -29,8 +29,9 @@ type CheckoutOption struct {
 // GetCheckoutConfigParams selects the price whose options GetCheckoutConfig
 // lists: at most one of PriceID or PriceKey.
 type GetCheckoutConfigParams struct {
-	PriceID  PriceID
-	PriceKey string
+	PriceID    PriceID
+	PriceKey   string
+	ProductKey string `json:"product_key,omitempty"`
 }
 
 // CheckoutConfig lists the merchant's armed PSPs and the public values a
@@ -121,8 +122,9 @@ type CreateCheckoutAttemptParams struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
 	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
 	// when they resemble ids. Accepted retries retain the original offer.
-	PriceID  PriceID `json:"price_id"`
-	PriceKey string  `json:"price_key"`
+	PriceID    PriceID `json:"price_id"`
+	PriceKey   string  `json:"price_key"`
+	ProductKey string  `json:"product_key,omitempty"`
 	// Entitlement optionally binds admission to the opaque resource the host
 	// showed. OpenRails verifies the selected product grants this key.
 	Entitlement    string                 `json:"entitlement"`

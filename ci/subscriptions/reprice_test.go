@@ -20,10 +20,12 @@ func TestRepriceBatches(t *testing.T) {
 	ctx := t.Context()
 	client := w.client[embedded]
 	old := w.membership("content:reprice", 10_000_000)
+	product, err := client.GetProduct(ctx, old.ProductID)
+	require.NoError(t, err)
 	member := w.newCustomer()
 	sub := member.subscribe(embedded, "stripe", old.ID.String(), "content:reprice", member.saveCard("stripe", visa))
 
-	preview, err := client.PreviewRepriceBatch(ctx, billing.PreviewRepriceBatchParams{PriceKey: old.Key})
+	preview, err := client.PreviewRepriceBatch(ctx, billing.PreviewRepriceBatchParams{ProductKey: product.Key, PriceKey: old.Key})
 	require.NoError(t, err)
 	require.Equal(t, 1, preview.Matched, "the preview counts the whole chain before the new version exists")
 
@@ -31,7 +33,7 @@ func TestRepriceBatches(t *testing.T) {
 	next, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: old.ProductID, Key: old.Key, UnitAmount: 12_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	effective := w.clock.Now().Add(45 * 24 * time.Hour).UTC().Truncate(time.Second)
-	create := billing.CreateRepriceBatchParams{PriceKey: old.Key, EffectiveAt: effective}
+	create := billing.CreateRepriceBatchParams{ProductKey: product.Key, PriceKey: old.Key, EffectiveAt: effective}
 
 	first, err := client.CreateRepriceBatch(ctx, create)
 	require.NoError(t, err)
@@ -97,7 +99,7 @@ func TestRepriceBatches(t *testing.T) {
 
 	// Batches list newest first, one cursor page at a time.
 	var listed []billing.RepriceBatchID
-	page := billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 2}, PriceKey: old.Key}
+	page := billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 2}, ProductKey: product.Key, PriceKey: old.Key}
 	for {
 		batches, err := client.ListRepriceBatches(ctx, page)
 		require.NoError(t, err)

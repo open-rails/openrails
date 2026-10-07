@@ -135,14 +135,18 @@ func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billin
 	return &out, nil
 }
 
-// GetPriceByKey reads the price a merchant-unique key currently names.
-func (c *Client) GetPriceByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Price, error) {
+// GetPriceByKey reads the current price under the given product and price keys.
+func (c *Client) GetPriceByKey(ctx context.Context, productKey, key string, requestOptions ...RequestOption) (*billing.Price, error) {
 	key, err := pathID("key", key)
 	if err != nil {
 		return nil, err
 	}
+	productKey, err = pathID("product_key", productKey)
+	if err != nil {
+		return nil, err
+	}
 	var out billing.Price
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+productKey+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -166,20 +170,24 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams,
 
 // ListPriceKeyHistory returns one page of a price key's history, most recent
 // first: when the key moved to which price, or was retired.
-func (c *Client) ListPriceKeyHistory(ctx context.Context, key string, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PriceKeyMovement], error) {
+func (c *Client) ListPriceKeyHistory(ctx context.Context, productKey, key string, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PriceKeyMovement], error) {
 	key, err := pathID("key", key)
 	if err != nil {
 		return nil, err
 	}
+	productKey, err = pathID("product_key", productKey)
+	if err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.PriceKeyMovement]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/by-key/"+key+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+productKey+"/prices/by-key/"+key+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// UpdatePrice moves a price to another key, archives or restores it, or
-// changes its PSP links; omitted fields keep their values.
+// UpdatePrice archives or restores a price, or changes its PSP links.
+// Omitted fields keep their values; the key and financial terms are immutable.
 func (c *Client) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams, requestOptions ...RequestOption) (*billing.Price, error) {
 	path, err := requireTypedID("price_id", id)
 	if err != nil {

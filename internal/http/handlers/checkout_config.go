@@ -76,6 +76,11 @@ func ServiceGetCheckoutConfig(r *httprequest.Request) {
 		return
 	}
 	rawID, key := strings.TrimSpace(r.Query("price_id")), r.Query("price_key")
+	productKey := r.Query("product_key")
+	if (strings.TrimSpace(productKey) != "") != (strings.TrimSpace(key) != "") {
+		r.ErrorCode(billing.CodeInvalidParam, "product_key and price_key must be supplied together")
+		return
+	}
 	if rawID == "" && strings.TrimSpace(key) == "" {
 		r.SuccessJSON(body)
 		return
@@ -98,7 +103,7 @@ func ServiceGetCheckoutConfig(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	options, err := svc.ListCheckoutOptions(r.Request.Context(), priceID, key)
+	options, err := svc.ListCheckoutOptions(r.Request.Context(), priceID, productKey, key)
 	if err != nil {
 		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return

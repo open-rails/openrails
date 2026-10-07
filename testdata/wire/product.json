@@ -1,4 +1,5 @@
 {
+  "revision": 0,
   "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "key": "pro",
   "display_name": "Pro",
@@ -11,6 +12,7 @@
   "archived": false,
   "prices": [
     {
+      "revision": 0,
       "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       "key": "pro-monthly",
       "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

@@ -44,6 +44,7 @@ type CatalogDraft struct {
 // CreatePrice creates it; Reprice, when set, moves the existing subscribers
 // to it, and they keep their price when it is nil.
 type PriceChangeDraft struct {
+	ProductKey    string `json:"product_key"`
 	PriceKey      string `json:"price_key"`
 	CurrentAmount int64  `json:"current_amount,string"`
 	NewAmount     int64  `json:"new_amount,string"`

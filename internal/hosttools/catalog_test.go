@@ -25,8 +25,7 @@ func TestExampleCatalogApplicationsParse(t *testing.T) {
 		application, err := catalog.ParseApplicationYAML(raw)
 		require.NoError(t, err, name)
 		require.Len(t, application.Products, products, name)
-		require.True(t, application.Declarative(), "a boot-time example applies declaratively: %s", name)
-		require.False(t, application.Prune, "an example never deletes omitted items: %s", name)
+		require.False(t, application.Prune, "an example preserves omitted items: %s", name)
 		if name == "catalog.example.yaml" {
 			metered = application
 		}
@@ -55,7 +54,7 @@ func TestExampleCatalogApplicationsParse(t *testing.T) {
 
 // The operator selects the merchant; the document can never select authority.
 func TestApplyMerchantCatalogPreconditions(t *testing.T) {
-	const header = "schema_version: 1\napplication_id: invalid-authority\nexpected_revision: 0\n"
+	const header = "schema_version: 1\n"
 	for _, field := range []string{"merchant: another-merchant", "merchants: []", "auth: {}", "catalogs: []"} {
 		_, err := ApplyMerchantCatalog(context.Background(), CatalogApplyOptions{Merchant: "operator-selected", Manifest: []byte(header + field + "\n")})
 		require.ErrorContains(t, err, "unknown field", field)
