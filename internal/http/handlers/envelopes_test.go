@@ -14,6 +14,9 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -21,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
@@ -156,6 +160,28 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 			require.NotContains(t, got.Raw, err.Error(), "%s leaked internal text", name)
 		}
 	}
+}
+
+func TestRefusalKeepsServerDiagnosticsOutOfResponse(t *testing.T) {
+	logger := logrus.StandardLogger()
+	hooks := logger.ReplaceHooks(make(logrus.LevelHooks))
+	t.Cleanup(func() { logger.ReplaceHooks(hooks) })
+	hook := logtest.NewGlobal()
+	cause := fmt.Errorf("db: acquire pgx merchant connection: %w: %v", db.ErrPoolExhausted, context.DeadlineExceeded)
+	got := render(t, func(r *httprequest.Request) { writeRefusal(r, cause, "customer read failed") })
+	assert.Equal(t, http.StatusServiceUnavailable, got.Status)
+	assert.Equal(t, db.ErrPoolExhausted.Code, got.Code)
+	assert.Equal(t, db.ErrPoolExhausted.Message, got.Message)
+	assert.Equal(t, "req-envelope", got.RequestID)
+	entries := hook.AllEntries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, logrus.ErrorLevel, entries[0].Level)
+	assert.Equal(t, cause, entries[0].Data[logrus.ErrorKey])
+	assert.Equal(t, "req-envelope", entries[0].Data["request_id"])
+
+	validation := fmt.Errorf("%w: row 7", billingimport.ErrInvalidPSPReference)
+	got = render(t, func(r *httprequest.Request) { writeRefusal(r, validation, "billing import failed") })
+	assert.Equal(t, validation.Error(), got.Message)
 }
 
 // Decoder failures are coded, name the field and never carry Go decoder text.
