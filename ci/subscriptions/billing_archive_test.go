@@ -86,7 +86,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	var archive bytes.Buffer
 	err = merchantarchive.Export(t.Context(), source, merchantID, &archive)
 	require.NoError(t, err, "export must preserve application metadata: %v", errors.Unwrap(err))
-	require.Contains(t, archive.String(), `"version":3`)
+	require.Contains(t, archive.String(), `"version":1`)
 
 	destinationSchema := "archive_metadata_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: destinationSchema, River: openrails.RiverHostOwned}))
@@ -100,7 +100,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	// An old positional format is refused, without partially restoring rows.
-	old := bytes.Replace(archive.Bytes(), []byte(`"version":3`), []byte(`"version":2`), 1)
+	old := bytes.Replace(archive.Bytes(), []byte(`"version":1`), []byte(`"version":3`), 1)
 	_, err = merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(old))
 	var archiveErr *merchantarchive.Error
 	require.ErrorAs(t, err, &archiveErr)

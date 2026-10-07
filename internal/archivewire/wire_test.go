@@ -61,16 +61,17 @@ func TestArchiveRefusesIncompleteOrAlteredStreams(t *testing.T) {
 		}
 	}
 	for name, bad := range map[string][]byte{
-		"data after footer":   append(append([]byte{}, good...), "{}\n"...),
-		"old version":         bytes.Replace(good, []byte(`"version":3`), []byte(`"version":2`), 1),
-		"weaker consistency":  bytes.Replace(good, []byte(`"consistency":"repeatable_read"`), []byte(`"consistency":"read_committed"`), 1),
-		"row count":           bytes.Replace(good, []byte(`"rows":1`), []byte(`"rows":2`), 1),
-		"duplicate field":     bytes.Replace(good, []byte(`"kind":"header"`), []byte(`"kind":"header","kind":"header"`), 1),
-		"non-canonical space": bytes.Replace(good, []byte(`"kind":"table"`), []byte(`"kind": "table"`), 1),
-		"table renamed":       bytes.Replace(good, []byte(`"table":"customers"`), []byte(`"table":"merchant_secrets"`), 1),
-		"row value altered":   bytes.Replace(good, []byte(`"x"`), []byte(`"y"`), 1),
-		"foreign row":         bytes.Replace(good, []byte(`"values":["`+merchant), []byte(`"values":["10000000-0000-0000-0000-000000000002`), 1),
-		"oversized record":    []byte(strings.Repeat("x", MaxRecordBytes) + "\n"),
+		"data after footer":     append(append([]byte{}, good...), "{}\n"...),
+		"unsupported version":   bytes.Replace(good, []byte(`"version":1`), []byte(`"version":2`), 1),
+		"retired draft version": bytes.Replace(good, []byte(`"version":1`), []byte(`"version":3`), 1),
+		"weaker consistency":    bytes.Replace(good, []byte(`"consistency":"repeatable_read"`), []byte(`"consistency":"read_committed"`), 1),
+		"row count":             bytes.Replace(good, []byte(`"rows":1`), []byte(`"rows":2`), 1),
+		"duplicate field":       bytes.Replace(good, []byte(`"kind":"header"`), []byte(`"kind":"header","kind":"header"`), 1),
+		"non-canonical space":   bytes.Replace(good, []byte(`"kind":"table"`), []byte(`"kind": "table"`), 1),
+		"table renamed":         bytes.Replace(good, []byte(`"table":"customers"`), []byte(`"table":"merchant_secrets"`), 1),
+		"row value altered":     bytes.Replace(good, []byte(`"x"`), []byte(`"y"`), 1),
+		"foreign row":           bytes.Replace(good, []byte(`"values":["`+merchant), []byte(`"values":["10000000-0000-0000-0000-000000000002`), 1),
+		"oversized record":      []byte(strings.Repeat("x", MaxRecordBytes) + "\n"),
 	} {
 		if _, err := CopyVerified(io.Discard, bytes.NewReader(bad)); err == nil {
 			t.Errorf("%s: accepted", name)
