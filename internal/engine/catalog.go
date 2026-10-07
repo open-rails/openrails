@@ -42,6 +42,9 @@ func declaredCatalog(cfg config.Config) (*catalog.Application, error) {
 	if err := cfg.Catalog.Validate(); err != nil {
 		return nil, fmt.Errorf("openrails: Config.Catalog: %w", err)
 	}
+	if cfg.Catalog.CatalogVersion == 0 {
+		return nil, fmt.Errorf("openrails: Config.Catalog requires a positive catalog_version; increase it whenever the catalog changes")
+	}
 	raw, err := json.Marshal(cfg.Catalog)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: Config.Catalog: %w", err)

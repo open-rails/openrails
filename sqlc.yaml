@@ -4,6 +4,7 @@ sql:
     queries: "internal/db/queries"
     schema:
       - "internal/migrate/postgres/0001_schema.up.sql"
+      - "internal/migrate/postgres/0002_declared_catalog_version.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

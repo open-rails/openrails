@@ -27,6 +27,7 @@ import (
 func declaredFile(t *testing.T, key, title string, amount int64) *catalog.Application {
 	t.Helper()
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+catalog_version: 1
 meters:
 - key: %[1]s-events
   event_type: %[1]s.event
@@ -85,7 +86,11 @@ func TestDeclaredCatalog(t *testing.T) {
 	w := prepareWorld(t, 12)
 	key := "declared-" + uuid.NewString()[:8]
 	title, amount := "Gold", int64(9_990_000)
-	w.cfg = func(cfg *config.Config) { cfg.Catalog = declaredFile(t, key, title, amount) }
+	version := int64(1)
+	w.cfg = func(cfg *config.Config) {
+		cfg.Catalog = declaredFile(t, key, title, amount)
+		cfg.Catalog.CatalogVersion = version
+	}
 	w.booted = func(c *openrails.Client) {
 		price, err := c.GetPriceByKey(t.Context(), key+"-monthly")
 		require.NoError(t, err, "applied before New returned")
@@ -140,8 +145,14 @@ func TestDeclaredCatalog(t *testing.T) {
 	w.restart()
 	require.Equal(t, revision, w.catalogRevision())
 
+	// A forgotten version bump cannot change the catalog.
+	_, err = w.bootDeclared(t.Context(), declaredFile(t, key, "Accidental edit", amount))
+	require.ErrorContains(t, err, "increase catalog_version")
+	require.Equal(t, revision, w.catalogRevision())
+
 	// Edited, it converges; the member keeps the price they bought.
 	title, amount = "Platinum", 12_000_000
+	version = 3 // Versions may skip: each file declares the intended catalog.
 	w.restart()
 	require.Equal(t, revision+1, w.catalogRevision())
 	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
@@ -151,10 +162,22 @@ func TestDeclaredCatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, price.ID, repriced.ID)
 	require.True(t, buyer.entitled(key))
+	for _, older := range []int64{1, 2} {
+		stale := declaredFile(t, key, "Stale", 9_990_000)
+		stale.CatalogVersion = older
+		// Even an old version that never applied, with a now-invalid provider,
+		// is superseded before resolving rows or contacting providers.
+		stale.Products[0].Prices[0].PSPs = catalog.Value([]string{"nowhere"})
+		c, bootErr := w.bootDeclared(t.Context(), stale)
+		require.NoError(t, bootErr)
+		require.NoError(t, c.Close(t.Context()))
+		require.Equal(t, revision+1, w.catalogRevision())
+	}
 
 	// A catalog the engine refuses fails New with the reason and changes nothing.
 	w.stop()
 	refused := declaredFile(t, key, "Platinum", 12_000_000)
+	refused.CatalogVersion = 4
 	refused.Products[0].Prices[0].PSPs = catalog.Value([]string{"nowhere"})
 	_, err = w.bootDeclared(t.Context(), refused)
 	require.ErrorContains(t, err, "Config.Catalog")
@@ -170,7 +193,9 @@ func TestDeclaredCatalog(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			clients[i], errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "Concurrent", 12_000_000))
+			declaration := declaredFile(t, key, "Concurrent", 12_000_000)
+			declaration.CatalogVersion = 4
+			clients[i], errs[i] = w.bootDeclared(t.Context(), declaration)
 		}()
 	}
 	close(start)
@@ -195,6 +220,7 @@ func TestDeclaredCatalogAwaitsItsProvider(t *testing.T) {
 	w.stop()
 	key := "legacy-" + uuid.NewString()[:8]
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+catalog_version: 1
 products:
 - key: %[1]s
   display_name: Legacy
@@ -229,4 +255,44 @@ products:
 	require.NoError(t, err)
 	require.Equal(t, "price_legacy_"+key, price.PSPs["stripe"].IDs["price_id"])
 	require.Equal(t, revision+1, w.catalogRevision())
+}
+
+// Different replicas may arrive in either order: the highest authored version
+// wins, and subsequent boots of both artifacts cannot reverse it.
+func TestDeclaredCatalogVersionRace(t *testing.T) {
+	w := prepareWorld(t, 12)
+	key := "versioned-" + uuid.NewString()[:8]
+	docs := []*catalog.Application{
+		declaredFile(t, key, "Old", 9_990_000),
+		declaredFile(t, key, "New", 12_000_000),
+	}
+	docs[1].CatalogVersion = 2
+	for range 2 {
+		start := make(chan struct{})
+		clients, errs := make([]*openrails.Client, 2), make([]error, 2)
+		var wg sync.WaitGroup
+		for i := range docs {
+			wg.Go(func() {
+				<-start
+				clients[i], errs[i] = w.bootDeclared(t.Context(), docs[i])
+			})
+		}
+		close(start)
+		wg.Wait()
+		for i, c := range clients {
+			require.NoError(t, errs[i])
+			product, err := c.GetProductByKey(t.Context(), key)
+			require.NoError(t, err)
+			require.Equal(t, "New", product.DisplayName)
+			require.NoError(t, c.Close(t.Context()))
+		}
+	}
+}
+
+func TestCatalogVersionIsConfigurationOnly(t *testing.T) {
+	w := newWorld(t)
+	for _, tp := range []topology{embedded, remote} {
+		_, err := w.client[tp].ApplyCatalog(t.Context(), declaredFile(t, "configuration-only", "Config", 9_990_000))
+		require.ErrorContains(t, err, "catalog_version belongs to Config.Catalog")
+	}
 }

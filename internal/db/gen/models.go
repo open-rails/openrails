@@ -101,6 +101,7 @@ type BillingCatalogApplication struct {
 	AppliedRevision int64
 	Result          []byte
 	AppliedAt       time.Time
+	CatalogVersion  *int64
 }
 
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.

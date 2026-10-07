@@ -23,7 +23,7 @@ func (q *Queries) AdvanceCatalogRevision(ctx context.Context, merchantID uuid.UU
 }
 
 const getCatalogApplication = `-- name: GetCatalogApplication :one
-SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
+SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at, catalog_version FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
 `
 
 type GetCatalogApplicationParams struct {
@@ -43,6 +43,7 @@ func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogAppli
 		&i.AppliedRevision,
 		&i.Result,
 		&i.AppliedAt,
+		&i.CatalogVersion,
 	)
 	return i, err
 }
@@ -58,9 +59,32 @@ func (q *Queries) GetCatalogRevision(ctx context.Context, merchantID uuid.UUID) 
 	return catalog_revision, err
 }
 
+const getLatestDeclaredCatalogApplication = `-- name: GetLatestDeclaredCatalogApplication :one
+SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at, catalog_version FROM billing.catalog_applications
+WHERE merchant_id=$1::uuid AND catalog_version IS NOT NULL
+ORDER BY catalog_version DESC LIMIT 1
+`
+
+func (q *Queries) GetLatestDeclaredCatalogApplication(ctx context.Context, merchantID uuid.UUID) (BillingCatalogApplication, error) {
+	row := q.db.QueryRow(ctx, getLatestDeclaredCatalogApplication, merchantID)
+	var i BillingCatalogApplication
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ApplicationID,
+		&i.SchemaVersion,
+		&i.RequestSha256,
+		&i.BaseRevision,
+		&i.AppliedRevision,
+		&i.Result,
+		&i.AppliedAt,
+		&i.CatalogVersion,
+	)
+	return i, err
+}
+
 const insertCatalogApplication = `-- name: InsertCatalogApplication :exec
-INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result)
-VALUES ($1::uuid,$2::text,$3::bigint,$4::bytea,$5::bigint,$6::bigint,$7::jsonb)
+INSERT INTO billing.catalog_applications (merchant_id,application_id,schema_version,request_sha256,base_revision,applied_revision,result,catalog_version)
+VALUES ($1::uuid,$2::text,$3::bigint,$4::bytea,$5::bigint,$6::bigint,$7::jsonb,NULLIF($8::bigint,0))
 `
 
 type InsertCatalogApplicationParams struct {
@@ -71,6 +95,7 @@ type InsertCatalogApplicationParams struct {
 	BaseRevision    int64
 	AppliedRevision int64
 	Result          []byte
+	CatalogVersion  int64
 }
 
 func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalogApplicationParams) error {
@@ -82,6 +107,7 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 		arg.BaseRevision,
 		arg.AppliedRevision,
 		arg.Result,
+		arg.CatalogVersion,
 	)
 	return err
 }

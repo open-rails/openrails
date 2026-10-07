@@ -238,8 +238,18 @@ these routes with the rest of the merchant API, each gated by its permission.
 **Declared catalog**: a host whose `catalog.yaml` is the truth sets
 `Config.Catalog` (`catalog.ParseApplicationYAML` of the file). `New`
 applies it before returning, so checkout never sells an unapplied catalog:
-unchanged it replays, edited it converges, and replicas booting together
-converge on one application. A catalog the engine refuses fails `New` with the
+the file requires a positive `catalog_version`, scoped to the merchant. A higher
+version applies atomically, the same version and content replays, and a lower
+version is superseded without changing the database. Reusing the current version
+with different content fails: increase `catalog_version` when editing the file.
+Replicas with different versions therefore cannot roll the catalog back. For an
+intentional rollback, put the earlier contents in a file with a new, higher
+`catalog_version`. `application_id` and `expected_revision` are omitted.
+
+Version ordering, the content checksum, and the catalog changes commit together;
+failed applications consume no version. Formatting and declaration ordering do
+not affect the checksum. The database retains this state with merchant archives.
+API-managed catalogs omit `catalog_version` and keep their existing update rules. A catalog the engine refuses fails `New` with the
 reason; a transient database error is retried within `ctx`. The apply makes no
 provider writes. It reads a provider only to confirm a new or changed
 `psp_links` reference (a Stripe price, an NMI plan, a Solana plan); if that

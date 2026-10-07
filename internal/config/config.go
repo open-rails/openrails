@@ -77,7 +77,8 @@ type Config struct {
 	Merchant MerchantDeclaration
 	// Catalog declares Merchant's catalog (catalog.ParseApplicationYAML
 	// of the host's catalog.yaml). New applies it before returning: unchanged
-	// it replays, edited it converges. While it is set, writes to the
+	// it replays, and a higher CatalogVersion applies edits. Older versions
+	// are superseded; the same version with different content is refused. While it is set, writes to the
 	// merchant's catalog are refused (billing.ErrCatalogDeclared); creator
 	// catalogs and negotiated payer rates stay writable. Nil leaves the
 	// catalog to the API.

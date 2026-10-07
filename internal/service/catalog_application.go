@@ -23,6 +23,12 @@ import (
 // ApplyCatalog applies one durable local operation. It never invokes provider
 // network writes; unsupported provider-link changes fail before local mutation.
 func (s *Service) ApplyCatalog(ctx context.Context, params catalogwire.Application) (*billing.CatalogApplicationReceipt, error) {
+	if params.CatalogVersion != 0 {
+		if err := s.checkCatalogWritePolicy(ctx); err != nil {
+			return nil, err
+		}
+		return nil, apperr.Invalidf("catalog_version belongs to Config.Catalog; API-managed catalogs omit it")
+	}
 	return s.applyCatalog(ctx, params, s.verifyCatalogProviderReference)
 }
 
@@ -127,7 +133,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
-		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, BaseRevision: revision}
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, BaseRevision: revision, CatalogVersion: params.CatalogVersion}
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -149,14 +155,16 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		if params.Declarative() {
+		if params.CatalogVersion > 0 {
+			receipt.ApplicationID = fmt.Sprintf("%s%d", catalogwire.VersionedIDPrefix, params.CatalogVersion)
+		} else if params.Declarative() {
 			receipt.ApplicationID = declarativeApplicationID(digest, receipt.AppliedRevision)
 		}
 		result, err := json.Marshal(receipt)
 		if err != nil {
 			return nil, err
 		}
-		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
+		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result, CatalogVersion: params.CatalogVersion})
 		if err != nil {
 			return nil, err
 		}

@@ -83,6 +83,10 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.Merchant.Slug = "m"
 			c.Catalog = &catalog.Application{}
 		}), config.Deps{}, "Config.Catalog: "},
+		"unversioned catalog": {with(sandbox, func(c *config.Config) {
+			c.Merchant.Slug = "m"
+			c.Catalog = &catalog.Application{SchemaVersion: 1}
+		}), config.Deps{}, "requires a positive catalog_version"},
 		"catalog with control plane": {with(sandbox, func(c *config.Config) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.Merchant.Slug = "m"

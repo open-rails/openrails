@@ -21,6 +21,8 @@ const (
 	// DeclarativeIDPrefix marks the derived identity of a declarative
 	// application; explicit application IDs cannot use it.
 	DeclarativeIDPrefix = "sha256:"
+	// VersionedIDPrefix names receipts for configuration-managed catalogs.
+	VersionedIDPrefix = "version:"
 )
 
 // Field distinguishes an omitted update from a value or an explicit null.
@@ -93,8 +95,12 @@ func (f *Field[T]) UnmarshalJSON(raw []byte) error {
 // ExpectedRevision it is guarded: it replays by ID and applies only at that
 // revision. Without both it is declarative: its content digest is its identity
 // and it converges the catalog to the declared state at any revision.
+// Config.Catalog additionally requires CatalogVersion to order declarations.
 type Application struct {
-	SchemaVersion    int            `json:"schema_version"`
+	SchemaVersion int `json:"schema_version"`
+	// CatalogVersion orders Config.Catalog declarations within one merchant. It must
+	// increase when the declaration changes. API applications leave it unset.
+	CatalogVersion   int64          `json:"catalog_version,omitempty"`
 	ApplicationID    string         `json:"application_id,omitempty"`
 	ExpectedRevision *int64         `json:"expected_revision,omitempty"`
 	Prune            bool           `json:"prune,omitempty"`
@@ -150,14 +156,17 @@ func (a Application) Validate() error {
 	if a.SchemaVersion != ApplicationSchemaVersion {
 		return fmt.Errorf("unsupported catalog application schema_version %d", a.SchemaVersion)
 	}
+	if a.CatalogVersion < 0 || a.CatalogVersion > 0 && !a.Declarative() {
+		return fmt.Errorf("catalog_version must be positive and cannot accompany application_id or expected_revision")
+	}
 	switch {
 	case a.Declarative():
 	case a.ApplicationID == "" || a.ExpectedRevision == nil:
 		return fmt.Errorf("application_id and expected_revision go together: supply both to guard against concurrent edits, or neither to apply the document declaratively")
 	case len(a.ApplicationID) > 128 || strings.TrimSpace(a.ApplicationID) != a.ApplicationID:
 		return fmt.Errorf("application_id must be a nonempty identifier of at most 128 bytes")
-	case strings.HasPrefix(a.ApplicationID, DeclarativeIDPrefix):
-		return fmt.Errorf("application_id prefix %q is reserved for declarative applications", DeclarativeIDPrefix)
+	case strings.HasPrefix(a.ApplicationID, DeclarativeIDPrefix), strings.HasPrefix(a.ApplicationID, VersionedIDPrefix):
+		return fmt.Errorf("application_id uses a reserved catalog prefix")
 	case *a.ExpectedRevision < 0:
 		return fmt.Errorf("expected_revision must be nonnegative")
 	}

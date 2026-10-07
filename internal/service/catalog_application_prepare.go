@@ -38,7 +38,8 @@ type catalogApplicationPreparation struct {
 	checks   []catalogReferenceCheck
 }
 
-// catalogApplicationGate runs under the merchant lock. A guarded application
+// catalogApplicationGate runs under the merchant lock. Configuration versions
+// advance monotonically; stale replicas return the latest receipt unchanged. A guarded application
 // replays by its ID and otherwise requires its expected revision. A declarative
 // one replays only while the catalog is still at the revision it produced;
 // after any other authored write it applies again, so the document wins.
@@ -51,6 +52,28 @@ func (s *Service) catalogApplicationGate(ctx context.Context, params catalogwire
 	revision, err := q.GetCatalogRevision(ctx, mid.UUID())
 	if err != nil {
 		return 0, nil, err
+	}
+	if params.CatalogVersion > 0 {
+		previous, err := q.GetLatestDeclaredCatalogApplication(ctx, mid.UUID())
+		if errors.Is(err, pgx.ErrNoRows) {
+			return revision, nil, nil
+		}
+		if err != nil {
+			return 0, nil, err
+		}
+		if params.CatalogVersion > *previous.CatalogVersion {
+			return revision, nil, nil
+		}
+		if params.CatalogVersion == *previous.CatalogVersion && !bytes.Equal(previous.RequestSha256, digest[:]) {
+			return 0, nil, apperr.New(409, "catalog_application_conflict", "catalog version already applied with different content; increase catalog_version")
+		}
+		var receipt billing.CatalogApplicationReceipt
+		if err := json.Unmarshal(previous.Result, &receipt); err != nil {
+			return 0, nil, err
+		}
+		receipt.Superseded = params.CatalogVersion < *previous.CatalogVersion
+		receipt.Replayed = !receipt.Superseded
+		return revision, &receipt, nil
 	}
 	id := params.ApplicationID
 	if params.Declarative() {

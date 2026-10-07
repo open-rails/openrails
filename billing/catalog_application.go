@@ -8,8 +8,12 @@ type CatalogApplicationReceipt struct {
 	BaseRevision    int64  `json:"base_revision"`
 	AppliedRevision int64  `json:"applied_revision"`
 	Replayed        bool   `json:"replayed"`
-	ProductsChanged int    `json:"products_changed"`
-	PricesChanged   int    `json:"prices_changed"`
+	// CatalogVersion is the applied configuration catalog's version. Superseded
+	// means a newer version was already applied and this request changed nothing.
+	CatalogVersion  int64 `json:"catalog_version,omitempty"`
+	Superseded      bool  `json:"superseded,omitempty"`
+	ProductsChanged int   `json:"products_changed"`
+	PricesChanged   int   `json:"prices_changed"`
 }
 
 // CatalogRevision is the merchant's catalog revision, which every catalog

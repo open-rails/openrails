@@ -47,7 +47,8 @@ Next, declare your catalog as a YAML config file:
 
 ```yaml
 # catalog.yaml
-schema_version: 1 # the file format, not your catalog's version
+schema_version: 1 # the file format
+catalog_version: 1 # increase whenever this merchant's catalog changes
 products:
   - key: premium
     display_name: Premium
