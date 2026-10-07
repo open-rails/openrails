@@ -50,13 +50,19 @@ func ValidateValues(p Profile, values []*string) error {
 	}
 	if p.Name == "subscriptions" {
 		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")
-		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil || binding == nil {
+		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil {
 			return fmt.Errorf("subscription lacks a valid collection policy or binding")
 		}
+		hasBinding := binding != nil && *binding != ""
 		if (*policy == "nmi_schedule") != (*rail == "nmi" && *policy != "engine") {
 			return fmt.Errorf("nmi_schedule is the policy of every provider-scheduled NMI subscription")
 		}
-		if *policy == "engine" && !((*rail == "nmi" || *rail == "stripe") && *binding == "" || *rail == "solana") {
+		if *policy != "engine" && !hasBinding {
+			return fmt.Errorf("provider collection lacks a schedule binding")
+		}
+		// Engine card subscriptions have no provider schedule: its absence is
+		// stored as SQL NULL. Solana still binds the on-chain subscription.
+		if *policy == "engine" && !((*rail == "nmi" || *rail == "stripe") && !hasBinding || *rail == "solana" && hasBinding) {
 			return fmt.Errorf("engine collection has contradictory schedule binding")
 		}
 	}

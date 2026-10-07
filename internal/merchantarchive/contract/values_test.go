@@ -123,8 +123,13 @@ func TestSubscriptionCollectionOwnership(t *testing.T) {
 		{"stripe nmi schedule", "subscriptions", sub("nmi_schedule", "stripe", "sub_1"), false},
 		{"nmi provider", "subscriptions", sub("provider", "nmi", "sub-1"), false},
 		{"engine nmi unbound", "subscriptions", sub("engine", "nmi", ""), true},
+		{"engine nmi null schedule", "subscriptions", map[string]string{"collection_policy": "engine", "rail": "nmi"}, true},
+		{"engine stripe null schedule", "subscriptions", map[string]string{"collection_policy": "engine", "rail": "stripe"}, true},
+		{"provider null schedule", "subscriptions", map[string]string{"collection_policy": "provider", "rail": "stripe"}, false},
+		{"provider empty schedule", "subscriptions", sub("provider", "stripe", ""), false},
 		{"engine nmi with provider schedule", "subscriptions", sub("engine", "nmi", "sub-1"), false},
 		{"engine solana", "subscriptions", sub("engine", "solana", "pda"), true},
+		{"engine solana null binding", "subscriptions", map[string]string{"collection_policy": "engine", "rail": "solana"}, false},
 		{"engine ccbill", "subscriptions", sub("engine", "ccbill", ""), false},
 		{"missing policy", "subscriptions", sub("", "nmi", ""), false},
 		{"unknown policy", "subscriptions", sub("manual", "nmi", ""), false},
@@ -175,29 +180,9 @@ func TestJSONContracts(t *testing.T) {
 		{"usage_events.dimensions", []string{`{"tokens":9007199254740993}`}, []string{`{"tokens":1e100}`, `{"tokens":1.5}`, `{"tokens":1} {}`}},
 		{"products.entitlements_spec", []string{`null`, `{"premium":null,"secret_content":24}`}, []string{`{"premium":"1"}`, `{"4111111111111111":1}`}},
 		{"custodians.settings", []string{`{"public_api_key":"public","account_updater":true,"account_updater_lookahead_days":"30"}`}, []string{`{"secret_api_key":"x"}`, `{"account_updater":"maybe"}`}},
-		{"admission_operations.capture_terms", []string{`null`, `{"metadata":{}}`}, []string{`{"metadata":{"opaque":"replay-fact"}}`}},
+		{"admission_operations.capture_terms", []string{`null`, `{"metadata":{"opaque":"replay-fact"}}`}, []string{`{"unknown_operation_field":true}`}},
 		{"catalog_meters.group_by", []string{`null`, `{"region":"$.region"}`}, []string{`{"region":1}`}},
 		{"catalog_rate_cards.filter", []string{`null`, `{"region":["us"]}`}, []string{`{"region":"us"}`}},
-		{"payments.metadata", []string{
-			`null`, `{}`, `{"order_id":"checkout-order","provider_transaction_id":"sale-1"}`,
-			`{"stripe_invoice_id":"in_paid","e2e_run_id":"run-1"}`,
-			`{"order_id":"payment:41111111-1111-4115-a111-111111111111"}`,
-			`{"initial_payment_reversal":"refund"}`, `{"initial_payment_reversal":"dispute"}`,
-		}, []string{
-			`{"unknown":"value"}`, `{"security_key":"secret"}`, `{"order_id":{"raw":"body"}}`,
-			`{"provider_transaction_id":"sk_test_secret"}`, `{"order_id":"4111111111111111"}`,
-			`{"initial_payment_reversal":"refunded"}`, `{"initial_payment_reversal":true}`, `{"initial_payment_reversal":null}`,
-		}},
-		{"subscriptions.gateway_response", []string{
-			`null`, `{}`, `{"initial_payment_reversal":"refund"}`,
-			`{"order_id":"checkout-1","provider_transaction_id":"charge-1","delayed_start":"2027-01-01T00:00:00Z","e2e_run_id":"run-1","admin_notes":"billing note"}`,
-			`{"order_id":"checkout-1","superseded_at":"2026-09-17T00:00:00Z","superseded_by_subscription_id":"10000000-0000-0000-0000-000000000001"}`,
-			`{"previous_gateway_response":null,"superseded_at":"2026-09-17T00:00:00Z","superseded_by_subscription_id":null}`,
-		}, []string{
-			`{"order_id":"checkout-1","unknown":"value"}`, `{"raw_body":{"order_id":"checkout-1"}}`,
-			`{"order_id":42}`, `{"provider_transaction_id":"sk_live_secret"}`,
-			`{"previous_gateway_response":{"secret":"unsafe"}}`, `[]`, `{"initial_payment_reversal":{"raw":"body"}}`,
-		}},
 		{"no.such_field", nil, []string{`null`, `{}`}},
 		{"payments.entitlements_spec_snapshot", nil, []string{strings.Repeat("[", 40) + strings.Repeat("]", 40)}},
 	} {
@@ -211,6 +196,44 @@ func TestJSONContracts(t *testing.T) {
 				t.Errorf("%s accepted %s", tc.field, raw)
 			}
 		}
+	}
+}
+
+// Metadata belongs to the application. Archive portability cannot depend on
+// the keys, nesting or strings an application happens to store in its JSON.
+func TestApplicationMetadata(t *testing.T) {
+	fields := []string{
+		"payments.metadata", "payments.discount_metadata", "payment_methods.metadata",
+		"usage_events.metadata", "invoice_items.metadata", "checkout_attempts.metadata",
+		"subscriptions.gateway_response",
+	}
+	valid := []string{
+		`null`, `{}`, `[]`, `"application note"`, `9007199254740993`, `true`,
+		`{"period_start":"2026-10-07T00:00:00Z","solana":{"signature":"transfer-1","amount_base_units":9007199254740993},"application":{"nested":[null,true,1.25,{"new_key":"value"}]}}`,
+		`{"security_key":"application field name","campaign":"sk_test_campaign","note":"-----BEGIN APPLICATION NOTE-----","order_number":"4111111111111111"}`,
+	}
+	invalid := []string{`{"unfinished":`, `{"key":1,"key":2}`, `{} {}`, strings.Repeat("[", 34) + strings.Repeat("]", 34)}
+	for _, field := range fields {
+		t.Run(field, func(t *testing.T) {
+			for _, raw := range valid {
+				if err := validateJSON(field, raw); err != nil {
+					t.Errorf("application metadata refused: %s: %v", raw, err)
+				}
+			}
+			for _, raw := range invalid {
+				if err := validateJSON(field, raw); err == nil {
+					t.Errorf("invalid or unbounded JSON accepted: %s", raw)
+				}
+			}
+		})
+	}
+	for _, raw := range valid {
+		if err := validateJSON("admission_operations.capture_terms", `{"metadata":`+raw+`}`); err != nil {
+			t.Errorf("capture metadata refused: %s: %v", raw, err)
+		}
+	}
+	if err := validateJSON("admission_operations.capture_terms", `{"unknown_operation_field":true}`); err == nil {
+		t.Fatal("application metadata allowance changed the outer operation contract")
 	}
 }
 
