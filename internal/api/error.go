@@ -54,6 +54,8 @@ type APIError struct {
 	RequestID  string
 	Param      *string
 	Metadata   map[string]any
+	// Cause is server-only diagnostic context, never part of the response.
+	Cause error `json:"-"`
 }
 
 // Error implements the error interface

@@ -203,7 +203,11 @@ func (r *Request) AbortAPIError(err *api.APIError) {
 
 func (r *Request) APIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
-	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}, err.Message)
+	fields := logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}
+	if err.Cause != nil {
+		fields[logrus.ErrorKey] = err.Cause
+	}
+	r.logRefusal(err.HTTPStatus, fields, err.Message)
 	r.t.WriteJSON(err.HTTPStatus, err.ToResponse())
 }
 
