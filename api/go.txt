@@ -255,13 +255,6 @@ pkg openrails, type Authority = billingauth.Authority
 pkg openrails, type Authority struct
 pkg openrails, type Authority struct, Permission string
 pkg openrails, type Authority struct, Scope auth.Scope
-pkg openrails, type Cache = cache.Cache
-pkg openrails, type Cache interface
-pkg openrails, type Cache interface, Clear(context.Context) error
-pkg openrails, type Cache interface, Close() error
-pkg openrails, type Cache interface, Delete(context.Context, string) error
-pkg openrails, type Cache interface, Get(context.Context, string, any) error
-pkg openrails, type Cache interface, Set(context.Context, string, any, time.Duration) error
 pkg openrails, type CaptchaConfig = config.CaptchaConfig
 pkg openrails, type CaptchaConfig struct
 pkg openrails, type CaptchaConfig struct, Provider string
@@ -375,7 +368,6 @@ pkg openrails, type Deps struct, Authenticate func(*http.Request) (billingauth.I
 pkg openrails, type Deps struct, AuthenticateCustomer func(*http.Request, string) (*billingauth.DelegatedPrincipal, error)
 pkg openrails, type Deps struct, AuthorityFor func(context.Context, billingauth.Requirement) (billingauth.Authority, error)
 pkg openrails, type Deps struct, Authorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error
-pkg openrails, type Deps struct, Cache cache.Cache
 pkg openrails, type Deps struct, CheckoutCustomer func(context.Context, billing.CustomerID) (billing.CheckoutCustomerIdentity, error)
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, ConsoleAssets fs.FS

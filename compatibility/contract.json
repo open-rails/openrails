@@ -208,7 +208,6 @@
       "type AuthConfig = config.AuthConfig",
       "type AuthRateLimit = config.AuthRateLimit",
       "type Authority = billingauth.Authority",
-      "type Cache = cache.Cache",
       "type CaptchaConfig = config.CaptchaConfig",
       "type CheckoutConfig = config.CheckoutConfig",
       "type Client struct {\n}",
@@ -1003,9 +1002,6 @@
       "type Target struct {\n\tMerchantID billing.MerchantID\n\n\tMerchantSlug     string\n\tAuthorityGroupID string\n}",
       "type Verifier interface {\n\tAuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)\n}"
     ],
-    "internal/cache": [
-      "type Cache interface {\n\tGet(ctx context.Context, key string, dest any) error\n\tSet(ctx context.Context, key string, value any, expiration time.Duration) error\n\tDelete(ctx context.Context, key string) error\n\tClear(ctx context.Context) error\n\tClose() error\n}"
-    ],
     "internal/cardguard": [
       "func (Card) Format(f fmt.State, _ rune)",
       "func (Card) GoString() string",
@@ -1035,7 +1031,7 @@
       "type CustomerHTTPScope uint8",
       "type CustomerRoutesConfig struct {\n\tPrefix string\n\n\tMerchant string\n\n\tScope CustomerHTTPScope\n\n\tDelegated bool\n}",
       "type DBConfig struct {\n\tURL string\n\n\tHost     string\n\tPort     string\n\tDatabase string\n\tUsername string\n\tPassword string\n\n\tSSLMode string\n\n\tSQLTrace bool\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tCache cache.Cache\n\n\tVault *vaultapi.Client\n\n\tAuthKit billingauth.Verifier\n\n\tCustomerFor func(ctx context.Context, caller billingauth.Identity) (billing.CustomerID, error)\n\n\tAuthorityFor func(ctx context.Context, required billingauth.Requirement) (billingauth.Authority, error)\n\n\tAuthenticate func(*http.Request) (billingauth.Identity, error)\n\n\tAuthorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error\n\n\tRecentSignIn func(*http.Request) error\n\n\tAuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)\n\n\tCheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)\n\n\tUserExists func(ctx context.Context, userID string) (bool, error)\n\tUserEmail  func(ctx context.Context, userID string) (username, email string, ok bool, err error)\n\n\tResolveUsername func(ctx context.Context, username string) (userID string, err error)\n\n\tConsoleAssets fs.FS\n\n\tEmailSender EmailSender\n\n\tSMSSender SMSSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tAuthKit billingauth.Verifier\n\n\tCustomerFor func(ctx context.Context, caller billingauth.Identity) (billing.CustomerID, error)\n\n\tAuthorityFor func(ctx context.Context, required billingauth.Requirement) (billingauth.Authority, error)\n\n\tAuthenticate func(*http.Request) (billingauth.Identity, error)\n\n\tAuthorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error\n\n\tRecentSignIn func(*http.Request) error\n\n\tAuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)\n\n\tCheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)\n\n\tUserExists func(ctx context.Context, userID string) (bool, error)\n\tUserEmail  func(ctx context.Context, userID string) (username, email string, ok bool, err error)\n\n\tResolveUsername func(ctx context.Context, username string) (userID string, err error)\n\n\tConsoleAssets fs.FS\n\n\tEmailSender EmailSender\n\n\tSMSSender SMSSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n\n\tAuth *iam.EmailMessage\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1850,7 +1846,6 @@
     },
     "config.go": {
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
-      "cache": "github.com/open-rails/openrails/internal/cache",
       "config": "github.com/open-rails/openrails/internal/config"
     },
     "control_plane.go": {
@@ -1956,10 +1951,6 @@
       "strings": "strings",
       "uuid": "github.com/google/uuid"
     },
-    "internal/cache/cache.go": {
-      "context": "context",
-      "time": "time"
-    },
     "internal/cardguard/card.go": {
       "context": "context",
       "fmt": "fmt",
@@ -1992,7 +1983,6 @@
     "internal/config/deps.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
-      "cache": "github.com/open-rails/openrails/internal/cache",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "fs": "io/fs",
@@ -3322,12 +3312,10 @@
       "fmt": "fmt",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "metrics": "github.com/open-rails/openrails/internal/modules/metrics",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "strings": "strings",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
+      "time": "time"
     },
     "internal/modules/dashboard/llm.go": {
       "bytes": "bytes",
