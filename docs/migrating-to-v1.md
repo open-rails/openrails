@@ -407,3 +407,19 @@ up there.
 | `''` for an absent value, with `DEFAULT ''`: `subscriptions.rail_subscription_id`; `payment_methods.rail_customer_ref`, `rail_method_ref`, `stored_credential_recurring_ref`, `stored_credential_unscheduled_ref`, `fingerprint`, `network_token_id`, `network_token_status`, `network_token_par`, `park_reason`; `checkout_sessions.success_url`, `origin`; `grants.source_id`; `custody_migrations.from_rail_customer_ref`, `from_rail_method_ref`, `reason`; `invoker_spend_limits.provenance`; `maintenance_runs.actor`, `mode`; `merchant_webhooks.name`; `notifications.severity`, `title`, `body`, `link`; `product_archive_operations.reason`; `reconciliation_findings.rail`, `openrails_resource_type`; `reprice_batches.fallback_policy`; `subscription_reprices.blocked_reason`; `account_updater_batches.job_ref`, `failure_reason` | NULL when absent, no default; a CHECK refuses `''`. A query that matched `= ''` matches `IS NULL`, and `<> ''` becomes `IS NOT NULL`. `payment_attempts.step` and `nmi_history_months.reason` keep `''` (part of a key) |
 | Mixed index and constraint names | One convention, `<table>_<columns>_<suffix>` (`_pkey`, `_key`, `_fkey`, `_check`, `_idx`): 619 names changed, 22 indexes dropped, 18 foreign keys added. `api/schema.txt` lists every name |
 | PostgreSQL-generated and placeholder names: `admission_operations_check`, `_check1`, `_check2`, `admission_operations_merchant_id_customer_id_fkey`, `catalog_applications_check`, `product_archive_operations_check`, `product_archive_operations_merchant_id_idempotency_key_key`, `product_archive_operations_merchant_id_product_id_fkey`, `maintenance_runs_x_check`; indexes and checks named after a renamed column | Named by the same convention, e.g. `admission_operations_state_fields_check`, `product_archive_operations_idempotency_key_key`, `maintenance_runs_kind_check`, `invoices_customer_id_period_starts_at_id_idx` |
+
+## Application cache and feature limits
+
+The unused general-purpose cache dependency and public cache interface are removed.
+Hosts no longer supply a cache to construct OpenRails. FX quote caching and the
+shared rate-limit/captcha state remain separate runtime features.
+
+Metrics questions, catalog questions/drafting and dashboard widget generation
+use the normal configurable HTTP feature buckets described in
+[rate limiting](rate-limiting.md). The former separate per-merchant AI daily quota
+is removed. Standalone and embedded HTTP use the same Redis counters and memory
+fallback; trusted in-process Client operations retain their normal boundary.
+
+Merchant billing archives now use format 3 and preserve arbitrary application
+metadata. Regenerate format-2 archives from their source; see
+[merchant portability](merchant-portability.md#archive-format-and-metadata).

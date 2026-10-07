@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/cache"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -27,7 +26,6 @@ import (
 
 type Dependencies struct {
 	Config  *config.Config
-	Cache   cache.Cache
 	Runtime *app.Runtime
 	Redis   *redis.Client
 	// Authenticator is the framework-neutral auth boundary; billingauth.Optional
@@ -53,7 +51,6 @@ type Dependencies struct {
 
 type Server struct {
 	cfg     *config.Config
-	cache   cache.Cache
 	runtime *app.Runtime
 	rdb     *redis.Client
 	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
@@ -204,9 +201,6 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if deps.Runtime.RiverProducer == nil {
 		return nil, fmt.Errorf("server runtime river producer is required")
 	}
-	if deps.Cache == nil {
-		return nil, fmt.Errorf("server cache is required")
-	}
 	if deps.Authenticator == nil {
 		return nil, fmt.Errorf("authenticator is required")
 	}
@@ -222,7 +216,6 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 
 	s := &Server{
 		cfg:                    deps.Config,
-		cache:                  deps.Cache,
 		runtime:                deps.Runtime,
 		rdb:                    deps.Redis,
 		authenticator:          deps.Authenticator,

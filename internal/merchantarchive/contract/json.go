@@ -33,6 +33,10 @@ var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "cust
 
 type jsonRule func(any) bool
 
+// Application metadata is opaque JSON. The bounded parser validates its syntax;
+// the archive preserves it without interpreting keys or filtering string values.
+func metadataJSON(any) bool { return true }
+
 func textValue(v any) bool { s, ok := v.(string); return ok && safeText(s) }
 func uuidValue(v any) bool { s, ok := v.(string); return ok && uuidPattern.MatchString(s) }
 func sha256Value(v any) bool {
@@ -156,7 +160,7 @@ var collectedReceiptJSON = object(map[string]jsonRule{
 
 var receiptBindingJSON = object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": sha256Value})
 
-// Exact nested shapes keep raw metadata/provider bodies out of the archive.
+// Provider-operation envelopes retain their exact structured shapes.
 // An unsupported shape is a refusal, never a lossy rewrite of a replay body.
 var instrumentJSON = object(map[string]jsonRule{
 	"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue,
@@ -233,15 +237,11 @@ var jsonRules = map[string]jsonRule{
 		}),
 		"rebill_decline": object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
 	})),
-	// Engine-authored payment correlation, not an arbitrary provider body.
-	"payments.metadata": nullable(object(map[string]jsonRule{
-		"initial_payment_reversal": func(v any) bool { return v == "refund" || v == "dispute" },
-		"order_id":                 textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
-		"refund_review": func(v any) bool { return v == "confirmed charge on a canceled subscription" },
-	})),
-	"invoice_items.metadata": nullable(object(map[string]jsonRule{
-		"operation": textValue, "source": textValue,
-	})),
+	"payments.metadata":          metadataJSON,
+	"payments.discount_metadata": metadataJSON,
+	"payment_methods.metadata":   metadataJSON,
+	"usage_events.metadata":      metadataJSON,
+	"invoice_items.metadata":     metadataJSON,
 	// Successful checkout intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.
 	"provider_intents.nmi_sale.payload": object(map[string]jsonRule{
@@ -280,16 +280,8 @@ var jsonRules = map[string]jsonRule{
 	"catalog_applications.result":                object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	"products.entitlements_spec":                 nullable(dictionary(nullable(integerValue))),
 	"subscriptions.entitlements_spec_snapshot":   nullable(dictionary(nullable(integerValue))),
-	// Checkout writes correlation coordinates and delayed-start metadata;
-	// ordinary subscription updates add notes and supersession markers.
-	// Superseding a NULL response wraps it as previous_gateway_response:null.
-	"subscriptions.gateway_response": nullable(object(map[string]jsonRule{
-		"initial_payment_reversal": func(v any) bool { return v == "refund" || v == "dispute" },
-		"order_id":                 textValue, "provider_transaction_id": textValue,
-		"delayed_start": textValue, "e2e_run_id": textValue, "admin_notes": textValue,
-		"superseded_at": textValue, "superseded_by_subscription_id": nullable(textValue),
-		"previous_gateway_response": func(v any) bool { return v == nil },
-	})),
+	// The model's legacy gateway_response column stores arbitrary subscription metadata.
+	"subscriptions.gateway_response":      metadataJSON,
 	"payments.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
 	"billing_policies.policy": object(map[string]jsonRule{
 		"kind": textValue, "outstanding_cap_amount": integerValue, "spend_windows": array(budgetWindow), "bad_spend_windows": array(budgetWindow), "accrual_rate_cap_per_hour": integerValue, "accrual_rate_window_seconds": integerValue, "collection_threshold_amount": nullable(integerValue), "collection_cycle_boundary": func(v any) bool { return v == "" }, "delinquency_grace_days": nullable(integerValue), "delinquency_amount_floor": nullable(integerValue), "policy_currency": textValue,
@@ -311,7 +303,7 @@ var jsonRules = map[string]jsonRule{
 	"invoker_spend_limits.windows":  array(budgetWindow),
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),
-	"checkout_attempts.metadata":    nullable(emptyObject),
+	"checkout_attempts.metadata":    metadataJSON,
 	"checkout_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{"initial_membership_quote": func(v any) bool {
 		raw, ok := v.(string)
@@ -328,7 +320,7 @@ var jsonRules = map[string]jsonRule{
 	"provider_intents.payload":           nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":   nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
 	"admission_operations.terms":         object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
-	"admission_operations.capture_terms": nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": emptyObject, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue)})),
+	"admission_operations.capture_terms": nullable(object(map[string]jsonRule{"event_type": textValue, "resource": textValue, "metadata": metadataJSON, "source": textValue, "source_id": textValue, "dimensions": dictionary(integerValue)})),
 }
 
 func validateJSON(field, raw string) error {

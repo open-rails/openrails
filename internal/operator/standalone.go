@@ -39,7 +39,6 @@ func standaloneDependencies(a *app.App) (*server.Dependencies, error) {
 	}
 	return &server.Dependencies{
 		Config:        a.Config,
-		Cache:         a.Cache,
 		Runtime:       a.Runtime,
 		Redis:         a.RedisClient,
 		Authenticator: authenticator,

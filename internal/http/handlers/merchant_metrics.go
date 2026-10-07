@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"errors"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -53,7 +51,7 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 // tools on the caller's merchant-scoped context. UNLIKE widget generation
 // (#741, schema-only), the model sees aggregate query RESULTS — so this is
 // registered only with the separate llm.ask_enabled consent and
-// rate-limited per merchant. The response carries the model's answer plus the
+// protected by the shared route abuse limiter. The response carries the model's answer plus the
 // VERBATIM result of every executed query as evidence.
 func MerchantMetricsAsk(r *httprequest.Request) {
 	svc := r.State.DashboardService
@@ -71,12 +69,7 @@ func MerchantMetricsAsk(r *httprequest.Request) {
 	}
 	res, err := svc.Ask(r.Request.Context(), strings.TrimSpace(body.Question))
 	if err != nil {
-		var limited *dashboard.AskRateLimitedError
-		if errors.As(err, &limited) {
-			r.SetHeader("Retry-After", strconv.Itoa(int(math.Ceil(limited.RetryAfter.Seconds()))))
-			r.ErrorCode(billing.CodeRateLimitExceeded, "ask rate limit exceeded; try again later")
-			return
-		}
+
 		var noAnswer *dashboard.AskNoAnswerError
 		modelFailure(r, err, errors.As(err, &noAnswer))
 		return

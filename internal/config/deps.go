@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/cache"
 )
 
 // Deps is everything an embedded engine reaches outside its own process:
@@ -23,10 +22,8 @@ type Deps struct {
 	// Postgres is the host's pool; its role owns OpenRails' tables (Migrate).
 	// Nil opens one from Config.DB.
 	Postgres *pgxpool.Pool
-	// Redis backs rate limits and the shared cache; nil keeps them in memory.
+	// Redis is optional shared storage for rate limits, FX rates and abuse statistics.
 	Redis *redis.Client
-	// Cache replaces the Redis-backed cache.
-	Cache cache.Cache
 	// Vault is a borrowed, authenticated client for Config.SecretBackend
 	// vault. The host owns its renewal; OpenRails never revokes it.
 	Vault *vaultapi.Client

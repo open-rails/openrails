@@ -50,5 +50,5 @@ var opsRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/metrics/ask", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead, When: FeatureMetricsAsk,
 		Request: billing.AskMetricsParams{}, Responses: []Reply{{200, billing.MetricsAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.MerchantMetricsAsk)},
 	{Method: POST, Path: "/v1/merchant/dashboard/widgets/generate", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantDashboardUpdate, When: FeatureDashboardGeneration,
-		Request: billing.GenerateDashboardWidgetParams{}, Responses: []Reply{{200, billing.GeneratedWidget{}}}, Errors: codes("dashboard_invalid", "invalid_param", "model_unavailable", "service_unavailable", "widget_generation_invalid"), Handler: h(handlers.GenerateDashboardWidget)},
+		Request: billing.GenerateDashboardWidgetParams{}, Responses: []Reply{{200, billing.GeneratedWidget{}}}, Errors: codes("rate_limit_exceeded", "dashboard_invalid", "invalid_param", "model_unavailable", "service_unavailable", "widget_generation_invalid"), Handler: h(handlers.GenerateDashboardWidget)},
 }

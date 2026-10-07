@@ -988,13 +988,13 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
-// RateLimitsConfig maps a bucket to its limit: subscribe, checkout, webhook
-// or payment. A bucket left out is not limited; other routes never are (a
+// RateLimitsConfig maps a feature bucket to its request limit.
+// A bucket left out is not limited; other routes never are (a
 // per-address ceiling belongs to the proxy in front of OpenRails).
 type RateLimitsConfig map[string]*RateLimit
 
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
-var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook"}
+var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook", "metrics-ask", "catalog-ask", "dashboard-generate"}
 
 // Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
 // mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
@@ -1705,8 +1705,11 @@ func DefaultRateLimits() *RateLimitsConfig {
 		// IPs), so this must absorb rebill runs without refusing legitimate
 		// payment events. Webhooks are already authenticated; this is a DoS
 		// floor, not the primary control.
-		"webhook": &RateLimit{RequestsPerMinute: 1200},
-		"payment": &RateLimit{RequestsPerMinute: 40},
+		"webhook":            &RateLimit{RequestsPerMinute: 1200},
+		"payment":            &RateLimit{RequestsPerMinute: 40},
+		"metrics-ask":        &RateLimit{RequestsPerMinute: 10},
+		"catalog-ask":        &RateLimit{RequestsPerMinute: 10},
+		"dashboard-generate": &RateLimit{RequestsPerMinute: 10},
 	}
 }
 

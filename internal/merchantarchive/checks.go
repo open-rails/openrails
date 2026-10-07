@@ -99,11 +99,9 @@ var omittedColumns = map[string]string{
 	// custody; credentials are re-entered at the destination.
 	"psps":              "credential_custody credential_refs credential_versions retired_credentials credentials_validated_at webhook_endpoint_id webhook_overlap_expires_at revision",
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
-	"payments":          "discount_metadata destructive_run_class",
-	"payment_methods":   "metadata",
+	"payments":          "destructive_run_class",
 	"checkout_attempts": "destructive_run_class",
 	"entitlements":      "period destructive_run_class",
-	"usage_events":      "metadata",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
 	"provider_intents":  "destructive_run_class",
 }
@@ -250,47 +248,6 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	for _, c := range preflightChecks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {
 			return err
-		}
-	}
-	// These blobs have no v1 portable contract. Even benign-looking nonempty
-	// metadata may carry replay terms or financial facts; never erase it.
-	for table, columns := range map[string][]string{
-		"payments": {"discount_metadata"}, "payment_methods": {"metadata"},
-		"usage_events": {"metadata"},
-	} {
-		for _, column := range columns {
-			if err := refuseRows(ctx, tx, id, table, "coalesce("+column+",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)"); err != nil {
-				return err
-			}
-		}
-	}
-	// Payment and invoice writers retain typed correlation metadata. Validate it with the
-	// same archive contract before writing the header, including unsafe values
-	// hidden under otherwise supported keys.
-	for _, table := range []string{"payments", "invoice_items"} {
-		rows, err := tx.Query(ctx, "SELECT metadata::text FROM billing."+table+" WHERE merchant_id=$1 AND coalesce(metadata,'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)", id.UUID())
-		if err != nil {
-			return err
-		}
-		profile := contract.Profile{Name: table, Columns: []contract.Column{{Name: "metadata", Type: "jsonb"}}}
-		var invalid int64
-		for rows.Next() {
-			var metadata string
-			if err := rows.Scan(&metadata); err != nil {
-				rows.Close()
-				return err
-			}
-			if contract.ValidateValues(profile, []*string{&metadata}) != nil {
-				invalid++
-			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		if invalid > 0 {
-			return &Error{Code: "unsupported_state", Table: table, Count: invalid}
 		}
 	}
 	return validateReferences(ctx, tx, id)

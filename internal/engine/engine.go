@@ -114,7 +114,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		RiverSchema:      cfg.RiverSchema,
 		PGXPool:          deps.Postgres,
 		Redis:            deps.Redis,
-		Cache:            deps.Cache,
 		UserDirectory:    userDirectory(deps),
 		UsernameResolver: usernameResolver(deps),
 		StripeTransport:  deps.StripeTransport,

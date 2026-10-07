@@ -102,7 +102,7 @@ explicit:
 | Deps field | Meaning |
 |---|---|
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
-| `Redis`, `Cache` | Shared rate limits and cache; in memory without them. |
+| `Redis` | Optional shared rate limits, FX rates and abuse statistics. |
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
 | `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |

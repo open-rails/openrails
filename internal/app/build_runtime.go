@@ -685,7 +685,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	// configured — nil LLM = the generate endpoint fail-closes with 501.
 	// #756 metrics Q&A additionally requires the llm.ask_enabled consent
 	// (aggregate query results flow to the provider) and is rate-limited
-	// per merchant (Redis-backed when available, in-process fallback).
+	// by the shared HTTP feature-bucket limiter.
 	var dashboardLLM dashboard.LLM
 	if config.LLMConfigured(cfg.LLM) {
 		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
@@ -696,18 +696,11 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 			dashboardLLM = dashboard.NewAnthropicLLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
 		}
 	}
-	var askLimiter dashboard.AskLimiter
-	if redisClient != nil {
-		askLimiter = dashboard.NewAskLimiter(redisClient, clock.Now)
-	} else {
-		askLimiter = dashboard.NewAskLimiter(nil, clock.Now)
-	}
 	dashboardService := dashboard.NewService(dashboard.Deps{
 		DB:         database,
 		Metrics:    metricsService,
 		LLM:        dashboardLLM,
 		AskEnabled: cfg.LLM != nil && cfg.LLM.AskEnabled,
-		AskLimiter: askLimiter,
 		Clock:      clock,
 	})
 	railCustomerService := payments.NewRailCustomerService(database)
@@ -767,12 +760,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	// propose changes; the reprice API owns #781 notice-window enforcement.
 	// The copilot shares the dashboard LLM client and uses its own rate-limit
 	// namespace.
-	var copilotLimiter copilot.AskLimiter
-	if redisClient != nil {
-		copilotLimiter = copilot.NewAskLimiter(redisClient, clock.Now)
-	} else {
-		copilotLimiter = copilot.NewAskLimiter(nil, clock.Now)
-	}
 	copilotService := copilot.NewService(copilot.Deps{
 		Products: productService,
 		Prices:   priceService,
@@ -781,7 +768,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		LLM:      dashboardLLM,
 		Enabled:  cfg.LLM != nil && cfg.LLM.CatalogCopilotEnabled,
 		Drafting: cfg.LLM != nil && cfg.LLM.CatalogDraftingEnabled,
-		Limiter:  copilotLimiter,
 		Clock:    clock,
 	})
 

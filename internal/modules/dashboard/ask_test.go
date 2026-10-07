@@ -9,11 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
@@ -144,8 +141,8 @@ func TestAskToolRefusals(t *testing.T) {
 	})
 }
 
-// Ask shows the model merchant data, so it needs its own consent beyond an LLM key, and a spend budget.
-func TestAskRequiresConsentAndBudget(t *testing.T) {
+// Ask shows the model merchant data, so it needs its own consent beyond an LLM key.
+func TestAskRequiresConsent(t *testing.T) {
 	_, err := NewService(Deps{}).Ask(context.Background(), "q")
 	require.ErrorIs(t, err, ErrAskNotConfigured)
 
@@ -156,40 +153,7 @@ func TestAskRequiresConsentAndBudget(t *testing.T) {
 	_, err = svc.Ask(context.Background(), "q")
 	require.ErrorIs(t, err, ErrAskNotConfigured)
 
-	ctx := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
-	_, err = NewService(Deps{LLM: llm, AskEnabled: true, AskLimiter: denyLimiter{retry: 30 * time.Second}}).Ask(ctx, "q")
-	var limited *AskRateLimitedError
-	require.ErrorAs(t, err, &limited)
-	require.Equal(t, 30*time.Second, limited.RetryAfter)
 	require.Empty(t, llm.convs, "refused before any LLM spend")
-}
-
-type denyLimiter struct{ retry time.Duration }
-
-func (d denyLimiter) AllowAsk(context.Context, string) (bool, time.Duration, error) {
-	return false, d.retry, nil
-}
-
-func TestMemoryAskLimiterWindows(t *testing.T) {
-	now := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
-	l := NewAskLimiter(nil, func() time.Time { return now })
-	ctx := context.Background()
-	for minute := 0; minute < askRatePerDay/askRatePerMinute; minute++ {
-		for i := 0; i < askRatePerMinute; i++ {
-			ok, _, err := l.AllowAsk(ctx, "a")
-			require.NoError(t, err)
-			require.True(t, ok, "minute %d call %d", minute, i)
-		}
-		ok, retry, _ := l.AllowAsk(ctx, "a")
-		require.False(t, ok, "minute window trips")
-		require.Greater(t, retry, time.Duration(0))
-		now = now.Add(time.Minute)
-	}
-	ok, retry, _ := l.AllowAsk(ctx, "a")
-	require.False(t, ok, "daily window trips")
-	require.Greater(t, retry, time.Hour)
-	ok, _, _ = l.AllowAsk(ctx, "b")
-	require.True(t, ok, "merchants are isolated")
 }
 
 // The model is told it sees a truncated result; evidence keeps it whole.

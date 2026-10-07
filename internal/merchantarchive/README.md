@@ -1,4 +1,4 @@
-# Merchant billing archive v1
+# Merchant billing archive
 
 `Export` streams a repeatable-read snapshot. `Restore` validates the complete
 bounded JSONL stream and inserts it in one transaction. The merchant UUID and
@@ -37,18 +37,15 @@ not sufficient coverage.
 - Operation authorizations, provider billing qualifications/observations,
   destructive before-images and account updater batches refuse any rows. Their
   opaque evidence has no v1 portable contract; provider formats belong to #1010.
-- Payment metadata retains declared order, provider transaction, Stripe invoice
-  and test-run correlation strings. Unknown keys, nested provider bodies and
-  unsafe values refuse before the export header. Payment discount metadata,
-  payment method metadata, usage event metadata and invoice item metadata refuse
-  when nonempty; empty/null values can be reconstructed without losing facts.
+- Application-owned JSON metadata is retained verbatim: payments (including
+  discount metadata), payment methods, usage events, invoice items, checkout
+  attempts, subscription `gateway_response`, and the metadata inside admission
+  capture terms. Keys, nesting and string values are not a schema or secret
+  detector boundary. JSON syntax, depth and archive framing limits still apply.
 - Maintenance history retains every prune/converge-enforce/merchant-purge row,
   including unreferenced runs. Nonempty coverage, affected, summary or inventory
   fields refuse. Reconciliation runs are diagnostic and excluded. Other run
   kinds refuse. The local billing-restore receipt is excluded from re-export.
-- Subscription gateway metadata preserves declared checkout correlation IDs,
-  delayed-start/run markers, admin notes and supersession markers. Unknown keys,
-  raw provider bodies and unsafe values refuse export and restore.
 - Maintenance note/error text is diagnostic and excluded. Generated entitlement
   periods and generated run-class columns are reconstructed by PostgreSQL.
 - PSP settings, signer references and declared public configuration are retained.
@@ -67,8 +64,8 @@ Unresolved payments, invoice attempts, open admissions, provider intents,
 checkouts, unfinished webhook receipts, undelivered host events and running
 maintenance work refuse export. Terminal checkout rows retain IDs, provider
 coordinates, request fingerprints and declared safe rail fields/routing facts;
-unknown rail state or metadata refuses. The currently supported checkout state
-covers NMI completion/failure and its request fingerprint. Redirect/Solana quote
+unknown structured rail state refuses; application metadata is preserved. The
+currently supported checkout state covers NMI completion/failure and its request fingerprint. Redirect/Solana quote
 or transaction blobs require a separate safe contract. Terminal intent payloads
 and evidence are never filtered: known safe refund/result shapes and typed NMI
 sale/subscription creation receipts are preserved verbatim. Successful NMI
@@ -79,9 +76,9 @@ require their own safe contract.
 Invoice collection retains its typed frozen request, original instrument
 coordinates and terminal receipt. An invoice with a live collection pointer
 refuses cutover; terminal collection clears that pointer. Invoice item metadata
-retains only the engine's operation/source coordinates. Unknown fields and raw
-provider bodies remain refused. A production NMI collection test proves that a
-settled invoice restores and replays without installing a provider adapter or
+retains application data alongside the engine's operation/source coordinates.
+Unknown provider-operation fields remain refused. A production NMI collection
+test proves that a settled invoice restores and replays without installing a provider adapter or
 creating another payment or ledger transfer.
 
 ## Restore guard
@@ -122,4 +119,9 @@ The destination must be empty, including its catalog. Creating a product before
 restore produces the ordinary `not_empty` refusal; the importer never rewrites
 incoming product IDs.
 
-Catalog applications require archive wire version 2. The consistent snapshot carries the merchant catalog revision in its hashed header and all permanent application receipts alongside catalog state. Restore preserves both atomically; replaying a completed restore cannot reset a later revision. Version 1 artifacts fail closed. Produce a fresh version 2 archive using the current library before cutover; retain older backups as historical artifacts.
+Archive wire version 3 adds the previously omitted payment-method, discount and
+usage metadata columns to positional row profiles. Older artifacts are refused
+by their version before restoration; export a fresh archive with the current
+library. Catalog revision and application receipts remain in the hashed snapshot,
+and replaying a completed restore cannot reset a later revision. Retain older
+backups as historical artifacts.

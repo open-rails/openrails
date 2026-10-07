@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/open-rails/openrails/internal/retry"
 )
 
 // ReadinessDependency is one dependency reported by Runtime.Ready (#748).
@@ -105,4 +108,33 @@ func (r *Runtime) PostureState() error {
 		return nil
 	}
 	return r.postureState()
+}
+
+// startRedisMonitor observes optional Redis health without delaying startup.
+// The runtime owns the probe loop and waits for it to stop before closing Redis.
+func (r *Runtime) startRedisMonitor() {
+	if r.RedisClient == nil {
+		return
+	}
+	r.Go("redis health", func(ctx context.Context) {
+		for attempt := 0; ; {
+			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := r.RedisClient.Ping(pingCtx).Err()
+			cancel()
+			if ctx.Err() != nil {
+				return
+			}
+			r.redisState.record(err)
+			wait := 10 * time.Second
+			if err != nil {
+				wait = retry.Backoff(attempt, retry.Base, retry.Max)
+				attempt++
+			} else {
+				attempt = 0
+			}
+			if !retry.Sleep(ctx, wait) {
+				return
+			}
+		}
+	})
 }

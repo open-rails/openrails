@@ -89,4 +89,6 @@ can't answer, say what's missing; state money in whole currency units.
 `/ask` is the same loop operated server-side; its response carries the answer plus the
 verbatim result of every executed query as evidence. Because aggregate results are sent to
 the LLM provider, it is consent-gated (`LLM_ASK_ENABLED=true` + `LLM_API_KEY`; otherwise
-the route is not registered) and rate-limited per merchant (429 + `Retry-After`).
+the route is not registered). Its `metrics-ask` HTTP bucket uses the shared
+per-IP and authenticated-user limits (429 + `Retry-After`); see
+[rate limiting](rate-limiting.md).

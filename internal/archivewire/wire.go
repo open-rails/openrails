@@ -17,7 +17,9 @@ import (
 )
 
 const (
-	Version              = 2
+	// Version 3 retains application metadata columns omitted from version 2's
+	// positional rows. A fresh export is required; their row shapes differ.
+	Version              = 3
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )

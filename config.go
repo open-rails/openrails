@@ -2,7 +2,6 @@ package openrails
 
 import (
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/cache"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -99,8 +98,6 @@ type (
 	// deployment.
 	HyperSwitchConfig = config.HyperSwitchConfig
 
-	// Cache is Deps.Cache: the store behind OpenRails' shared cache.
-	Cache = cache.Cache
 	// EmailSender is Deps.EmailSender: it delivers OpenRails' rendered email,
 	// billing and control plane alike.
 	EmailSender = config.EmailSender

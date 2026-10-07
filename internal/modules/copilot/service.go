@@ -51,7 +51,7 @@ type RepricePreviewer interface {
 
 // Deps are the catalog copilot's collaborators. LLM may be nil, which leaves
 // the feature disabled. Enabled and Drafting are separate consent gates;
-// Limiter may be nil when the caller accepts no rate limiting.
+// HTTP abuse limits belong to the shared route middleware.
 type Deps struct {
 	Products ProductReader
 	Prices   PriceReader
@@ -60,7 +60,6 @@ type Deps struct {
 	LLM      dashboard.LLM
 	Enabled  bool
 	Drafting bool
-	Limiter  AskLimiter
 	Clock    clockwork.Clock
 }
 
@@ -74,7 +73,6 @@ type Service struct {
 	llm      dashboard.LLM
 	enabled  bool
 	drafting bool
-	limiter  AskLimiter
 	clock    clockwork.Clock
 }
 
@@ -90,7 +88,6 @@ func NewService(d Deps) *Service {
 		llm:      d.LLM,
 		enabled:  d.Enabled,
 		drafting: d.Drafting,
-		limiter:  d.Limiter,
 		clock:    d.Clock,
 	}
 }

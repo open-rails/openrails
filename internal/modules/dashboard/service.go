@@ -29,19 +29,17 @@ type Service struct {
 	metrics    MetricsExecutor
 	llm        LLM
 	askEnabled bool
-	askLimiter AskLimiter
 	clock      clockwork.Clock
 }
 
 // Deps are the dashboard module's collaborators. LLM may be nil (NL features
-// fail closed); AskEnabled is the llm.ask_enabled consent flag; AskLimiter may
-// be nil (no per-merchant ask rate limiting); Clock nil = wall clock.
+// fail closed); AskEnabled is the llm.ask_enabled consent flag.
+// Clock nil = wall clock. HTTP abuse limits belong to the shared route middleware.
 type Deps struct {
 	DB         *db.DB
 	Metrics    MetricsExecutor
 	LLM        LLM
 	AskEnabled bool
-	AskLimiter AskLimiter
 	Clock      clockwork.Clock
 }
 
@@ -55,7 +53,6 @@ func NewService(d Deps) *Service {
 		metrics:    d.Metrics,
 		llm:        d.LLM,
 		askEnabled: d.AskEnabled,
-		askLimiter: d.AskLimiter,
 		clock:      d.Clock,
 	}
 }

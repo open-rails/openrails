@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -31,26 +30,16 @@ func (f *scriptLLM) CompleteTools(_ context.Context, _ string, _ []dashboard.Too
 	return f.turns[min(len(f.convs), len(f.turns))-1], nil
 }
 
-type denyLimiter struct{ retry time.Duration }
-
-func (d denyLimiter) AllowAsk(context.Context, string) (bool, time.Duration, error) {
-	return false, d.retry, nil
-}
-
 func merchantCtx() context.Context {
 	return merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
 }
 
-func TestAskRequiresConsentAndBudget(t *testing.T) {
+func TestAskRequiresConsent(t *testing.T) {
 	llm := &scriptLLM{turns: []*dashboard.ToolTurn{{Text: "never reached"}}}
 	for name, d := range map[string]Deps{"no LLM": {Enabled: true}, "LLM without consent flag": {LLM: llm}} {
 		_, err := NewService(d).Ask(merchantCtx(), "q")
 		require.ErrorIs(t, err, ErrNotConfigured, name)
 	}
-	_, err := NewService(Deps{LLM: llm, Enabled: true, Limiter: denyLimiter{retry: 30 * time.Second}}).Ask(merchantCtx(), "q")
-	var limited *RateLimitedError
-	require.ErrorAs(t, err, &limited)
-	require.Equal(t, 30*time.Second, limited.RetryAfter)
 	require.Empty(t, llm.convs, "refused before any LLM spend")
 }
 
@@ -93,26 +82,4 @@ func TestAskToolLoopRefusals(t *testing.T) {
 	require.ErrorAs(t, err, &noAnswer)
 	require.Equal(t, askMaxToolCalls, noAnswer.ToolCalls)
 	require.Len(t, llm.convs, askMaxTurns)
-}
-
-func TestMemoryAskLimiterWindows(t *testing.T) {
-	now := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
-	l := NewAskLimiter(nil, func() time.Time { return now })
-	ctx := context.Background()
-	for minute := 0; minute < askRatePerDay/askRatePerMinute; minute++ {
-		for i := 0; i < askRatePerMinute; i++ {
-			ok, _, err := l.AllowAsk(ctx, "a")
-			require.NoError(t, err)
-			require.True(t, ok, "minute %d call %d", minute, i)
-		}
-		ok, retry, _ := l.AllowAsk(ctx, "a")
-		require.False(t, ok, "minute window trips")
-		require.Greater(t, retry, time.Duration(0))
-		now = now.Add(time.Minute)
-	}
-	ok, retry, _ := l.AllowAsk(ctx, "a")
-	require.False(t, ok, "daily window trips")
-	require.Greater(t, retry, time.Hour)
-	ok, _, _ = l.AllowAsk(ctx, "b")
-	require.True(t, ok, "merchants are isolated")
 }

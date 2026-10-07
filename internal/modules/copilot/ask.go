@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
 
@@ -30,19 +27,6 @@ const (
 func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAnswer, error) {
 	if !s.Configured() {
 		return nil, ErrNotConfigured
-	}
-	if s.limiter != nil {
-		merchantID, err := merchant.Require(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("copilot ask: no merchant in context: %w", err)
-		}
-		allowed, retry, err := s.limiter.AllowAsk(ctx, uuid.UUID(merchantID).String())
-		if err != nil {
-			return nil, fmt.Errorf("copilot ask: rate limiter: %w", err)
-		}
-		if !allowed {
-			return nil, &RateLimitedError{RetryAfter: retry}
-		}
 	}
 
 	now := s.now().UTC()
