@@ -28,8 +28,16 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
-	w.settle()
 	client := w.client[embedded]
+	grant, err := client.CreateCreditGrant(t.Context(), e.c.cid(), billing.CreateCreditGrantParams{
+		Currency: "USD", Amount: 2_500_000, Source: "archive-test", SourceID: "retained-credit",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2_500_000, grant.RemainingAmount)
+	balance, err := client.GetBalance(t.Context(), e.c.cid(), "USD")
+	require.NoError(t, err)
+	require.EqualValues(t, 2_500_000, balance.BalanceAmount)
+	w.settle()
 	merchantID := client.MerchantID()
 	events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
 	require.NoError(t, err)
@@ -129,9 +137,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 			return snapshot
 		}
 		before := read(w.schema)
-		if tc.table != "ledger_transfers" && tc.table != "ledger_accounts" {
-			require.NotEqual(t, "[]", before, tc.table)
-		}
+		require.NotEqual(t, "[]", before, tc.table)
 		require.Equal(t, before, read(destinationSchema), tc.table)
 	}
 	// A lost response retries the same archive without duplicating money or work.
