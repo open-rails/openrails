@@ -102,11 +102,10 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		case ccbill.DataLinkTxnRebill, ccbill.DataLinkTxnRefund, ccbill.DataLinkTxnChargeback:
 			snap.Transactions = append(snap.Transactions, normalizeCCBillTransaction(row))
 		default:
-			// Unrequested/unknown row types are preserved as raw-only
-			// transactions so nothing in the export is dropped.
+			// Unknown events remain raw evidence, not evidence of a failed charge.
 			snap.Transactions = append(snap.Transactions, RemoteTransaction{
 				SubscriptionID: row.SubscriptionID(),
-				Type:           TransactionTypeSale,
+				Type:           TransactionTypeUnknown,
 				Success:        false,
 				Raw:            ccbillRowRaw(row),
 			})

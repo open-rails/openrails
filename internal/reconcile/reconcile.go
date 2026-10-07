@@ -72,6 +72,7 @@ func LocalMaterializeStatus(remote SubscriptionStatus) (models.SubscriptionStatu
 type TransactionType string
 
 const (
+	TransactionTypeUnknown    TransactionType = "unknown"
 	TransactionTypeSale       TransactionType = "sale"
 	TransactionTypeAuth       TransactionType = "auth"
 	TransactionTypeRefund     TransactionType = "refund"
