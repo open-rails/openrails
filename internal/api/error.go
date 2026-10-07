@@ -54,8 +54,7 @@ type APIError struct {
 	RequestID  string
 	Param      *string
 	Metadata   map[string]any
-	// Cause is server-only diagnostic context, never part of the response.
-	Cause error `json:"-"`
+	cause      error
 }
 
 // Error implements the error interface
@@ -159,6 +158,17 @@ func NewAPIError(httpStatus int, errType, code, message string) *APIError {
 		Code:       code,
 		Message:    message,
 	}
+}
+
+// WithCause attaches server-only diagnostic context.
+func (e *APIError) WithCause(cause error) *APIError {
+	e.cause = cause
+	return e
+}
+
+// Cause returns the server-only diagnostic cause.
+func (e *APIError) Cause() error {
+	return e.cause
 }
 
 // WithParam adds a parameter name to the error

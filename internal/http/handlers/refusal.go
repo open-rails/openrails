@@ -20,7 +20,7 @@ func writeRefusal(r *httprequest.Request, err error, internalMessage string) {
 	out := api.NewAPIError(refusal.Status, api.ErrorTypeForStatus(refusal.Status), refusal.Code, err.Error())
 	if refusal.Status >= 500 {
 		out.Message = refusal.Error()
-		out.Cause = err
+		out.WithCause(err)
 	}
 	if refusal.Param != "" {
 		out.WithParam(refusal.Param)
