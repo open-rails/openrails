@@ -94,12 +94,11 @@ func TestInternalDoesNotImportRoot(t *testing.T) {
 }
 
 // Root's only aliases are the Config and Deps family (#1121): defined once in
-// internal/config (auth hook types in internal/billingauth, the cache
-// interface in internal/cache) and named in root's config.go. Every other
-// root type is the Client's own.
+// internal/config (auth hook types in internal/billingauth) and named in
+// root's config.go. Every other root type is the Client's own.
 func TestRootAliasesAreTheConfigFamily(t *testing.T) {
 	fsys := repositoryFS(t)
-	family := map[string]bool{Module + "/internal/config": true, Module + "/internal/billingauth": true, Module + "/internal/cache": true}
+	family := map[string]bool{Module + "/internal/config": true, Module + "/internal/billingauth": true}
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		t.Fatal(err)

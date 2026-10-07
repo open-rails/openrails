@@ -181,7 +181,7 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 // First boot with Vault, Redis and the NMI posture probe all unavailable: the
 // runtime builds and is ready, the card rails are offered, only the Solana
 // rail is missing and its signer answers unavailable; each recovers in the
-// background. (Checkout idempotency still needs Redis until #1099.)
+// background.
 func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
@@ -199,6 +199,18 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	rt := f.resilientRuntime(t, resilientBoot{vault: fake, nmi: nmi, stripe: &stripeCheckoutFake{t: t}, slug: "resilient-" + uuid.NewString()[:8], redisDown: true})
 	client := rt
 	waitReady(t, rt)
+	require.Eventually(t, func() bool {
+		deps, err := engine.Graph(rt).Runtime.Ready(t.Context())
+		if err != nil {
+			return false
+		}
+		for _, dep := range deps {
+			if dep.Name == "redis" {
+				return dep.Optional && !dep.Available && dep.Err != nil
+			}
+		}
+		return false
+	}, 5*time.Second, 20*time.Millisecond, "unreachable Redis is reported without failing readiness")
 	require.ErrorIs(t, probe(t, rt, "openrails_vault"), vault.ErrUnavailable)
 	require.Error(t, probe(t, rt, "openrails_psp_posture"), "the NMI verdict is still unknown")
 

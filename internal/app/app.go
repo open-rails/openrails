@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -15,17 +14,14 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/cache"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/retry"
 )
 
 // App encapsulates the long-lived dependencies shared across transports.
 type App struct {
 	Config      *config.Config
 	Runtime     *Runtime
-	Cache       cache.Cache
 	RedisClient *redis.Client
 
 	// ControlPlane is an optional host-owned lifecycle resource. Concrete
@@ -36,8 +32,6 @@ type App struct {
 	// standalone surface when admin_console is enabled.
 	ConsoleAssets fs.FS
 
-	stopRedisMonitor context.CancelFunc
-	ownedCache       cache.Cache
 	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
 	// created only when the control plane is attached and no pool was injected. It
 	// is attached together with ControlPlane via SetControlPlane and closed here.
@@ -70,7 +64,6 @@ type BootstrapOptions struct {
 	RiverSchema string
 	PGXPool     *pgxpool.Pool
 	Redis       *redis.Client
-	Cache       cache.Cache
 	Clock       clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
@@ -82,7 +75,7 @@ type BootstrapOptions struct {
 	ConfiguredMerchant billing.MerchantID
 }
 
-// Bootstrap initialises core services, caches, and auth verifier.
+// Bootstrap initialises core services and the auth verifier.
 func Bootstrap(ctx context.Context, cfg *config.Config) (*App, error) {
 	return BootstrapWithOptions(ctx, cfg, nil)
 }
@@ -194,30 +187,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		runtime.SetConfiguredMerchant(opts.ConfiguredMerchant)
 	}
 
-	var appCache cache.Cache
-	var ownedCache cache.Cache
-	var stop context.CancelFunc
-	if opts != nil && opts.Cache != nil {
-		appCache = opts.Cache
-	} else {
-		memoryCache := cache.NewMemoryCache()
-		ownedCache = memoryCache
-		switchable := cache.NewSwitchableCache(memoryCache)
-		appCache = switchable
-		if runtime.RedisClient != nil {
-			stop = monitorRedis(runtime.RedisClient, switchable, memoryCache, runtime.redisState.record)
-		} else {
-			log.Warn("redis not configured; cache operating in-memory only")
-		}
-	}
+	runtime.startRedisMonitor()
 
 	app := &App{
-		Config:           cfg,
-		Runtime:          runtime,
-		Cache:            appCache,
-		ownedCache:       ownedCache,
-		RedisClient:      runtime.RedisClient,
-		stopRedisMonitor: stop,
+		Config:      cfg,
+		Runtime:     runtime,
+		RedisClient: runtime.RedisClient,
 	}
 
 	// The OpenRails-owned AuthKit control plane (#224) is no longer built here
@@ -231,9 +206,6 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 func (a *App) Close(ctx context.Context) error {
 	if a == nil {
 		return nil
-	}
-	if a.stopRedisMonitor != nil {
-		a.stopRedisMonitor()
 	}
 	var errs []error
 	// Shared workers must stop before their optional components release pools.
@@ -250,57 +222,8 @@ func (a *App) Close(ctx context.Context) error {
 		a.controlPlanePool.Close()
 		a.controlPlanePool = nil
 	}
-	// Close the owned fallback even if Redis is the current backend.
-	// A cache supplied by the host stays open.
-	if a.ownedCache != nil {
-		if err := a.ownedCache.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close cache: %w", err))
-		}
-		a.ownedCache = nil
-	}
 	if len(errs) == 0 {
 		return nil
 	}
 	return fmt.Errorf("shutdown errors: %v", errs)
-}
-
-// monitorRedis starts on the memory cache and switches to Redis once a probe
-// answers, back to memory when one fails: every 10s while up, capped
-// full-jitter backoff while down. Construction never waits on Redis.
-func monitorRedis(client *redis.Client, switchable *cache.SwitchableCache, fallback cache.Cache, record func(error)) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-	redisCache := cache.NewRedisCache(client)
-	go func() {
-		usingRedis := false
-		for attempt := 0; ; {
-			pingCtx, pingCancel := context.WithTimeout(ctx, 2*time.Second)
-			err := client.Ping(pingCtx).Err()
-			pingCancel()
-			if ctx.Err() != nil {
-				return
-			}
-			record(err)
-			wait := 10 * time.Second
-			switch {
-			case err == nil && !usingRedis:
-				switchable.SetBackend(redisCache)
-				usingRedis = true
-				log.Info("redis available; cache uses redis")
-			case err != nil && usingRedis:
-				switchable.SetBackend(fallback)
-				usingRedis = false
-				log.WithError(err).Warn("redis lost; cache reverted to memory")
-			}
-			if err != nil {
-				wait = retry.Backoff(attempt, retry.Base, retry.Max)
-				attempt++
-			} else {
-				attempt = 0
-			}
-			if !retry.Sleep(ctx, wait) {
-				return
-			}
-		}
-	}()
-	return cancel
 }

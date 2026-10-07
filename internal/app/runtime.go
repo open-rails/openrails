@@ -67,7 +67,7 @@ type Runtime struct {
 	// background owns goroutines that reconnect optional providers; Close
 	// stops them first.
 	background backgroundTasks
-	// redisState is the cached Redis state the cache monitor last observed.
+	// redisState is the latest background Redis health observation.
 	redisState dependencyState
 	// signerIdentity records a Vault Transit key that no longer matches its
 	// stored Solana identity.
