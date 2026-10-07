@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"errors"
-	"strconv"
 	"strings"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -34,12 +32,7 @@ func AskCatalog(r *httprequest.Request) {
 	}
 	res, err := svc.Ask(r.Request.Context(), question)
 	if err != nil {
-		var limited *copilot.RateLimitedError
-		if errors.As(err, &limited) {
-			r.SetHeader("Retry-After", strconv.FormatInt(int64((limited.RetryAfter+time.Second-1)/time.Second), 10))
-			r.ErrorCode(billing.CodeRateLimitExceeded, "ask rate limit exceeded; try again later")
-			return
-		}
+
 		var noAnswer *copilot.NoAnswerError
 		modelFailure(r, err, errors.As(err, &noAnswer))
 		return

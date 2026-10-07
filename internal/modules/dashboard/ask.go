@@ -9,11 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -42,13 +40,6 @@ const (
 // answers 501 with a pointed message.
 var ErrAskNotConfigured = errors.New("dashboard: metrics ask not configured")
 
-// AskRateLimitedError: the merchant exceeded the per-merchant ask budget.
-type AskRateLimitedError struct{ RetryAfter time.Duration }
-
-func (e *AskRateLimitedError) Error() string {
-	return fmt.Sprintf("dashboard: ask rate limit exceeded (retry after %s)", e.RetryAfter)
-}
-
 // AskNoAnswerError: the model never produced a text answer within the loop
 // budget (kept asking for tools).
 type AskNoAnswerError struct{ ToolCalls int }
@@ -74,19 +65,6 @@ type AskResult = billing.MetricsAnswer
 func (s *Service) Ask(ctx context.Context, question string) (*AskResult, error) {
 	if !s.AskConfigured() {
 		return nil, ErrAskNotConfigured
-	}
-	if s.askLimiter != nil {
-		merchantID, err := merchant.Require(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("dashboard ask: no merchant in context: %w", err)
-		}
-		allowed, retry, err := s.askLimiter.AllowAsk(ctx, uuid.UUID(merchantID).String())
-		if err != nil {
-			return nil, fmt.Errorf("dashboard ask: rate limiter: %w", err)
-		}
-		if !allowed {
-			return nil, &AskRateLimitedError{RetryAfter: retry}
-		}
 	}
 
 	system := askSystemPrompt(s.clock.Now().UTC())

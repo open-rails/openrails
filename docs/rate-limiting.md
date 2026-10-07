@@ -37,11 +37,21 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
+| `metrics-ask` | `metrics-ask` | 10 | `POST /v1/merchant/metrics/ask` |
+| `catalog-ask` | `catalog-ask` | 10 | `POST /v1/merchant/catalog/ask` (including drafting) |
+| `dashboard-generate` | `dashboard-generate` | 10 | `POST /v1/merchant/dashboard/widgets/generate` |
 | `captcha` | — | unlimited | `/v1/captcha/status`, `/v1/captcha/client.js` |
 
 Every other route is unlimited here: a generic per-address ceiling belongs to the proxy in front
 of OpenRails (Traefik). A bucket left out of `rate_limits` is not limited, any other key refuses
 boot, and a configured limit ≤ 0 means 60 rpm.
+
+AI features use these same per-IP and authenticated-user buckets. There is no
+separate per-merchant daily quota. Each feature has its own counter; catalog
+drafting tools are part of the one catalog question. Consent and per-request
+model/tool limits still apply. These are HTTP abuse limits on both standalone
+and embedded routes; trusted in-process Client operations follow the normal
+library boundary and do not consume HTTP counters.
 
 > The `checkout` bucket covers POSTs to `/v1/me/checkout-sessions` and under
 > `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs are not
