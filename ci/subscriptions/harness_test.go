@@ -202,7 +202,12 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 // starting a runtime.
 func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config)) *world {
 	t.Helper()
-	poolConfig, err := pgxpool.ParseConfig(dsn(t))
+	return prepareWorldAtDSN(t, maxConns, dsn(t), configure...)
+}
+
+func prepareWorldAtDSN(t *testing.T, maxConns int32, databaseURL string, configure ...func(*config.Config)) *world {
+	t.Helper()
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
 	require.NoError(t, err)
 	poolConfig.MaxConns = maxConns
 	queries := &queryLog{}
@@ -213,7 +218,7 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 	// due on River's wall clock; tests advance it explicitly.
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-4 * 365 * 24 * time.Hour).Truncate(time.Second))
 	w := &world{
-		t: t, pool: pool, dsn: dsn(t), queries: queries,
+		t: t, pool: pool, dsn: databaseURL, queries: queries,
 		schema: "gf_subs_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16],
 		slug:   "subs-" + uuid.NewString()[:8],
 		clock:  clock,

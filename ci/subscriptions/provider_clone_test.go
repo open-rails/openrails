@@ -51,8 +51,8 @@ func providerCopyDatabase(t *testing.T, adminDSN string) string {
 func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeClock) {
 	t.Helper()
 	adminDSN := dsn(t)
-	t.Setenv("OPENRAILS_E2E_DSN", providerCopyDatabase(t, adminDSN))
-	a := newWorld(t)
+	a := prepareWorldAtDSN(t, 12, providerCopyDatabase(t, adminDSN))
+	a.start()
 	one := enroll(t, a, "stripe", embedded)
 	a.settle()
 	merchantID := a.client[embedded].MerchantID()
@@ -74,8 +74,7 @@ func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeCl
 	err = merchantarchive.Export(t.Context(), sourceDB, merchantID, &archive)
 	require.NoError(t, err, "copy source must export normally: %v", errors.Unwrap(err))
 
-	t.Setenv("OPENRAILS_E2E_DSN", providerCopyDatabase(t, adminDSN))
-	b := prepareWorld(t, 12)
+	b := prepareWorldAtDSN(t, 12, providerCopyDatabase(t, adminDSN))
 	b.slug, b.auth, b.stripe, b.nmi = a.slug, a.auth, a.stripe, a.nmi
 	b.clock = clockwork.NewFakeClockAt(a.clock.Now())
 	targetDB, err := db.NewWithPGXPool(b.pool, b.schema)
@@ -108,6 +107,7 @@ func stripeIntentCreate(r *http.Request) bool {
 // A copied book admits the same renewal in two independent databases. The
 // provider must see the same operation identity and execute it only once.
 func TestCopiedStripeBooksRenewConcurrently(t *testing.T) {
+	t.Parallel()
 	a, b, _ := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	provider := a.w.stripe
@@ -146,6 +146,7 @@ func TestCopiedStripeBooksRenewConcurrently(t *testing.T) {
 // The stale copy has never submitted its next renewal. A provider record for
 // that obligation is still authoritative after the short-lived key expires.
 func TestCopiedStripeBookReadsAgedObligationBeforeFirstSubmission(t *testing.T) {
+	t.Parallel()
 	a, b, providerClock := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	a.toPeriodEnd()
@@ -166,6 +167,7 @@ func TestCopiedStripeBookReadsAgedObligationBeforeFirstSubmission(t *testing.T) 
 }
 
 func TestCopiedStripeBookRefusesConflictingRenewalTerms(t *testing.T) {
+	t.Parallel()
 	a, b, _ := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	a.toPeriodEnd()
@@ -201,6 +203,7 @@ func TestCopiedStripeBookRefusesConflictingRenewalTerms(t *testing.T) {
 // A failed first attempt may legitimately be retried with a later attempt
 // ordinal. Once that retry pays, an older copy must not charge attempt zero.
 func TestCopiedStripeBookRefusesStaleAttemptAfterSuccessfulRetry(t *testing.T) {
+	t.Parallel()
 	a, b, providerClock := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	a.setDecline(visa.Last4, "insufficient_funds", "")
@@ -235,6 +238,7 @@ func TestCopiedStripeBookRefusesStaleAttemptAfterSuccessfulRetry(t *testing.T) {
 // temporarily empty read must not permit another charge. Once visible, the
 // persistent operation record resolves both independently copied books.
 func TestCopiedStripeBookRecoversAgedLostReplyWithoutResend(t *testing.T) {
+	t.Parallel()
 	a, b, providerClock := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	provider := a.w.stripe

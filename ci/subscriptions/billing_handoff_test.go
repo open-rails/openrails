@@ -33,6 +33,7 @@ import (
 // the ordinary Client. This is core embedded/HTTP qualification, not a claim
 // that the separately versioned SaaS host has adopted the current archive.
 func TestOfflineBillingHandoff(t *testing.T) {
+	t.Parallel()
 	binary := filepath.Join(t.TempDir(), "openrails")
 	build := exec.CommandContext(t.Context(), "go", "build", "-p", "2", "-o", binary, "./cmd/openrails")
 	build.Dir = "../.."
@@ -46,6 +47,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				targetTopology = embedded
 			}
 			t.Run(rail+"/"+string(sourceTopology)+"_to_"+string(targetTopology), func(t *testing.T) {
+				t.Parallel()
 				source := newWorld(t)
 				member := enroll(t, source, rail, sourceTopology)
 				mid := source.client[embedded].MerchantID()
@@ -210,6 +212,7 @@ func handoffTarget(t *testing.T, source *world) *world {
 // The group-bound preparation used by the hosted CLI checks real destination
 // AuthKit authority. Neither the archive UUID nor a foreign owner can rebind it.
 func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
+	t.Parallel()
 	source := newWorld(t)
 	mid := source.client[embedded].MerchantID()
 	source.stop()
