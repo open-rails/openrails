@@ -996,10 +996,13 @@ func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscripti
 		}
 	}
 	if price != nil {
-		if r.AmountCents > 0 {
-			if cents, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount); err == nil && int64(cents) != r.AmountCents {
+		remoteAmount, err := nmiScheduleAmount(r, price.Currency)
+		if err != nil {
+			drift["remote_amount_invalid"] = err.Error()
+		} else if remoteAmount > 0 {
+			if cents, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount); err == nil && int64(cents) != remoteAmount {
 				drift["local_amount_cents"] = strconv.FormatInt(int64(cents), 10)
-				drift["remote_amount_cents"] = strconv.FormatInt(r.AmountCents, 10)
+				drift["remote_amount_cents"] = strconv.FormatInt(remoteAmount, 10)
 			}
 		}
 		// A schedule whose amount OpenRails changed in place keeps its original

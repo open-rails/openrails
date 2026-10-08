@@ -18,6 +18,16 @@ func receiptMismatch(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrReceiptMismatch, fmt.Sprintf(format, args...))
 }
 
+// ParseAmountMinor reads an NMI major-unit decimal at its declared currency's
+// rail scale. It refuses unknown currencies, fractional minor units and overflow.
+func ParseAmountMinor(amount, currency string) (moneyutil.Cents, error) {
+	minor, ok := exactMinorAmount(amount, currency)
+	if !ok {
+		return 0, fmt.Errorf("NMI amount %q is not exactly representable in %s", amount, currency)
+	}
+	return moneyutil.Cents(minor), nil
+}
+
 // exactMinorAmount parses a provider major-unit decimal at its declared
 // currency scale, without rounding or float conversion (JPY has no decimals).
 func exactMinorAmount(amount, currency string) (int64, bool) {

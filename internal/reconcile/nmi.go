@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -182,13 +183,8 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		if s.Plan != nil {
 			sub.PlanID = strings.TrimSpace(s.Plan.ID)
 		}
-		if cents, err := parseAmountCents(s.Amount); err == nil && cents > 0 {
-			sub.AmountCents = cents
-		} else if s.Plan != nil {
-			if cents, err := parseAmountCents(s.Plan.PlanAmount); err == nil {
-				sub.AmountCents = cents
-			}
-		}
+		// This resource has no currency. Keep its decimal in Raw and compare
+		// against the uniquely bound local price later; do not guess USD cents.
 		if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
 			sub.NextBillingAt = &next
 			if next.Before(today) {
@@ -287,7 +283,7 @@ func qualifyNMITransaction(t nmi.QueryTransaction) error {
 		if strings.TrimSpace(action.Success) != "0" && strings.TrimSpace(action.Success) != "1" {
 			return fmt.Errorf("nmi transaction %s has unreadable outcome", t.TransactionID)
 		}
-		if _, err := parseAmountCents(action.Amount); err != nil || strings.TrimSpace(action.Amount) == "" {
+		if _, err := nmi.ParseAmountMinor(action.Amount, t.Currency); err != nil {
 			return fmt.Errorf("nmi transaction %s has unreadable amount", t.TransactionID)
 		}
 		if _, ok := action.At(); !ok {
@@ -339,8 +335,8 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"action":            a,
 			}),
 		}
-		if cents, err := parseAmountCents(a.Amount); err == nil {
-			txn.AmountCents = cents
+		if minor, err := nmi.ParseAmountMinor(a.Amount, t.Currency); err == nil {
+			txn.AmountCents = int64(minor)
 		}
 		if ts, ok := a.At(); ok {
 			txn.OccurredAt = ts
@@ -351,6 +347,30 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 		out = append(out, txn)
 	}
 	return out
+}
+
+// nmiScheduleAmount uses the bound catalog currency only for comparison, never
+// to manufacture a transaction's currency or a missing provider payment.
+func nmiScheduleAmount(remote *RemoteSubscription, currency string) (int64, error) {
+	var wire struct {
+		Source       string              `json:"source"`
+		Subscription *nmi.V5Subscription `json:"subscription"`
+	}
+	if err := json.Unmarshal(remote.Raw, &wire); err != nil || wire.Source != "nmi_recurring_v5" {
+		return remote.AmountCents, nil // typed imports already carry rail minor units
+	}
+	if wire.Subscription == nil {
+		return 0, fmt.Errorf("NMI schedule has no amount record")
+	}
+	amount := strings.TrimSpace(wire.Subscription.Amount)
+	if amount == "" && wire.Subscription.Plan != nil {
+		amount = strings.TrimSpace(wire.Subscription.Plan.PlanAmount)
+	}
+	if amount == "" {
+		return 0, nil // optional amount was not reported
+	}
+	minor, err := nmi.ParseAmountMinor(amount, currency)
+	return int64(minor), err
 }
 
 // normalizeNMIAction maps NMI action_type values onto the normalized
