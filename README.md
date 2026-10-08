@@ -323,25 +323,48 @@ reprice operation. Changing their accepted benefits uses the
 [planned agreement-change workflow](https://github.com/open-rails/tracker/blob/master/openrails/1132.md).
 Those subscriber migrations are separate from the YAML offer changes above.
 
-### Exporting and reapplying catalog YAML
+### Backing up and restoring a complete catalog
 
-Dump the merchant's current catalog offers from the configured database:
+Use a catalog snapshot when the original IDs and archived history must survive:
+
+```sh
+# Source database: capture every product and price revision, including archived rows.
+openrails catalog export --merchant MERCHANT_UUID --out catalog.snapshot.yaml
+
+# Destination database, selected by config: restore those exact records and IDs.
+openrails catalog import --config destination.yaml --merchant MERCHANT_UUID --in catalog.snapshot.yaml
+```
+
+The snapshot preserves products, all price revisions, price-key history, provider
+bindings, meters and rate cards, catalog application receipts, and catalog
+revision state. A purchase's original product and price IDs continue to identify
+the same records after restoration. It is a versioned YAML snapshot, distinct
+from the editable `products:` application files above.
+
+Restore into an empty catalog for the same merchant UUID. Provision referenced
+PSP accounts and customers with their original identities first; the snapshot
+contains references, not payment credentials. Import restores local state
+atomically and makes no provider calls. It does not overwrite an existing
+catalog or reprice subscriptions. Repeating the same successful restore is a
+no-op, even after later catalog edits.
+
+Payments, subscriptions, grants and balances are not catalog records. Use the
+[merchant archive](internal/merchantarchive/README.md) to back up and restore that
+complete billing state together with its catalog.
+
+For an editable declaration containing only current, unarchived offers, use the
+lighter dump/apply workflow instead:
 
 ```sh
 openrails dump-merchant-catalog --slug onlydemo > catalog.yaml
 openrails apply-catalog --merchant onlydemo --file catalog.yaml
 ```
 
-The YAML contains unarchived products and prices, meters, and default product
-rate cards. It can recreate equivalent offers in a new merchant, but provider
+That document can recreate equivalent offers, using the destination's product and
+price identities. It does not preserve archived history or original IDs. Provider
 references belong to their configured PSP accounts and must be reviewed before
-copying between merchants. A repeated application is still a permanent hash
-replay; reapplying an old dump does not roll back later edits.
-
-For a backup preserving original IDs, archived price revisions, purchases,
-subscriptions, and grants, use the [merchant archive](internal/merchantarchive/README.md)
-export/import workflow. Catalog YAML is an editable declaration of live offers;
-it is not a lossless billing-state backup.
+copying between merchants. Reapplying an already applied document is a permanent
+hash replay, so this workflow does not roll back later edits.
 
 ### Turning catalog HTTP writes on and off
 
