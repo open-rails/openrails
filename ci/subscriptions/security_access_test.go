@@ -147,25 +147,24 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		w.advance(w.subscription(embedded, sub).CurrentPeriodEndsAt.Sub(w.clock.Now()) / 2)
 		charges := len(w.railLedger(rail))
 		g := w.chargeGate(rail)
-		var wg sync.WaitGroup
-		change := func(client *openrails.Client, target tier) {
+		var first, racers sync.WaitGroup
+		change := func(wg *sync.WaitGroup, client *openrails.Client, target tier) {
 			defer wg.Done()
 			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, billing.ChangeTierParams{PriceID: target.ID, IdempotencyKey: "upgrade-" + uuid.NewString()})
 			t.Logf("upgrade to %s: %v", target.ent, err)
 		}
-		wg.Add(1)
-		go change(w.client[embedded], plus)
+		first.Add(1)
+		go change(&first, w.client[embedded], plus)
 		select {
 		case <-g.arrived:
 		case <-time.After(20 * time.Second):
 			t.Fatal("the first upgrade never reached the provider")
 		}
-		wg.Add(2)
-		go change(replica.client, pro)
-		go change(w.client[remote], pro)
-		time.Sleep(500 * time.Millisecond)
-		close(g.release)
-		wg.Wait()
+		racers.Add(2)
+		go change(&racers, replica.client, pro)
+		go change(&racers, w.client[remote], pro)
+		releaseAfterRacers(t, g, &racers)
+		first.Wait()
 		w.stripe.unhold()
 		w.nmi.unhold()
 		w.settle()

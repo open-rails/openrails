@@ -40,6 +40,22 @@ func (c *customer) raw(server, method, path string, body any) (int, error) {
 	return res.StatusCode, nil
 }
 
+// releaseAfterRacers lets the held request through once every racer has been
+// answered, so each racer is decided while the first is still at the
+// provider. A racer that waits on the held request fails the test.
+func releaseAfterRacers(t *testing.T, g *gate, racers *sync.WaitGroup) {
+	t.Helper()
+	answered := make(chan struct{})
+	go func() { racers.Wait(); close(answered) }()
+	select {
+	case <-answered:
+		close(g.release)
+	case <-time.After(30 * time.Second):
+		close(g.release)
+		t.Fatal("a racing request waited on the held one instead of being answered")
+	}
+}
+
 // chargeGate parks the rail's next charge request at the provider.
 func (w *world) chargeGate(rail string) *gate {
 	if rail == "stripe" {
@@ -77,27 +93,26 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 			}
 			g := w.chargeGate(rail)
-			var wg sync.WaitGroup
+			var first, racers sync.WaitGroup
 			outcomes := make(chan error, 8)
-			send := func(client *openrails.Client) {
+			send := func(wg *sync.WaitGroup, client *openrails.Client) {
 				defer wg.Done()
 				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), request)
 				outcomes <- err
 			}
-			wg.Add(1)
-			go send(w.client[embedded])
+			first.Add(1)
+			go send(&first, w.client[embedded])
 			select {
 			case <-g.arrived:
 			case <-time.After(20 * time.Second):
 				t.Fatal("the first request never reached the provider")
 			}
 			for _, client := range []*openrails.Client{w.client[embedded], replica.client, replica.client, w.client[remote]} {
-				wg.Add(1)
-				go send(client)
+				racers.Add(1)
+				go send(&racers, client)
 			}
-			time.Sleep(500 * time.Millisecond)
-			close(g.release)
-			wg.Wait()
+			releaseAfterRacers(t, g, &racers)
+			first.Wait()
 			close(outcomes)
 			for err := range outcomes {
 				t.Logf("create -> %v", err)
@@ -134,10 +149,10 @@ func TestSecurityConcurrentRefundsNeverExceedPayment(t *testing.T) {
 				}
 				g := w.refundGate(rail)
 				clients := []*openrails.Client{w.client[embedded], w.client[remote], replica.client, w.client[embedded], replica.client}
-				var wg sync.WaitGroup
+				var first, racers sync.WaitGroup
 				var mu sync.Mutex
 				accepted := 0
-				refund := func(i int, client *openrails.Client) {
+				refund := func(wg *sync.WaitGroup, i int, client *openrails.Client) {
 					defer wg.Done()
 					p := params
 					p.IdempotencyKey = fmt.Sprintf("race-refund-%d", i)
@@ -147,20 +162,19 @@ func TestSecurityConcurrentRefundsNeverExceedPayment(t *testing.T) {
 						mu.Unlock()
 					}
 				}
-				wg.Add(1)
-				go refund(0, clients[0])
+				first.Add(1)
+				go refund(&first, 0, clients[0])
 				select {
 				case <-g.arrived:
 				case <-time.After(20 * time.Second):
 					t.Fatal("the first refund never reached the provider")
 				}
 				for i, client := range clients[1:] {
-					wg.Add(1)
-					go refund(i+1, client)
+					racers.Add(1)
+					go refund(&racers, i+1, client)
 				}
-				time.Sleep(500 * time.Millisecond)
-				close(g.release)
-				wg.Wait()
+				releaseAfterRacers(t, g, &racers)
+				first.Wait()
 				w.stripe.unhold()
 				w.nmi.unhold()
 				w.settle()

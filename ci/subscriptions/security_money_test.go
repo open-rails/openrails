@@ -101,10 +101,10 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 				return err
 			}
 			g := w.chargeGate(rail)
-			var wg sync.WaitGroup
-			wg.Add(1)
+			var first, racers sync.WaitGroup
+			first.Add(1)
 			go func() {
-				defer wg.Done()
+				defer first.Done()
 				t.Logf("first purchase: %v", buy(client))
 			}()
 			select {
@@ -113,15 +113,14 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 				t.Fatal("the first purchase never reached the provider")
 			}
 			for _, other := range []*openrails.Client{replica.client, w.client[remote]} {
-				wg.Add(1)
+				racers.Add(1)
 				go func() {
-					defer wg.Done()
+					defer racers.Done()
 					t.Logf("racing purchase: %v", buy(other))
 				}()
 			}
-			time.Sleep(500 * time.Millisecond)
-			close(g.release)
-			wg.Wait()
+			releaseAfterRacers(t, g, &racers)
+			first.Wait()
 			w.stripe.unhold()
 			w.nmi.unhold()
 			w.settle()
