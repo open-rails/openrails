@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -669,8 +670,13 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		conflicts, err := w.DB.Gen(ctx).PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: pspID})
 		if err != nil || conflicts {
 			out.ProviderErrors++
-		} else if err := w.DB.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: horizon}); err != nil {
-			out.WatermarkErrors++
+		} else {
+			more, err := w.completeRecovery(ctx, mid, pspID, horizon)
+			if err != nil {
+				out.WatermarkErrors++
+			} else {
+				out.More = more
+			}
 		}
 	}
 	// #786: advance the pull watermark AFTER the pass so the NEXT pass's drift
@@ -681,6 +687,42 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		}
 	}
 	return out
+}
+
+// Complete coverage and its recovery wakeups commit together. Scans use the
+// existing collection policy/cadence; refresh never invokes a provider writer.
+func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
+	const batch = 100
+	more := false
+	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := w.DB.NewWithPgxTx(tx)
+		changed, err := d.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: psp, WatermarkAt: horizon})
+		if err != nil {
+			return err
+		}
+		if w.Config == nil || config.IsLimitedMode(w.Config) {
+			return nil
+		}
+		if err := providerrecovery.CheckPSP(ctx, d, mid, psp, w.now()); err != nil {
+			return err
+		}
+		resumed, err := intents.NewStore(d).ResumeRecoveryHeld(ctx, w.now(), batch)
+		if err != nil {
+			return err
+		}
+		more = resumed == batch
+		if changed == 0 && resumed == 0 {
+			return nil
+		}
+		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, InvoiceArgs{MerchantID: mid, Collect: true}, InvoiceArgs{MerchantID: mid, Collect: true, UseMonthlyFloor: true}}
+		for _, args := range jobs {
+			if err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning}}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return more, err
 }
 
 func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {

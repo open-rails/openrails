@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -64,7 +65,9 @@ const (
 )
 
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
-type DunningArgs struct{}
+type DunningArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id,omitempty"`
+}
 
 func (DunningArgs) Kind() string { return KindDunning }
 
@@ -183,9 +186,15 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	if w.EngineCollections != nil {
 		nmiRails = append(nmiRails, string(models.RailStripe))
 	}
-	merchantIDs, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
-	})
+	var merchantIDs []uuid.UUID
+	var err error
+	if job.Args.MerchantID != uuid.Nil {
+		merchantIDs = []uuid.UUID{job.Args.MerchantID}
+	} else {
+		merchantIDs, err = w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
+			Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("query merchants with due subscriptions: %w", err)
 	}

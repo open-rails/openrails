@@ -108,6 +108,9 @@ func (f *fakeLedger) MarkFailedTerminal(_ context.Context, id uuid.UUID, reason 
 func (f *fakeLedger) Park(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
 	return f.set(id, StatusPending, reason, next, nil)
 }
+func (f *fakeLedger) ParkForRecovery(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
+	return f.set(id, StatusPending, reason, next, RecoveryHeld(reason).Evidence)
+}
 func (f *fakeLedger) MarkSuperseded(_ context.Context, id uuid.UUID, reason string) error {
 	return f.set(id, StatusSuperseded, reason, time.Time{}, nil)
 }
@@ -355,6 +358,46 @@ func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
 			require.Equal(t, 1, handler.verified)
 			require.Zero(t, handler.executed)
 			require.Equal(t, StatusSucceeded, store.recs[intent.ID].status)
+		})
+	}
+}
+
+func TestVerifiedUnsubmittedRecoveryReconsidersOnlyWhenAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      ModeView
+		submitted bool
+		held      bool
+		ready     bool
+	}{
+		{"ready", modeFull, false, false, true},
+		{"readonly", modeReadonly, false, false, false},
+		{"still stale", modeFull, false, true, false},
+		{"submitted replay keeps backoff", modeFull, true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := testIntent("subscription_collection", OriginSystem, 1)
+			in.Rail = "stripe"
+			in.Status = StatusUnknownNeedsVerify
+			if tc.submitted {
+				in.ResultEvidence = []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)
+			}
+			store := &fakeLedger{row: in, dueVerify: []gen.BillingProviderIntent{in}}
+			if tc.held {
+				store.recoveryErr = errors.New("provider recovery required")
+			}
+			handler := &fakeHandler{typ: in.IntentType, verify: Retryable("verified unsubmitted")}
+			before := time.Now()
+			_, err := (&Runner{Store: store, Registry: NewRegistry(handler), Config: tc.mode}).RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			require.Zero(t, handler.executed, "verification never dispatches the provider")
+			record := store.recs[in.ID]
+			if tc.ready {
+				require.Equal(t, StatusFailedRetryable, record.status)
+				require.WithinDuration(t, before, record.next, time.Second)
+			} else {
+				require.True(t, record.next.After(before.Add(time.Second)), "provider/policy backoff is not expedited")
+			}
 		})
 	}
 }

@@ -120,3 +120,28 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 	}
 	return rows, err
 }
+
+// ResumeRecoveryHeld advances only recovery-held work and durably schedules its
+// normal dispatcher. A newly ready account can unblock another account's invoice,
+// so the batch is merchant-scoped; every execution rechecks all its own guards.
+func (s *Store) ResumeRecoveryHeld(ctx context.Context, now time.Time, limit int32) (int, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), Now: now, BatchSize: limit})
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(now)); err != nil {
+				return err
+			}
+		}
+		count = len(ids)
+		return nil
+	})
+	return count, err
+}

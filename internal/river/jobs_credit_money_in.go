@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -53,9 +54,10 @@ const KindInvoice = "openrails.invoice"
 // InvoiceArgs lets one invoice-domain worker serve the recurring invoice
 // lifecycle without splitting each phase into a separate River worker type.
 type InvoiceArgs struct {
-	Collect               bool `json:"collect,omitempty"`
-	UseMonthlyFloor       bool `json:"use_monthly_floor,omitempty"`
-	FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
+	MerchantID            uuid.UUID `json:"merchant_id,omitempty"`
+	Collect               bool      `json:"collect,omitempty"`
+	UseMonthlyFloor       bool      `json:"use_monthly_floor,omitempty"`
+	FinalizePreviousMonth bool      `json:"finalize_previous_month,omitempty"`
 }
 
 func (InvoiceArgs) Kind() string { return KindInvoice }
@@ -84,6 +86,10 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 		// scan would suppress collection for the rest of its thirty-day bucket,
 		// even after a restart with writes enabled.
 		return river.JobSnooze(time.Minute)
+	}
+	if job.Args.MerchantID != uuid.Nil {
+		ctx = merchant.WithID(ctx, billing.MerchantID(job.Args.MerchantID))
+		return w.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { return w.workMerchant(ctx, job, logger) })
 	}
 	// #673: every money path below (settings, finalize, collect) requires a
 	// merchant in context; fan out per merchant.

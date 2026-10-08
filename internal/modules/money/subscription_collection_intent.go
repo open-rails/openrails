@@ -542,7 +542,7 @@ func (h *SubscriptionCollectionHandler) awaitRecoveredSubmission(ctx context.Con
 		return intents.Parked(reason)
 	}
 	if err := intents.NewStore(h.DB).CheckRecovery(ctx, in, h.now()); err != nil {
-		return intents.Parked(err.Error())
+		return intents.RecoveryHeld(err.Error())
 	}
 	return intents.Retryable("unsubmitted payment awaits gated execution")
 }

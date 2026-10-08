@@ -150,6 +150,49 @@ func (q *Queries) PSPRecoveryHistoryFloor(ctx context.Context, arg PSPRecoveryHi
 	return oldest_at, err
 }
 
+const resumeProviderRecoveryHeldOperations = `-- name: ResumeProviderRecoveryHeldOperations :many
+UPDATE billing.provider_intents
+SET next_attempt_at=$1::timestamptz,
+    result_evidence=result_evidence-'recovery_held', updated_at=now()
+WHERE merchant_id=$2::uuid AND id IN (
+ SELECT id FROM billing.provider_intents
+ WHERE merchant_id=$2::uuid
+   AND status IN ('pending','failed_retryable','unknown_needs_verify')
+   AND result_evidence @> '{"recovery_held":true}'::jsonb
+   AND (lease_expires_at IS NULL OR lease_expires_at<=$1::timestamptz)
+ ORDER BY id LIMIT $3::int
+ FOR UPDATE SKIP LOCKED
+)
+RETURNING id
+`
+
+type ResumeProviderRecoveryHeldOperationsParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	BatchSize  int32
+}
+
+// Only recovery delays are expedited; issuer retry dates and live leases stand.
+func (q *Queries) ResumeProviderRecoveryHeldOperations(ctx context.Context, arg ResumeProviderRecoveryHeldOperationsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, resumeProviderRecoveryHeldOperations, arg.Now, arg.MerchantID, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertPSPAppliedRefreshWatermark = `-- name: UpsertPSPAppliedRefreshWatermark :exec
 INSERT INTO billing.psp_refresh_watermarks (merchant_id, psp_id, event_domain, watermark_at)
 VALUES ($1::uuid, $2::uuid, 'applied_events', $3::timestamptz)
@@ -168,11 +211,12 @@ func (q *Queries) UpsertPSPAppliedRefreshWatermark(ctx context.Context, arg Upse
 	return err
 }
 
-const upsertPSPCompletedRefreshWatermark = `-- name: UpsertPSPCompletedRefreshWatermark :exec
+const upsertPSPCompletedRefreshWatermark = `-- name: UpsertPSPCompletedRefreshWatermark :execrows
 INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at)
 VALUES($1::uuid,$2::uuid,'completed_events',$3::timestamptz)
 ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE
-SET watermark_at=GREATEST(billing.psp_refresh_watermarks.watermark_at,EXCLUDED.watermark_at),updated_at=now()
+SET watermark_at=EXCLUDED.watermark_at,updated_at=now()
+WHERE billing.psp_refresh_watermarks.watermark_at<EXCLUDED.watermark_at
 `
 
 type UpsertPSPCompletedRefreshWatermarkParams struct {
@@ -181,7 +225,10 @@ type UpsertPSPCompletedRefreshWatermarkParams struct {
 	WatermarkAt time.Time
 }
 
-func (q *Queries) UpsertPSPCompletedRefreshWatermark(ctx context.Context, arg UpsertPSPCompletedRefreshWatermarkParams) error {
-	_, err := q.db.Exec(ctx, upsertPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
-	return err
+func (q *Queries) UpsertPSPCompletedRefreshWatermark(ctx context.Context, arg UpsertPSPCompletedRefreshWatermarkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

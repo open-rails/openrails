@@ -35,6 +35,7 @@ type ledger interface {
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
+	ParkForRecovery(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
 }
 
@@ -222,11 +223,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	}
 
 	if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
-		r.holdForRecovery(ctx, logEntry, stats, intent, now, reason)
+		r.holdForRecovery(ctx, logEntry, stats, intent, now, reason, false)
 		return
 	}
 	if err := r.Store.CheckRecovery(ctx, intent, now); err != nil {
-		r.holdForRecovery(ctx, logEntry, stats, intent, now, err.Error())
+		r.holdForRecovery(ctx, logEntry, stats, intent, now, err.Error(), true)
 		return
 	}
 
@@ -490,7 +491,26 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 			err = r.Store.MarkSucceeded(ctx, intent.ID, now, outcome.Evidence)
 		}
 	case OutcomeRetryable:
-		err = r.Store.MarkFailedRetryable(ctx, intent.ID, now.Add(handler.Backoff(intent.Attempts)), outcome.Reason)
+		next := now.Add(handler.Backoff(intent.Attempts))
+		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == "invoice_collection") {
+			submitted, malformed := hasSubmissionEvidence(intent)
+			if !submitted && malformed == nil {
+				if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
+					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), reason, nil)
+					applied = OutcomeAmbiguous
+					break
+				}
+				if held := r.Store.CheckRecovery(ctx, intent, now); held != nil {
+					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), held.Error(), RecoveryHeld(held.Error()).Evidence)
+					applied = OutcomeAmbiguous
+					break
+				}
+				// Verified-unsubmitted recovery is ready work, not a failed
+				// provider attempt. Execute still rechecks every write guard.
+				next = now
+			}
+		}
+		err = r.Store.MarkFailedRetryable(ctx, intent.ID, next, outcome.Reason)
 	case OutcomeAmbiguous:
 		delay := VerifyDelay
 		if verifying {
@@ -720,13 +740,27 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 // A held write must not strand a possibly submitted operation in an execute
 // state. Redispatch it through Verify, which can record positive receipts while
 // the write gate remains closed, without issuing another provider mutation.
-func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
+func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string, recovery bool) {
 	submitted, malformed := hasSubmissionEvidence(in)
 	if in.IntentType == "subscription_collection" || in.IntentType == "invoice_collection" || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
-		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, nil); err != nil {
+		var evidence map[string]any
+		if recovery {
+			evidence = RecoveryHeld(reason).Evidence
+		}
+		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, evidence); err != nil {
 			logger.WithError(err).Error("cannot schedule held operation readback")
+			return
+		}
+		stats.Parked++
+		return
+	}
+	if recovery {
+		writeCtx, cancel := LedgerWriteContext(ctx)
+		defer cancel()
+		if err := r.Store.ParkForRecovery(r.transitionContext(writeCtx), in.ID, now.Add(ParkRetryInterval), reason); err != nil {
+			logger.WithError(err).Error("cannot retain provider recovery hold")
 			return
 		}
 		stats.Parked++

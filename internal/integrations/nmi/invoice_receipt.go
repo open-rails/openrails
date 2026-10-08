@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -136,9 +135,7 @@ func (c *NMIClient) invoiceSaleCandidate(ctx context.Context, invoice uuid.UUID)
 				}
 				hasSale = hasSale || action.Is("sale")
 				if !action.Succeeded() {
-					code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
-					condition := strings.ToLower(strings.TrimSpace(txn.Condition))
-					if err != nil || code < 200 || code >= 300 || UncertainResponseCode(code) || (condition != "" && condition != "failed" && condition != "complete") {
+					if _, closed := action.DefinitiveDecline(txn.Condition); !closed {
 						return candidate, approved, false, errors.New("invoice history contains an unresolved financial outcome")
 					}
 					continue

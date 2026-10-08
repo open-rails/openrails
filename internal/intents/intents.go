@@ -98,6 +98,12 @@ func Succeeded(evidence map[string]any) Outcome {
 	return Outcome{Class: OutcomeSucceeded, Evidence: evidence}
 }
 func Retryable(reason string) Outcome { return Outcome{Class: OutcomeRetryable, Reason: reason} }
+
+// RecoveryHeld preserves why this operation can be reconsidered promptly when
+// provider catch-up completes. It grants no permission to dispatch a mutation.
+func RecoveryHeld(reason string) Outcome {
+	return Outcome{Class: OutcomeParked, Reason: reason, Evidence: map[string]any{"recovery_held": true}}
+}
 func Ambiguous(reason string) Outcome { return Outcome{Class: OutcomeAmbiguous, Reason: reason} }
 
 // AmbiguousWithEvidence retains an exact provider receipt while local effects

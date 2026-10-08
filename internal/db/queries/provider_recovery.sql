@@ -67,11 +67,12 @@ SELECT watermark_at FROM billing.psp_refresh_watermarks
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
   AND event_domain='completed_events';
 
--- name: UpsertPSPCompletedRefreshWatermark :exec
+-- name: UpsertPSPCompletedRefreshWatermark :execrows
 INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at)
 VALUES(sqlc.arg(merchant_id)::uuid,sqlc.arg(psp_id)::uuid,'completed_events',sqlc.arg(watermark_at)::timestamptz)
 ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE
-SET watermark_at=GREATEST(billing.psp_refresh_watermarks.watermark_at,EXCLUDED.watermark_at),updated_at=now();
+SET watermark_at=EXCLUDED.watermark_at,updated_at=now()
+WHERE billing.psp_refresh_watermarks.watermark_at<EXCLUDED.watermark_at;
 
 -- name: PSPHasUnresolvedFinancialFindings :one
 -- Ignore silences an operator notification; it does not settle a receipt.
@@ -80,3 +81,19 @@ SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings
    AND status IN ('reconcile_required','requires_review','ignored')
    AND finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
      'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift'))::boolean;
+
+-- name: ResumeProviderRecoveryHeldOperations :many
+-- Only recovery delays are expedited; issuer retry dates and live leases stand.
+UPDATE billing.provider_intents
+SET next_attempt_at=sqlc.arg(now)::timestamptz,
+    result_evidence=result_evidence-'recovery_held', updated_at=now()
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
+ SELECT id FROM billing.provider_intents
+ WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+   AND status IN ('pending','failed_retryable','unknown_needs_verify')
+   AND result_evidence @> '{"recovery_held":true}'::jsonb
+   AND (lease_expires_at IS NULL OR lease_expires_at<=sqlc.arg(now)::timestamptz)
+ ORDER BY id LIMIT sqlc.arg(batch_size)::int
+ FOR UPDATE SKIP LOCKED
+)
+RETURNING id;

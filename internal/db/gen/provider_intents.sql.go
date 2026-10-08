@@ -2244,6 +2244,7 @@ func (q *Queries) LockProviderIntentForTierCompletion(ctx context.Context, arg L
 const markProviderIntentFailedRetryable = `-- name: MarkProviderIntentFailedRetryable :execrows
 UPDATE billing.provider_intents
 SET status = 'failed_retryable',
+	result_evidence = result_evidence - 'recovery_held',
     next_attempt_at = $1::timestamptz,
     last_failure_reason = $2,
     lease_expires_at = NULL,
@@ -2389,7 +2390,7 @@ func (q *Queries) MarkProviderIntentSuperseded(ctx context.Context, arg MarkProv
 const markProviderIntentUnknown = `-- name: MarkProviderIntentUnknown :execrows
 UPDATE billing.provider_intents
 SET status = 'unknown_needs_verify',
-    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE($1::jsonb, '{}'::jsonb)
+    result_evidence = (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || COALESCE($1::jsonb, '{}'::jsonb)
       || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = $2::timestamptz,
     last_failure_reason = $3,
@@ -2425,12 +2426,14 @@ func (q *Queries) MarkProviderIntentUnknown(ctx context.Context, arg MarkProvide
 const parkProviderIntent = `-- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
+	result_evidence = CASE WHEN $1::jsonb IS NULL THEN result_evidence - 'recovery_held'
+	  ELSE (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || $1::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
-    next_attempt_at = $1::timestamptz,
-    last_failure_reason = $2,
+    next_attempt_at = $2::timestamptz,
+    last_failure_reason = $3,
     lease_expires_at = NULL,
     updated_at = now()
-WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status = 'in_flight'
+WHERE provider_intents.merchant_id = $4::uuid AND id = $5 AND status = 'in_flight'
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
@@ -2438,10 +2441,11 @@ WHERE provider_intents.merchant_id = $3::uuid AND id = $4 AND status = 'in_fligh
 `
 
 type ParkProviderIntentParams struct {
-	NextAttemptAt time.Time
-	Reason        *string
-	MerchantID    uuid.UUID
-	ID            uuid.UUID
+	RecoveryEvidence []byte
+	NextAttemptAt    time.Time
+	Reason           *string
+	MerchantID       uuid.UUID
+	ID               uuid.UUID
 }
 
 // Park: the attempt was deliberately NOT made (mode gate, kill switch,
@@ -2450,6 +2454,7 @@ type ParkProviderIntentParams struct {
 // must not escalate backoff.
 func (q *Queries) ParkProviderIntent(ctx context.Context, arg ParkProviderIntentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkProviderIntent,
+		arg.RecoveryEvidence,
 		arg.NextAttemptAt,
 		arg.Reason,
 		arg.MerchantID,
