@@ -193,7 +193,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.amount > 0
   AND p.subscription_id IS NULL
   AND (
-        (pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb)
+        (COALESCE(NULLIF(p.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb)
       )
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
@@ -372,7 +372,7 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        -- through its grace window, as a mirrored decline does.
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       COALESCE(s.entitlements_snapshot, pd.entitlements) AS entitlements
+       COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) AS entitlements
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -382,8 +382,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
-  AND COALESCE(s.entitlements_snapshot, pd.entitlements) IS NOT NULL
-  AND COALESCE(s.entitlements_snapshot, pd.entitlements) <> '[]'::jsonb
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) IS NOT NULL
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= sqlc.arg(scan_since)::timestamptz)
   AND NOT EXISTS (

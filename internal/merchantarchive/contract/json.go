@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "entitlements": dictionary(nullable(integerValue)),
+var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
 	"replaces": object(map[string]jsonRule{"subscription_id": uuidValue, "price_id": uuidValue, "period_end": textValue, "credit": moneyStringValue})})
 
 var creditGrantJSON = nullable(func(v any) bool {
@@ -29,7 +29,7 @@ var creditGrantJSON = nullable(func(v any) bool {
 
 var acceptedPurchaseJSON = object(map[string]jsonRule{
 	"price_id": uuidValue, "product_id": uuidValue, "payment_id": uuidValue, "product_key": textValue, "product_name": textValue,
-	"amount": moneyStringValue, "currency": textValue, "access_duration_hours": nullable(integerValue), "entitlements": nullable(dictionary(nullable(integerValue))),
+	"amount": moneyStringValue, "currency": textValue, "access_duration_hours": nullable(integerValue), "entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)),
 	"accepted_at": textValue, "entitlement_start": textValue, "credit_grant": creditGrantJSON,
 	"psp_links": dictionary(object(map[string]jsonRule{"psp_id": uuidValue, "rail": textValue, "plan_id": textValue, "form_name": textValue, "flex_id": textValue, "price_id": textValue, "product_id": textValue, "provider": textValue, "recurring_billing_option_id": textValue})),
 })
@@ -39,12 +39,18 @@ var acceptedRenewalJSON = object(map[string]jsonRule{
 	"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
 	"product_name": textValue, "amount": moneyStringValue, "currency": textValue,
 	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue),
-	"entitlements": nullable(dictionary(nullable(integerValue))), "previous_entitlements": nullable(dictionary(nullable(integerValue))),
+	"entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)), "previous_entitlements": nullable(acceptedEntitlementsJSON),
 	"reprice_id": uuidValue, "scheduled_price_id": uuidValue,
 })
 var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue})
 
 type jsonRule func(any) bool
+
+// Accepted payloads retain their old map representation as historical evidence.
+// New catalog and stored snapshot contracts accept only lists.
+func acceptedEntitlementsJSON(v any) bool {
+	return array(textValue)(v) || dictionary(nullable(integerValue))(v)
+}
 
 // Application metadata is opaque JSON. The bounded parser validates its syntax;
 // the archive preserves it without interpreting keys or filtering string values.
@@ -276,7 +282,7 @@ var jsonRules = map[string]jsonRule{
 		"checkout_attempt_id": uuidValue,
 		"request_fingerprint": sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
 		"credit_grant":      creditGrantJSON,
-		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
+		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
 	}),
 	"provider_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
@@ -308,11 +314,12 @@ var jsonRules = map[string]jsonRule{
 	"custodians.settings":                        object(map[string]jsonRule{"public_api_key": textValue, "profile_id": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
 	"merchant_configuration_applications.result": object(map[string]jsonRule{"application_id": textValue, "revision": textValue, "replayed": booleanValue}),
 	"catalog_applications.result":                object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
-	"products.entitlements_spec":                 nullable(dictionary(nullable(integerValue))),
-	"subscriptions.entitlements_spec_snapshot":   nullable(dictionary(nullable(integerValue))),
+	"products.entitlements":                      array(textValue),
+	"subscriptions.entitlements_snapshot":        nullable(array(textValue)),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
-	"subscriptions.gateway_response":      metadataJSON,
-	"payments.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
+	"subscriptions.gateway_response":    metadataJSON,
+	"payments.entitlements_snapshot":    nullable(array(textValue)),
+	"payments.legacy_entitlement_hours": nullable(dictionary(integerValue)),
 	"billing_policies.policy": object(map[string]jsonRule{
 		"kind": textValue, "outstanding_cap_amount": integerValue, "spend_windows": array(budgetWindow), "bad_spend_windows": array(budgetWindow), "accrual_rate_cap_per_hour": integerValue, "accrual_rate_window_seconds": integerValue, "collection_threshold_amount": nullable(integerValue), "collection_cycle_boundary": func(v any) bool { return v == "" }, "delinquency_grace_days": nullable(integerValue), "delinquency_amount_floor": nullable(integerValue), "policy_currency": textValue,
 	}),

@@ -647,7 +647,7 @@ FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
     SELECT jsonb_agg(feat ORDER BY feat) AS spec
-    FROM jsonb_array_elements_text(COALESCE(s.entitlements_snapshot, pd.entitlements)) AS feat
+    FROM jsonb_array_elements_text(COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements)) AS feat
     WHERE NOT EXISTS (
         SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
@@ -664,8 +664,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND COALESCE(s.entitlements_snapshot, pd.entitlements) IS NOT NULL
-  AND COALESCE(s.entitlements_snapshot, pd.entitlements) <> '[]'::jsonb
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) IS NOT NULL
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz

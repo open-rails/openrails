@@ -94,7 +94,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	}
 	accepted := subscriptions.InitialMembershipTerms{PaymentID: payment.ID, SubscriptionID: t.SubscriptionID, CustomerID: t.CustomerID, PSPID: t.PSPID, PriceID: t.PriceID, ProductID: t.ProductID, Amount: t.Amount, RecurringAmount: t.Amount, Currency: t.Currency, Entitlements: t.Entitlements, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, AccessDurationHours: t.AccessDurationHours}
 	if accepted.Entitlements == nil {
-		accepted.Entitlements = map[string]*int{}
+		accepted.Entitlements = []string{}
 	}
 	if err := subscriptions.ValidateInitialMembershipPayment(accepted, payment, models.Rail(op.Rail), transaction); err != nil {
 		return err

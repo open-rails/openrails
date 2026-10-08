@@ -145,7 +145,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		if hasGrant {
 			return errors.New("reversed initial payment granted access")
 		}
-		historyTerms.Entitlements = map[string]*int{}
+		historyTerms.Entitlements = []string{}
 	}
 	if p.Terms.Pending && sub.Status != models.StatusPending {
 		anyGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})

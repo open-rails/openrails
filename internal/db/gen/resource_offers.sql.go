@@ -171,7 +171,7 @@ SELECT cardinality($1::text[])>0 AND NOT EXISTS (
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
       AND s.rail_state->'accepted_purchase'->>'access_duration_hours' IS NULL
       AND s.rail_state->'accepted_purchase'->'entitlements' ? wanted.key
-      AND COALESCE(s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0'
+      AND COALESCE(s.rail_state->'accepted_purchase'->'legacy_entitlements'->>wanted.key,s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0'
       -- #1099: a session whose sale finally failed reserves nothing; its
       -- operation's outcome is the session's.
       AND NOT EXISTS (SELECT 1 FROM billing.provider_intents f
@@ -184,7 +184,7 @@ SELECT cardinality($1::text[])>0 AND NOT EXISTS (
       AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
       AND i.payload->>'access_duration_hours' IS NULL
       AND i.payload->'entitlements' ? wanted.key
-      AND COALESCE(i.payload->'entitlements'->>wanted.key,'0')='0')
+      AND COALESCE(i.payload->'legacy_entitlements'->>wanted.key,i.payload->'entitlements'->>wanted.key,'0')='0')
  ))
 )
 `

@@ -25,6 +25,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
 			table++
+			// Archives preceding invoice cadence have no completed scan to retain.
+			if table < len(Profiles) && Profiles[table].Name == "invoice_collection_cadence" && r.Table == "invoices" {
+				table++
+			}
 			if table >= len(Profiles) || r.Table != Profiles[table].Name {
 				return fmt.Errorf("invalid archive table order")
 			}
@@ -42,6 +46,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		}
 		if (p.Name == "prices" || p.Name == "products" || p.Name == "payments") && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
+		}
+		if p.Name == "payments" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, nil, nil) // Before purchased credits and private legacy duration evidence.
 		}
 		if p.Name == "prices" && len(r.Values) == len(p.Columns) {
 			for i, c := range p.Columns {
@@ -85,6 +92,12 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			legacyDurations = true
 		}
+		if len(r.Values) == len(p.Columns) {
+			if err := normalizeEntitlementRow(p, r.Values, priceAccess); err != nil {
+				return err
+			}
+		}
+
 		if err := ValidateValues(p, r.Values); err != nil {
 			return err
 		}
