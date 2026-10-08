@@ -234,6 +234,16 @@ func hasSubmissionEvidence(in gen.BillingProviderIntent) (bool, error) {
 		key = "initial_submitted"
 	case "nmi_sale":
 		key = "sale_submitted"
+	case "nmi_upgrade":
+		// Tier changes fence their one-time proration inside the step. The
+		// remaining schedule update must not strand its charge behind a gate.
+		if raw := evidence["proration"]; len(raw) > 0 && string(raw) != "null" {
+			var step map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &step); err != nil {
+				return false, err
+			}
+			evidence = step
+		}
 	}
 	_, found := evidence[key]
 	return found, nil

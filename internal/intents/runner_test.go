@@ -344,6 +344,8 @@ func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
 		{"readonly submitted operation", "subscription_collection", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
 		{"restored invoice without local fence", "invoice_collection", modeFull, nil},
 		{"readonly invoice without local fence", "invoice_collection", modeReadonly, nil},
+		{"stale paid tier change", "nmi_upgrade", modeFull, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
+		{"readonly paid tier change", "nmi_upgrade", modeReadonly, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			intent := testIntent(test.kind, OriginSystem, 1)

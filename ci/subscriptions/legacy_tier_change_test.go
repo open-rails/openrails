@@ -26,10 +26,13 @@ const tierUpdateStuck = "life.tier_change.provider_update_stuck"
 // legacyOnTier imports an NMI-owned membership on price, whose NMI schedule
 // bills cents every cycle hours and next bills `left` from now (a date).
 func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, left time.Duration) *legacy {
+	return w.legacyOnTierEndingAt(tp, price, cents, cycle, w.clock.Now().Add(left).UTC().Truncate(24*time.Hour))
+}
+
+func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle int, end time.Time) *legacy {
 	t := w.t
 	t.Helper()
 	c := w.newCustomer()
-	end := w.clock.Now().Add(left).UTC().Truncate(24 * time.Hour)
 	start := end.Add(-time.Duration(cycle) * time.Hour)
 	amount := fmt.Sprintf("%d.%02d", cents/100, cents%100)
 	vault := w.nmi.AddVault(visa)
