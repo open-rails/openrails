@@ -346,7 +346,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			require.Zero(t, len(w.nmi.Attempts()), "read-only posture holds automatic recovery")
 			w.cfg = nil
 			w.restart()
-			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+			w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 			w.runRenewals()
 			sub = w.subscription(tp, l.sub)
 			require.Equal(t, billing.SubscriptionActive, sub.Status)
