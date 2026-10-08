@@ -51,7 +51,7 @@ func openSolanaShop(t *testing.T) *solanaShop {
 	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
     currency: usd
     unit_amount: 23000000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [nmi, solana]
     psp_links:

@@ -30,7 +30,7 @@ func TestRepriceBatches(t *testing.T) {
 	require.Equal(t, 1, preview.Matched, "the preview counts the whole chain before the new version exists")
 
 	hours := monthHours
-	next, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: old.ProductID, Key: old.Key, UnitAmount: 12_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	next, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: old.ProductID, Key: old.Key, UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	effective := w.clock.Now().Add(45 * 24 * time.Hour).UTC().Truncate(time.Second)
 	create := billing.CreateRepriceBatchParams{ProductKey: product.Key, PriceKey: old.Key, EffectiveAt: effective}

@@ -37,7 +37,7 @@ func canonicalWireFixtures() map[string]any {
 	param, sourceID := "amount", "deposit-1"
 	periodHours, expMonth, expYear := 720, 12, 2030
 	card := &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("4242"), ExpMonth: &expMonth, ExpYear: &expYear}
-	priceFixtureValue := billing.Price{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AccessDurationHours: &periodHours, AutoRenew: true,
+	priceFixtureValue := billing.Price{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AccessDurationHours: &periodHours, BillingIntervalHours: &periodHours,
 		PSPs: map[string]billing.PSPLinkState{"mobius": {Status: billing.PSPLinkLinked, SyncStatus: billing.SyncStatusUnknown}}, PendingManualActions: []billing.PendingAction{}, CreatedAt: when, UpdatedAt: when}
 	return map[string]any{
 		"error_envelope.json": errorEnvelope{Error: billing.ErrorDetails{
@@ -64,7 +64,7 @@ func canonicalWireFixtures() map[string]any {
 		}},
 		"checkout_session.json": checkoutsession.CheckoutSession{
 			ID: "ocs_fixture", Status: "requires_action", Merchant: checkoutsession.CheckoutSessionMerchant{DisplayName: "Acme Demo"},
-			Plan:      checkoutsession.CheckoutSessionPlan{DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, PeriodHours: &periodHours, AutomaticallyRenews: true},
+			Plan:      checkoutsession.CheckoutSessionPlan{DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, BillingIntervalHours: &periodHours, AccessDurationHours: &periodHours},
 			LineItems: []checkoutsession.CheckoutSessionLineItem{{Label: "Premium Membership", Sublabel: ptr("Renews monthly"), Amount: maxMoney}, {Label: "Launch discount", Amount: minMoney}},
 			Tax:       &zero, DueToday: &maxMoney,
 			Options: []checkoutsession.CheckoutSessionOption{

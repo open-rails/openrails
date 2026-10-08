@@ -488,7 +488,7 @@ func TestEngineRepricing(t *testing.T) {
 		price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, old.price), billing.GetPriceParams{})
 		require.NoError(t, err)
 		hours := monthHours
-		bumped, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		bumped, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		require.NotEqual(t, price.ID, bumped.ID)
 		archived, err := w.client[tp].GetPrice(t.Context(), price.ID, billing.GetPriceParams{})

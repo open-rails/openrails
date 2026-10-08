@@ -79,8 +79,8 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 			// natural-key lookup must preserve them rather than mint a duplicate.
 			legacyID := uuid.New()
 			_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices
-				(id, merchant_id, product_id, key, amount, currency, archived, auto_renew)
-				SELECT $1, merchant_id, id, 'imported', 4000000, 'USD', false, false
+				(id, merchant_id, product_id, key, amount, currency, archived, billing_interval_hours)
+				SELECT $1, merchant_id, id, 'imported', 4000000, 'USD', false, NULL
 				FROM billing.products WHERE id=$2`), legacyID, products[0].ID.UUID())
 			require.NoError(t, err)
 			imported := create(products[0], "imported", 4_000_000)
@@ -159,7 +159,7 @@ func TestCatalogConcurrentPriceVersions(t *testing.T) {
 func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	w := newWorld(t)
 	file := func(amount int64) *catalog.Application {
-		price := catalog.ApplyPrice{Key: "purchase", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount), Archived: catalog.Value(false), AutoRenew: catalog.Value(false), AccessDurationHours: catalog.Null[int](), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int]()}
+		price := catalog.ApplyPrice{Key: "purchase", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount), Archived: catalog.Value(false), BillingIntervalHours: catalog.Null[int](), AccessDurationHours: catalog.Null[int](), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int]()}
 		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{
 			{Key: "video", DisplayName: catalog.Value("Video"), Archived: catalog.Value(false), EntitlementsSpec: catalog.Value(map[string]*int{"video:one": nil}), Prices: []catalog.ApplyPrice{price}},
 			{Key: "other-video", DisplayName: catalog.Value("Other video"), Archived: catalog.Value(false), Prices: []catalog.ApplyPrice{price}},
@@ -246,8 +246,7 @@ func TestCatalogArchivedVersionKeepsProviderBindings(t *testing.T) {
 	hours := monthHours
 	create := func(amount int64, plan string) *billing.Price {
 		t.Helper()
-		price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: amount, Currency: "USD", AccessDurationHours: &hours, AutoRenew: true,
-			PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
+		price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: amount, Currency: "USD", AccessDurationHours: &hours, BillingIntervalHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 		require.NoError(t, err)
 		return price
 	}
@@ -256,8 +255,7 @@ func TestCatalogArchivedVersionKeepsProviderBindings(t *testing.T) {
 	_, err = c.UpdatePrice(t.Context(), second.ID, billing.UpdatePriceParams{Archived: catalog.Value(true)})
 	require.NoError(t, err)
 	_, err = c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{Key: product.Key, Prices: []catalog.ApplyPrice{{
-		Key: "monthly", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(1_000_000)), AccessDurationHours: catalog.Value(hours), AutoRenew: catalog.Value(true),
-		TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int](), Archived: catalog.Value(true),
+		Key: "monthly", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(1_000_000)), AccessDurationHours: catalog.Value(hours), BillingIntervalHours: catalog.Value(hours), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int](), Archived: catalog.Value(true),
 	}}}}})
 	require.NoError(t, err)
 	preserved, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
@@ -281,17 +279,17 @@ func TestCatalogImmutableDatabaseRows(t *testing.T) {
 	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "purchase", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	for name, statement := range map[string]string{
-		"amount":         "UPDATE billing.prices SET amount=2000000 WHERE id=$1",
-		"currency":       "UPDATE billing.prices SET currency='EUR' WHERE id=$1",
-		"duration":       "UPDATE billing.prices SET access_duration_hours=720 WHERE id=$1",
-		"auto_renew":     "UPDATE billing.prices SET auto_renew=true, access_duration_hours=720 WHERE id=$1",
-		"trial":          "UPDATE billing.prices SET auto_renew=true, access_duration_hours=720, trial_unit_amount=0, trial_duration_hours=24 WHERE id=$1",
-		"key":            "UPDATE billing.prices SET key='renamed' WHERE id=$1",
-		"revision":       "UPDATE billing.prices SET revision=revision+1 WHERE id=$1",
-		"product":        fmt.Sprintf("UPDATE billing.prices SET product_id='%s' WHERE id=$1", other.ID.UUID()),
-		"price delete":   "DELETE FROM billing.prices WHERE id=$1",
-		"product key":    fmt.Sprintf("UPDATE billing.products SET key='renamed-product' WHERE id='%s' AND $1::uuid IS NOT NULL", other.ID.UUID()),
-		"product delete": fmt.Sprintf("DELETE FROM billing.products WHERE id='%s' AND $1::uuid IS NOT NULL", other.ID.UUID()),
+		"amount":           "UPDATE billing.prices SET amount=2000000 WHERE id=$1",
+		"currency":         "UPDATE billing.prices SET currency='EUR' WHERE id=$1",
+		"duration":         "UPDATE billing.prices SET access_duration_hours=720 WHERE id=$1",
+		"billing_interval": "UPDATE billing.prices SET billing_interval_hours=720, access_duration_hours=720 WHERE id=$1",
+		"trial":            "UPDATE billing.prices SET billing_interval_hours=720, access_duration_hours=720, trial_unit_amount=0, trial_duration_hours=24 WHERE id=$1",
+		"key":              "UPDATE billing.prices SET key='renamed' WHERE id=$1",
+		"revision":         "UPDATE billing.prices SET revision=revision+1 WHERE id=$1",
+		"product":          fmt.Sprintf("UPDATE billing.prices SET product_id='%s' WHERE id=$1", other.ID.UUID()),
+		"price delete":     "DELETE FROM billing.prices WHERE id=$1",
+		"product key":      fmt.Sprintf("UPDATE billing.products SET key='renamed-product' WHERE id='%s' AND $1::uuid IS NOT NULL", other.ID.UUID()),
+		"product delete":   fmt.Sprintf("DELETE FROM billing.products WHERE id='%s' AND $1::uuid IS NOT NULL", other.ID.UUID()),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := w.pool.Exec(t.Context(), w.sql(statement), price.ID.UUID())
@@ -332,11 +330,11 @@ func TestCatalogRepriceStaysWithinProduct(t *testing.T) {
 		product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: fmt.Sprintf("scoped-%d", i), DisplayName: "Scoped", EntitlementsSpec: map[string]*int{entitlement: nil}})
 		require.NoError(t, err)
 		products[i] = product
-		prices[i], err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 10_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		prices[i], err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		buyer := w.newCustomer()
 		subs[i] = buyer.subscribe(embedded, "stripe", prices[i].ID.String(), entitlement, buyer.saveCard("stripe", visa))
-		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 12_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		require.Equal(t, prices[i].ID, w.subscription(embedded, subs[i]).PriceID, "catalog replacement cannot reprice the existing subscription")
 	}

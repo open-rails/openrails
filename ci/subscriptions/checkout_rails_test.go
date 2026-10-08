@@ -89,7 +89,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
     currency: usd
     unit_amount: 23000000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [nmi, solana]
     psp_links:
@@ -99,7 +99,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
   - key: "{key}-once"
     currency: usd
     unit_amount: 5000000
-    auto_renew: false
+    billing_interval_hours: null
     access_duration_hours: 720
     psps: [nmi, solana]
 `, plan))
@@ -147,13 +147,13 @@ func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
 	key, err := w.applyCatalog(`  - key: "{key}-monthly"
     currency: usd
     unit_amount: 23000000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [nmi]
   - key: "{key}-once"
     currency: usd
     unit_amount: 5000000
-    auto_renew: false
+    billing_interval_hours: null
     access_duration_hours: 720
     psps: [nmi]
 `)
@@ -171,7 +171,7 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
     currency: usd
     unit_amount: 23000000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [ccbill]
     psp_links:
@@ -207,7 +207,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 	_, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
     currency: usd
     unit_amount: 23000000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [ccbill]
     psp_links:
@@ -225,7 +225,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 	_, err = w.applyCatalog(fmt.Sprintf(`  - key: "{key}-retired"
     currency: usd
     unit_amount: 19000000
-    auto_renew: true
+    billing_interval_hours: 720
     archived: true
     access_duration_hours: 720
     psps: [ccbill]

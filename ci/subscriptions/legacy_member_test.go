@@ -148,7 +148,7 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	require.NoError(t, err)
 	hours := monthHours
 	plan := "legacy_plan_" + uuid.NewString()[:8]
-	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(t, err)
 	start := w.clock.Now().Add(-5 * day)

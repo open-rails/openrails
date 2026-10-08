@@ -183,7 +183,7 @@ func TestCopiedStripeBookRefusesConflictingRenewalTerms(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{
 		ProductID: old.ProductID, Key: old.Key, UnitAmount: old.UnitAmount + 10000,
-		Currency: old.Currency, AutoRenew: true, AccessDurationHours: old.AccessDurationHours,
+		Currency: old.Currency, BillingIntervalHours: old.AccessDurationHours, AccessDurationHours: old.AccessDurationHours,
 	})
 	require.NoError(t, err)
 	batch, err := client.CreateRepriceBatch(t.Context(), billing.CreateRepriceBatchParams{

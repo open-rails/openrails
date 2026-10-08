@@ -61,7 +61,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
   - key: %[1]s-%[2]s-monthly
     currency: usd
     unit_amount: %[3]d
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [solana]
     psp_links:

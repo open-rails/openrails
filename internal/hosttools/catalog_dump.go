@@ -186,7 +186,10 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		price := catalog.ApplyPrice{Key: row.Key}
 		price.UnitAmount = catalog.Value(row.Amount)
 		price.Currency = catalog.Value(row.Currency)
-		price.AutoRenew = catalog.Value(row.AutoRenew)
+		price.BillingIntervalHours = catalog.Null[int]()
+		if row.BillingIntervalHours != nil {
+			price.BillingIntervalHours = catalog.Value(int(*row.BillingIntervalHours))
+		}
 		price.Archived = catalog.Value(row.Archived)
 		price.AccessDurationHours = catalog.Null[int]()
 		if row.AccessDurationHours != nil {

@@ -35,7 +35,7 @@ products:
   - key: monthly
     currency: USD
     unit_amount: 9990000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     trial_unit_amount: 0
     trial_duration_hours: 24

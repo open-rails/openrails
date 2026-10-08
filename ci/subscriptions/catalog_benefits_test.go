@@ -39,7 +39,7 @@ func importCatalogBenefitsCCBill(t *testing.T, w *world, benefits map[string]*in
 	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "accepted-benefits", DisplayName: "Accepted benefits", EntitlementsSpec: benefits})
 	require.NoError(t, err)
 	hours := monthHours
-	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 	start := w.clock.Now().Add(-10 * day)
@@ -159,7 +159,7 @@ func TestCatalogPendingBenefitsRemainAcceptedOnFirstPayment(t *testing.T) {
 			product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pending-benefits", DisplayName: "Pending benefits", EntitlementsSpec: benefits})
 			require.NoError(t, err)
 			hours := monthHours
-			price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+			price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 			require.NoError(t, err)
 			buyer := w.newCustomer()
 			method := pmid(buyer.saveCard("nmi", visa))

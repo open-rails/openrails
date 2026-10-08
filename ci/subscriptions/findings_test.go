@@ -150,8 +150,8 @@ func (w *world) chargeAgain(customerID string, after time.Duration, newPrice boo
 // charge (a plan change target).
 func (w *world) anotherPrice(customerID string) {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew, key, archived)
-		SELECT gen_random_uuid(), p.product_id, p.amount * 2, p.currency, p.merchant_id, p.access_duration_hours, p.auto_renew, p.key || '-plus', false
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, billing_interval_hours, key, archived)
+		SELECT gen_random_uuid(), p.product_id, p.amount * 2, p.currency, p.merchant_id, p.access_duration_hours, p.billing_interval_hours, p.key || '-plus', false
 		FROM billing.payments pay JOIN billing.prices p ON p.id = pay.price_id
 		WHERE pay.customer_id = $1::uuid ORDER BY pay.purchased_at DESC LIMIT 1
 		ON CONFLICT DO NOTHING`), customerID)

@@ -32,7 +32,7 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
 	w.stripe.legacyPrice(stripePrice, 1999)
-	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 
@@ -69,7 +69,7 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
 	w.stripe.legacyPrice(stripePrice, 1999)
-	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 	paidBefore := len(completed(w.payments(embedded, l.c.id)))

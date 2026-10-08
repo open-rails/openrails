@@ -31,7 +31,7 @@ products:
   - key: monthly
     currency: usd
     unit_amount: %[3]d
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
 `, key, title, amount)))
 		require.NoError(t, err)

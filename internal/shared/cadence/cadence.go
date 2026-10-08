@@ -12,11 +12,11 @@ import (
 // PriceIntervalLabel is the default price-key interval label. Distinct
 // cadences always get distinct labels: <n>h, or <n>d on whole days, with the
 // named labels reserved for exactly 168/720/2160/8760 hours.
-func PriceIntervalLabel(accessDurationHours *int, autoRenew bool) string {
-	if !autoRenew || accessDurationHours == nil {
+func PriceIntervalLabel(billingIntervalHours *int) string {
+	if billingIntervalHours == nil {
 		return "onetime"
 	}
-	h := *accessDurationHours
+	h := *billingIntervalHours
 	switch h {
 	case 168:
 		return "weekly"
@@ -34,14 +34,11 @@ func PriceIntervalLabel(accessDurationHours *int, autoRenew bool) string {
 }
 
 // Same reports whether two prices bill on the same cadence.
-func Same(aHours *int, aRenew bool, bHours *int, bRenew bool) bool {
-	if aRenew != bRenew {
-		return false
+func Same(aHours, bHours *int) bool {
+	if aHours == nil || bHours == nil {
+		return aHours == nil && bHours == nil
 	}
-	if !aRenew {
-		return true
-	}
-	return aHours != nil && bHours != nil && *aHours == *bHours
+	return *aHours == *bHours
 }
 
 // ShortPeriod is the period length below which an instant is shown with its

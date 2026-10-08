@@ -77,7 +77,7 @@ products:
 	for _, tp := range []topology{embedded, remote} {
 		_, err := w.client[tp].UpdateProduct(t.Context(), p.ID, billing.UpdateProductParams{CreditGrant: catalog.Null[catalog.CreditGrantSpec]()})
 		require.Error(t, err)
-		_, err = w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: p.ID, Key: "bad", Currency: "USD", UnitAmount: 1000000, AutoRenew: true, AccessDurationHours: ptrCreditHours(720)})
+		_, err = w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: p.ID, Key: "bad", Currency: "USD", UnitAmount: 1000000, BillingIntervalHours: ptrCreditHours(720), AccessDurationHours: ptrCreditHours(720)})
 		require.Error(t, err)
 	}
 	// Partial batches may archive the incompatible offer and change the product
@@ -102,8 +102,8 @@ products:
 	_, err = w.pool.Exec(t.Context(), w.sql(`UPDATE billing.prices SET customer_amount='{"min_amount":"2000000","max_amount":"100000000"}'::jsonb WHERE id=$1`), first.ID.UUID())
 	require.Error(t, err, "deposit bounds are immutable in the database")
 	for _, bounds := range []string{`{"min_amount":null,"max_amount":"100000000"}`, `{"min_amount":"1000000","max_amount":null}`} {
-		_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,auto_renew,customer_amount)
-   SELECT gen_random_uuid(),merchant_id,product_id,'invalid',0,currency,false,$2::jsonb FROM billing.prices WHERE id=$1`), first.ID.UUID(), bounds)
+		_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,billing_interval_hours,customer_amount)
+   SELECT gen_random_uuid(),merchant_id,product_id,'invalid',0,currency,NULL,$2::jsonb FROM billing.prices WHERE id=$1`), first.ID.UUID(), bounds)
 		require.Error(t, err, "null bounds must fail a database check")
 	}
 }

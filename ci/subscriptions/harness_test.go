@@ -798,7 +798,7 @@ func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int)
 	client := w.client[embedded]
 	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
 	require.NoError(w.t, err)
-	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }

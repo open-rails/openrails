@@ -46,7 +46,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
-	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 

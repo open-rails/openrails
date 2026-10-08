@@ -78,7 +78,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 			EntitlementsSpec: map[string]*int{"content:plan": nil}})
 		require.NoError(t, err)
 		require.Empty(t, product.Prices)
-		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: int64(i+1) * 1_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: int64(i+1) * 1_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 			PSPLinks: map[string]map[string]string{"nmi": {"plan_id": "plan-" + uuid.NewString()[:8]}}})
 		require.NoError(t, err)
 		products = append(products, product)
@@ -94,7 +94,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	require.NotEmpty(t, price.PSPs["nmi"].IDs["plan_id"])
 	var wire map[string]any
 	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices/"+price.ID.String(), nil, &wire))
-	for _, field := range []string{"id", "key", "product_id", "archived", "unit_amount", "currency", "access_duration_hours", "auto_renew", "trial_unit_amount", "trial_duration_hours", "psps", "pending_manual_actions", "created_at", "updated_at"} {
+	for _, field := range []string{"id", "key", "product_id", "archived", "unit_amount", "currency", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "psps", "pending_manual_actions", "created_at", "updated_at"} {
 		require.Contains(t, wire, field, "nulls are present, never omitted")
 	}
 	require.NotContains(t, wire, "providers")
@@ -117,7 +117,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	}
 	require.Len(t, seen, 3)
 	var envelope map[string]any
-	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices?limit=1&auto_renew=true", nil, &envelope))
+	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices?limit=1&recurring=true", nil, &envelope))
 	require.Len(t, envelope["data"], 1)
 	require.NotNil(t, envelope["next_cursor"])
 	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices?cursor=nope", nil, nil))
@@ -140,7 +140,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	require.True(t, keys[products[0].Key])
 	require.False(t, keys[products[2].Key], "an archived product is not on sale")
 	require.Contains(t, listed, "next_cursor")
-	prices := w.public("/v1/prices?" + url.Values{"product_id": {products[0].ID.String()}, "auto_renew": {"true"}}.Encode())
+	prices := w.public("/v1/prices?" + url.Values{"product_id": {products[0].ID.String()}, "recurring": {"true"}}.Encode())
 	require.Len(t, prices["data"], 1)
 
 	// Retired routes and fields are gone.

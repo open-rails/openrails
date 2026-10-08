@@ -71,7 +71,7 @@ func newSolanaPay(t *testing.T) *solanaPay {
 	key, err := w.applyCatalog(`  - key: "{key}-once"
     currency: usd
     unit_amount: 5000000
-    auto_renew: false
+    billing_interval_hours: null
     access_duration_hours: 720
     psps: [solana]
 `)

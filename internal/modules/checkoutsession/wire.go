@@ -53,23 +53,23 @@ type CheckoutSessionMerchant struct {
 
 // CheckoutSessionPlan is the offer: what the buyer pays and how often.
 type CheckoutSessionPlan struct {
-	DisplayName         string `json:"display_name"`
-	UnitAmount          int64  `json:"unit_amount,string"`
-	Currency            string `json:"currency"`
-	UnitDecimals        int    `json:"unit_decimals"`
-	PeriodHours         *int   `json:"period_hours"`
-	AutomaticallyRenews bool   `json:"automatically_renews"`
+	DisplayName          string `json:"display_name"`
+	UnitAmount           int64  `json:"unit_amount,string"`
+	Currency             string `json:"currency"`
+	UnitDecimals         int    `json:"unit_decimals"`
+	BillingIntervalHours *int   `json:"billing_interval_hours"`
+	AccessDurationHours  *int   `json:"access_duration_hours"`
 }
 
 // NewPlan is the plan for a price, stamped with its currency's registered
 // scale. An unregistered currency is billing.ErrInvalid: a scale is never
 // guessed.
-func NewPlan(displayName string, amount int64, currency string, periodHours *int, renews bool) (CheckoutSessionPlan, error) {
+func NewPlan(displayName string, amount int64, currency string, billingIntervalHours, accessDurationHours *int) (CheckoutSessionPlan, error) {
 	units, ok := billing.LookupCurrency(currency)
 	if !ok {
 		return CheckoutSessionPlan{}, fmt.Errorf("%w: currency %q is not registered", billing.ErrInvalid, currency)
 	}
-	return CheckoutSessionPlan{DisplayName: displayName, UnitAmount: amount, Currency: units.Code, UnitDecimals: units.Decimals, PeriodHours: periodHours, AutomaticallyRenews: renews}, nil
+	return CheckoutSessionPlan{DisplayName: displayName, UnitAmount: amount, Currency: units.Code, UnitDecimals: units.Decimals, BillingIntervalHours: billingIntervalHours, AccessDurationHours: accessDurationHours}, nil
 }
 
 // CheckoutSessionLineItem is one order line in the plan currency.

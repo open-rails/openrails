@@ -32,7 +32,7 @@ func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount
 		product, err = client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: productKey, DisplayName: "Cadence " + productKey, EntitlementsSpec: map[string]*int{entitlement: nil}})
 	}
 	require.NoError(w.t, err)
-	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
@@ -69,10 +69,10 @@ func TestCadencePriceKeys(t *testing.T) {
 			products, err := w.client[tp].GetProductByKey(t.Context(), product)
 			require.NoError(t, err)
 			explicit := 36
-			held, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &explicit})
+			held, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", BillingIntervalHours: &explicit, AccessDurationHours: &explicit})
 			require.NoError(t, err)
 			twoDays := 48
-			_, err = w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, UnitAmount: 6_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &twoDays})
+			_, err = w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, UnitAmount: 6_000_000, Currency: "USD", BillingIntervalHours: &twoDays, AccessDurationHours: &twoDays})
 			require.ErrorIs(t, err, billing.ErrPriceKeyCadenceConflict)
 			require.ErrorIs(t, err, billing.ErrConflict)
 			var status *billing.StatusError

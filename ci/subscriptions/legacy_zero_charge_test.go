@@ -42,8 +42,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := days * 24
-	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true,
-		AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
+	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(t, err)
 	cycle := time.Duration(hours) * time.Hour
 	end := w.clock.Now().Add(2 * cycle / 3).UTC().Truncate(24 * time.Hour)

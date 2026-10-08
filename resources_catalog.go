@@ -159,7 +159,7 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams,
 	if params.Currency != "" {
 		q.Set("currency", normalizeCurrency(params.Currency))
 	}
-	setBool(q, "auto_renew", params.AutoRenew)
+	setBool(q, "recurring", params.Recurring)
 	setBool(q, "archived", params.Archived)
 	var out billing.ListPage[billing.Price]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {

@@ -130,7 +130,7 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 	kind := billing.OfferPermanent
 	if recurring {
 		hours := 720
-		params.AccessDurationHours, params.AutoRenew, kind = &hours, true, billing.OfferRecurring
+		params.AccessDurationHours, params.BillingIntervalHours, kind = &hours, &hours, billing.OfferRecurring
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)

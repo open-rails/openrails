@@ -41,13 +41,13 @@ func TestCurrencyRegistry(t *testing.T) {
 
 func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
 	hours := 720
-	plan, err := checkoutsession.NewPlan("Premium", math.MaxInt64, "jpy", &hours, true)
+	plan, err := checkoutsession.NewPlan("Premium", math.MaxInt64, "jpy", &hours, &hours)
 	require.NoError(t, err)
-	require.Equal(t, checkoutsession.CheckoutSessionPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, PeriodHours: &hours, AutomaticallyRenews: true}, plan)
+	require.Equal(t, checkoutsession.CheckoutSessionPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, BillingIntervalHours: &hours, AccessDurationHours: &hours}, plan)
 	raw, err := json.Marshal(plan)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"unit_amount":"9223372036854775807"`)
-	_, err = checkoutsession.NewPlan("Premium", 1, "XYZ", nil, false)
+	_, err = checkoutsession.NewPlan("Premium", 1, "XYZ", nil, nil)
 	require.ErrorIs(t, err, billing.ErrInvalid, "a scale is never guessed")
 	// OpenRails advertises the browser driver per option (#1078); an option
 	// no browser can drive carries none.

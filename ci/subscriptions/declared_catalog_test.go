@@ -39,7 +39,7 @@ products:
   - key: %[1]s-monthly
     currency: usd
     unit_amount: %[3]d
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
   rate_cards:
   - meter: %[1]s-events
@@ -149,7 +149,7 @@ products:
   - key: %[1]s-monthly
     currency: usd
     unit_amount: 9990000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [stripe]
     psp_links:

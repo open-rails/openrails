@@ -60,7 +60,7 @@ func TestCheckoutSessionResolvesStoredMerchant(t *testing.T) {
 	}
 	id, err := checkoutsession.NewID()
 	require.NoError(t, err)
-	plan, err := checkoutsession.NewPlan("private-offer", 123_000_000, "USD", nil, false)
+	plan, err := checkoutsession.NewPlan("private-offer", 123_000_000, "USD", nil, nil)
 	require.NoError(t, err)
 	// This is the capability store boundary, not a fabricated payment. Actual
 	// provider-backed native checkout is exercised by the SaaS adoption journey.
