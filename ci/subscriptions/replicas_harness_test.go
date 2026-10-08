@@ -323,6 +323,32 @@ func (f *fleet) advance(d time.Duration) {
 	}
 }
 
+// refreshBeforeDue models healthy provider observation before a race/fault
+// scenario. Every replica remains before the first due boundary during refresh.
+func (f *fleet) refreshBeforeDue(cases ...*engineCase) {
+	f.t.Helper()
+	var first time.Time
+	for _, e := range cases {
+		if end := f.periodEnd(e); first.IsZero() || end.Before(first) {
+			first = end
+		}
+	}
+	var ahead time.Duration
+	for _, r := range f.live() {
+		ahead = max(ahead, r.clock.Now().Sub(f.base.clock.Now()))
+	}
+	if delta := first.Add(-time.Minute - ahead).Sub(f.base.clock.Now()); delta > 0 {
+		f.advance(delta)
+	}
+	f.any().refreshProviders()
+	f.any().settleCollectionScans()
+}
+
+func (f *fleet) toFreshDue(cases ...*engineCase) {
+	f.refreshBeforeDue(cases...)
+	f.toDue(cases...)
+}
+
 // toDue moves engine time just past the latest paid period of cases.
 func (f *fleet) toDue(cases ...*engineCase) {
 	var end time.Time

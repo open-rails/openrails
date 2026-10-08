@@ -31,7 +31,7 @@ func TestReplicasManyDueAtOnce(t *testing.T) {
 		cases = append(cases, enroll(t, f.replicas[i%3], rails[i%2], embedded))
 	}
 	for period := 2; period <= 3; period++ {
-		f.toDue(cases...)
+		f.toFreshDue(cases...)
 		f.passes()
 		f.passes() // a second round in the same period admits nothing
 		for _, e := range cases {
@@ -56,7 +56,7 @@ func TestReplicasAdmissionRace(t *testing.T) {
 			t.Parallel()
 			f := newFleet(t, 2)
 			e := enroll(t, f.replicas[0], rail, embedded)
-			f.toDue(e)
+			f.toFreshDue(e)
 			lock := f.lockCustomer(e)
 			passes := f.startPasses()
 			lock.awaitWaiters(f.replicas...)
@@ -112,7 +112,7 @@ func TestReplicasSettledBeforeAdmission(t *testing.T) {
 			f.advance(day)
 			first := enroll(t, a, rail, embedded)
 			late.setDecline(visa.Last4, "insufficient_funds", "202")
-			f.toDue(late)
+			f.toFreshDue(late)
 			f.passes()
 			retry := f.subscription(late)
 			require.Equal(t, billing.SubscriptionPastDue, retry.Status)
@@ -121,6 +121,7 @@ func TestReplicasSettledBeforeAdmission(t *testing.T) {
 			require.True(t, f.periodEnd(first).Before(*retry.NextRetryAt))
 			lock := f.lockCustomer(first)
 			f.advance(retry.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
+			a.refreshProviders() // The earlier customer lock keeps every due pass behind the intended barrier.
 			passes := f.startPasses(b)
 			lock.awaitWaiters(b) // b has read both as due and waits on the first
 			paid := unwrap(late.c.must(http.MethodPost, "/subscriptions/"+late.sub.String()+"/retry-now", "retry-"+uuid.NewString(), map[string]any{}))
@@ -216,7 +217,7 @@ func TestReplicasCrashMidRenewal(t *testing.T) {
 				f := newFleet(t, 2)
 				e := enroll(t, f.replicas[0], rail, embedded)
 				end := f.periodEnd(e)
-				f.toDue(e)
+				f.toFreshDue(e)
 				dead := point.kill(f, e)
 				f.unhold()
 				f.recover()
@@ -295,7 +296,7 @@ func TestReplicasLeaderCrash(t *testing.T) {
 	for i := range 4 {
 		cases = append(cases, enroll(t, f.replicas[i%3], rails[i%2], embedded))
 	}
-	f.toDue(cases...)
+	f.toFreshDue(cases...)
 	leader := f.awaitLeader(nil)
 	lock := f.lockCustomer(cases[0])
 	f.startPasses(leader)
@@ -327,6 +328,7 @@ func TestReplicasClockSkew(t *testing.T) {
 	cases := []*engineCase{enroll(t, f.replicas[1], "nmi", embedded), enroll(t, f.replicas[1], "stripe", embedded)}
 	end := f.periodEnd(cases[0])
 	require.True(t, end.Equal(f.periodEnd(cases[1])))
+	f.refreshBeforeDue(cases...)
 	f.advance(end.Sub(f.base.clock.Now()) - 10*time.Second)
 	f.passes()
 	for _, e := range cases {
@@ -354,7 +356,7 @@ func TestReplicasNoticeDuringFinalize(t *testing.T) {
 			f := newFleet(t, 2)
 			e := enroll(t, f.replicas[0], rail, embedded)
 			end := f.periodEnd(e)
-			f.toDue(e)
+			f.toFreshDue(e)
 			h := f.hold(rail, receiptRead(f, e), false)
 			f.startPasses()
 			finalizer := h.wait()
@@ -443,14 +445,17 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			e := enroll(t, a, rail, embedded)
 			e.setDecline(visa.Last4, "insufficient_funds", "202")
 			end := f.periodEnd(e)
-			f.toDue(e)
+			f.toFreshDue(e)
 			f.passes()
 			sub := f.subscription(e)
 			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 			require.NotNil(t, sub.NextRetryAt)
 			require.Equal(t, 2, f.submissions(e))
 
-			f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
+			f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) - time.Minute)
+			a.refreshProviders()
+			a.settleCollectionScans()
+			f.advance(2 * time.Minute)
 			lock := f.lockCustomer(e)
 			passes := f.startPasses(a, b)
 			lock.awaitWaiters(a, b)
@@ -538,7 +543,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				f := newFleet(t, 2)
 				e := enroll(t, f.replicas[0], rail, embedded)
 				end := f.periodEnd(e)
-				f.toDue(e)
+				f.toFreshDue(e)
 				match, commit := rc.gate(f, e)
 				h := f.hold(rail, match, commit)
 				f.startPasses()
@@ -639,6 +644,7 @@ func TestReplicasProviderOwned(t *testing.T) {
 		require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from NMI's decline")
 		require.Zero(t, len(f.base.nmi.Attempts()))
 		f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) - time.Minute)
+		f.any().refreshProviders()
 		f.passes()
 		require.Zero(t, len(f.base.nmi.Attempts()), "nothing before the scheduled retry")
 		f.advance(2 * time.Minute)
@@ -665,7 +671,7 @@ func TestReplicasRollingDeploy(t *testing.T) {
 	for _, e := range cases {
 		ends[e] = f.periodEnd(e)
 	}
-	f.toDue(cases...)
+	f.toFreshDue(cases...)
 	f.latency.Store(int64(150 * time.Millisecond))
 	requests := func() int {
 		n := 0

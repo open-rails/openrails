@@ -35,7 +35,7 @@ func TestEngineNMIUnsubmittedAttemptInspectsVisibleOrder(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, "nmi", embedded)
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.refreshBeforePeriodEnd()
 			operation := subscriptions.SubscriptionCollectionOperationID(w.client[embedded].MerchantID().UUID(), w.psp["nmi"].UUID(), subscriptions.SubscriptionCollectionPayload{
 				Renewal: subscriptions.RenewalTerms{SubscriptionID: e.sub.UUID()}, PreviousPeriodEnd: end,
 			})
@@ -47,9 +47,10 @@ func TestEngineNMIUnsubmittedAttemptInspectsVisibleOrder(t *testing.T) {
 			remote := w.nmi.AddSale(nmimock.Sale{
 				OrderID: subscriptions.ObligationOrderReference(e.sub.UUID(), end), OrderDescription: description,
 				Vault: initial.Vault, BillingID: initial.BillingID, Amount: initial.Amount,
-				Declined: tc.code, Condition: tc.condition,
+				Declined: tc.code, Condition: tc.condition, At: end,
 			})
 			before := e.providerAttempts()
+			e.toPeriodEnd()
 			w.runRenewals()
 			if tc.submit {
 				w.until(func() bool { return e.periodEnd().After(end) }, "a previous definitive refusal does not settle this attempt")

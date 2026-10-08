@@ -34,8 +34,11 @@ func TestNMIRecoveryDuplicateRefusalIsNotResent(t *testing.T) {
 	w.cfg = nil
 	w.restart()
 
+	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) - time.Minute)
+	w.refreshProviders()
+	w.settleCollectionScans()
 	w.nmi.RefuseDuplicates(1)
-	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+	w.advance(2 * time.Minute)
 	w.runRenewals()
 	require.Equal(t, 1, len(w.nmi.Attempts()), "the recovery reached NMI once and was refused")
 	for range 6 {

@@ -35,6 +35,9 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, "nmi", remote)
 			end := e.periodEnd()
+			if !invoiceMode {
+				e.refreshBeforePeriodEnd()
+			}
 			w.nmi.Intercept(func(r *http.Request) bool {
 				if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/query.php") {
 					return false

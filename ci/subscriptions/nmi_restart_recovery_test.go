@@ -212,9 +212,11 @@ func TestNMIFiveDayRestartRecovery(t *testing.T) {
 			require.Len(t, w.nmi.Ledger(""), 2, "one initial payment and exactly one renewal")
 			require.Len(t, w.nmi.Attempts(), 2, "recovery does not submit an additional charge")
 			if stage == "paid_before_completion" {
-				var rescued int
-				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.provider_operation' AND metadata ? 'openrails:rescue_count'`)).Scan(&rescued))
-				require.Greater(t, rescued, 0, "normal startup rescue reclaimed the killed job")
+				require.Eventually(t, func() bool {
+					var rescued int
+					err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.provider_operation' AND metadata ? 'openrails:rescue_count'`)).Scan(&rescued)
+					return err == nil && rescued > 0
+				}, 30*time.Second, 50*time.Millisecond, "normal startup rescue independently reclaims the killed job after financial recovery")
 			}
 			first.kill(t)
 			second.kill(t)
