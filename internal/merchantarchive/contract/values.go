@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -148,6 +149,12 @@ func ValidateValues(p Profile, values []*string) error {
 			x, err := strconv.ParseInt(v, 10, bits)
 			if err != nil || strconv.FormatInt(x, 10) != v {
 				return bad()
+			}
+			switch p.Name + "." + c.Name {
+			case "prices.access_duration_hours", "prices.billing_interval_hours", "prices.trial_duration_hours", "subscriptions.access_duration_hours_snapshot":
+				if x <= 0 || x > int64(catalog.MaxDurationHours) {
+					return bad()
+				}
 			}
 		case "boolean":
 			if v != "true" && v != "false" {
