@@ -153,8 +153,9 @@ Browse to the console path, `https://<your-openrails-host>/admin/` by default
 **Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
 whose sign-in form offers password, the deployment's login-capable OIDC providers
 (AuthKit's `/oidc/{provider}/login`), second factors, account
-recovery and backup codes. auth-ui keeps the access token in memory and the
-refresh token in `sessionStorage`, and refreshes it. Every write runs through
+recovery and backup codes. auth-ui keeps the access token in memory; the control
+plane's rotating refresh token stays in an HttpOnly cookie and restores the
+session across page reloads without JavaScript storage. Every write runs through
 auth-ui's step-up dialog: when OpenRails answers `403 step_up_required` (an owner
 operation after a stale sign-in), the dialog asks the user to confirm it's them
 and the write is retried. Who can log in and what they may do is the merchant

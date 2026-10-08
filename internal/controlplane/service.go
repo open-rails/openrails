@@ -328,6 +328,9 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	httpCfg.Groups = cp.MountedRouteGroups()
 	httpCfg.APIPath = authAPIPath(auth.Issuer)
 	httpCfg.RateLimits = options.rateLimitOverrides
+	// The control plane serves same-origin browser clients, including auth-ui.
+	// Refresh credentials stay in AuthKit's protected cookie, not browser JS.
+	httpCfg.RefreshCookie = true
 	deps := authkit.Deps{
 		Postgres:      pool,
 		KeySource:     keySource,
