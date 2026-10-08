@@ -5,7 +5,24 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestDurationHoursArithmeticBoundary(t *testing.T) {
+	hours, err := ParseDurationHours(fmt.Sprintf("%d hours", MaxDurationHours))
+	if err != nil || hours != MaxDurationHours || time.Duration(hours)*time.Hour <= 0 {
+		t.Fatalf("largest valid duration: hours=%d err=%v", hours, err)
+	}
+	for _, text := range []string{
+		fmt.Sprintf("%d hours", MaxDurationHours+1),
+		fmt.Sprintf("%d days", MaxDurationHours/24+1),
+		"2147483647 hours",
+	} {
+		if _, err := ParseDurationHours(text); err == nil {
+			t.Errorf("accepted overflowing duration %q", text)
+		}
+	}
+}
 
 func TestApplicationDurationAliases(t *testing.T) {
 	var first [32]byte
@@ -59,6 +76,7 @@ func TestApplicationRejectsInvalidDurations(t *testing.T) {
 		`"trial_duration":72`,
 		`"billing_interval_hours":0`,
 		`"billing_interval_hours":-1`,
+		fmt.Sprintf(`"access_duration_hours":%d`, MaxDurationHours+1),
 		`"access_duration":"3 days","access_duration_hours":72`,
 		`"billing_interval":null,"billing_interval_hours":null`,
 		`"trial_duration":"1 day","trial_duration_hours":48`,
