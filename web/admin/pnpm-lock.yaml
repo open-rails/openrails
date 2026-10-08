@@ -562,7 +562,7 @@ packages:
     engines: {node: '>= 8'}
 
   '@openrails/auth-ui@https://github.com/open-rails/authkit/releases/download/v1.1.1/openrails-auth-ui-1.1.1.tgz':
-    resolution: {tarball: https://github.com/open-rails/authkit/releases/download/v1.1.1/openrails-auth-ui-1.1.1.tgz}
+    resolution: {integrity: sha512-GrJ/AXGwjSXwuMHy64xLQzqkyymwKYjJQwxz8HWnRkm7JHHRToDzJuaCBunR52mSGulcGQ+Zj1Kn1QkW0KBNLQ==, tarball: https://github.com/open-rails/authkit/releases/download/v1.1.1/openrails-auth-ui-1.1.1.tgz}
     version: 1.1.1
     engines: {node: '>=22.12.0'}
     peerDependencies:
