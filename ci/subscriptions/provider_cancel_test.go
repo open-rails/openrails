@@ -79,6 +79,8 @@ func TestStripeMerchantCancelIsDurable(t *testing.T) {
 	w := newWorld(t)
 	l := importLegacy(t, w, "stripe", embedded)
 	w.converge()
+	w.refreshProviders()
+	w.settleCollectionScans()
 	w.stripe.subscriptionWritesDown(true)
 	cancel := map[string]any{"reason": "merchant ended the membership"}
 	status, body := w.staffJSON(http.MethodPost, "/v1/merchant/subscriptions/"+l.sub.String()+"/cancel", cancel)
