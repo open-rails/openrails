@@ -123,7 +123,7 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 	subscription, err := s.SubscriptionService.GetActiveSubscription(ctx, userID)
 	switch {
 	case err == nil:
-		resp := &UserSubscriptionResponse{Subscription: subscription, Access: accessFromSubscription(subscription)}
+		resp := &UserSubscriptionResponse{Subscription: subscription}
 		if err := s.enrichSubscriptionResponses(ctx, []*UserSubscriptionResponse{resp}); err != nil {
 			return nil, err
 		}
@@ -144,21 +144,11 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 
 // GetUserAccessStatus composes all active access grants (subscriptions + entitlements) for a user.
 func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userID string) ([]*billing.SubscriptionAccess, error) {
-	grants := make([]*billing.SubscriptionAccess, 0, 2)
-	skipSubscriptionIDs := make(map[uuid.UUID]struct{})
-	if s.SubscriptionService != nil {
-		if sub, err := s.SubscriptionService.GetActiveSubscription(ctx, userID); err == nil {
-			grants = append(grants, accessFromSubscription(sub))
-			skipSubscriptionIDs[sub.ID] = struct{}{}
-		} else if err != nil && !db.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to fetch subscription access: %w", err)
-		}
-	}
-	ents, err := s.entitlementAccessGrants(ctx, userID, skipSubscriptionIDs)
+	grants, err := s.entitlementAccessGrants(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	grants = append(grants, ents...)
+
 	if len(grants) == 0 {
 		return nil, sql.ErrNoRows
 	}
@@ -182,7 +172,6 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 
 	resp := &UserSubscriptionResponse{
 		Subscription: subscription,
-		Access:       accessFromSubscription(subscription),
 	}
 
 	if err := s.enrichSubscriptionResponses(ctx, []*UserSubscriptionResponse{resp}); err != nil {
@@ -205,7 +194,7 @@ func (s *UserSubscriptionService) ListUserSubscriptions(ctx context.Context, use
 		return billing.ListPage[*UserSubscriptionResponse]{}, fmt.Errorf("failed to list subscriptions: %w", err)
 	}
 	out := pagination.Map(subs, func(sub *models.Subscription) *UserSubscriptionResponse {
-		return &UserSubscriptionResponse{Subscription: sub, Access: accessFromSubscription(sub)}
+		return &UserSubscriptionResponse{Subscription: sub}
 	})
 	if err := s.enrichSubscriptionResponses(ctx, out.Items); err != nil {
 		return billing.ListPage[*UserSubscriptionResponse]{}, err
@@ -214,11 +203,27 @@ func (s *UserSubscriptionService) ListUserSubscriptions(ctx context.Context, use
 }
 
 // enrichSubscriptionResponses loads every current and scheduled price, with its
-// product, in one batch.
+// product, in one batch; access uses one batch of current entitlement windows.
 func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Context, responses []*UserSubscriptionResponse) error {
+	at := s.now().UTC()
+	if s.EntitlementService != nil && len(responses) > 0 {
+		customers := make([]uuid.UUID, 0, len(responses))
+		seen := make(map[uuid.UUID]bool, len(responses))
+		for _, response := range responses {
+			if !seen[response.CustomerID] {
+				customers = append(customers, response.CustomerID)
+				seen[response.CustomerID] = true
+			}
+		}
+		active, err := s.EntitlementService.ListActiveRecordsByCustomers(ctx, customers, at)
+		if err != nil {
+			return fmt.Errorf("load subscription access: %w", err)
+		}
+		applySubscriptionAccess(responses, active)
+	}
 	ids := make([]uuid.UUID, 0, 2*len(responses))
 	for _, resp := range responses {
-		resp.EvaluatedAt = s.now().UTC()
+		resp.EvaluatedAt = at
 		if resp.Subscription.PriceID != uuid.Nil {
 			ids = append(ids, resp.Subscription.PriceID)
 		}
@@ -379,23 +384,53 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	return nil
 }
 
-func accessFromSubscription(sub *models.Subscription) *billing.SubscriptionAccess {
-	grant := &billing.SubscriptionAccess{
-		Kind:           "subscription",
-		Entitlement:    "premium",
-		Rail:           string(sub.Rail),
-		SubscriptionID: billing.SubscriptionID(sub.ID),
-		StartsAt:       sub.StartedAt,
+// applySubscriptionAccess projects live entitlement windows, never billing status
+// or a price snapshot. A canceled membership may retain bought access; a live
+// membership may have no access between its independently scheduled grants.
+func applySubscriptionAccess(responses []*UserSubscriptionResponse, active map[uuid.UUID][]models.Entitlement) {
+	bySource := make(map[[2]uuid.UUID]*billing.SubscriptionAccess)
+	for customer, ents := range active {
+		for _, ent := range ents {
+			if ent.SourceID == nil || (ent.SourceType != models.EntitlementSourceSubscription && ent.SourceType != models.EntitlementSourceGrace) {
+				continue
+			}
+			grant := entitlementAccess(ent)
+			if grant == nil {
+				continue
+			}
+			key := [2]uuid.UUID{customer, *ent.SourceID}
+			if current := bySource[key]; current != nil && (current.EndsAt == nil || grant.EndsAt != nil && !grant.EndsAt.After(*current.EndsAt)) {
+				continue
+			}
+			bySource[key] = grant
+		}
 	}
-	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
-		grant.StartsAt = *sub.CurrentPeriodStartsAt
+	for _, response := range responses {
+		response.Access = nil
+		if grant := bySource[[2]uuid.UUID{response.CustomerID, response.ID}]; grant != nil {
+			copy := *grant
+			copy.Kind, copy.Rail = "subscription", string(response.Rail)
+			response.Access = &copy
+		}
 	}
-	grant.EndsAt = accessEnd(grant.StartsAt, sub.AccessDurationHoursSnapshot)
+}
+
+func entitlementAccess(ent models.Entitlement) *billing.SubscriptionAccess {
+	if ent.Entitlement == "" {
+		return nil
+	}
+	grant := &billing.SubscriptionAccess{Kind: "entitlement", Entitlement: ent.Entitlement, SourceType: string(ent.SourceType), StartsAt: ent.StartsAt, EndsAt: ent.EndsAt}
+	if ent.SourceID != nil {
+		grant.SourceID = billing.SourceRef(string(ent.SourceType), ent.SourceID.String())
+		if ent.SourceType == models.EntitlementSourceSubscription || ent.SourceType == models.EntitlementSourceGrace {
+			grant.SubscriptionID = billing.SubscriptionID(*ent.SourceID)
+		}
+	}
 	return grant
 }
 
 func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, userID string) (*billing.SubscriptionAccess, error) {
-	grants, err := s.entitlementAccessGrants(ctx, userID, nil)
+	grants, err := s.entitlementAccessGrants(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +440,7 @@ func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, u
 	return nil, nil
 }
 
-func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, userID string, skipSubs map[uuid.UUID]struct{}) ([]*billing.SubscriptionAccess, error) {
+func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, userID string) ([]*billing.SubscriptionAccess, error) {
 	if s.EntitlementService == nil {
 		return nil, nil
 	}
@@ -415,29 +450,9 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 	}
 	grants := make([]*billing.SubscriptionAccess, 0, len(ents))
 	for _, ent := range ents {
-		if ent.Entitlement == "" {
-			continue
+		if grant := entitlementAccess(ent); grant != nil {
+			grants = append(grants, grant)
 		}
-		fromSubscription := ent.SourceType == models.EntitlementSourceSubscription && ent.SourceID != nil
-		if fromSubscription {
-			if _, ok := skipSubs[*ent.SourceID]; ok {
-				continue
-			}
-		}
-		grant := &billing.SubscriptionAccess{
-			Kind:        "entitlement",
-			Entitlement: ent.Entitlement,
-			SourceType:  string(ent.SourceType),
-			StartsAt:    ent.StartsAt,
-			EndsAt:      ent.EndsAt,
-		}
-		if ent.SourceID != nil {
-			grant.SourceID = billing.SourceRef(string(ent.SourceType), ent.SourceID.String())
-		}
-		if fromSubscription {
-			grant.SubscriptionID = billing.SubscriptionID(*ent.SourceID)
-		}
-		grants = append(grants, grant)
 	}
 	return grants, nil
 }
