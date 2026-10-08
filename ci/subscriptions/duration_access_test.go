@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -45,6 +46,20 @@ func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, acce
 	return e, params
 }
 
+func requireDurationSelfAccess(t *testing.T, e *engineCase, want bool) {
+	t.Helper()
+	got := unwrap(e.c.must(http.MethodGet, "/subscriptions/"+e.sub.String(), "", nil))
+	require.Equal(t, want, got["access"] != nil, "self subscription detail reflects the live grant ledger")
+	list := decodeSubs(t, e.c.must(http.MethodGet, "/subscriptions", "", nil))
+	for _, sub := range list {
+		if sub.ID == e.sub {
+			require.Equal(t, want, sub.Access != nil, "self subscription list reflects the live grant ledger")
+			return
+		}
+	}
+	t.Fatal("self subscription list omitted the membership")
+}
+
 func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
@@ -53,6 +68,7 @@ func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 		w.runRenewals()
 		w.converge()
 		require.False(t, e.c.entitled(e.ent), "being active does not reopen expired paid access")
+		requireDurationSelfAccess(t, e, false)
 		require.Equal(t, billing.SubscriptionActive, w.subscription(tp, e.sub).Status)
 		require.Len(t, e.providerLedger(), 1, "access expiry cannot trigger an early renewal")
 
@@ -61,6 +77,7 @@ func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 		w.runRenewals()
 		require.Len(t, e.providerLedger(), 2, "one charge at the billing boundary")
 		require.True(t, e.c.entitled(e.ent), "the new charge grants a new access window")
+		requireDurationSelfAccess(t, e, true)
 		_, err := w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "finished"})
 		require.NoError(t, err)
 		w.advance(73 * time.Hour)
@@ -87,11 +104,19 @@ func TestDurationAccessSurvivesCancellation(t *testing.T) {
 				w.runRenewals()
 				w.converge()
 				require.True(t, e.c.entitled(e.ent), "billing cancellation does not shorten purchased access")
+				requireDurationSelfAccess(t, e, true)
 				require.Len(t, e.providerLedger(), 1)
 				w.advance(721 * time.Hour)
 				w.runRenewals()
 				w.converge()
 				require.Equal(t, access.hours == nil, e.c.entitled(e.ent), "finite access expires on its own boundary; indefinite access remains")
+				requireDurationSelfAccess(t, e, access.hours == nil)
+				if access.hours == nil {
+					_, err = w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "revoke purchased access", RevokeAccess: true})
+					require.NoError(t, err)
+					require.False(t, e.c.entitled(e.ent))
+					requireDurationSelfAccess(t, e, false)
+				}
 				require.Len(t, e.providerLedger(), 1)
 			})
 		})
