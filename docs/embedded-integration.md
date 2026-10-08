@@ -182,7 +182,7 @@ it is stalled.
 
 **Inserting an engine job.** The one job a host inserts itself is the invoice
 sweep: `workers.Insert(ctx, openrails.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
-finalizes every customer's previous period now; `Collect: true` runs the
+finalizes the previous period of every customer active in it now; `Collect: true` runs the
 collection pass. Runs are idempotent.
 
 **No job clock.** `river.Config.JobTimeout` does not apply to OpenRails'

@@ -23,17 +23,18 @@ type monthlyInvoicePass struct {
 func (monthlyInvoicePass) Kind() string { return "openrails.invoice" }
 
 // The monthly pass invoices payers active in the period, not every payer on
-// file: a payer last active six months ago gets no statement.
+// file: a payer last active six months ago, or first active after the period
+// closed, gets no statement.
 func TestMonthlyInvoicesCoverActivePayersOnly(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	ctx, client := t.Context(), w.client[embedded]
-	active, dormant := w.newCustomer(), w.newCustomer()
+	active, dormant, newcomer := w.newCustomer(), w.newCustomer(), w.newCustomer()
 	run := w.clock.Now().Add(31 * 24 * time.Hour)
 	from, to, err := money.PreviousInvoicePeriod(run, run, money.InvoiceBoundaryFixedInterval)
 	require.NoError(t, err)
 	activity := from.Add(time.Hour)
-	for c, at := range map[*customer]time.Time{active: activity, dormant: from.AddDate(0, -6, 0)} {
+	for c, at := range map[*customer]time.Time{active: activity, dormant: from.AddDate(0, -6, 0), newcomer: to.Add(time.Hour)} {
 		_, err := client.CreateCreditGrant(ctx, c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 5_000_000, Source: "e2e", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		// Ledger rows take the database's clock; move them onto the world's.
@@ -57,7 +58,9 @@ func TestMonthlyInvoicesCoverActivePayersOnly(t *testing.T) {
 	inv := invoices.Items[0]
 	require.True(t, inv.PeriodStartsAt.Equal(from) && inv.PeriodEndsAt.Equal(to), "%v-%v", inv.PeriodStartsAt, inv.PeriodEndsAt)
 	require.Equal(t, int64(5_000_000), inv.DepositsTotal)
-	invoices, err = client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: dormant.cid()})
-	require.NoError(t, err)
-	require.Empty(t, invoices.Items)
+	for _, c := range []*customer{dormant, newcomer} {
+		invoices, err = client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: c.cid()})
+		require.NoError(t, err)
+		require.Empty(t, invoices.Items)
+	}
 }

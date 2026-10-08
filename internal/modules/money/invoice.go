@@ -27,6 +27,28 @@ import (
 // invoice. Arrears invoices with owed accrual become open receivables; prepaid
 // / zero-due invoices are marked paid informational statements.
 func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*models.Invoice, error) {
+	return s.finalizeInvoice(ctx, payer, currency, from, to, basisAny)
+}
+
+// invoiceBasis is what a period must hold, under the payer lock, for a
+// finalization to write its invoice. The scheduled passes choose their payers
+// before taking that lock, so the choice is rechecked there.
+type invoiceBasis int
+
+const (
+	// basisAny writes the statement unconditionally: an explicit finalization.
+	basisAny invoiceBasis = iota
+	// basisActivity needs usage, a money movement or an uninvoiced item in the
+	// period: the period sweep never states a period the payer had no part in.
+	basisActivity
+	// basisPending needs an uninvoiced item in the period: a threshold pass
+	// whose items another pass has invoiced since leaves nothing to bill.
+	basisPending
+)
+
+// finalizeInvoice is FinalizeInvoice under a basis; a nil invoice and nil
+// error mean the period held nothing the basis requires.
+func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time, basis invoiceBasis) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -175,6 +197,15 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			default:
 				movements[m.TransferType] += m.Total
 			}
+		}
+		var pendingItems int64
+		for _, rr := range ratedRows {
+			pendingItems += rr.ItemCount
+		}
+		switch {
+		case basis == basisPending && pendingItems == 0,
+			basis == basisActivity && pendingItems == 0 && len(totals) == 0 && len(movs) == 0:
+			return nil
 		}
 		pendingReceivable, perr := q.SumPendingInvoiceItemAmountInPeriod(ctx, gen.SumPendingInvoiceItemAmountInPeriodParams{
 			MerchantID:     tenantID,
@@ -620,8 +651,8 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 }
 
 // FinalizeDueInvoicesForBoundary finalizes the previous period of every
-// invoice payer under the merchant's billing_period_boundary; anniversary
-// periods are anchored on the payer's first recorded activity.
+// invoice payer active in it under the merchant's billing_period_boundary;
+// anniversary periods are anchored on the payer's first recorded activity.
 func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, boundary string, now time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -637,11 +668,11 @@ func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, bound
 	})
 }
 
-// finalizeInvoicePayers runs FinalizeInvoice over every (payer, currency)
-// ListInvoicePayers enumerates: ledger money movement OR catalog-priced usage
-// since activeSince. A usage-only payer (the metered platform fee: zero-amount
-// usage, no deposit or spend) has no ledger row until FinalizeInvoice rates it
-// (exactly-once through the #672 watermark).
+// finalizeInvoicePayers finalizes every (payer, currency) ListInvoicePayers
+// enumerates (ledger money movement OR catalog-priced usage since
+// activeSince) whose period holds activity. A usage-only payer (the metered
+// platform fee: zero-amount usage, no deposit or spend) has no ledger row
+// until FinalizeInvoice rates it (exactly-once through the #672 watermark).
 func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, activeSince time.Time, period func(gen.ListInvoicePayersRow) (time.Time, time.Time, error)) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -664,10 +695,13 @@ func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, activeSince ti
 		if err != nil {
 			return count, err
 		}
-		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to); err != nil {
+		inv, err := s.finalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to, basisActivity)
+		if err != nil {
 			return count, err
 		}
-		count++
+		if inv != nil {
+			count++
+		}
 	}
 	return count, nil
 }
@@ -713,10 +747,13 @@ func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff tim
 		if !cutoff.After(from) {
 			continue
 		}
-		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(r.CustomerID), r.Currency, from, cutoff); err != nil {
+		inv, err := s.finalizeInvoice(ctx, identity.CustomerID(r.CustomerID), r.Currency, from, cutoff, basisPending)
+		if err != nil {
 			return count, err
 		}
-		count++
+		if inv != nil {
+			count++
+		}
 	}
 	return count, nil
 }
