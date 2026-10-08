@@ -1594,7 +1594,8 @@
       "type Recommendation struct {\n\tAction       string           `json:\"action\"`\n\tParams       map[string]any   `json:\"params,omitempty\"`\n\tAlternatives []Recommendation `json:\"alternatives,omitempty\"`\n}"
     ],
     "internal/river": [
-      "type InvoiceArgs struct {\n\tCollect               bool `json:\"collect,omitempty\"`\n\tUseMonthlyFloor       bool `json:\"use_monthly_floor,omitempty\"`\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
+      "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
+      "type InvoiceArgs struct {\n\tMerchantID            uuid.UUID `json:\"merchant_id,omitempty\"`\n\tCollect               bool      `json:\"collect,omitempty\"`\n\tUseMonthlyFloor       bool      `json:\"use_monthly_floor,omitempty\"`\n\tFinalizePreviousMonth bool      `json:\"finalize_previous_month,omitempty\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tRequested bool `json:\"requested,omitempty\" river:\"unique\"`\n}",
       "type SolanaPullPayload struct {\n\tSubscriptionPDA string    `json:\"subscription_pda\"`\n\tRowID           uuid.UUID `json:\"row_id\"`\n\tNextPullAt      time.Time `json:\"next_pull_at\"`\n}",
       "type SubscriptionConvergeArgs struct {\n\tPSPID                 uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tMerchantID            uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRail                  string    `json:\"rail\" river:\"unique\"`\n\tSubscriptionReference string    `json:\"subscription_reference\" river:\"unique\"`\n\n\tAfter        int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType    string `json:\"event_type,omitempty\"`\n\tEventCreated int64  `json:\"event_created,omitempty\"`\n}"
@@ -4158,7 +4159,37 @@
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "progress": "github.com/open-rails/openrails/internal/shared/progress",
       "river": "github.com/riverqueue/river",
-      "time": "time"
+      "time": "time",
+      "uuid": "github.com/google/uuid"
+    },
+    "internal/river/jobs_dunning.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
+      "clockwork": "github.com/jonboulle/clockwork",
+      "collection": "github.com/open-rails/openrails/internal/modules/collection",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "decline": "github.com/open-rails/openrails/internal/decline",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
+      "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "intents": "github.com/open-rails/openrails/internal/intents",
+      "json": "encoding/json",
+      "log": "github.com/sirupsen/logrus",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "money": "github.com/open-rails/openrails/internal/modules/money",
+      "normalize": "github.com/open-rails/openrails/internal/shared/normalize",
+      "payments": "github.com/open-rails/openrails/internal/modules/payments",
+      "progress": "github.com/open-rails/openrails/internal/shared/progress",
+      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "river": "github.com/riverqueue/river",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
@@ -4173,6 +4204,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "intents": "github.com/open-rails/openrails/internal/intents",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",

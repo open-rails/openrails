@@ -17,6 +17,11 @@ mode resumes automatically after catch-up completes without those conflicts.
 Starting another replica does not reset healthy shared-database coverage.
 CCBill and Solana retain their existing webhook and destructive-policy behavior;
 this delivery does not give them an automatic stale-backup recovery guarantee.
+Completion durably wakes recovery-held operations and requests the merchant's
+normal renewal and invoice scans, including invoices refused before admission.
+Issuer retry dates and monthly collection cadence remain unchanged. A verifier
+that commits its hold just after completion rechecks readiness after commit, so
+its live lease cannot strand the operation on the former recovery delay.
 
 Observation and application use separate domains in `psp_refresh_watermarks`:
 
