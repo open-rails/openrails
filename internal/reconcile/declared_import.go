@@ -360,7 +360,17 @@ func ImportDeclaredSubscriptions(
 			err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				txdb := db.NewWithPgxTx(tx)
 				_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{})
-				return err
+				if err != nil || outcome != DeclaredImported {
+					return err
+				}
+				// A retained unverified row may need no lifecycle transition.
+				// Give it the same explicit renewal-hold grace as native runtime
+				// subscriptions without extending its immutable paid grants.
+				locked, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, sub.ID)
+				if err != nil {
+					return err
+				}
+				return lc.EnsureRenewalGrace(ctx, txdb, locked)
 			})
 			if err != nil {
 				var pgErr *pgconn.PgError

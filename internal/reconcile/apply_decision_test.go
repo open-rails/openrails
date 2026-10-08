@@ -8,8 +8,26 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
+
+func TestRenewalCatchupGrantsTheLatestPaidWindow(t *testing.T) {
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	var transactions []RemoteTransaction
+	for i, id := range []string{"first", "second", "third"} {
+		transactions = append(transactions, RemoteTransaction{TransactionID: id, Type: TransactionTypeSale, Success: true, OccurredAt: end.Add(time.Duration(i) * 24 * time.Hour)})
+	}
+	transactions = append(transactions, transactions[2]) // replayed provider event
+	decision := renewPaidPeriods(transactions, end, end.Add(4*24*time.Hour), &start, &end, Decision{})
+	wantStart, wantEnd := end.Add(2*24*time.Hour), end.Add(3*24*time.Hour)
+	require.Equal(t, wantStart, *decision.NewPeriodStart)
+	require.Equal(t, wantEnd, *decision.NewPeriodEnd)
+	event := eventFor(decision, &models.Subscription{CurrentPeriodEndsAt: &end}, wantEnd.Add(-time.Hour)).(lifecycle.RenewalPaid)
+	require.Equal(t, wantStart, event.PeriodStart, "a prior stored end cannot override the verified latest paid period")
+	require.Equal(t, wantEnd, event.PeriodEnd)
+}
 
 // A provider roster's rebill date is no payment (#1089 §1): an unverified
 // row it lists as alive is confirmed only while its paid period still runs,

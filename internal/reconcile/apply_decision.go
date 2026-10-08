@@ -89,11 +89,10 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 		return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.Retry, At: at}
 	case TransitionRenew:
 		start := paidThroughOf(cur)
-		if start.IsZero() {
+		if d.NewPeriodStart != nil && d.NewPeriodStart.Before(*d.NewPeriodEnd) {
+			start = d.NewPeriodStart.UTC()
+		} else if start.IsZero() {
 			start = now
-			if d.NewPeriodStart != nil && d.NewPeriodStart.Before(*d.NewPeriodEnd) {
-				start = d.NewPeriodStart.UTC()
-			}
 		}
 		return lifecycle.RenewalPaid{PeriodStart: start, PeriodEnd: d.NewPeriodEnd.UTC()}
 	case TransitionAdoptPeriodEnd:

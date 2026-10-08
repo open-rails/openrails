@@ -19,24 +19,25 @@ func TestPaidPeriod(t *testing.T) {
 	roster := func(next time.Time) *RemoteSubscription { return &RemoteSubscription{NextBillingAt: &next} }
 	one := []RemoteTransaction{charge("a", end)}
 	for _, c := range []struct {
-		name   string
-		txns   []RemoteTransaction
-		remote *RemoteSubscription
-		want   time.Time
+		name      string
+		txns      []RemoteTransaction
+		remote    *RemoteSubscription
+		wantStart time.Time
+		wantEnd   time.Time
 	}{
-		{"NMI's date on the paid boundary's day", one, roster(end.AddDate(0, 0, 30).Truncate(24 * time.Hour)), end.AddDate(0, 0, 30).Truncate(24 * time.Hour)},
-		{"a calendar month within half a cycle", one, roster(end.AddDate(0, 1, 0)), end.AddDate(0, 1, 0)},
-		{"a date a decline moved on is not payment", one, roster(end.AddDate(0, 0, 60)), end.AddDate(0, 0, 30)},
-		{"no roster: one cycle per charge", one, nil, end.AddDate(0, 0, 30)},
+		{"NMI's date on the paid boundary's day", one, roster(end.AddDate(0, 0, 30).Truncate(24 * time.Hour)), end, end.AddDate(0, 0, 30).Truncate(24 * time.Hour)},
+		{"a calendar month within half a cycle", one, roster(end.AddDate(0, 1, 0)), end, end.AddDate(0, 1, 0)},
+		{"a date a decline moved on is not payment", one, roster(end.AddDate(0, 0, 60)), end, end.AddDate(0, 0, 30)},
+		{"no roster: one cycle per charge", one, nil, end, end.AddDate(0, 0, 30)},
 		{"three charges, three cycles", []RemoteTransaction{charge("a", end), charge("b", end.AddDate(0, 0, 30)), charge("c", end.AddDate(0, 0, 60)), charge("c", end.AddDate(0, 0, 60))},
-			roster(end.AddDate(0, 0, 90)), end.AddDate(0, 0, 90)},
-		{"an older charge paid an earlier period", []RemoteTransaction{charge("old", start), charge("a", end)}, nil, end.AddDate(0, 0, 30)},
-		{"a date short of the count bounds it", []RemoteTransaction{charge("a", end), charge("b", end.Add(time.Hour))}, roster(end.AddDate(0, 0, 30)), end.AddDate(0, 0, 30)},
+			roster(end.AddDate(0, 0, 90)), end.AddDate(0, 0, 60), end.AddDate(0, 0, 90)},
+		{"an older charge paid an earlier period", []RemoteTransaction{charge("old", start), charge("a", end)}, nil, end, end.AddDate(0, 0, 30)},
+		{"a date short of the count bounds it", []RemoteTransaction{charge("a", end), charge("b", end.Add(time.Hour))}, roster(end.AddDate(0, 0, 30)), end, end.AddDate(0, 0, 30)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			from, to := paidPeriod(c.txns, cutoff, &start, &end, c.remote)
-			require.Equal(t, end, *from)
-			require.Equal(t, c.want, *to)
+			require.Equal(t, c.wantStart, *from)
+			require.Equal(t, c.wantEnd, *to)
 		})
 	}
 	from, to := paidPeriod(one, cutoff, &start, &end, roster(end))

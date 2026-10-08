@@ -664,14 +664,16 @@ func renewPaidPeriods(txns []RemoteTransaction, cutoff, declinedAt time.Time, st
 		base.Reason = "renewal_before_decline_cycle_unknown"
 		return base
 	}
-	paid := 0
+	paid := map[string]bool{}
 	for i := range txns {
 		t := txns[i]
 		if t.Type == TransactionTypeSale && t.Success && !t.OccurredAt.Before(cutoff) && t.OccurredAt.Before(declinedAt) {
-			paid++
+			paid[t.TransactionID] = true
 		}
 	}
-	newStart, newEnd := *end, end.Add(time.Duration(paid)*end.Sub(*start))
+	cycle := end.Sub(*start)
+	newEnd := end.Add(time.Duration(len(paid)) * cycle)
+	newStart := newEnd.Add(-cycle)
 	return Decision{Kind: TransitionRenew, NewPeriodStart: &newStart, NewPeriodEnd: &newEnd, Reason: reasonRenewedBeforeDecline}
 }
 
@@ -718,6 +720,14 @@ func paidPeriod(txns []RemoteTransaction, cutoff time.Time, start, end *time.Tim
 		to = *next // a charge in the alignment slack paid an earlier period
 	default:
 		return nil, nil // the charges were already applied
+	}
+	// A catch-up can observe several paid periods at once. The current period
+	// is the latest one, otherwise its finite access would start at the oldest
+	// missed boundary and could already be expired despite the latest charge.
+	if remoteStart != nil && !remoteStart.Before(from) && remoteStart.Before(to) {
+		from = *remoteStart
+	} else if to.Sub(from) > cycle+cycle/2 {
+		from = to.Add(-cycle)
 	}
 	return &from, &to
 }
