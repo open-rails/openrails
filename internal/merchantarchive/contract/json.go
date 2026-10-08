@@ -145,6 +145,18 @@ func array(r jsonRule) jsonRule {
 }
 
 var emptyObject = object(map[string]jsonRule{})
+
+// Provider adapters retain these public routing fields after price binding
+// identities move into dedicated columns. Preserve their string values; an
+// unrecognized field must be reviewed instead of silently lost in an archive.
+var priceBindingConfigurationJSON = object(map[string]jsonRule{
+	"product_id": textValue, "provider": textValue, "lookup_key": textValue,
+	"form_name": textValue, "enabled": textValue,
+	"token": textValue, "mint": textValue, "mint_symbol": textValue,
+	"amount_base_units": textValue, "period_hours": textValue,
+	"created_at": textValue, "merchant_address": textValue,
+})
+
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
 var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_url": textValue, "from_email": textValue, "support_url": textValue, "signup_url": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
@@ -312,7 +324,7 @@ var jsonRules = map[string]jsonRule{
 	}),
 	"psps.settings":                    pspSettingsJSON,
 	"psps.signer":                      nullable(object(map[string]jsonRule{"mode": textValue, "key": textValue})),
-	"price_psp_bindings.configuration": emptyObject,
+	"price_psp_bindings.configuration": priceBindingConfigurationJSON,
 	"catalog_rate_cards.filter":        nullable(dictionary(array(textValue))),
 	"catalog_rate_cards.allowance":     nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
 	"catalog_rate_cards.price":         rateJSON,

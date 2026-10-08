@@ -18,8 +18,13 @@ func newDumpCatalogCmd() *cobra.Command {
 	opts := catalogDumpOptions{}
 	cmd := &cobra.Command{
 		Use:   "dump-merchant-catalog --slug <merchant>",
-		Short: "Dump the merchant's active default catalog as a new catalog application",
-		Args:  cobra.NoArgs,
+		Short: "Dump the merchant's active default catalog as a YAML application",
+		Long: "Exports unarchived products and prices, meters, and default product rate cards. " +
+			"Includes prepaid credit grants and customer-selected amount ranges. " +
+			"Archived revisions, immutable IDs, purchases and balances require billing export. " +
+			"Provider links refer to the selected merchant's configured PSP accounts. " +
+			"Reimport with apply-catalog; an already applied document remains a replay, not a rollback.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runDumpCatalog(cmd, opts)
 		},

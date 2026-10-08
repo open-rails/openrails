@@ -18,6 +18,7 @@ import (
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
+	"catalog_restore_receipts":  "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
 	"credential_publications":   "deployment credential custody receipts; secrets are re-entered at destination",
 	"merchants":                 "destination identity and host authority are explicitly provisioned",
 	"merchant_slug_aliases":     "former names are directory identity, not billing history",
@@ -53,6 +54,7 @@ var excludedTables = map[string]string{
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
+	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
 	"credential_publications":       "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",

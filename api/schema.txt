@@ -6,6 +6,7 @@ migration 0002_catalog_batch_hash.up.sql sha256:7c1b9d10c7d1d2d4300963e93fe9a5f1
 migration 0003_product_price_keys.up.sql sha256:86d4b378bbdc547fe3d617034749fb4af880510983c465e48fa8bac29e3d4abe
 migration 0004_catalog_credit_benefits.up.sql sha256:70d01a7b2e045503724d00488ff4601b68dd613c236fc67c8904e9c1392d541f
 migration 0005_purchased_credit_accounting.up.sql sha256:a60a5b3a64bbe0a882350e3decadc89566e09fcfe008cd22cacc6e22c6899e41
+migration 0006_catalog_snapshots.up.sql sha256:e45102e6cb5b778a67aa5dbdfb95c095efd4df018a237969b84e74c07773fb12
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -193,6 +194,19 @@ table billing.catalog_rate_cards
   index CREATE UNIQUE INDEX catalog_rate_cards_pkey ON billing.catalog_rate_cards USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX catalog_rate_cards_product_id_ordinal_key ON billing.catalog_rate_cards USING btree (merchant_id, product_id, ordinal)
   trigger CREATE TRIGGER catalog_authored_rate_card BEFORE INSERT OR DELETE OR UPDATE ON billing.catalog_rate_cards FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
+
+table billing.catalog_restore_receipts
+  column merchant_id uuid NOT NULL
+  column digest text NOT NULL
+  column rows bigint NOT NULL
+  column restored_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint catalog_restore_receipts_digest_check CHECK ((digest ~ '^[0-9a-f]{64}$'::text))
+  constraint catalog_restore_receipts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint catalog_restore_receipts_pkey PRIMARY KEY (merchant_id)
+  constraint catalog_restore_receipts_rows_check CHECK ((rows >= 0))
+  index CREATE UNIQUE INDEX catalog_restore_receipts_pkey ON billing.catalog_restore_receipts USING btree (merchant_id)
+  trigger CREATE TRIGGER immutable_catalog_restore_receipt BEFORE DELETE OR UPDATE ON billing.catalog_restore_receipts FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER no_catalog_restore_receipt_truncate BEFORE TRUNCATE ON billing.catalog_restore_receipts FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.checkout_attempts
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2497,6 +2511,7 @@ function billing.guard_billing_restore_receipt()
                     'catalog_applications',
                     'catalog_meters',
                     'catalog_rate_cards',
+                    'catalog_restore_receipts',
                     'checkout_attempts',
                     'checkout_sessions',
                     'cost_observations',
@@ -2793,6 +2808,19 @@ function billing.lock_merchant_configuration_write()
    IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
   END $function$
 
+function billing.monthly_normalized_amount(bigint,integer)
+  CREATE OR REPLACE FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer)
+   RETURNS bigint
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT CASE
+      WHEN p_hours IS NULL OR p_hours <= 0 THEN 0
+      WHEN p_hours >= 648 THEN round(p_amount::numeric / greatest(round(p_hours / 730.0), 1))::bigint
+      ELSE round(p_amount::numeric * 730.0 / p_hours)::bigint
+  END
+  $function$
+
 function billing.month_partitions(name)
   CREATE OR REPLACE FUNCTION billing.month_partitions(p_table name)
    RETURNS TABLE(partition name, range_from timestamp with time zone, range_to timestamp with time zone)
@@ -2807,19 +2835,6 @@ function billing.month_partitions(name)
         JOIN pg_class c ON c.oid = i.inhrelid
        WHERE i.inhparent = to_regclass(quote_ident(p_table))
        ORDER BY 2
-  $function$
-
-function billing.monthly_normalized_amount(bigint,integer)
-  CREATE OR REPLACE FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer)
-   RETURNS bigint
-   LANGUAGE sql
-   IMMUTABLE PARALLEL SAFE
-  AS $function$
-  SELECT CASE
-      WHEN p_hours IS NULL OR p_hours <= 0 THEN 0
-      WHEN p_hours >= 648 THEN round(p_amount::numeric / greatest(round(p_hours / 730.0), 1))::bigint
-      ELSE round(p_amount::numeric * 730.0 / p_hours)::bigint
-  END
   $function$
 
 function billing.preserve_subscription_collection_policy()

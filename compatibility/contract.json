@@ -1320,6 +1320,9 @@
       "type stripeRecurringDecline struct {\n\tDeclineCode     string         `json:\"decline_code,omitempty\"`\n\tBinding         receiptBinding `json:\"binding\"`\n\tFailureCode     string         `json:\"failure_code\"`\n\tPaymentIntentID string         `json:\"payment_intent_id\"`\n}"
     ],
     "internal/merchantarchive": [
+      "type CatalogDependencies struct {\n\tPSPs      []CatalogPSPIdentity `json:\"psps\"`\n\tCustomers []string             `json:\"customers\"`\n}",
+      "type CatalogPSPIdentity struct {\n\tID          string `json:\"id\"`\n\tRail        string `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\tAccountID   string `json:\"account_id\"`\n}",
+      "type CatalogSnapshot struct {\n\tKind            string                                  `json:\"kind\"`\n\tSchemaVersion   int                                     `json:\"schema_version\"`\n\tMerchantID      string                                  `json:\"merchant_id\"`\n\tCatalogRevision int64                                   `json:\"catalog_revision,string\"`\n\tDependencies    CatalogDependencies                     `json:\"dependencies\"`\n\tTables          map[string][]map[string]json.RawMessage `json:\"tables\"`\n\tSHA256          string                                  `json:\"sha256,omitempty\"`\n}",
       "type Result struct {\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n\tReplayed   bool   `json:\"replayed\"`\n}"
     ],
     "internal/merchants": [
@@ -2908,6 +2911,18 @@
       "strings": "strings",
       "time": "time",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/merchantarchive/catalog_snapshot_wire.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "bytes": "bytes",
+      "configdocument": "github.com/open-rails/openrails/internal/configdocument",
+      "contract": "github.com/open-rails/openrails/internal/merchantarchive/contract",
+      "fmt": "fmt",
+      "go-yaml": "github.com/goccy/go-yaml",
+      "hex": "encoding/hex",
+      "io": "io",
+      "json": "encoding/json",
+      "sha256": "crypto/sha256"
     },
     "internal/merchants/secret_cleanup.go": {
       "billing": "github.com/open-rails/openrails/billing",

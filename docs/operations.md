@@ -24,10 +24,10 @@ exactly four ways the system diverges, each with its own mechanism:
 ## Mutation Flags
 
 Provider pull and merchant-configuration commands use mutation flags. Catalog
-application instead carries optional `prune` (and, for a guarded change,
-`application_id` + `expected_revision`) in its document; it has no
-insert/overwrite flags. For commands that use
-mutation flags:
+application instead carries optional `prune` in its document; it has no
+insert/overwrite flags. Each canonical catalog content hash is remembered
+permanently, so replaying an old document never rolls back later edits. For
+commands that use mutation flags:
 
 - no mutation flags: plan/report only
 - `--insert`: create records or provider objects missing from the target
@@ -50,8 +50,9 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
-| `apply-catalog --merchant NAME --file PATH` | atomic local catalog application; declarative by default, guarded with `application_id` + `expected_revision` |
-| `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
+| `apply-catalog --merchant NAME --file PATH` | atomic local catalog batch; permanent content-hash replay, with omission preserved unless `prune: true` |
+| `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
+| `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |

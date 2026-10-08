@@ -93,8 +93,16 @@ func TestProviderLinksDumpOnlyDeclarativeFields(t *testing.T) {
 		"creation intent": {`{"solana":{"rail":"solana","token":"USD1"}}`, map[string]map[string]string{"solana": {"token": "USD1"}}},
 		"other rail":      {`{"mobius":{"rail":"nmi","plan_id":"premium","token":"kept"}}`, map[string]map[string]string{"mobius": {"plan_id": "premium", "token": "kept"}}},
 		"empty":           {`{}`, nil},
-		"invalid":         {`not json`, nil},
+		"named account":   {`{"chain-main":{"rail":"solana","psp_id":"account","mint_symbol":"USD1","token":"USD1","plan_pda":"plan"}}`, map[string]map[string]string{"chain-main": {"psp_id": "account", "plan_pda": "plan"}}},
 	} {
-		require.Equal(t, tc.want, providerLinks([]byte(tc.raw)), name)
+		got, err := providerLinks([]byte(tc.raw))
+		require.NoError(t, err, name)
+		require.Equal(t, tc.want, got, name)
 	}
+}
+
+// A malformed stored binding must not become a plausible link-free export.
+func TestProviderLinksDumpRefusesInvalidJSON(t *testing.T) {
+	_, err := providerLinks([]byte(`not json`))
+	require.Error(t, err)
 }
