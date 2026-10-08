@@ -54,12 +54,10 @@ products:
     entitlements: ["course:101"]
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 4990000 # $4.99; every USD amount is in micros
+        amount: 4.99 USD
         access_duration: null # permanent access
       - key: rent
-        currency: USD
-        unit_amount: 1990000 # $1.99, paid once
+        amount: 1.99 USD
         access_duration: 3 days
 
   - key: course-102
@@ -67,12 +65,10 @@ products:
     entitlements: ["course:102"]
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 4990000 # $4.99, paid once
+        amount: 4.99 USD
         access_duration: null
       - key: rent
-        currency: USD
-        unit_amount: 1990000 # $1.99, paid once
+        amount: 1.99 USD
         access_duration: 3 days
 
   - key: course-bundle
@@ -80,8 +76,7 @@ products:
     entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 8990000 # $8.99 for both, instead of $9.98 separately
+        amount: 8.99 USD # both courses, instead of 9.98 USD separately
         access_duration: null
 
   - key: channel-main
@@ -89,13 +84,11 @@ products:
     entitlements: ["channel:main:membership"]
     prices:
       - key: monthly
-        currency: USD
-        unit_amount: 9990000 # $9.99 every 30 days
+        amount: 9.99 USD
         access_duration: 30 days
         billing_interval: 30 days
       - key: yearly
-        currency: USD
-        unit_amount: 99990000 # $99.99 every 365 days
+        amount: 99.99 USD
         access_duration: 365 days
         billing_interval: 365 days
 ```
@@ -118,6 +111,12 @@ distinguish a content key such as `course:101` from a service key such as `premi
 your application decides what each permits. Keys are nonblank strings of at most 256 bytes, with no per-key durations.
 A product name or key does not implicitly grant an entitlement. Use `[]` to grant
 none; omitted fields preserve an existing product's list.
+
+Price amounts include an explicit currency: `amount: 9.99 USD`, `amount: 1 SOL`,
+or `amount: 10 USDC`. A bare `amount: 9.99` is invalid. Conversion uses the
+currency's registered precision exactly, without rounding. A price can use
+`amount` or the numeric `unit_amount` and `currency` fields, never both forms.
+Payment rails still determine which currencies they can charge.
 
 Durations accept positive
 whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
@@ -206,8 +205,12 @@ products:
     display_name: Main channel Plus membership
     prices:
       - key: monthly
-        unit_amount: 12990000 # $12.99; currency, duration and renewal terms are preserved
+        amount: 12.99 USD
 ```
+
+The `amount` field sets both the amount and currency. Other omitted fields
+preserve their existing values. If no money fields are supplied, both the amount
+and currency are preserved.
 
 For the initial catalog, this creates `channel-main.monthly.v1` at
 $12.99 and archives `channel-main.monthly.v0` at $9.99. The old price
@@ -265,8 +268,7 @@ products:
       - key: rent
         archived: true
       - key: rental-7-days
-        currency: USD
-        unit_amount: 2990000 # $2.99, paid once
+        amount: 2.99 USD
         access_duration: 7 days
         billing_interval: null
 ```
@@ -311,8 +313,7 @@ products:
   - key: channel-main
     prices:
       - key: monthly
-        currency: USD
-        unit_amount: 9990000 # the original $9.99 terms
+        amount: 9.99 USD # the original $9.99 terms
         access_duration: 30 days
         billing_interval: 30 days
         trial_unit_amount: null
@@ -742,8 +743,7 @@ products:
       # expires_after_days defaults to 365, starting when payment succeeds
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 10000000 # pay $10
+        amount: 10 USD
         billing_interval: null
 
   - key: api-credit-100
@@ -754,8 +754,7 @@ products:
       expires_after_days: 365
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        amount: 80 USD # grants 100 USD of balance: a bulk discount
         billing_interval: null
 
   - key: api-deposit
@@ -766,13 +765,16 @@ products:
       expires_after_days: 365
     prices:
       - key: deposit
-        currency: USD
-        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
+        amount: 0 USD # customer_amount requires an explicit checkout amount; this is not free
         customer_amount:
           min_amount: 1000000 # at least $1
           max_amount: 1000000000 # at most $1,000
         billing_interval: null
 ```
+
+The readable `amount` field above belongs to each price. Credit-grant amounts
+and customer-selected minimums and maximums keep their numeric native units
+(USD micros); they are separate policy fields.
 
 Customers pay ahead of time; metered API usage draws down
 the funded balance. Each top-up uses the existing currency balance and usage ledger.

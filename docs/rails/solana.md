@@ -130,7 +130,8 @@ plan's terms, and a merchant-co-signed pull of the full first period into the
 merchant's ATA, landed within the checkout's validity. A signature settles one
 checkout only, across every merchant and PSP.
 
-- Catalog prices bill in `currency: USD`. Declaring `psps: [solana]` creates or
+- Solana recurring prices are denominated in USD, such as `amount: 23 USD`.
+  Declaring `psps: [solana]` creates or
   reattaches a USDC plan by default. Use `psp_links.solana.token: USD1` to select
   USD1 instead, or supply `plan_pda` to attach an existing plan and resolve its
   configured token from the on-chain mint:
@@ -138,8 +139,7 @@ checkout only, across every merchant and PSP.
   ```yaml
   prices:
     - key: premium-monthly
-      currency: USD
-      unit_amount: 23_000_000
+      amount: 23 USD
       access_duration_hours: 720
       billing_interval_hours: 720
       psps: [solana]

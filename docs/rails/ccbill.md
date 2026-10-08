@@ -64,8 +64,7 @@ maps to:
 ```yaml
 prices:
   - key: premium-monthly
-    currency: USD
-    unit_amount: 9990000        # micros ($9.99)
+    amount: 9.99 USD
     access_duration_hours: 720
     billing_interval_hours: 720
     psps: [ccbill]

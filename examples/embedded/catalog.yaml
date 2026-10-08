@@ -6,12 +6,10 @@ products:
     entitlements: ["course:101"]
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 4990000 # $4.99; every USD amount is in micros
+        amount: 4.99 USD
         access_duration: null # permanent access
       - key: rent
-        currency: USD
-        unit_amount: 1990000 # $1.99, paid once
+        amount: 1.99 USD
         access_duration: 3 days
 
   - key: course-102
@@ -19,12 +17,10 @@ products:
     entitlements: ["course:102"]
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 4990000 # $4.99, paid once
+        amount: 4.99 USD
         access_duration: null
       - key: rent
-        currency: USD
-        unit_amount: 1990000 # $1.99, paid once
+        amount: 1.99 USD
         access_duration: 3 days
 
   - key: course-bundle
@@ -32,8 +28,7 @@ products:
     entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 8990000 # $8.99 for both, instead of $9.98 separately
+        amount: 8.99 USD # both courses, instead of 9.98 USD separately
         access_duration: null
 
   - key: channel-main
@@ -41,12 +36,10 @@ products:
     entitlements: ["channel:main:membership"]
     prices:
       - key: monthly
-        currency: USD
-        unit_amount: 9990000 # $9.99 every 30 days
+        amount: 9.99 USD
         access_duration: 30 days
         billing_interval: 30 days
       - key: yearly
-        currency: USD
-        unit_amount: 99990000 # $99.99 every 365 days
+        amount: 99.99 USD
         access_duration: 365 days
         billing_interval: 365 days

@@ -6,10 +6,10 @@ day-to-day customer operations via the merchant API and admin console.
 
 Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a
 **PSP** is *your account* on a rail (e.g. a `mobius` key on the nmi rail; `stripe`,
-`ccbill`, `solana` are their own PSP names). Money amounts are **integers in the
-currency's native units** (micros for USD: `20_000_000` = $20.00; the scale per
-currency is `GET /v1/currencies`). YAML underscore separators are
-just readability — there are no dollar-string amounts in the catalog document.
+`ccbill`, `solana` are their own PSP names). The API and database represent money
+as **integers in the currency's native units** (micros for USD:
+`20_000_000` = $20.00; scales are listed by `GET /v1/currencies`). Catalog prices
+can be authored as `amount: 20 USD`; parsing produces those exact native units.
 
 ### The mental model
 
@@ -49,11 +49,18 @@ products:
     entitlements: ["tier:novice"]
     prices:
       - key: novice-monthly
-        currency: USD
-        unit_amount: 12000000
+        amount: 12 USD
         access_duration_hours: 720
         billing_interval_hours: 720
 ```
+
+Catalog prices accept `amount: 9.99 USD`, `amount: 1 SOL`, or `amount: 10 USDC`.
+The currency is required and must be registered. Amounts convert exactly at that
+currency's precision; values that require rounding are rejected.
+Use `amount` by itself, or `unit_amount` with `currency`; combining these forms is
+invalid. Supplying `amount` sets both the amount and currency. Omitting all money
+fields in a partial update preserves both; other omitted fields also preserve
+their values.
 
 Duration fields also accept readable aliases: `access_duration: 3 days`,
 `billing_interval: 30 days`, and `trial_duration: 24 hours`. Use one form per
@@ -63,7 +70,8 @@ Price fields worth knowing:
 
 | Field | Meaning |
 |---|---|
-| `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON application (`POST /v1/merchant/catalog/applications`) spells it as a decimal string |
+| `amount` | decimal plus explicit currency, such as `9.99 USD`; sets amount and currency together |
+| `unit_amount`, `currency` | numeric alternative: integer native units at the registered scale plus a currency code; JSON applications spell `unit_amount` as a decimal string |
 | `access_duration_hours` | positive hour count, or null for indefinite access |
 | `billing_interval_hours` | positive interval between recurring payments, or null for a one-time purchase; independent of access duration |
 | `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together with a billing interval |
@@ -84,15 +92,17 @@ access; null `access_duration_hours` gives indefinite access:
         entitlements: ["course:101"]
         prices:
           - key: course-101-usd
-            currency: USD
-            unit_amount: 20000000
+            amount: 20 USD
             access_duration_hours: null
             billing_interval_hours: null
 ```
 
-Prepaid balances are not catalog products: fund them with
-`POST /v1/merchant/customers/{customer_id}/credit-grants` (`Client.CreateCreditGrant`),
-whose grants carry their own expiry.
+Prepaid balance products use `credit_grant`; see the
+[prepaid catalog example](../README.md#prepaid-api-balance-catalog). Administrative
+funding uses `POST /v1/merchant/customers/{customer_id}/credit-grants`
+(`Client.CreateCreditGrant`), whose grants carry their own expiry. The price
+`amount` alias does not change numeric credit-grant amounts, customer-selected
+bounds, or metered rate-card fields.
 
 **Charge models** (for metered rate cards):
 

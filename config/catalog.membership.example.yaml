@@ -1,5 +1,5 @@
 # Example merchant: host-three. Select the merchant outside this payload.
-# Amounts are integer USD micros. These are illustrative prices, not current quotes.
+# Price amounts include their currency. These are illustrative prices, not current quotes.
 # Declarative (no application_id/expected_revision); see catalog.example.yaml.
 schema_version: 1
 
@@ -12,8 +12,7 @@ products:
     entitlements: ["tier:novice"]
     prices:
       - key: novice-offer-1
-        currency: usd
-        unit_amount: "12000000"
+        amount: 12 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
@@ -26,8 +25,7 @@ products:
     entitlements: ["tier:craftsman"]
     prices:
       - key: craftsman-offer-1
-        currency: usd
-        unit_amount: "29000000"
+        amount: 29 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
@@ -40,8 +38,7 @@ products:
     entitlements: ["tier:expert"]
     prices:
       - key: expert-offer-1
-        currency: usd
-        unit_amount: "59000000"
+        amount: 59 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
@@ -54,8 +51,7 @@ products:
     entitlements: ["tier:grandmaster"]
     prices:
       - key: grandmaster-offer-1
-        currency: usd
-        unit_amount: "119000000"
+        amount: 119 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]

@@ -1,5 +1,5 @@
 # Example merchant: anthropic. Select the merchant outside this payload.
-# Amounts are integer USD micros. These are illustrative prices, not current quotes.
+# Price amounts include their currency. These are illustrative prices, not current quotes.
 # Declarative (no application_id/expected_revision); see catalog.example.yaml.
 schema_version: 1
 
@@ -11,14 +11,12 @@ products:
     tier_rank: 1
     prices:
       - key: claude-code-pro-offer-1
-        currency: usd
-        unit_amount: "20000000"
+        amount: 20 USD
         access_duration_hours: 720
         billing_interval_hours: 8760
         psps: [stripe]
       - key: claude-code-pro-offer-2
-        currency: usd
-        unit_amount: "200000000"
+        amount: 200 USD
         access_duration_hours: 8760
         billing_interval_hours: 8760
         psps: [stripe]
@@ -30,8 +28,7 @@ products:
     tier_rank: 2
     prices:
       - key: claude-code-max-5x-offer-1
-        currency: usd
-        unit_amount: "100000000"
+        amount: 100 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
@@ -43,8 +40,7 @@ products:
     tier_rank: 3
     prices:
       - key: claude-code-max-20x-offer-1
-        currency: usd
-        unit_amount: "200000000"
+        amount: 200 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
