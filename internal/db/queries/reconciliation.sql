@@ -462,7 +462,7 @@ WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(
         -- provider subscription id is only unique within a gateway account.
         AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
-RETURNING id, entitlements_spec_snapshot;
+RETURNING id, entitlements_spec_snapshot, access_duration_hours_snapshot;
 
 -- PS-7: adopt the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows

@@ -1138,7 +1138,10 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		}
 		// Restore the paid access promise independently of its billing cadence.
 		if sub.IsLive() && len(sub.EntitlementNames) > 0 {
-			start := now
+			start := sub.StartedAt
+			if start.IsZero() {
+				start = t.OccurredAt
+			}
 			if sub.CurrentPeriodStartsAt != nil {
 				start = *sub.CurrentPeriodStartsAt
 			}
@@ -1154,7 +1157,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				StartsAt:       start,
 				EndsAt:         accessEnd,
 			}
-			f.RecommendedAction += "; the charge's period is current, so missing subscription entitlements are granted too"
+			f.RecommendedAction += "; missing subscription entitlements are restored from the accepted access duration"
 		}
 		f.Apply = &ApplyAction{BackfillPayment: action}
 	}

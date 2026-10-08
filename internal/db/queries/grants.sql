@@ -455,6 +455,21 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.ends_at IS NOT NULL
   AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), sqlc.arg(entitlement)::text);
 
+-- A purchased window is a distinct fact even when it overlaps another paid
+-- window or has no expiry. A replay must not reinstate a revoked grant.
+-- name: EntitlementGrantWindowExists :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.grants g
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND g.customer_id = sqlc.arg(customer_id)::uuid
+      AND g.kind = 'entitlement' AND g.event = 'grant'
+      AND g.source_type = sqlc.arg(source_type)::text
+      AND g.source_id = sqlc.arg(source_id)::text
+      AND g.starts_at = sqlc.arg(starts_at)::timestamptz
+      AND g.ends_at IS NOT DISTINCT FROM sqlc.narg(ends_at)::timestamptz
+      AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), sqlc.arg(entitlement)::text)
+) AS exists;
+
 -- #636 idempotency for admin-grant import: is there already an entitlement grant
 -- from this admin source? Lets the host-one migrate hand admin comps over as grants
 -- (source_type=admin) and re-run safely — convergence derive-2 projects the

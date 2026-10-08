@@ -210,10 +210,21 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return res, fmt.Errorf("record customer email: %w", err)
 	}
 
-	// Entitlements via the normal subscription-sourced path, for the remote
-	// period when it is still running (mirrors the PS-4 current-period grant).
+	// The accepted access window is independent of the provider's billing date.
 	now := w.now()
-	if a.PeriodEndsAt == nil || a.PeriodEndsAt.After(now) {
+	start := now
+	if a.StartedAt != nil {
+		start = *a.StartedAt
+	}
+	if a.PeriodStartsAt != nil {
+		start = *a.PeriodStartsAt
+	}
+	var accessEnd *time.Time
+	if rows[0].AccessDurationHoursSnapshot != nil {
+		end := start.Add(time.Duration(*rows[0].AccessDurationHoursSnapshot) * time.Hour)
+		accessEnd = &end
+	}
+	if accessEnd == nil || accessEnd.After(now) {
 		var spec map[string]json.RawMessage
 		if len(rows[0].EntitlementsSpecSnapshot) > 0 {
 			_ = json.Unmarshal(rows[0].EntitlementsSpecSnapshot, &spec)
@@ -224,16 +235,12 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 				names = append(names, name)
 			}
 			sort.Strings(names)
-			start := now
-			if a.PeriodStartsAt != nil {
-				start = *a.PeriodStartsAt
-			}
 			granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
 				SubscriptionID: res.SubscriptionID,
 				CustomerID:     a.CustomerID,
 				Entitlements:   names,
 				StartsAt:       start,
-				EndsAt:         a.PeriodEndsAt,
+				EndsAt:         accessEnd,
 			})
 			if err != nil {
 				return res, err

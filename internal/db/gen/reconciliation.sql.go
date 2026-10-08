@@ -2801,7 +2801,7 @@ WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
         -- provider subscription id is only unique within a gateway account.
         AND s.psp_id = $9::uuid
   )
-RETURNING id, entitlements_spec_snapshot
+RETURNING id, entitlements_spec_snapshot, access_duration_hours_snapshot
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
@@ -2820,8 +2820,9 @@ type ReconcileMaterializeSubscriptionParams struct {
 }
 
 type ReconcileMaterializeSubscriptionRow struct {
-	ID                       uuid.UUID
-	EntitlementsSpecSnapshot []byte
+	ID                          uuid.UUID
+	EntitlementsSpecSnapshot    []byte
+	AccessDurationHoursSnapshot *int32
 }
 
 // PS-1 materialization (bootstrap mode, --materialize): create the local
@@ -2853,7 +2854,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 	var items []ReconcileMaterializeSubscriptionRow
 	for rows.Next() {
 		var i ReconcileMaterializeSubscriptionRow
-		if err := rows.Scan(&i.ID, &i.EntitlementsSpecSnapshot); err != nil {
+		if err := rows.Scan(&i.ID, &i.EntitlementsSpecSnapshot, &i.AccessDurationHoursSnapshot); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

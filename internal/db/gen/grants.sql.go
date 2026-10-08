@@ -142,6 +142,47 @@ func (q *Queries) EntitlementExistsForGrant(ctx context.Context, arg Entitlement
 	return exists, err
 }
 
+const entitlementGrantWindowExists = `-- name: EntitlementGrantWindowExists :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.grants g
+    WHERE g.merchant_id = $1::uuid
+      AND g.customer_id = $2::uuid
+      AND g.kind = 'entitlement' AND g.event = 'grant'
+      AND g.source_type = $3::text
+      AND g.source_id = $4::text
+      AND g.starts_at = $5::timestamptz
+      AND g.ends_at IS NOT DISTINCT FROM $6::timestamptz
+      AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), $7::text)
+) AS exists
+`
+
+type EntitlementGrantWindowExistsParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	SourceType  string
+	SourceID    string
+	StartsAt    time.Time
+	EndsAt      *time.Time
+	Entitlement string
+}
+
+// A purchased window is a distinct fact even when it overlaps another paid
+// window or has no expiry. A replay must not reinstate a revoked grant.
+func (q *Queries) EntitlementGrantWindowExists(ctx context.Context, arg EntitlementGrantWindowExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, entitlementGrantWindowExists,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.Entitlement,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
 SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id = $1::uuid
