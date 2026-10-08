@@ -153,6 +153,7 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
+	e.refreshBeforePeriodEnd()
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
 	e.toPeriodEnd()
 	w.runRenewals()
@@ -161,6 +162,7 @@ func TestAttemptAndCycleReads(t *testing.T) {
 			e.setDecline(visa.Last4, "", "")
 		}
 		s := w.subscription(embedded, e.sub)
+		require.NotNil(t, s.NextRetryAt, "the declined renewal is scheduled for retry")
 		w.advanceHealthyTo(s.NextRetryAt.Add(time.Second))
 		w.runRenewals()
 	}
