@@ -55,6 +55,8 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	require.Equal(t, "nmi_schedule", subs.Items[0].CollectionPolicy)
 	l := &legacy{w: w, rail: "nmi", tp: tp, c: c, price: price.Price, railSub: railSub, sub: subs.Items[0].ID, ent: price.ent, railCust: vault}
 	require.True(t, c.entitled(price.ent))
+	w.refreshProviders()
+	w.settleCollectionScans()
 	return l
 }
 
