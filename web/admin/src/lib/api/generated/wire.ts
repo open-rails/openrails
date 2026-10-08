@@ -138,7 +138,7 @@ export type ApplyProduct = {
   tier_group?: string | null
   tier_rank?: number | null
   archived?: boolean | null
-  entitlements_spec?: Record<string, number | null> | null
+  entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
   prices?: ApplyPrice[]
   rate_cards?: RateCard[] | null
@@ -681,7 +681,7 @@ export type CreateProductParams = {
   key?: string
   display_name?: string
   description?: string
-  entitlements_spec?: Record<string, number | null>
+  entitlements?: string[]
   credit_grant?: CreditGrantSpec
   tier_group?: string
   tier_rank?: number
@@ -1430,7 +1430,7 @@ export type Offer = {
   product_id: string
   product_key: string
   product_display_name: string
-  entitlements_spec: Record<string, number | null> | null
+  entitlements: string[]
   price_id: string
   price_key: string
   unit_amount: string
@@ -1804,7 +1804,7 @@ export type Product = {
   key: string
   display_name: string
   description: string
-  entitlements_spec: Record<string, number | null> | null
+  entitlements: string[]
   credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number
@@ -2404,7 +2404,7 @@ export type UpdatePriceParams = {
 export type UpdateProductParams = {
   display_name?: string | null
   description?: string | null
-  entitlements_spec?: Record<string, number | null> | null
+  entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
   tier_group?: string | null
   tier_rank?: number | null

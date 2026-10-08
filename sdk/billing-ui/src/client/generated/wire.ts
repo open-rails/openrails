@@ -526,7 +526,7 @@ export type Product = {
   key: string
   display_name: string
   description: string
-  entitlements_spec: Record<string, number | null> | null
+  entitlements: string[]
   credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number

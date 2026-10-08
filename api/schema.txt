@@ -10,6 +10,7 @@ migration 0006_catalog_snapshots.up.sql sha256:e45102e6cb5b778a67aa5dbdfb95c095e
 migration 0007_checkout_session_directory.up.sql sha256:28f5ee3c7d980e9d607fb82e6bb76f94b43315e1f5c4531117fcc1b4076546e6
 migration 0008_billing_access_intervals.up.sql sha256:711cdfd7a4611d00d15617823e7964214fe2f0bba9688327f20150cc628f9b94
 migration 0009_invoice_collection_cadence.up.sql sha256:b90e15a74c20dd154c34bbb4deb115eac0541299eae862d728153e291ca4e95d
+migration 0010_entitlement_names.up.sql sha256:b232cc073d440a64f515c5b868624efe731d3681a1373e851a21710259255acb
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1368,7 +1369,7 @@ table billing.payments
   column discount_code text
   column discount_reason text
   column discount_metadata jsonb
-  column entitlements_spec_snapshot jsonb
+  column entitlements_snapshot jsonb
   column metadata jsonb
   column purchased_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
@@ -1387,6 +1388,7 @@ table billing.payments
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column money_movement text NOT NULL DEFAULT 'none'::text
   column credit_grant_snapshot jsonb
+  column legacy_entitlement_hours jsonb
   constraint payments_attempt_kind_check CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text]))))
   constraint payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text])))
   constraint payments_channel_psp_check CHECK ( CASE WHEN (channel = 'rail'::text) THEN ((rail IS NOT NULL) AND (psp_id IS NOT NULL)) ELSE ((rail IS NULL) AND (psp_id IS NULL)) END)
@@ -1397,6 +1399,8 @@ table billing.payments
   constraint payments_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
   constraint payments_customer_id_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE SET NULL (subscription_id)
   constraint payments_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
+  constraint payments_entitlements_list_check CHECK (((entitlements_snapshot IS NULL) OR (entitlements_snapshot = 'null'::jsonb) OR ((jsonb_typeof(entitlements_snapshot) = 'array'::text) AND (NOT jsonb_path_exists(entitlements_snapshot, '$[*]?(@.type() != "string")'::jsonpath)))))
+  constraint payments_legacy_entitlement_hours_check CHECK (((legacy_entitlement_hours IS NULL) OR ((jsonb_typeof(legacy_entitlement_hours) = 'object'::text) AND (NOT jsonb_path_exists(legacy_entitlement_hours, '$.*?((@.type() != "number" || @ <= 0) || @ > 2562047)'::jsonpath)))))
   constraint payments_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint payments_money_movement_check CHECK ((money_movement = ANY (ARRAY['rail'::text, 'none'::text])))
   constraint payments_not_future_check CHECK ((purchased_at <= (now() + '00:05:00'::interval)))
@@ -1542,7 +1546,7 @@ table billing.products
   column key text NOT NULL
   column display_name text NOT NULL
   column description text
-  column entitlements_spec jsonb
+  column entitlements jsonb NOT NULL DEFAULT '[]'::jsonb
   column tier_group text
   column tier_rank integer NOT NULL
   column archived boolean NOT NULL
@@ -1552,7 +1556,7 @@ table billing.products
   column revision bigint NOT NULL DEFAULT 0
   column credit_grant jsonb
   constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
-  constraint products_entitlement_hours_nonnegative_check CHECK ((NOT jsonb_path_exists(COALESCE(entitlements_spec, '{}'::jsonb), '$.*?(@.type() == "number" && @ < 0)'::jsonpath)))
+  constraint products_entitlements_list_check CHECK (((jsonb_typeof(entitlements) = 'array'::text) AND (NOT jsonb_path_exists(entitlements, '$[*]?(@.type() != "string")'::jsonpath))))
   constraint products_key_key UNIQUE (merchant_id, key)
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint products_pkey PRIMARY KEY (merchant_id, id)
@@ -1560,7 +1564,7 @@ table billing.products
   constraint products_tier_group_check CHECK (((char_length(tier_group) >= 1) AND (char_length(tier_group) <= 100)))
   index CREATE INDEX products_archived_idx ON billing.products USING btree (archived)
   index CREATE INDEX products_created_at_id_idx ON billing.products USING btree (merchant_id, created_at DESC, id DESC)
-  index CREATE INDEX products_entitlements_spec_idx ON billing.products USING gin (entitlements_spec) WHERE (NOT archived)
+  index CREATE INDEX products_entitlements_idx ON billing.products USING gin (entitlements) WHERE (NOT archived)
   index CREATE INDEX products_key_idx ON billing.products USING btree (key)
   index CREATE UNIQUE INDEX products_key_key ON billing.products USING btree (merchant_id, key)
   index CREATE UNIQUE INDEX products_pkey ON billing.products USING btree (merchant_id, id)
@@ -2021,7 +2025,7 @@ table billing.subscriptions
   column canceled_at timestamp with time zone
   column cancel_type text
   column cancel_feedback text
-  column entitlements_spec_snapshot jsonb
+  column entitlements_snapshot jsonb
   column gateway_response jsonb
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
@@ -2050,6 +2054,7 @@ table billing.subscriptions
   constraint subscriptions_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint subscriptions_ended_not_before_canceled_check CHECK (((ended_at IS NULL) OR (canceled_at IS NULL) OR (ended_at >= canceled_at)))
   constraint subscriptions_engine_binding_check CHECK (((collection_policy <> 'engine'::text) OR (((rail = ANY (ARRAY['nmi'::text, 'stripe'::text])) AND (rail_subscription_id IS NULL)) OR (rail = 'solana'::text))))
+  constraint subscriptions_entitlements_list_check CHECK (((entitlements_snapshot IS NULL) OR (entitlements_snapshot = 'null'::jsonb) OR ((jsonb_typeof(entitlements_snapshot) = 'array'::text) AND (NOT jsonb_path_exists(entitlements_snapshot, '$[*]?(@.type() != "string")'::jsonpath)))))
   constraint subscriptions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint subscriptions_nmi_schedule_rail_check CHECK (((collection_policy = 'nmi_schedule'::text) = ((rail = 'nmi'::text) AND (collection_policy <> 'engine'::text))))
   constraint subscriptions_past_due_has_period_end_check CHECK (((status <> 'past_due'::text) OR (current_period_ends_at IS NOT NULL)))

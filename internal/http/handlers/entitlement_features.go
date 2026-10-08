@@ -15,7 +15,7 @@ import (
 
 // Active-entitlements SELF read (issue #245). #528 retired the admin
 // feature/product-feature CRUD surface; #702 dropped the feature-definition
-// tables entirely — entitlements are plain strings (product.EntitlementsSpec
+// tables entirely — entitlements are plain strings (product.Entitlements
 // keys). The billing.entitlements window ledger is the source of truth.
 
 // activeEntitlement is one active entitlement window: the entitlement string

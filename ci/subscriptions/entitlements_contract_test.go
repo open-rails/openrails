@@ -124,6 +124,21 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			require.True(t, customer.entitled("premium"), "content and service names receive identical access")
 			require.True(t, customer.entitled(" private key "), "opaque spelling must survive granting and lookup")
 			require.False(t, customer.entitled("private key"), "lookup must not trim an opaque entitlement")
+			for _, check := range []struct {
+				key  string
+				want bool
+			}{{" private key ", true}, {"private key", false}} {
+				has, err := client.HasEntitlement(t.Context(), customer.customerID(), check.key, w.clock.Now())
+				require.NoError(t, err)
+				require.Equal(t, check.want, has, "both transports preserve exact names")
+				members, err := client.ListEntitlementCustomers(t.Context(), check.key, billing.EntitlementCustomerListParams{})
+				require.NoError(t, err)
+				if check.want {
+					require.Contains(t, members.Items, customer.customerID())
+				} else {
+					require.Empty(t, members.Items)
+				}
+			}
 			require.False(t, customer.entitled(product.Key), "the product key is not an implicit entitlement")
 			_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"post:202"})})
 			require.NoError(t, err)

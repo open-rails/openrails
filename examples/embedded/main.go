@@ -168,7 +168,7 @@ func run(ctx context.Context) error {
 	// separate from membership-included posts; a bundle grants both paid keys.
 	postAccess := map[string]string{
 		"101": "course:101",
-		"102": "post:102",
+		"102": "course:102",
 		"103": "channel:main:membership",
 	}
 	r.GET("/content/:id/video", authkitgin.Required(auth), func(c *gin.Context) {

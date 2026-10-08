@@ -5,54 +5,47 @@ products:
     display_name: Course 101 — Intro to CSS
     entitlements: ["course:101"]
     prices:
-      - key: buy
+      - key: purchase
         currency: USD
         unit_amount: 4990000 # $4.99; every USD amount is in micros
-        access_duration: null # permanent access to this course
+        access_duration: null # permanent access
       - key: rent
         currency: USD
         unit_amount: 1990000 # $1.99, paid once
         access_duration: 3 days
 
-  - key: post-102
-    display_name: Post 102 — The full shoot
-    entitlements: ["post:102"]
+  - key: course-102
+    display_name: Course 102 — Intro to Tailwind
+    entitlements: ["course:102"]
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 6990000 # $6.99, paid once
+        unit_amount: 4990000 # $4.99, paid once
         access_duration: null
-        billing_interval: null
+      - key: rent
+        currency: USD
+        unit_amount: 1990000 # $1.99, paid once
+        access_duration: 3 days
 
-  - key: featured-content-bundle
-    display_name: Featured content — CSS course and Post 102
-    entitlements: ["course:101", "post:102"] # the same keys as individual sales
+  - key: course-bundle
+    display_name: CSS courses 101 and 102
+    entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 9990000 # $9.99 for both, instead of $11.98 separately
+        unit_amount: 8990000 # $8.99 for both, instead of $9.98 separately
         access_duration: null
-        billing_interval: null
 
-  - key: channel-main-monthly
-    display_name: Main channel — 30-day membership
+  - key: channel-main
+    display_name: Main channel membership
     entitlements: ["channel:main:membership"]
-    tier_group: channel-main # the two term products are mutually exclusive memberships
-    tier_rank: 1
     prices:
-      - key: subscription
+      - key: monthly
         currency: USD
         unit_amount: 9990000 # $9.99 every 30 days
         access_duration: 30 days
         billing_interval: 30 days
-
-  - key: channel-main-yearly
-    display_name: Main channel — 365-day membership
-    entitlements: ["channel:main:membership"] # same benefit, separate product
-    tier_group: channel-main
-    tier_rank: 1
-    prices:
-      - key: subscription
+      - key: yearly
         currency: USD
         unit_amount: 99990000 # $99.99 every 365 days
         access_duration: 365 days

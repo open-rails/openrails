@@ -13602,25 +13602,11 @@
               }
             ]
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "credit_grant": {
             "oneOf": [
@@ -15902,17 +15888,10 @@
           "description": {
             "type": "string"
           },
-          "entitlements_spec": {
-            "type": "object",
-            "additionalProperties": {
-              "oneOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
           "credit_grant": {
@@ -19165,25 +19144,11 @@
           "product_display_name": {
             "type": "string"
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "price_id": {
             "type": "string"
@@ -19224,7 +19189,7 @@
           "product_id",
           "product_key",
           "product_display_name",
-          "entitlements_spec",
+          "entitlements",
           "price_id",
           "price_key",
           "unit_amount",
@@ -21005,25 +20970,11 @@
           "description": {
             "type": "string"
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "credit_grant": {
             "$ref": "#/components/schemas/CreditGrantSpec"
@@ -21065,7 +21016,7 @@
           "key",
           "display_name",
           "description",
-          "entitlements_spec",
+          "entitlements",
           "tier_group",
           "tier_rank",
           "archived",
@@ -23539,25 +23490,11 @@
               }
             ]
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "credit_grant": {
             "oneOf": [

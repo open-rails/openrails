@@ -976,6 +976,7 @@ pkg openrails/billing, method (*Card) LastFour() string
 pkg openrails/billing, method (*Card) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*Card) Zero()
 pkg openrails/billing, method (*CheckoutAttemptID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*CreateProductParams) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*CreditGrantID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CreditTransactionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CustomerID) UnmarshalText([]byte) error
@@ -1568,7 +1569,7 @@ pkg openrails/billing, type CreateProductParams struct, Archived bool `json:"arc
 pkg openrails/billing, type CreateProductParams struct, CreditGrant *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, Description string `json:"description,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, DisplayName string `json:"display_name"`
-pkg openrails/billing, type CreateProductParams struct, EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
+pkg openrails/billing, type CreateProductParams struct, Entitlements []string `json:"entitlements,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, Key string `json:"key"`
 pkg openrails/billing, type CreateProductParams struct, TierGroup *string `json:"tier_group,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, TierRank int `json:"tier_rank,omitempty"`
@@ -2236,7 +2237,7 @@ pkg openrails/billing, type Offer struct
 pkg openrails/billing, type Offer struct, AccessDurationHours *int `json:"access_duration_hours"`
 pkg openrails/billing, type Offer struct, BillingIntervalHours *int `json:"billing_interval_hours"`
 pkg openrails/billing, type Offer struct, Currency string `json:"currency"`
-pkg openrails/billing, type Offer struct, EntitlementsSpec map[string]*int `json:"entitlements_spec"`
+pkg openrails/billing, type Offer struct, Entitlements []string `json:"entitlements"`
 pkg openrails/billing, type Offer struct, Kind OfferKind `json:"kind"`
 pkg openrails/billing, type Offer struct, PriceID PriceID `json:"price_id"`
 pkg openrails/billing, type Offer struct, PriceKey string `json:"price_key"`
@@ -2557,7 +2558,7 @@ pkg openrails/billing, type Product struct, CreatedAt time.Time `json:"created_a
 pkg openrails/billing, type Product struct, CreditGrant *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 pkg openrails/billing, type Product struct, Description string `json:"description"`
 pkg openrails/billing, type Product struct, DisplayName string `json:"display_name"`
-pkg openrails/billing, type Product struct, EntitlementsSpec map[string]*int `json:"entitlements_spec"`
+pkg openrails/billing, type Product struct, Entitlements []string `json:"entitlements"`
 pkg openrails/billing, type Product struct, ID ProductID `json:"id"`
 pkg openrails/billing, type Product struct, Key string `json:"key"`
 pkg openrails/billing, type Product struct, Prices []Price `json:"prices"`
@@ -3027,7 +3028,7 @@ pkg openrails/billing, type UpdateProductParams struct, Archived catalog.Field[b
 pkg openrails/billing, type UpdateProductParams struct, CreditGrant catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, Description catalog.Field[string] `json:"description,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, DisplayName catalog.Field[string] `json:"display_name,omitzero"`
-pkg openrails/billing, type UpdateProductParams struct, EntitlementsSpec catalog.Field[map[string]*int] `json:"entitlements_spec,omitzero"`
+pkg openrails/billing, type UpdateProductParams struct, Entitlements catalog.Field[[]string] `json:"entitlements,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, TierGroup catalog.Field[string] `json:"tier_group,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, TierRank catalog.Field[int] `json:"tier_rank,omitzero"`
 pkg openrails/billing, type Usage struct
@@ -3135,6 +3136,7 @@ pkg openrails/catalog, const ApplicationSchemaVersion untyped int = 1
 pkg openrails/catalog, const MaxApplicationBytes untyped int = 1048576
 pkg openrails/catalog, const MaxApplicationItems untyped int = 2000
 pkg openrails/catalog, const MaxDurationHours int = 2562047
+pkg openrails/catalog, const MaxEntitlementKeyBytes untyped int = 256
 pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
 pkg openrails/catalog, const ModelPerUnit Model = "per_unit"
@@ -3146,6 +3148,7 @@ pkg openrails/catalog, const RoundHalfUp Round = "half_up"
 pkg openrails/catalog, const RoundUp Round = "up"
 pkg openrails/catalog, const TierModeGraduated TierMode = "graduated"
 pkg openrails/catalog, const TierModeVolume TierMode = "volume"
+pkg openrails/catalog, func NormalizeEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
@@ -3194,7 +3197,7 @@ pkg openrails/catalog, type ApplyProduct struct, Archived Field[bool] `json:"arc
 pkg openrails/catalog, type ApplyProduct struct, CreditGrant Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Description Field[string] `json:"description,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, DisplayName Field[string] `json:"display_name,omitzero"`
-pkg openrails/catalog, type ApplyProduct struct, EntitlementsSpec Field[map[string]*int] `json:"entitlements_spec,omitzero"`
+pkg openrails/catalog, type ApplyProduct struct, Entitlements Field[[]string] `json:"entitlements,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Key string `json:"key"`
 pkg openrails/catalog, type ApplyProduct struct, Prices []ApplyPrice `json:"prices,omitempty"`
 pkg openrails/catalog, type ApplyProduct struct, RateCards Field[[]RateCard] `json:"rate_cards,omitzero"`
