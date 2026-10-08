@@ -93,6 +93,10 @@ func TestRailConversionsRefuseUnknownCurrencyAndOverflow(t *testing.T) {
 		}
 	}
 	for _, code := range CurrencyCodes() {
+		cur, _ := LookupCurrency(code)
+		if cur.NativeShift() <= 0 {
+			continue // Atomic token units require no widening.
+		}
 		for _, minor := range []Cents{math.MaxInt64, math.MinInt64} {
 			if _, err := RailMinorToNative(code, minor); err == nil {
 				t.Errorf("%s: RailMinorToNative(%d) overflowed silently", code, minor)
@@ -112,22 +116,22 @@ func TestRailConversionsRefuseUnknownCurrencyAndOverflow(t *testing.T) {
 }
 
 // CentsToMicros and remaining hardcoded 10^4 conversions are correct only while
-// every registered currency shifts by exactly 4 decimals between the internal
-// and rail scale. Registering another shift must fail here first.
-func TestRegisteredCurrenciesShareNativeShift(t *testing.T) {
+// every registered fiat currency shifts by exactly 4 decimals between the
+// internal and card-rail scale. Token currencies never use these card paths.
+func TestRegisteredFiatCurrenciesShareNativeShift(t *testing.T) {
 	if MicrosPerCent != 10_000 || CentsToMicros(1234) != Micros(12_340_000) {
 		t.Fatal("cents/micros scale changed")
 	}
 	for _, code := range CurrencyCodes() {
 		cur, _ := LookupCurrency(code)
-		if cur.NativeShift() != 4 {
+		if cur.Kind == "fiat" && cur.NativeShift() != 4 {
 			t.Errorf("%s native shift %d != 4: route inbound conversions through RailMinorToNative first", code, cur.NativeShift())
 		}
 	}
 }
 
 func TestFormatting(t *testing.T) {
-	if got := DescribeNativeScales(); got != "EUR 1000000, JPY 10000, USD 1000000" {
+	if got := DescribeNativeScales(); got != "EUR 1000000, JPY 10000, SOL 1000000000, USD 1000000, USDC 1000000" {
 		t.Errorf("DescribeNativeScales() = %q", got)
 	}
 	withCurrency(t, "TST", 6, 3)

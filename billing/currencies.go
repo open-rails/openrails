@@ -1,9 +1,6 @@
 package billing
 
-import (
-	"sort"
-	"strings"
-)
+import "github.com/open-rails/openrails/internal/currency"
 
 // CurrencyUnits is one registered currency's scale. Every monetary integer
 // OpenRails emits for the currency is in native units (10^Decimals per major
@@ -18,29 +15,20 @@ type CurrencyUnits struct {
 // native = minor * 10^NativeShift.
 func (c CurrencyUnits) NativeShift() int { return c.Decimals - c.MinorDecimals }
 
-// currencyRegistry is the system currency table. It is fixed per release, not
-// per merchant, and is the single source for the engine's converters, the
-// admin console's scale file and GET /v1/currencies.
-var currencyRegistry = map[string]CurrencyUnits{
-	"USD": {Code: "USD", Decimals: 6, MinorDecimals: 2},
-	"EUR": {Code: "EUR", Decimals: 6, MinorDecimals: 2},
-	"JPY": {Code: "JPY", Decimals: 4, MinorDecimals: 0},
-}
-
 // Currencies lists the registry in code order; no I/O.
 func Currencies() []CurrencyUnits {
-	out := make([]CurrencyUnits, 0, len(currencyRegistry))
-	for _, units := range currencyRegistry {
-		out = append(out, units)
+	registered := currency.List()
+	out := make([]CurrencyUnits, 0, len(registered))
+	for _, units := range registered {
+		out = append(out, CurrencyUnits{Code: units.Code, Decimals: units.Decimals, MinorDecimals: units.MinorDecimals})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
 	return out
 }
 
 // LookupCurrency returns the scale registered for code (case-insensitive).
 func LookupCurrency(code string) (CurrencyUnits, bool) {
-	units, ok := currencyRegistry[strings.ToUpper(strings.TrimSpace(code))]
-	return units, ok
+	units, ok := currency.Lookup(code)
+	return CurrencyUnits{Code: units.Code, Decimals: units.Decimals, MinorDecimals: units.MinorDecimals}, ok
 }
 
 // CurrencyRegistry is the GET /v1/currencies document.

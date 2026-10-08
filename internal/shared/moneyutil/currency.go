@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/currency"
 )
 
 // System currency registry (#472), moved here from internal/modules/money by
@@ -18,24 +18,15 @@ import (
 // a divide-by-10 000 instead of asking the registry. Currency is system-fixed,
 // NOT merchant-scoped: the codebase is the authority (there is no DB CHECK).
 
-// Currency is a system currency code and its minor-unit scale.
-type Currency struct {
-	Code          string
-	Decimals      int    // internal units per major unit = 10^Decimals
-	MinorDecimals int    // ISO-4217/provider minor units per major unit = 10^MinorDecimals (0 for zero-decimal rails like JPY)
-	Kind          string // "fiat"
-}
+// Currency is one registered currency and its native/settlement scale.
+type Currency = currency.Units
 
-// NativeShift is the decimal shift between a currency's internal scale and its
-// rail minor unit: internal = minor * 10^NativeShift.
-func (c Currency) NativeShift() int { return c.Decimals - c.MinorDecimals }
-
-// currencies mirrors the public registry (billing.Currencies), the one owner
+// currencies mirrors the dependency-free currency registry, the one owner
 // of every currency scale.
 var currencies = func() map[string]Currency {
 	out := map[string]Currency{}
-	for _, units := range billing.Currencies() {
-		out[units.Code] = Currency{Code: units.Code, Decimals: units.Decimals, MinorDecimals: units.MinorDecimals, Kind: "fiat"}
+	for _, units := range currency.List() {
+		out[units.Code] = units
 	}
 	return out
 }()

@@ -60,11 +60,9 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 // the CURRENCY's registered scale" (JPY is 10^4), which is not always micros —
 // typing it Micros would be a lie.
 
-// CentsToMicros widens a rail minor amount into internal micros. Valid for
-// every registered currency only because every registered currency has the
-// same 10^4 native shift — TestRegisteredCurrenciesShareNativeShift pins that, and
-// FAILS the moment a currency is registered that breaks it. Currency-aware
-// callers should prefer RailMinorToNative.
+// CentsToMicros widens a fiat card-rail minor amount into native units. The
+// registered fiat currencies share this shift; crypto uses native atomic units
+// directly and must go through RailMinorToNative instead.
 func CentsToMicros(cents Cents) Micros {
 	return Micros(int64(cents) * MicrosPerCent)
 }
