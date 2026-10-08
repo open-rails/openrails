@@ -168,6 +168,11 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 }
 
 func (s *PGStore) FinishRun(ctx context.Context, runID uuid.UUID, status string, summary []byte, runErr string) error {
+	// Ending a canceled pass is bookkeeping about work already attempted.
+	// Preserve its merchant scope and recover a pin closed by cancellation;
+	// never leave an orderly shutdown looking like a still-running writer.
+	ctx, cancel := db.DetachedWriteContext(ctx, 5*time.Second)
+	defer cancel()
 	var errPtr *string
 	if runErr != "" {
 		errPtr = &runErr

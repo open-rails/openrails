@@ -3,6 +3,7 @@ package converge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -217,8 +218,8 @@ func AfterMutation(ctx context.Context, database *db.DB, merchantID billing.Merc
 // connection (RunInMerchantConn) so the gen queries resolve to the merchant.
 // When the scope is clean (no findings) it does no writes at all — the idempotent
 // no-op that keeps the inline hot path cheap.
-func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeResult, error) {
-	res := ConvergeResult{Scope: scope}
+func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res ConvergeResult, runErr error) {
+	res.Scope = scope
 	if scope.Merchant.UUID() == uuid.Nil {
 		return res, fmt.Errorf("converge: scope.Merchant required")
 	}
@@ -237,6 +238,30 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	// A run stamps first_seen_run/last_seen_run on the findings (and drives
 	// auto-vanish). Created lazily — only when there is something to persist.
 	var runID *uuid.UUID
+	completed := false
+	defer func() {
+		if runID == nil {
+			return
+		}
+		// Error, cancellation, and panic paths retain a failed run. Only the
+		// fully completed pass may certify completion; cleanup grants no work.
+		status, reason := "failed", "convergence interrupted before completion"
+		if runErr == nil && ctx.Err() != nil {
+			runErr = ctx.Err()
+		}
+		if runErr != nil {
+			reason = runErr.Error()
+		} else if completed {
+			status, reason = "completed", ""
+		}
+		summary, _ := json.Marshal(map[string]any{
+			"findings": res.Findings, "auto_fixed": res.AutoFixed,
+			"reconcile_required": res.ReconcileRequired, "requires_review": res.RequiresReview, "operator": res.Operator,
+		})
+		if err := (&reconcile.PGStore{DB: e.DB}).FinishRun(ctx, *runID, status, summary, reason); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("converge: finish run: %w", err))
+		}
+	}()
 	apply := func(findings []ConvergeFinding) error {
 		if len(findings) == 0 {
 			return nil
@@ -299,18 +324,7 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 		return res, err
 	}
 
-	if runID == nil {
-		return res, nil // converged: no run, no writes
-	}
-	summary, _ := json.Marshal(map[string]any{
-		"findings": res.Findings, "auto_fixed": res.AutoFixed,
-		"reconcile_required": res.ReconcileRequired, "requires_review": res.RequiresReview, "operator": res.Operator,
-	})
-	if _, err := q.FinishReconciliationRun(ctx, gen.FinishReconciliationRunParams{
-		ID: *runID, Status: "completed", Summary: summary,
-	}); err != nil {
-		return res, fmt.Errorf("converge: finish run: %w", err)
-	}
+	completed = true
 	return res, nil
 }
 
