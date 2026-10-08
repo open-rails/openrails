@@ -72,10 +72,7 @@ func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *model
 	if err != nil {
 		return err
 	}
-	start := periodEnd.UTC()
-	if paidEnd := accessEnd(periodStart, sub.AccessDurationHoursSnapshot); paidEnd.After(start) {
-		start = *paidEnd
-	}
+	start := *accessEnd(periodStart, sub.AccessDurationHoursSnapshot)
 	end := start.Add(grace)
 	for _, name := range names {
 		p := entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndsAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}

@@ -1446,12 +1446,6 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return result, nil
 	}
 
-	// A repeated refund/merchant reversal cannot reactivate an already revoked
-	// engine agreement or move its terminal dates. No paid/grace interval remains.
-	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCanceled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeMerchant) && params.CancelType == models.CancelTypeMerchant && subscription.EndedAt != nil && !subscription.EndedAt.After(s.now()) && subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.After(s.now()) {
-		return result, nil
-	}
-
 	// Merchant cancellation admits active or collecting engine obligations under
 	// the same row lock as the mutation. A later terminal state stays terminal.
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine && params.CancelType == models.CancelTypeMerchant && subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod && !(params.RevokeAccess && subscription.Status == models.StatusCanceled) {
@@ -1473,7 +1467,9 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	now := s.now()
 	endAt := now
 	if params.RevokeAccess {
-		subscription.CurrentPeriodEndsAt = &now
+		if subscription.CurrentPeriodEndsAt == nil || subscription.CurrentPeriodEndsAt.After(now) {
+			subscription.CurrentPeriodEndsAt = &now
+		}
 		if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(now) {
 			adjustedStart := now.Add(-time.Second)
 			subscription.CurrentPeriodStartsAt = &adjustedStart
@@ -1589,6 +1585,9 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		canceledAt = endedAt
 	}
 	wasCanceled := sub.Status == models.StatusCanceled
+	if wasCanceled && sub.EndedAt != nil && sub.EndedAt.Before(endedAt) {
+		endedAt = *sub.EndedAt
+	}
 	applied, err := Transition(sub, lifecycle.Cancel{Kind: cancelKindOf(c.CancelType), Immediate: !endedAt.After(now), At: now}, now)
 	if err != nil {
 		return fmt.Errorf("apply local cancellation %s: %w", sub.ID, err)
@@ -2406,10 +2405,7 @@ func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.
 		}
 		return nil
 	}
-	start := sub.CurrentPeriodEndsAt.UTC()
-	if paidEnd := accessEnd(*sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot); paidEnd.After(start) {
-		start = *paidEnd
-	}
+	start := *accessEnd(*sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot)
 	for name := range sub.EntitlementsSpecSnapshot {
 		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, Indefinite: true, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}); err != nil {
 			return fmt.Errorf("keep access through dunning for %s: %w", sub.ID, err)

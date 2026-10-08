@@ -153,6 +153,9 @@ func TestNativeGraceUsesDeclaredCadenceAndKeepsPaidWindow(t *testing.T) {
 	require.Equal(t, models.EntitlementSourceGrace, r.grants[0].SourceType)
 	require.Equal(t, paidEnd, *r.grants[0].NotBefore, "provider date rounding never shortens purchased access")
 	require.True(t, r.grants[0].Indefinite, "existing keep policy is represented by explicit grace")
+	longerProvider := &recordedAccess{}
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, longerProvider, sub, []string{"premium"}, start, start.Add(48*time.Hour)))
+	require.Equal(t, paidEnd, *longerProvider.grants[0].NotBefore, "a longer provider billing period leaves no gap after matched paid access ends")
 	sub.AccessDurationHoursSnapshot = new(1)
 	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
 	require.Len(t, r.grants, 1, "deliberately short access never receives recurring grace")
