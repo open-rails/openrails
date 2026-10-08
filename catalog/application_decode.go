@@ -61,7 +61,7 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 		}
 		fields := map[string]reflect.Type{}
 		if shape == reflect.TypeFor[ApplyPrice]() {
-			for _, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
+			for _, name := range []string{"amount", "access_duration", "billing_interval", "trial_duration"} {
 				fields[name] = reflect.TypeFor[Field[string]]()
 			}
 		}

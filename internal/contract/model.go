@@ -216,8 +216,10 @@ func fieldsOf(t reflect.Type) []field {
 	}
 	walk(t)
 	// ApplyPrice accepts these input aliases through UnmarshalJSON and writes
-	// only normalized *_hours fields. Reflection alone cannot see the aliases.
+	// normalized native-unit money and *_hours fields. Reflection alone cannot
+	// see the input aliases.
 	if t == reflect.TypeFor[catalog.ApplyPrice]() {
+		out = append(out, field{name: "amount", t: reflect.TypeFor[string](), optional: true})
 		for _, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
 			out = append(out, field{name: name, t: reflect.TypeFor[string](), optional: true, nullable: true})
 		}
