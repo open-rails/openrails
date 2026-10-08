@@ -50,12 +50,14 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 	defer pool.Close()
 	gateway, err := url.Parse(input.Gateway)
 	require.NoError(t, err)
+	realClock := clockwork.NewRealClock()
+	clock := restartClock{Clock: realClock, offset: input.Now.Sub(realClock.Now())}
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Schema: input.Schema, River: openrails.RiverHostOwned,
 		TestMode: openrails.Sandbox, ProviderWriteMode: input.Mode,
 		DB: &openrails.DBConfig{URL: input.DSN}, HTTP: &openrails.HTTPConfig{},
 		Merchant: openrails.MerchantDeclaration{Slug: input.Slug, DisplayName: input.Slug, PSPs: input.PSPs},
-	}, openrails.Deps{Postgres: pool, Clock: clockwork.NewFakeClockAt(input.Now), NMITransport: restartNMITransport{gateway: gateway}})
+	}, openrails.Deps{Postgres: pool, Clock: clock, NMITransport: restartNMITransport{gateway: gateway}})
 	require.NoError(t, err)
 	defer func() { _ = rt.Close(context.Background()) }()
 	jobs, err := riverkit.New(t.Context(), pool, &river.Config{Schema: input.Schema, ID: input.ID, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}}}, rt.RiverJobs())
@@ -64,6 +66,17 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 	require.NoError(t, os.WriteFile(input.Ready, []byte("ready"), 0600))
 	<-t.Context().Done()
 }
+
+// Historical business time continues advancing after boot, as production time
+// does. A frozen clock would leave recovery backoffs permanently in the future.
+type restartClock struct {
+	clockwork.Clock
+	offset time.Duration
+}
+
+func (c restartClock) Now() time.Time                   { return c.Clock.Now().Add(c.offset) }
+func (c restartClock) Since(at time.Time) time.Duration { return c.Now().Sub(at) }
+func (c restartClock) Until(at time.Time) time.Duration { return at.Sub(c.Now()) }
 
 type restartNMITransport struct{ gateway *url.URL }
 
@@ -238,6 +251,7 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard("nmi", visa)
 			initial := newNMIInvoice(f, c)
+			w.pull() // Qualify the setup invoice's historical period through the real provider refresh.
 			answer := payNMIInvoice(t.Context(), w, c, initial, method, "invoice-startup-agreement")
 			require.NoError(t, answer.err)
 			require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status)
