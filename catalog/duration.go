@@ -19,11 +19,11 @@ func ParseDurationHours(input string) (int, error) {
 	if len(parts) != 2 {
 		return 0, fmt.Errorf("duration must be a positive whole number of hours, days, or weeks")
 	}
-	count, err := strconv.ParseUint(parts[0], 10, 64)
-	if err != nil || count == 0 {
+	count, err := strconv.Atoi(parts[0])
+	if err != nil || count <= 0 {
 		return 0, fmt.Errorf("duration must be a positive whole number of hours, days, or weeks")
 	}
-	var multiplier uint64
+	var multiplier int
 	switch strings.ToLower(parts[1]) {
 	case "hour", "hours", "h":
 		multiplier = 1
@@ -35,10 +35,10 @@ func ParseDurationHours(input string) (int, error) {
 		return 0, fmt.Errorf("unsupported duration unit %q; use hours, days, or weeks", parts[1])
 	}
 	// Every duration must fit the time arithmetic used to grant access.
-	if count > uint64(MaxDurationHours)/multiplier {
+	if count > MaxDurationHours/multiplier {
 		return 0, fmt.Errorf("duration exceeds %d hours", MaxDurationHours)
 	}
-	return int(count * multiplier), nil
+	return count * multiplier, nil
 }
 
 // UnmarshalJSON accepts readable duration aliases and normalizes them before
