@@ -91,7 +91,10 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 				probe = bySchedule
 			}
 		}
-		snap.Transactions = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
+		snap.Transactions, err = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	liveness, err := p.Client.GetRecurringLiveness(ctx, subj.RailSubscriptionID)
@@ -120,7 +123,7 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 // transactions. NMI's query response is server-filtered to actions >= since, so
 // an action with an unparseable date is floored to `since` — a provider-proven
 // lower bound, not a fabricated instant.
-func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since time.Time) []RemoteTransaction {
+func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since time.Time) ([]RemoteTransaction, error) {
 	floored := func(at time.Time) time.Time {
 		if at.IsZero() {
 			return since
@@ -133,38 +136,47 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since ti
 			if sale.TransactionID == "" {
 				continue
 			}
-			t := remoteSale(sale, railSubID)
+			t, err := remoteSale(sale, railSubID)
+			if err != nil {
+				return nil, err
+			}
 			t.OccurredAt = floored(sale.At)
 			out = append(out, t)
 		}
-		return out
+		return out, nil
 	}
 	if probe.SuccessFound && probe.SuccessTransactionID != "" {
-		amount, _ := parseAmountCents(probe.SuccessAmount)
+		amount, err := nmi.ParseAmountMinor(probe.SuccessAmount, probe.SuccessCurrency)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, RemoteTransaction{
 			TransactionID:  probe.SuccessTransactionID,
 			SubscriptionID: railSubID,
 			Type:           TransactionTypeSale,
 			Success:        true,
-			AmountCents:    amount,
+			AmountCents:    int64(amount),
 			Currency:       probe.SuccessCurrency,
 			OccurredAt:     floored(probe.SuccessAt),
 		})
 	}
 	if probe.DeclineFound {
-		amount, _ := parseAmountCents(probe.DeclineAmount)
+		amount, err := nmi.ParseAmountMinor(probe.DeclineAmount, probe.DeclineCurrency)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, RemoteTransaction{
 			TransactionID:  probe.DeclineTransactionID,
 			SubscriptionID: railSubID,
 			Type:           TransactionTypeDecline,
 			Success:        false,
-			AmountCents:    amount,
+			AmountCents:    int64(amount),
 			Currency:       probe.DeclineCurrency,
 			OccurredAt:     floored(probe.DeclineAt),
 			DeclineReason:  probe.DeclineReason,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // StripeSubscriptionProber wraps the per-subscription Stripe read

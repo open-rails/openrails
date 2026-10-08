@@ -134,11 +134,13 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 		{"due_pass_monthly", 30, false, 0, cycles},
 		{"due_pass_yearly", 365, false, 0, cycles},
 		{"nmi_dunning", 30, true, 1, func(t *testing.T, w *world, l *legacy) {
+			w.advanceHealthyTo(l.periodEnd().Add(-time.Second))
 			w.advanceTo(l.periodEnd().Add(time.Hour))
 			l.renewAtNMI(false, true)
 			require.Equal(t, billing.SubscriptionPastDue, w.subscription(l.tp, l.sub).Status)
 			for range 10 {
 				w.advance(2 * day)
+				w.refreshProviders()
 				w.runRenewals()
 				w.wake()
 			}
@@ -175,6 +177,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 			engineVault := w.nmi.LastSale().Vault
 			second := w.startReplica()
 			for i := range 3 {
+				w.advanceHealthyTo(e.periodEnd().Add(-time.Second))
 				w.advanceTo(e.periodEnd().Add(time.Hour))
 				w.duePassEverywhere(second)
 				l.renewAtNMI(true, i != 1)
@@ -221,6 +224,7 @@ func TestLegacyNMICoexistsWithEngine(t *testing.T) {
 			w.converge()
 			require.NotEqual(t, l.railCust, engineVault)
 			for range 3 {
+				w.advanceHealthyTo(e.periodEnd().Add(-time.Second))
 				w.advanceTo(e.periodEnd().Add(time.Hour))
 				w.runRenewals()
 				l.renewAtNMI(true, true)
