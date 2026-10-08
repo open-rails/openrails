@@ -165,9 +165,7 @@ func normalizeCCBillTransaction(row ccbill.DataLinkExportRow) RemoteTransaction 
 	default:
 		txn.Type = TransactionTypeSale
 	}
-	if cents, err := parseAmountCents(row.Amount()); err == nil {
-		txn.AmountCents = cents
-	}
+	txn.setAmount(row.Amount())
 	if ts, err := timeutil.ParseFirstUTC(row.Timestamp(), "2006-01-02 15:04:05", "2006-01-02", "20060102150405", "01/02/2006"); err == nil {
 		txn.OccurredAt = ts
 	}

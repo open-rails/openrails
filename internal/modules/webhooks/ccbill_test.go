@@ -16,33 +16,41 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// CCBill posts decimal dollar strings; they must land as exact cents, then micros.
+// CCBill posts major-unit decimals in the event's currency; they land as exact
+// rail minor units of that currency, then native units: 500 yen is 500, never
+// 50 000.
 func TestCCBillAmountWireParsing(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
+		currency  string
 		raw       string
 		cents     moneyutil.Cents
-		micros    moneyutil.Micros
+		native    int64
 		allowZero bool
 		wantErr   bool
 	}{
-		{raw: "19.99", cents: 1999, micros: 19_990_000},
-		{raw: "0.01", cents: 1, micros: 10_000},
-		{raw: "10", cents: 1000, micros: 10_000_000},
-		{raw: "0.10", cents: 10, micros: 100_000},
-		{raw: "1999.00", cents: 199900, micros: 1_999_000_000}, // looks like cents, is dollars
-		{raw: "0.00", allowZero: true},
-		{raw: "0.00", wantErr: true},
-		{raw: "-5.00", wantErr: true},
-		{raw: "-5.00", allowZero: true, wantErr: true},
-		{raw: "", wantErr: true},
-		{raw: "abc", wantErr: true},
-		{raw: "19.99USD", wantErr: true},
-		{raw: "$19.99", wantErr: true},
-		{raw: "1,999.00", wantErr: true},
+		{currency: "USD", raw: "19.99", cents: 1999, native: 19_990_000},
+		{currency: "USD", raw: "0.01", cents: 1, native: 10_000},
+		{currency: "USD", raw: "10", cents: 1000, native: 10_000_000},
+		{currency: "USD", raw: "0.10", cents: 10, native: 100_000},
+		{currency: "USD", raw: "1999.00", cents: 199900, native: 1_999_000_000}, // looks like cents, is dollars
+		{currency: "JPY", raw: "500.00", cents: 500, native: 5_000_000},
+		{currency: "JPY", raw: "500", cents: 500, native: 5_000_000},
+		{currency: "USD", raw: "0.00", allowZero: true},
+		{currency: "USD", raw: "0.00", wantErr: true},
+		{currency: "USD", raw: "-5.00", wantErr: true},
+		{currency: "USD", raw: "-5.00", allowZero: true, wantErr: true},
+		{currency: "USD", raw: "", wantErr: true},
+		{currency: "USD", raw: "abc", wantErr: true},
+		{currency: "USD", raw: "19.99USD", wantErr: true},
+		{currency: "USD", raw: "$19.99", wantErr: true},
+		{currency: "USD", raw: "1,999.00", wantErr: true},
+		{currency: "USD", raw: "19.999", wantErr: true},
+		{currency: "JPY", raw: "500.50", wantErr: true},
+		{currency: "XXX", raw: "19.99", wantErr: true},
 	} {
-		t.Run(fmt.Sprintf("%q/zero=%v", tc.raw, tc.allowZero), func(t *testing.T) {
-			got, err := parseCCBillAmountCents(tc.raw, "billedAmount", "billedAmount", tc.allowZero)
+		t.Run(fmt.Sprintf("%s %q/zero=%v", tc.currency, tc.raw, tc.allowZero), func(t *testing.T) {
+			got, err := parseCCBillAmountCents(tc.currency, tc.raw, "billedAmount", "billedAmount", tc.allowZero)
 			if tc.wantErr {
 				require.Error(t, err)
 				require.True(t, shouldTreatCCBillErrorAsNonRetryable(err), "a malformed amount never changes on redelivery")
@@ -50,7 +58,9 @@ func TestCCBillAmountWireParsing(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tc.cents, got)
-			require.Equal(t, tc.micros, moneyutil.CentsToMicros(got))
+			native, err := moneyutil.RailMinorToNative(tc.currency, got)
+			require.NoError(t, err)
+			require.Equal(t, tc.native, native)
 		})
 	}
 }

@@ -178,8 +178,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"expected_amount_cents\"":            notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"billed_amount_cents\"":        notHTTPLogContext,
 	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"expected_amount_cents\"":      notHTTPLogContext,
-	"internal/modules/webhooks/nmi.go:func reconcileNMIChargebackEntry \"amount_cents\"":                 notHTTPLogContext,
-	"internal/modules/webhooks/nmi.go:func reconcileNMIChargebackEntry \"matched_amount_cents\"":         notHTTPLogContext,
 	"internal/river/jobs_solana_crank.go:func finalizePull \"solana_token_amount\"":                      notHTTPStoredMetadata,
 }
 

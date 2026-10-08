@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/currency"
@@ -156,6 +157,50 @@ func RailMinorToNative(currency string, minor Cents) (int64, error) {
 		return int64(minor) / -div, nil
 	}
 	return multiplyNative(int64(minor), div)
+}
+
+// DecimalToRailMinor is THE provider-decimal -> rail-minor boundary: it reads
+// a provider's major-unit amount ("9.99", "500.00", "-5") as rail minor units
+// of a registered currency, exactly. Zeros past the minor unit are accepted
+// ("500.00" JPY is 500 yen); any other digit there, a blank or unknown
+// currency, a malformed amount or int64 overflow is an error. An optional
+// leading '-' is kept: callers that need a positive amount check it.
+func DecimalToRailMinor(currency, amount string) (Cents, error) {
+	cur, ok := LookupCurrency(currency)
+	if !ok {
+		return 0, fmt.Errorf("money: unknown currency %q", currency)
+	}
+	raw := strings.TrimSpace(amount)
+	digits, sign := strings.CutPrefix(raw, "-")
+	whole, fraction, _ := strings.Cut(digits, ".")
+	if whole+fraction == "" || !allDigits(whole) || !allDigits(fraction) {
+		return 0, fmt.Errorf("money: invalid decimal amount %q", amount)
+	}
+	if len(fraction) > cur.MinorDecimals {
+		if strings.Trim(fraction[cur.MinorDecimals:], "0") != "" {
+			return 0, fmt.Errorf("money: amount %q is not in %s %s", raw, cur.Code, minorUnitName(cur.Code))
+		}
+		fraction = fraction[:cur.MinorDecimals]
+	}
+	fraction += strings.Repeat("0", cur.MinorDecimals-len(fraction))
+	value := whole + fraction
+	if sign {
+		value = "-" + value
+	}
+	minor, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("money: amount %q exceeds int64", raw)
+	}
+	return Cents(minor), nil
+}
+
+func allDigits(s string) bool {
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // minorUnitName names a currency's rail minor unit for error messages: "whole

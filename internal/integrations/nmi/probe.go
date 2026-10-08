@@ -50,10 +50,10 @@ const (
 // probes never trip duplicate-transaction detection. crypto/rand is used (over
 // math/rand) only to satisfy gosec G404 — randomness here is for uniqueness,
 // not security; a read failure just degrades to the lower bound.
-func probeAmount() string {
+func probeAmount() moneyutil.Cents {
 	var b [1]byte
 	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("1.%02d", 1+int(b[0])%99)
+	return moneyutil.Cents(101 + int(b[0])%99)
 }
 
 // TestModeProbeResult classifies what the probe learned about the account.
@@ -109,13 +109,9 @@ func probeOrderIDSuffix() string {
 // transaction id (for voiding), the gateway error text when the gateway
 // rejected the REQUEST itself (v5 error envelope or response=3), and any
 // transport error.
-func (c *NMIClient) probeAuth(ctx context.Context, amount string) (approved bool, txnID string, gatewayErr string, err error) {
-	amountCents, err := v5AmountToCents(amount)
-	if err != nil {
-		return false, "", "", fmt.Errorf("nmi test-mode probe amount %q: %w", amount, err)
-	}
+func (c *NMIClient) probeAuth(ctx context.Context, amount moneyutil.Cents) (approved bool, txnID string, gatewayErr string, err error) {
 	req := v5PaymentRequest{
-		Amount:         centsJSONAmount(moneyutil.Cents(amountCents)),
+		Amount:         centsJSONAmount(amount),
 		PaymentDetails: &v5PaymentDetails{CardNumber: probeTestCard, CardExp: probeTestExpiry},
 		OrderDetails:   &v5OrderDetails{ID: probeOrderIDPrefix + probeOrderIDSuffix()},
 	}

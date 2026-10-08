@@ -60,26 +60,60 @@ func TestNMITransactionSubscriptionReference(t *testing.T) {
 	}
 }
 
-// MONEY-6 at the NMI edge: decimal strings round half away from zero, first parseable candidate wins.
-func TestNMITransactionAmountCents(t *testing.T) {
+// NMI amounts are read at the currency's own minor unit, first parseable
+// candidate wins: 500 yen arrives as "500.00" and is 500, never 50 000.
+func TestNMITransactionAmount(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name string
-		body *NMITransactionEventBody
-		want moneyutil.Cents
-		err  bool
+		name     string
+		body     *NMITransactionEventBody
+		currency string
+		want     moneyutil.Cents
+		err      bool
 	}{
-		{"top-level", &NMITransactionEventBody{Amount: "19.99", TransactionDetail: &NMITransactionDetail{Amount: "1.00"}}, 1999, false},
-		{"malformed falls back to detail", &NMITransactionEventBody{Amount: "not-a-number", TransactionDetail: &NMITransactionDetail{Amount: "12.34"}}, 1234, false},
-		{"blank falls back, half rounds up", &NMITransactionEventBody{TransactionDetail: &NMITransactionDetail{Amount: "7.255"}}, 726, false},
-		{"action amount", &NMITransactionEventBody{Action: &NMIAction{Amount: "1.005"}}, 101, false},
-		{"detail action amount", &NMITransactionEventBody{TransactionDetail: &NMITransactionDetail{Action: &NMIAction{Amount: "10.014"}}}, 1001, false},
-		{"negative rounds away from zero", &NMITransactionEventBody{Amount: "-1.005"}, -101, false},
-		{"only malformed", &NMITransactionEventBody{Amount: "abc"}, 0, true},
-		{"none", &NMITransactionEventBody{}, 0, true},
-		{"nil", nil, 0, true},
+		{"top-level", &NMITransactionEventBody{Amount: "19.99", TransactionDetail: &NMITransactionDetail{Amount: "1.00"}}, "USD", 1999, false},
+		{"malformed falls back to detail", &NMITransactionEventBody{Amount: "not-a-number", TransactionDetail: &NMITransactionDetail{Amount: "12.34"}}, "USD", 1234, false},
+		{"sub-cent falls back to action", &NMITransactionEventBody{Amount: "7.255", Action: &NMIAction{Amount: "7.25"}}, "USD", 725, false},
+		{"detail action amount", &NMITransactionEventBody{TransactionDetail: &NMITransactionDetail{Action: &NMIAction{Amount: "10.01"}}}, "USD", 1001, false},
+		{"negative", &NMITransactionEventBody{Amount: "-1.05"}, "USD", -105, false},
+		{"yen", &NMITransactionEventBody{Amount: "500.00"}, "JPY", 500, false},
+		{"fractional yen", &NMITransactionEventBody{Amount: "500.50"}, "JPY", 0, true},
+		{"sub-cent only", &NMITransactionEventBody{Amount: "1.005"}, "USD", 0, true},
+		{"unknown currency", &NMITransactionEventBody{Amount: "1.00"}, "", 0, true},
+		{"only malformed", &NMITransactionEventBody{Amount: "abc"}, "USD", 0, true},
+		{"none", &NMITransactionEventBody{}, "USD", 0, true},
+		{"nil", nil, "USD", 0, true},
 	} {
-		got, err := transactionAmountCents(tc.body)
+		got, err := transactionAmount(tc.body, tc.currency)
+		if tc.err {
+			require.Error(t, err, tc.name)
+			continue
+		}
+		require.NoError(t, err, tc.name)
+		require.Equal(t, tc.want, got, tc.name)
+	}
+}
+
+// A refund is read in the refunded payment's currency, which a currency the
+// event names must match: ¥500 refunds 5_000_000 native units.
+func TestNMIRefundAmountIsReadInThePaymentCurrency(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		body     *NMITransactionEventBody
+		currency string
+		want     int64
+		err      bool
+	}{
+		{"yen", &NMITransactionEventBody{Amount: "500.00", Currency: "JPY"}, "JPY", 5_000_000, false},
+		{"yen named lower-case", &NMITransactionEventBody{Amount: "-500.00", Currency: "jpy"}, "JPY", 5_000_000, false},
+		{"dollars, currency only on the detail", &NMITransactionEventBody{Amount: "4.99", TransactionDetail: &NMITransactionDetail{Currency: "USD"}}, "USD", 4_990_000, false},
+		{"no named currency", &NMITransactionEventBody{Amount: "4.99"}, "USD", 4_990_000, false},
+		{"named currency disagrees", &NMITransactionEventBody{Amount: "500.00", Currency: "USD"}, "JPY", 0, true},
+		{"fractional yen", &NMITransactionEventBody{Amount: "500.50", Currency: "JPY"}, "JPY", 0, true},
+		{"zero", &NMITransactionEventBody{Amount: "0.00", Currency: "USD"}, "USD", 0, true},
+	} {
+		got, err := nmiRefundAmount(tc.body, tc.currency)
 		if tc.err {
 			require.Error(t, err, tc.name)
 			continue
@@ -106,12 +140,23 @@ func TestNMIChargebackFieldParsing(t *testing.T) {
 	require.Empty(t, normalizeNMIChargebackLast4("****"))
 	require.Empty(t, normalizeNMIChargebackLast4("x123"))
 
-	amount, err := parseNMIChargebackAmountCents("11.11")
-	require.NoError(t, err)
-	require.EqualValues(t, 1111, amount)
-	for _, bad := range []string{"", "0.00", "-1.00", "abc"} {
-		_, err := parseNMIChargebackAmountCents(bad)
-		require.Error(t, err, bad)
+	reading := func(raw string) map[string]int64 {
+		currencies, amounts := nmiChargebackReadings(raw)
+		out := map[string]int64{}
+		for i, code := range currencies {
+			out[code] = amounts[i]
+		}
+		return out
+	}
+	dollars := reading("11.11")
+	require.Equal(t, int64(11_110_000), dollars["USD"])
+	require.NotContains(t, dollars, "JPY", "11.11 is no whole yen")
+	require.NotContains(t, dollars, "SOL", "card chargebacks are fiat")
+	yen := reading("500.00")
+	require.Equal(t, int64(5_000_000), yen["JPY"], "500 yen, never 50 000")
+	require.Equal(t, int64(500_000_000), yen["USD"])
+	for _, bad := range []string{"", "0.00", "-1.00", "abc", "1.005"} {
+		require.Empty(t, reading(bad), bad)
 	}
 
 	for raw, want := range map[string]time.Time{

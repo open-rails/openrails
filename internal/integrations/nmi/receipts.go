@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -18,41 +17,13 @@ func receiptMismatch(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrReceiptMismatch, fmt.Sprintf(format, args...))
 }
 
-// exactMinorAmount parses a provider major-unit decimal at its declared
-// currency scale, without rounding or float conversion (JPY has no decimals).
-func exactMinorAmount(amount, currency string) (int64, bool) {
-	units, ok := moneyutil.LookupCurrency(currency)
-	if !ok {
-		return 0, false
-	}
-	amount = strings.TrimSpace(amount)
-	if amount == "" {
-		return 0, false
-	}
-	for i, ch := range amount {
-		if (ch < '0' || ch > '9') && ch != '.' && !(i == 0 && ch == '-') {
-			return 0, false
-		}
-	}
-	value, ok := new(big.Rat).SetString(amount)
-	if !ok {
-		return 0, false
-	}
-	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(units.MinorDecimals)), nil)
-	value.Mul(value, new(big.Rat).SetInt(scale))
-	if !value.IsInt() || !value.Num().IsInt64() {
-		return 0, false
-	}
-	return value.Num().Int64(), true
-}
-
 func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cents) bool {
 	for _, action := range txn.Actions {
-		cents, ok := exactMinorAmount(action.Amount, txn.Currency)
+		cents, err := moneyutil.DecimalToRailMinor(txn.Currency, action.Amount)
 		if cents < 0 {
 			cents = -cents
 		}
-		if strings.EqualFold(strings.TrimSpace(action.Type), actionType) && action.Success && ok && cents == int64(amount) {
+		if strings.EqualFold(strings.TrimSpace(action.Type), actionType) && action.Success && err == nil && cents == amount {
 			return true
 		}
 	}
@@ -143,11 +114,11 @@ func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, re
 		return receiptMismatch("original transaction %s is not in %s", originalTransactionID, currency)
 	}
 	if amount == 0 {
-		cents, ok := exactMinorAmount(original.Amount, currency)
-		if !ok || cents <= 0 {
+		cents, err := moneyutil.DecimalToRailMinor(currency, original.Amount)
+		if err != nil || cents <= 0 {
 			return receiptMismatch("original transaction %s has no exact amount", originalTransactionID)
 		}
-		amount = moneyutil.Cents(cents)
+		amount = cents
 	}
 	refund, found, err := c.GetPayment(ctx, refundTransactionID)
 	if err != nil {
@@ -230,11 +201,11 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 		if !strings.EqualFold(strings.TrimSpace(action.Type), "sale") || !action.Success {
 			continue
 		}
-		cents, ok := exactMinorAmount(action.Amount, txn.Currency)
-		if !ok || cents <= 0 || amount != 0 {
+		cents, err := moneyutil.DecimalToRailMinor(txn.Currency, action.Amount)
+		if err != nil || cents <= 0 || amount != 0 {
 			return SaleEvidence{}, false, receiptMismatch("transaction does not have one exact positive sale")
 		}
-		amount = moneyutil.Cents(cents)
+		amount = cents
 	}
 	if amount <= 0 || strings.TrimSpace(txn.Currency) == "" {
 		return SaleEvidence{}, false, receiptMismatch("sale evidence is incomplete")

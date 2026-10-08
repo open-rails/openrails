@@ -132,23 +132,35 @@ func TestComputeStripeDrift(t *testing.T) {
 func TestComputeNMIDrift(t *testing.T) {
 	now := time.Now().UTC()
 	psp := uuid.New()
-	// FAB-6: an unparseable amount is skipped, never read as a zero price.
-	plans := MapNMIPlans([]nmi.V5Plan{{ID: "premium-usd-999-30", PlanAmount: "9.99"}, {ID: "bad", PlanAmount: "nope"}, {ID: "handmade", PlanAmount: "4.99"}})
-	require.Equal(t, []NMIPlan{{PlanID: "premium-usd-999-30", AmountCents: 999}, {PlanID: "handmade", AmountCents: 499}}, plans)
+	plans := MapNMIPlans([]nmi.V5Plan{{ID: "premium-usd-999-30", PlanAmount: "9.99"}, {ID: "bad", PlanAmount: "nope"}, {ID: "handmade", PlanAmount: " 4.99 "}})
+	require.Equal(t, []NMIPlan{{PlanID: "premium-usd-999-30", Amount: "9.99"}, {PlanID: "bad", Amount: "nope"}, {PlanID: "handmade", Amount: "4.99"}}, plans)
 
 	orphans := ComputeNMIDrift(plans, BuildDriftSnapshot(nil, nil, psp), now)
-	require.Equal(t, map[models.CatalogDriftKind]int{models.CatalogDriftOrphanInNMI: 2}, countKinds(orphans))
+	require.Equal(t, map[models.CatalogDriftKind]int{models.CatalogDriftOrphanInNMI: 3}, countKinds(orphans))
 
 	price := nmiPrice(psp, "mobius", 9_990_000, "premium-usd-999-30")
 	snap := BuildDriftSnapshot(nil, []*models.Price{price}, psp)
-	require.Empty(t, ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", AmountCents: 999}}, snap, now))
+	require.Empty(t, ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", Amount: "9.99"}}, snap, now))
 	missing := ComputeNMIDrift(nil, snap, now)
 	require.Len(t, missing, 1)
 	require.Equal(t, models.CatalogDriftMissingInNMI, missing[0].Kind)
 	require.Equal(t, price.ID.String(), missing[0].OpenRailsResourceID)
-	amount := ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", AmountCents: 1999}}, snap, now)
+	amount := ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", Amount: "19.99"}}, snap, now)
 	require.Len(t, amount, 1)
 	require.Equal(t, []string{"plan_amount", "9990000", "19990000"}, []string{amount[0].Field, amount[0].OpenRailsValue, amount[0].ExternalValue})
+	// FAB-6: an unparseable linked amount is drift reported verbatim, never a zero price.
+	bad := ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", Amount: "nope"}}, snap, now)
+	require.Len(t, bad, 1)
+	require.Equal(t, []string{"plan_amount", "9990000", "nope"}, []string{bad[0].Field, bad[0].OpenRailsValue, bad[0].ExternalValue})
+
+	// NMI writes 500 yen as "500.00": read in the price's currency it is ¥500.
+	yen := nmiPrice(psp, "mobius", 5_000_000, "premium-jpy-500-30")
+	yen.Currency = "JPY"
+	yenSnap := BuildDriftSnapshot(nil, []*models.Price{yen}, psp)
+	require.Empty(t, ComputeNMIDrift([]NMIPlan{{PlanID: "premium-jpy-500-30", Amount: "500.00"}}, yenSnap, now))
+	fractional := ComputeNMIDrift([]NMIPlan{{PlanID: "premium-jpy-500-30", Amount: "500.50"}}, yenSnap, now)
+	require.Len(t, fractional, 1)
+	require.Equal(t, []string{"plan_amount", "5000000", "500.50"}, []string{fractional[0].Field, fractional[0].OpenRailsValue, fractional[0].ExternalValue})
 }
 
 // #993: links bound to another account are neither evidence nor expectations
@@ -157,7 +169,7 @@ func TestDriftSnapshotIsScopedToTheReadAccount(t *testing.T) {
 	now := time.Now().UTC()
 	a, b := uuid.New(), uuid.New()
 	prices := []*models.Price{nmiPrice(a, "primary", 9_990_000, "plan-a"), nmiPrice(b, "secondary", 4_990_000, "plan-b")}
-	require.Empty(t, ComputeNMIDrift([]NMIPlan{{PlanID: "plan-a", AmountCents: 999}}, BuildDriftSnapshot(nil, prices, a), now))
+	require.Empty(t, ComputeNMIDrift([]NMIPlan{{PlanID: "plan-a", Amount: "9.99"}}, BuildDriftSnapshot(nil, prices, a), now))
 	events := ComputeNMIDrift(nil, BuildDriftSnapshot(nil, prices, b), now)
 	require.Len(t, events, 1)
 	require.Equal(t, prices[1].ID.String(), events[0].OpenRailsResourceID)

@@ -141,12 +141,14 @@ func boundCCBillPeriodEnd(candidate *time.Time, sub *models.Subscription, now ti
 	return candidate, nil
 }
 
-func parseCCBillPositiveAmountCents(rawAmount, parseFieldName, invalidFieldName string) (moneyutil.Cents, error) {
-	return parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName, false)
+func parseCCBillPositiveAmountCents(currency, rawAmount, parseFieldName, invalidFieldName string) (moneyutil.Cents, error) {
+	return parseCCBillAmountCents(currency, rawAmount, parseFieldName, invalidFieldName, false)
 }
 
-func parseCCBillAmountCents(rawAmount, parseFieldName, invalidFieldName string, allowZero bool) (moneyutil.Cents, error) {
-	amountCents, err := moneyutil.ParseDecimalToCents(rawAmount)
+// parseCCBillAmountCents reads CCBill's major-unit amount in the currency the
+// same event declares, as rail minor units.
+func parseCCBillAmountCents(currency, rawAmount, parseFieldName, invalidFieldName string, allowZero bool) (moneyutil.Cents, error) {
+	amountCents, err := moneyutil.DecimalToRailMinor(currency, rawAmount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse %s '%s': %w", parseFieldName, rawAmount, err)
 	}
@@ -785,7 +787,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 
 		// Validate the billed amount matches the new price.
 		expectedAmountMicros := ccbillInitialChargeAmount(newPrice)
-		billedAmountCents, err := parseCCBillAmountCents(billedAmountStr, "billedInitialPrice", "billedAmount", expectedAmountMicros == 0)
+		billedAmountCents, err := parseCCBillAmountCents(currencyValue, billedAmountStr, "billedInitialPrice", "billedAmount", expectedAmountMicros == 0)
 		if err != nil {
 			return err
 		}
@@ -1237,11 +1239,12 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 	refundAmountStr := data.Amount
 	refundTransactionID := data.TransactionID // Use TransactionID as the refund transaction ID
 	refundReason := data.Reason
-	refundAmountCents, err := parseCCBillPositiveAmountCents(refundAmountStr, "refund amount", "amount")
+	currency, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
 	if err != nil {
 		return err
 	}
-	if _, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode"); err != nil {
+	refundAmountCents, err := parseCCBillPositiveAmountCents(currency, refundAmountStr, "refund amount", "amount")
+	if err != nil {
 		return err
 	}
 
@@ -1407,11 +1410,12 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 	pSubscriptionID := data.SubscriptionID
 	voidAmountStr := data.Amount
 	voidTransactionID := data.TransactionID // Use TransactionID as the void transaction ID
-	voidAmountCents, err := parseCCBillPositiveAmountCents(voidAmountStr, "void amount", "amount")
+	currency, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
 	if err != nil {
 		return err
 	}
-	if _, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode"); err != nil {
+	voidAmountCents, err := parseCCBillPositiveAmountCents(currency, voidAmountStr, "void amount", "amount")
+	if err != nil {
 		return err
 	}
 	var notes []*models.NotificationQueue
@@ -1522,11 +1526,12 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 	chargebackAmountStr := data.Amount
 	chargebackTransactionID := data.TransactionID // Use TransactionID as the chargeback transaction ID
 	chargebackReason := data.Reason
-	chargebackAmountCents, err := parseCCBillPositiveAmountCents(chargebackAmountStr, "chargeback amount", "amount")
+	currency, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode")
 	if err != nil {
 		return err
 	}
-	if _, err := requireCCBillCurrency(data.CurrencyCode, "currencyCode"); err != nil {
+	chargebackAmountCents, err := parseCCBillPositiveAmountCents(currency, chargebackAmountStr, "chargeback amount", "amount")
+	if err != nil {
 		return err
 	}
 	var ledgerErr error
@@ -1697,11 +1702,11 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	if transactionID == "" {
 		return newBillingError(ErrorTypeValidation, "missing required field: transactionId", map[string]interface{}{"field": "transactionId"}, nil)
 	}
-	billedAmountCents, err := parseCCBillPositiveAmountCents(data.BilledAmount, "billedAmount", "billedAmount")
+	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
 	if err != nil {
 		return err
 	}
-	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
+	billedAmountCents, err := parseCCBillPositiveAmountCents(currencyValue, data.BilledAmount, "billedAmount", "billedAmount")
 	if err != nil {
 		return err
 	}

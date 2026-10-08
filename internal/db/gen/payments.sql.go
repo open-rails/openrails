@@ -1293,7 +1293,7 @@ SELECT p.id AS payment_id,
        p.subscription_id AS subscription_id,
        COALESCE(sub.rail_subscription_id, '')::text AS rail_subscription_id,
        p.customer_id::text AS user_id,
-       (p.amount / 10000)::bigint AS amount_cents,
+       p.amount AS amount,
        p.currency AS currency,
        p.purchased_at AS purchased_at,
        COALESCE(pm.card_last4, '')::text AS card_last4
@@ -1314,26 +1314,29 @@ WHERE p.merchant_id = $2::uuid AND p.psp_id = $3::uuid
   AND p.deleted_at IS NULL
   AND p.rail = $4::text
   AND p.amount > 0
-  AND p.amount = $5::bigint * 10000
+  AND (p.currency, p.amount) IN (
+    SELECT reading.currency, reading.amount
+    FROM unnest($5::text[], $6::bigint[]) AS reading(currency, amount))
   AND (pm.card_last4 = $1::text
     OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = $1::text
     OR customer_card.id IS NOT NULL)
-  AND p.purchased_at >= $6::timestamptz
-  AND p.purchased_at <= $7::timestamptz
-ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - $8::timestamptz))) ASC,
+  AND p.purchased_at >= $7::timestamptz
+  AND p.purchased_at <= $8::timestamptz
+ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - $9::timestamptz))) ASC,
          p.purchased_at DESC
 LIMIT 2
 `
 
 type MatchChargebackPaymentsParams struct {
-	Last4       string
-	MerchantID  uuid.UUID
-	PspID       uuid.UUID
-	Rail        string
-	AmountCents int64
-	FromAt      time.Time
-	ToAt        time.Time
-	TargetAt    time.Time
+	Last4      string
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	Currencies []string
+	Amounts    []int64
+	FromAt     time.Time
+	ToAt       time.Time
+	TargetAt   time.Time
 }
 
 type MatchChargebackPaymentsRow struct {
@@ -1342,7 +1345,7 @@ type MatchChargebackPaymentsRow struct {
 	SubscriptionID       *uuid.UUID
 	RailSubscriptionID   string
 	UserID               string
-	AmountCents          int64
+	Amount               int64
 	Currency             string
 	PurchasedAt          time.Time
 	CardLast4            string
@@ -1351,6 +1354,8 @@ type MatchChargebackPaymentsRow struct {
 // NMI chargeback reconciliation (webhooks/nmi.go): candidate charges
 // (subscription or one-time) matched by amount + card last4 within ±7d of the
 // chargeback date, closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
+// The batch names no currency: (currencies, amounts) is every registered
+// reading of its amount, and a charge matches in its own currency.
 // A lateral probe, not EXISTS under OR, which plans as a hash of every merchant's cards.
 func (q *Queries) MatchChargebackPayments(ctx context.Context, arg MatchChargebackPaymentsParams) ([]MatchChargebackPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, matchChargebackPayments,
@@ -1358,7 +1363,8 @@ func (q *Queries) MatchChargebackPayments(ctx context.Context, arg MatchChargeba
 		arg.MerchantID,
 		arg.PspID,
 		arg.Rail,
-		arg.AmountCents,
+		arg.Currencies,
+		arg.Amounts,
 		arg.FromAt,
 		arg.ToAt,
 		arg.TargetAt,
@@ -1376,7 +1382,7 @@ func (q *Queries) MatchChargebackPayments(ctx context.Context, arg MatchChargeba
 			&i.SubscriptionID,
 			&i.RailSubscriptionID,
 			&i.UserID,
-			&i.AmountCents,
+			&i.Amount,
 			&i.Currency,
 			&i.PurchasedAt,
 			&i.CardLast4,

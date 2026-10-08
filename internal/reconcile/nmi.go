@@ -176,13 +176,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		if s.Plan != nil {
 			sub.PlanID = strings.TrimSpace(s.Plan.ID)
 		}
-		if cents, err := parseAmountCents(s.Amount); err == nil && cents > 0 {
-			sub.AmountCents = cents
-		} else if s.Plan != nil {
-			if cents, err := parseAmountCents(s.Plan.PlanAmount); err == nil {
-				sub.AmountCents = cents
-			}
-		}
+		sub.Amount = s.DeclaredAmount()
 		if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
 			sub.NextBillingAt = &next
 			if next.Before(today) {
@@ -302,9 +296,7 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"action":            a,
 			}),
 		}
-		if cents, err := parseAmountCents(a.Amount); err == nil {
-			txn.AmountCents = cents
-		}
+		txn.setAmount(a.Amount)
 		if ts, ok := a.At(); ok {
 			txn.OccurredAt = ts
 		}

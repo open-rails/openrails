@@ -235,12 +235,14 @@ LIMIT sqlc.arg(row_limit)::int;
 -- NMI chargeback reconciliation (webhooks/nmi.go): candidate charges
 -- (subscription or one-time) matched by amount + card last4 within ±7d of the
 -- chargeback date, closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
+-- The batch names no currency: (currencies, amounts) is every registered
+-- reading of its amount, and a charge matches in its own currency.
 SELECT p.id AS payment_id,
        p.transaction_id AS payment_transaction_id,
        p.subscription_id AS subscription_id,
        COALESCE(sub.rail_subscription_id, '')::text AS rail_subscription_id,
        p.customer_id::text AS user_id,
-       (p.amount / 10000)::bigint AS amount_cents,
+       p.amount AS amount,
        p.currency AS currency,
        p.purchased_at AS purchased_at,
        COALESCE(pm.card_last4, '')::text AS card_last4
@@ -262,7 +264,9 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id
   AND p.deleted_at IS NULL
   AND p.rail = sqlc.arg(rail)::text
   AND p.amount > 0
-  AND p.amount = sqlc.arg(amount_cents)::bigint * 10000
+  AND (p.currency, p.amount) IN (
+    SELECT reading.currency, reading.amount
+    FROM unnest(sqlc.arg(currencies)::text[], sqlc.arg(amounts)::bigint[]) AS reading(currency, amount))
   AND (pm.card_last4 = sqlc.arg(last4)::text
     OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
     OR customer_card.id IS NOT NULL)

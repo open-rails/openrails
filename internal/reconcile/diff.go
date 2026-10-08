@@ -358,7 +358,7 @@ func remoteTxnEvidence(t *RemoteTransaction) map[string]any {
 		"transaction_id": t.TransactionID,
 		"type":           string(t.Type),
 		"success":        t.Success,
-		"amount_cents":   strconv.FormatInt(t.AmountCents, 10),
+		"amount":         t.formatAmount(),
 		// occurred_at drives the windowed auto-resolve of PS-4/5/6.
 		"occurred_at": t.OccurredAt.UTC().Format(time.RFC3339),
 	}
@@ -645,22 +645,26 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	}
 	if t := latestChargeForRemoteSub(snap, r); t != nil {
 		currency, inherited := txnCurrency(t, link.price.Currency)
-		action.Backfill = &BackfillPaymentAction{
-			Rail:          link.railName,
-			TransactionID: t.TransactionID,
-			AmountCents:   t.AmountCents,
-			Currency:      currency,
-			PurchasedAt:   t.OccurredAt,
-			PriceID:       link.price.ID,
-			CustomerID:    subjectID,
-			Metadata: map[string]any{
-				"reconcile_backfill":    true,
-				"reconcile_materialize": true,
-				"provider":              string(provider),
-			},
-		}
-		if inherited {
-			action.Backfill.Metadata["currency_provenance"] = "inherited_from_subscription_price"
+		if minor, err := t.minorIn(currency); err != nil {
+			remoteEv["backfill_blocked"] = err.Error()
+		} else {
+			action.Backfill = &BackfillPaymentAction{
+				Rail:          link.railName,
+				TransactionID: t.TransactionID,
+				AmountCents:   int64(minor),
+				Currency:      currency,
+				PurchasedAt:   t.OccurredAt,
+				PriceID:       link.price.ID,
+				CustomerID:    subjectID,
+				Metadata: map[string]any{
+					"reconcile_backfill":    true,
+					"reconcile_materialize": true,
+					"provider":              string(provider),
+				},
+			}
+			if inherited {
+				action.Backfill.Metadata["currency_provenance"] = "inherited_from_subscription_price"
+			}
 		}
 	}
 
@@ -735,7 +739,7 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 	var best *RemoteTransaction
 	for i := range snap.Transactions {
 		t := &snap.Transactions[i]
-		if t.Type != TransactionTypeSale || !t.Success || t.TransactionID == "" || t.AmountCents <= 0 {
+		if t.Type != TransactionTypeSale || !t.Success || t.TransactionID == "" || !t.positive() {
 			continue
 		}
 		matched := t.SubscriptionID != "" && t.SubscriptionID == r.RailSubscriptionID
@@ -927,10 +931,14 @@ func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscripti
 		}
 	}
 	if price != nil {
-		if r.AmountCents > 0 {
-			if cents, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount); err == nil && int64(cents) != r.AmountCents {
-				drift["local_amount_cents"] = strconv.FormatInt(int64(cents), 10)
-				drift["remote_amount_cents"] = strconv.FormatInt(r.AmountCents, 10)
+		// NMI's schedule names no currency: its amount is read in the
+		// price's, and one not exact there is drift, not a rounding.
+		if r.Amount != "" {
+			remote, err := moneyutil.DecimalToRailMinor(price.Currency, r.Amount)
+			local, lerr := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount)
+			if lerr == nil && (err != nil || (remote > 0 && remote != local)) {
+				drift["local_amount"] = moneyutil.FormatAmount(price.Amount, price.Currency)
+				drift["remote_amount"] = fmt.Sprintf("%s %s", r.Amount, moneyutil.NormalizeCurrency(price.Currency))
 			}
 		}
 		// A schedule whose amount OpenRails changed in place keeps its original
@@ -1082,7 +1090,7 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 				findings = append(findings, f)
 				continue
 			}
-			if t.AmountCents <= 0 {
+			if !t.positive() {
 				continue
 			}
 			findings = append(findings, makePS4(provider, t, corr, now))
@@ -1134,13 +1142,20 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 	default:
 		f.LocalEvidence = localSubEvidence(sub)
 		f.LocalEvidence["correlated_via"] = how
+		currency, inherited := txnCurrency(t, sub.PriceCurrency)
+		minor, err := t.minorIn(currency)
+		if err != nil {
+			f.Status = FindingStatusAdminRequired
+			f.RequiresAdmin = true
+			f.RecommendedAction = "rail charge has no local payment and its amount is not exact in the currency it is recorded in (" + err.Error() + "); backfill manually"
+			return f
+		}
 		f.RecommendedAction = "enforce backfills the missing billing.payments row (deduped on rail+transaction_id)"
 		subID := sub.ID
-		currency, inherited := txnCurrency(t, sub.PriceCurrency)
 		action := &BackfillPaymentAction{
 			Rail:           sub.Rail,
 			TransactionID:  t.TransactionID,
-			AmountCents:    t.AmountCents,
+			AmountCents:    int64(minor),
 			Currency:       currency,
 			PurchasedAt:    t.OccurredAt,
 			PriceID:        *sub.PriceID,
@@ -1351,12 +1366,19 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	}
 	f.RecommendedAction = "enforce records the refund locally (negative payment row + original marked refunded). Revoking any entitlement the refunded payment granted is a human decision — review in the admin queue if warranted"
 
-	originalID := original.ID
 	currency, inherited := txnCurrency(t, original.Currency)
+	minor, err := t.minorIn(currency)
+	if err != nil {
+		f.Status = FindingStatusAdminRequired
+		f.RequiresAdmin = true
+		f.RecommendedAction = "rail refund amount is not exact in the currency it is recorded in (" + err.Error() + "); record it manually"
+		return f, true
+	}
+	originalID := original.ID
 	action := &RecordRefundAction{
 		Rail:              original.Rail,
 		TransactionID:     t.TransactionID,
-		AmountCents:       t.AmountCents,
+		AmountCents:       int64(minor),
 		Currency:          currency,
 		PurchasedAt:       t.OccurredAt,
 		RefundedPaymentID: &originalID,

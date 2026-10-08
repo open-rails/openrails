@@ -158,20 +158,25 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		return fmt.Errorf("nmi converge: load price for activation: %w", err)
 	}
 
-	// Fetched amount, verbatim; the subscription's price is the declared
-	// fallback when the report omitted it (#651: never fabricate).
-	amountMicros := price.Amount
+	// Fetched amount and currency, verbatim; the subscription's price is the
+	// declared fallback when the report omitted them (#651: never fabricate).
+	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
+	if moneyutil.NormalizeCurrency(currency) != moneyutil.NormalizeCurrency(price.Currency) {
+		return fmt.Errorf("nmi converge: fetched charge currency %s does not match price currency %s", currency, price.Currency)
+	}
+	amount := price.Amount
 	if raw := strings.TrimSpace(probe.SuccessAmount); raw != "" {
-		cents, perr := moneyutil.ParseDecimalToCents(raw)
+		minor, perr := moneyutil.DecimalToRailMinor(currency, raw)
 		if perr != nil {
 			return fmt.Errorf("nmi converge: unparseable fetched charge amount %q: %w", raw, perr)
 		}
-		if !nmiAmountMatchesExpected(price.Currency, cents, moneyutil.Micros(price.Amount)) {
-			return fmt.Errorf("nmi converge: fetched charge amount %d cents does not match expected price %d micros", cents, price.Amount)
+		if !nmiAmountMatchesExpected(price.Currency, minor, moneyutil.Micros(price.Amount)) {
+			return fmt.Errorf("nmi converge: fetched charge amount %s does not match expected price %s", raw, moneyutil.FormatAmount(price.Amount, price.Currency))
 		}
-		amountMicros = int64(moneyutil.CentsToMicros(cents))
+		if amount, perr = moneyutil.RailMinorToNative(currency, minor); perr != nil {
+			return fmt.Errorf("nmi converge: fetched charge amount %q: %w", raw, perr)
+		}
 	}
-	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
 
 	if s.DB != nil {
 		removed, err := subscriptions.RemoveCanceledSubscriptionsForActivation(ctx, s.DB, sub.CustomerID.String(), sub.ProductID, sub.ID)
@@ -196,7 +201,7 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		Rail:               models.Rail(rail),
 		RailSubscriptionID: &sub.RailSubscriptionID,
 		TransactionID:      probe.SuccessTransactionID,
-		Amount:             amountMicros,
+		Amount:             amount,
 		AmountProvided:     true,
 		Currency:           currency,
 		PurchasedAt:        purchasedAt,
@@ -257,18 +262,19 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 // recordInitialDecline records the fetched decline of a pending
 // subscription's first charge as its initial attempt (#1111).
 func (s *NMIConvergeService) recordInitialDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
-	amount := int64(0)
-	if cents, err := moneyutil.ParseDecimalToCents(strings.TrimSpace(probe.DeclineAmount)); err == nil {
-		amount = int64(moneyutil.CentsToMicros(cents))
-	}
 	currency := normalizeNMICurrencyValue(probe.DeclineCurrency)
-	if sub.Price != nil {
-		if amount == 0 {
-			amount = sub.Price.Amount
+	if currency == "" && sub.Price != nil {
+		currency = strings.ToLower(strings.TrimSpace(sub.Price.Currency))
+	}
+	amount := int64(0)
+	if minor, err := moneyutil.DecimalToRailMinor(currency, probe.DeclineAmount); err == nil {
+		if native, err := moneyutil.RailMinorToNative(currency, minor); err == nil {
+			amount = native
 		}
-		if currency == "" {
-			currency = strings.ToLower(strings.TrimSpace(sub.Price.Currency))
-		}
+	}
+	// The price is the declared fallback only for an amount in its currency.
+	if amount == 0 && sub.Price != nil && moneyutil.NormalizeCurrency(currency) == moneyutil.NormalizeCurrency(sub.Price.Currency) {
+		amount = sub.Price.Amount
 	}
 	at := s.now()
 	if !probe.DeclineAt.IsZero() {

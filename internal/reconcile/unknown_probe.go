@@ -140,29 +140,29 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since ti
 		return out
 	}
 	if probe.SuccessFound && probe.SuccessTransactionID != "" {
-		amount, _ := parseAmountCents(probe.SuccessAmount)
-		out = append(out, RemoteTransaction{
+		t := RemoteTransaction{
 			TransactionID:  probe.SuccessTransactionID,
 			SubscriptionID: railSubID,
 			Type:           TransactionTypeSale,
 			Success:        true,
-			AmountCents:    amount,
 			Currency:       probe.SuccessCurrency,
 			OccurredAt:     floored(probe.SuccessAt),
-		})
+		}
+		t.setAmount(probe.SuccessAmount)
+		out = append(out, t)
 	}
 	if probe.DeclineFound {
-		amount, _ := parseAmountCents(probe.DeclineAmount)
-		out = append(out, RemoteTransaction{
+		t := RemoteTransaction{
 			TransactionID:  probe.DeclineTransactionID,
 			SubscriptionID: railSubID,
 			Type:           TransactionTypeDecline,
 			Success:        false,
-			AmountCents:    amount,
 			Currency:       probe.DeclineCurrency,
 			OccurredAt:     floored(probe.DeclineAt),
 			DeclineReason:  probe.DeclineReason,
-		})
+		}
+		t.setAmount(probe.DeclineAmount)
+		out = append(out, t)
 	}
 	return out
 }

@@ -63,18 +63,6 @@ func TestDeclaredCoverageRefusesUnconfirmedExhaustiveBook(t *testing.T) {
 	}
 }
 
-func TestParseAmountCentsIsExact(t *testing.T) {
-	for in, want := range map[string]int64{"9.99": 999, "23.99": 2399, "0.00": 0, "": 0, "23": 2300, "5.5": 550, "-5.00": -500, "+1.00": 100, ".99": 99} {
-		got, err := parseAmountCents(in)
-		require.NoError(t, err, in)
-		require.Equal(t, want, got, in)
-	}
-	for _, in := range []string{"1.999", "abc", "1.2.3", "1,00", "- 1"} {
-		_, err := parseAmountCents(in)
-		require.Error(t, err, "%q must be refused, never truncated", in)
-	}
-}
-
 func TestParseRebillOrderID(t *testing.T) {
 	id := uuid.New()
 	for in, want := range map[string]bool{

@@ -82,7 +82,7 @@ func TestProbeTestModeAndSandboxArming(t *testing.T) {
 				} `json:"order_details"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(call.Body), &req))
-			cents, err := moneyutil.ParseDecimalToCents(req.Amount.String())
+			cents, err := moneyutil.DecimalToRailMinor("USD", req.Amount.String())
 			require.NoError(t, err)
 			require.True(t, cents >= 101 && cents <= 199, "probe amount %s stays in [1.01,1.99]", req.Amount)
 			require.Equal(t, moneyutil.FormatCentsDecimal(cents), req.Amount.String())

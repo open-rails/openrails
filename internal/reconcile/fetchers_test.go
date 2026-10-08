@@ -136,13 +136,14 @@ func TestNMIFetcher(t *testing.T) {
 		require.Equal(t, []string{string(SubscriptionStatusUnknown), "paused"}, []string{string(paused.Status), paused.RawStatus}, "paused is neither live nor dead")
 		require.Equal(t, SubscriptionStatusActive, live.Status, "future next_billing_date")
 		require.Equal(t, "basic_monthly", live.PlanID)
-		require.Equal(t, int64(999), live.AmountCents)
+		require.Equal(t, "9.99", live.Amount, "verbatim: the schedule names no currency")
+		require.Zero(t, live.AmountCents)
 		require.Equal(t, "ripix@example.com", live.Email, "joined from the vault via customer_vault_id")
 		require.Equal(t, "Rippler Ixas", live.Username)
 		require.Equal(t, SubscriptionStatusPastDue, stale.Status, "past next_billing_date")
 		require.Equal(t, "987654", stale.CustomerID)
 		require.Empty(t, stale.Email, "no vault match, no fabricated email")
-		require.Equal(t, int64(999), stale.AmountCents, "empty amount falls back to the plan amount")
+		require.Equal(t, "9.99", stale.Amount, "empty amount falls back to the plan amount")
 
 		require.Len(t, snap.Transactions, 3, "settle actions are not charge events")
 		sale, declined, refund := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
@@ -184,6 +185,31 @@ func TestNMIFetcher(t *testing.T) {
 		require.Equal(t, []string{"", "1"}, f.cursors["customers"])
 		require.Len(t, f.queries, 2)
 		require.True(t, snap.Coverage.TransactionsPaginatedComplete)
+	})
+
+	// NMI writes 500 yen as "500.00": each amount is read in its transaction's
+	// currency, and one not exact there is refused, never rounded.
+	t.Run("reads amounts in the transaction currency", func(t *testing.T) {
+		f := &nmiBulkFake{txnPages: []string{`<?xml version="1.0" encoding="UTF-8"?><nm_response>
+	<transaction><transaction_id>y1</transaction_id><condition>complete</condition><currency>JPY</currency>
+		<action><amount>500.00</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action>
+		<action><amount>200.00</amount><action_type>refund</action_type><date>20260506193542</date><success>1</success><response_code>100</response_code></action></transaction>
+	<transaction><transaction_id>y2</transaction_id><condition>complete</condition><currency>JPY</currency>
+		<action><amount>500.50</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action></transaction>
+	<transaction><transaction_id>k1</transaction_id><condition>complete</condition><currency>KRW</currency>
+		<action><amount>1500</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action></transaction>
+	<transaction><transaction_id>n1</transaction_id><condition>complete</condition>
+		<action><amount>9.99</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action></transaction>
+</nm_response>`}}
+		snap := f.fetch(t, FetchParams{})
+		got := map[string]int64{}
+		for _, txn := range snap.Transactions {
+			got[txn.TransactionID+"/"+string(txn.Type)+"/"+txn.Currency] = txn.AmountCents
+		}
+		require.Equal(t, map[string]int64{
+			"y1/sale/JPY": 500, "y1/refund/JPY": 200, "y2/sale/JPY": 0, "k1/sale/KRW": 1500, "n1/sale/": 0,
+		}, got, "¥500 is 500 rail units (5_000_000 native), never 50 000")
+		require.Equal(t, "9.99", snap.Transactions[len(snap.Transactions)-1].Amount, "no currency is never read as USD: kept verbatim")
 	})
 
 	// #842: exhaustiveness authorizes cancelling everything absent; a 200 with
@@ -385,7 +411,7 @@ func TestCCBillFetcher(t *testing.T) {
 	require.Len(t, snap.Transactions, 4)
 	rebill, refund, chargeback := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
 	require.Equal(t, RemoteTransaction{TransactionID: "918273645", SubscriptionID: "0125217202000000017", Type: TransactionTypeSale, Success: true,
-		AmountCents: 2399, OccurredAt: time.Date(2026, 6, 1, 4, 5, 6, 0, time.UTC)}, withoutRaw(rebill))
+		Amount: "23.99", OccurredAt: time.Date(2026, 6, 1, 4, 5, 6, 0, time.UTC)}, withoutRaw(rebill), "kept verbatim until a local record names its currency")
 	for _, sub := range snap.Subscriptions {
 		require.Empty(t, sub.Currency, "DataLink reports no currency; it is never defaulted")
 	}
@@ -393,7 +419,7 @@ func TestCCBillFetcher(t *testing.T) {
 		require.Empty(t, txn.Currency, "DataLink reports no currency; it is never defaulted")
 	}
 	require.Equal(t, TransactionTypeRefund, refund.Type)
-	require.Equal(t, int64(2399), refund.AmountCents)
+	require.Equal(t, "23.99", refund.Amount)
 	require.Empty(t, refund.TransactionID, "REFUND rows carry no transaction id")
 	require.Equal(t, TransactionTypeChargeback, chargeback.Type)
 	require.Contains(t, string(chargeback.Raw), "ccbill_datalink_export")
@@ -439,8 +465,8 @@ func TestCCBillChargesTakeTheLocalRecordCurrency(t *testing.T) {
 	original := LocalPayment{ID: uuid.New(), CustomerID: customerID, Rail: "ccbill", TransactionID: "original", AmountCents: 799, Currency: "EUR",
 		Status: "completed", SubscriptionID: &subID}
 	snap := &RemoteSnapshot{Provider: ProviderCCBill, Capabilities: Capabilities{Transactions: true, Refunds: true}, Transactions: []RemoteTransaction{
-		{TransactionID: "rebill", SubscriptionID: sub.RailSubscriptionID, Type: TransactionTypeSale, Success: true, AmountCents: 799, OccurredAt: now},
-		{TransactionID: "refund", Type: TransactionTypeRefund, Success: true, AmountCents: 799, OccurredAt: now, Raw: []byte(`{"charge":"original"}`)},
+		{TransactionID: "rebill", SubscriptionID: sub.RailSubscriptionID, Type: TransactionTypeSale, Success: true, Amount: "7.99", OccurredAt: now},
+		{TransactionID: "refund", Type: TransactionTypeRefund, Success: true, Amount: "7.99", OccurredAt: now, Raw: []byte(`{"charge":"original"}`)},
 	}}
 	actions := func(local LocalSubscription) (*BackfillPaymentAction, *RecordRefundAction) {
 		var backfill *BackfillPaymentAction
@@ -460,14 +486,25 @@ func TestCCBillChargesTakeTheLocalRecordCurrency(t *testing.T) {
 
 	backfill, refund := actions(sub)
 	require.Equal(t, "GBP", backfill.Currency, "the rebill is billed in its subscription's price currency")
+	require.Equal(t, int64(799), backfill.AmountCents, "read in that currency")
+	require.Equal(t, int64(799), refund.AmountCents)
 	require.Equal(t, "inherited_from_subscription_price", backfill.Metadata["currency_provenance"])
 	require.Equal(t, "EUR", refund.Currency, "a refund returns the money of the payment it refunds")
 	require.Equal(t, "inherited_from_refunded_payment", refund.Metadata["currency_provenance"])
 
-	sub.PriceCurrency = ""
+	sub.PriceCurrency = "JPY"
+	snap.Transactions[0].Amount = "500.00"
 	backfill, _ = actions(sub)
-	require.Empty(t, backfill.Currency, "no currency anywhere is no currency, not USD")
-	require.NotContains(t, backfill.Metadata, "currency_provenance")
-	_, err := (&PGLocalWriter{}).BackfillPayment(context.Background(), *backfill)
+	require.Equal(t, []any{"JPY", int64(500)}, []any{backfill.Currency, backfill.AmountCents}, "¥500, never 50 000")
+
+	snap.Transactions[0].Amount = "7.99"
+	sub.PriceCurrency = ""
+	for _, f := range diffProvider(ProviderCCBill, snap, &LocalState{Subscriptions: []LocalSubscription{sub}}, []LocalPayment{original}, now, diffOptions{}) {
+		if f.Type == FindingChargeMissingLocal {
+			require.Nil(t, f.Apply, "no currency anywhere is no currency, not USD: nothing to backfill")
+			require.Equal(t, FindingStatusAdminRequired, f.Status)
+		}
+	}
+	_, err := (&PGLocalWriter{}).BackfillPayment(context.Background(), BackfillPaymentAction{AmountCents: 799})
 	require.ErrorContains(t, err, "payment currency required")
 }

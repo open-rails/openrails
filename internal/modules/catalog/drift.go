@@ -371,27 +371,37 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 	return events
 }
 
-// NMIPlan is the comparable shape of one NMI recurring plan.
+// NMIPlan is the comparable shape of one NMI recurring plan. NMI plans name
+// no currency, so Amount stays the verbatim major-unit decimal until it is
+// read in the linked price's currency.
 type NMIPlan struct {
-	PlanID      string
-	PlanName    string
-	AmountCents int64
+	PlanID   string
+	PlanName string
+	Amount   string
 }
 
-// MapNMIPlans parses provider amounts exactly. An unparseable amount skips the
-// plan rather than becoming a zero-dollar plan.
+// MapNMIPlans keeps each plan's amount verbatim.
 func MapNMIPlans(plans []nmi.V5Plan) []NMIPlan {
 	out := make([]NMIPlan, 0, len(plans))
 	for _, p := range plans {
-		cents, err := moneyutil.ParseDecimalToCents(p.PlanAmount)
-		if err != nil {
-			log.WithError(err).WithFields(log.Fields{"plan_id": p.ID, "plan_amount": p.PlanAmount}).
-				Warn("nmi catalog drift: skipping plan with unparseable amount")
-			continue
-		}
-		out = append(out, NMIPlan{PlanID: strings.TrimSpace(p.ID), PlanName: p.PlanName, AmountCents: int64(cents)})
+		out = append(out, NMIPlan{PlanID: strings.TrimSpace(p.ID), PlanName: p.PlanName, Amount: strings.TrimSpace(p.PlanAmount)})
 	}
 	return out
+}
+
+// nmiPlanAmountDrift reads a plan amount in the linked price's currency and
+// returns its native value when it differs. An amount not exact in that
+// currency is drift, reported verbatim, never read as a zero price.
+func nmiPlanAmountDrift(amount string, price *models.Price) (string, bool) {
+	minor, err := moneyutil.DecimalToRailMinor(price.Currency, amount)
+	if err != nil {
+		return amount, true
+	}
+	native, err := moneyutil.RailMinorToNative(price.Currency, minor)
+	if err != nil {
+		return amount, true
+	}
+	return strconv.FormatInt(native, 10), native != price.Amount
 }
 
 // ComputeNMIDrift returns the NMI findings that should be open for one complete
@@ -418,11 +428,10 @@ func ComputeNMIDrift(plans []NMIPlan, snap DriftSnapshot, now time.Time) []model
 		if local == nil {
 			continue
 		}
-		remoteMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(plan.AmountCents)))
-		if local.Amount != remoteMicros {
+		if external, drifted := nmiPlanAmountDrift(plan.Amount, local); drifted {
 			events = append(events, models.CatalogDriftEvent{Provider: models.CatalogDriftProviderNMI, Kind: models.CatalogDriftFieldDrift,
 				OpenRailsResourceType: models.CatalogDriftResourcePrice, OpenRailsResourceID: priceID, ExternalResourceID: plan.PlanID,
-				Field: "plan_amount", OpenRailsValue: strconv.FormatInt(local.Amount, 10), ExternalValue: strconv.FormatInt(remoteMicros, 10), DetectedAt: now})
+				Field: "plan_amount", OpenRailsValue: strconv.FormatInt(local.Amount, 10), ExternalValue: external, DetectedAt: now})
 		}
 	}
 	for priceID, planID := range snap.NMIPlanByPriceID {

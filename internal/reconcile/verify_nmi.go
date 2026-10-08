@@ -240,9 +240,9 @@ func (a *attribution) add(sale nmi.ScheduleSale) {
 // remoteSale is one sale action of NMI's transaction report as a snapshot
 // transaction of the schedule railSubID.
 func remoteSale(sale nmi.SaleAction, railSubID string) RemoteTransaction {
-	amount, _ := parseAmountCents(sale.Amount)
 	t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
-		AmountCents: amount, Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
+		Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
+	t.setAmount(sale.Amount)
 	if !sale.Success {
 		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.Evidence.Text, sale.Evidence.Code
 	}
