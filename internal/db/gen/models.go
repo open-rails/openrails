@@ -507,6 +507,13 @@ type BillingInvoice struct {
 	CollectionIntentID *uuid.UUID
 }
 
+// Last fully scanned thirty-day invoice collection period per merchant. Advancing this marker requires successful admission of the whole eligible scan; accepted operations recover independently. Included in merchant archives. Retention: permanent, never pruned.
+type BillingInvoiceCollectionCadence struct {
+	MerchantID             uuid.UUID
+	MonthlyPeriodStartedAt time.Time
+	CompletedAt            time.Time
+}
+
 // Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items. Retention: permanent, never pruned.
 type BillingInvoiceItem struct {
 	ID         uuid.UUID

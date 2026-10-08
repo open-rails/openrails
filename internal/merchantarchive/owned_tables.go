@@ -30,6 +30,7 @@ var ownedTables = []string{
 	"grants",
 	"host_outbox",
 	"idempotency_keys",
+	"invoice_collection_cadence",
 	"invoice_items",
 	"invoice_payments",
 	"invoices",

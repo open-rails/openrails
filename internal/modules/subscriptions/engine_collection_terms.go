@@ -33,13 +33,20 @@ type SubscriptionCollectionPayload struct {
 	OrderReference           string                    `json:"order_reference"`
 }
 
+// SubscriptionCollectionDescription correlates a gateway transaction with one
+// attempt while OrderReference remains shared by every attempt of the period.
+func SubscriptionCollectionDescription(operationID uuid.UUID) string {
+	return "OpenRails renewal " + operationID.String()
+}
+
 func SubscriptionCollectionKey(id uuid.UUID, previousPeriodEnd time.Time, attempt int) string {
 	return fmt.Sprintf("%s:%s:%s:attempt-%d", TypeSubscriptionCollection, id, previousPeriodEnd.UTC().Format(time.RFC3339Nano), attempt)
 }
 
-// SelectEngineRenewalPeriod preserves an ordinary next period until that whole
-// period has been missed. Thereafter one newly accepted attempt buys one period
-// from admission. Replays never call this selector again.
+// SelectEngineRenewalPeriod preserves the original due period through a short
+// outage. Missing the entire next period requires an explicit recovery decision;
+// a due scan must not silently reset the billing schedule or collect old debt.
+// Already accepted operations retain their frozen terms for receipt recovery.
 func SelectEngineRenewalPeriod(terms RenewalTerms, admittedAt time.Time) (RenewalTerms, error) {
 	if err := terms.Validate(); err != nil {
 		return terms, err
@@ -48,9 +55,7 @@ func SelectEngineRenewalPeriod(terms RenewalTerms, admittedAt time.Time) (Renewa
 		return terms, errors.New("engine renewal is not due")
 	}
 	if !terms.PeriodEnd.After(admittedAt) {
-		cycle := terms.PeriodEnd.Sub(terms.PeriodStart)
-		terms.PeriodStart = admittedAt.UTC().Truncate(time.Microsecond)
-		terms.PeriodEnd = terms.PeriodStart.Add(cycle)
+		return terms, errors.New("the entire renewal period elapsed; automatic collection requires operator reconciliation")
 	}
 	return terms, terms.Validate()
 }

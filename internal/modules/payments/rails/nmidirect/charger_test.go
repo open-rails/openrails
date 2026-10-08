@@ -203,17 +203,19 @@ func TestRecurringSaleWire(t *testing.T) {
 func TestRecurringInvalidTermsNeverDispatch(t *testing.T) {
 	t.Parallel()
 	for name, change := range map[string]func(*charge.Request, *Charger){
-		"missing anchor":      func(r *charge.Request, _ *Charger) { r.Context = charge.RecurringMIT("") },
-		"unscheduled":         func(r *charge.Request, _ *Charger) { r.Context = charge.UnscheduledMIT("anchor") },
-		"customer initiated":  func(r *charge.Request, _ *Charger) { r.Context = charge.RecurringReuse("anchor") },
-		"wrong rail":          func(r *charge.Request, _ *Charger) { r.Instrument.Rail = "stripe" },
-		"empty billing":       func(r *charge.Request, _ *Charger) { r.Instrument.MethodRef = "" },
-		"whitespace vault":    func(r *charge.Request, _ *Charger) { r.Instrument.CustomerRef = " v1" },
-		"unknown currency":    func(r *charge.Request, _ *Charger) { r.Currency = "??" },
-		"zero amount":         func(r *charge.Request, _ *Charger) { r.AmountMinor = 0 },
-		"missing operation":   func(r *charge.Request, _ *Charger) { r.OrderRef = "" },
-		"changed credentials": func(_ *charge.Request, c *Charger) { c.Client.SecurityKey = "another-account" },
-		"read only":           func(_ *charge.Request, c *Charger) { c.Client.ReadOnly = true },
+		"missing anchor":         func(r *charge.Request, _ *Charger) { r.Context = charge.RecurringMIT("") },
+		"unscheduled":            func(r *charge.Request, _ *Charger) { r.Context = charge.UnscheduledMIT("anchor") },
+		"customer initiated":     func(r *charge.Request, _ *Charger) { r.Context = charge.RecurringReuse("anchor") },
+		"wrong rail":             func(r *charge.Request, _ *Charger) { r.Instrument.Rail = "stripe" },
+		"empty billing":          func(r *charge.Request, _ *Charger) { r.Instrument.MethodRef = "" },
+		"whitespace vault":       func(r *charge.Request, _ *Charger) { r.Instrument.CustomerRef = " v1" },
+		"unknown currency":       func(r *charge.Request, _ *Charger) { r.Currency = "??" },
+		"zero amount":            func(r *charge.Request, _ *Charger) { r.AmountMinor = 0 },
+		"missing operation":      func(r *charge.Request, _ *Charger) { r.OrderRef = "" },
+		"changed credentials":    func(_ *charge.Request, c *Charger) { c.Client.SecurityKey = "another-account" },
+		"read only":              func(_ *charge.Request, c *Charger) { c.Client.ReadOnly = true },
+		"invalid financial URL":  func(_ *charge.Request, c *Charger) { c.Client.DirectPostURL = ":invalid" },
+		"disarmed financial URL": func(_ *charge.Request, c *Charger) { c.Client.DirectPostURL = "https://payments.example.test/sale" },
 	} {
 		g := &fakeGateway{billing: `[{"id":"b1"}]`}
 		c := newCharger(t, g)
