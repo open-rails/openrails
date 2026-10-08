@@ -9,10 +9,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // bookTier is one catalog price of a legacy NMI book, linked to the NMI plan
@@ -156,9 +162,9 @@ func (w *world) nmiCharges(vault string) []string {
 // legacy system held, daily/monthly/calendar-monthly/yearly cadences, a
 // customer with two memberships on one multi-card vault, an orphan card
 // reference. Refunds in the book never become charges. Re-import changes
-// nothing. The first enforcing pull finds the NMI-only schedule, mirrors the
-// schedule NMI deleted, and raises no false drift. OpenRails never writes to
-// NMI.
+// nothing. The first enforcing pull finds the NMI-only schedule and raises no
+// false drift. Unresolved imported money keeps recovery and local cancellation
+// held; OpenRails never writes to NMI.
 func TestLegacyNMIBookImport(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -278,9 +284,25 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			stray := w.nmi.AddSchedule(nmimock.Schedule{Vault: strayVault, Plan: monthly.plan, Amount: monthly.amount, Days: 30, Months: 0, NextBilling: now.Add(5 * day)})
 			w.nmi.DeleteSchedule(gone.schedule)
 			w.armDestructive()
-			w.pull()
+			mid, psp := w.client[embedded].MerchantID(), w.psp["nmi"]
+			var completedBefore, completedAfter *time.Time
+			watermark := w.q(`SELECT max(watermark_at) FROM billing.psp_refresh_watermarks WHERE merchant_id=$1 AND psp_id=$2 AND event_domain='completed_events'`)
+			require.NoError(t, w.pool.QueryRow(t.Context(), watermark, mid.UUID(), psp.UUID()).Scan(&completedBefore))
+			job, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: mid.UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				row, err := w.jobs.JobGet(t.Context(), job.Job.ID)
+				return err == nil && row.State == rivertype.JobStateRetryable
+			}, 30*time.Second, 20*time.Millisecond, "the deliberately unresolved book cannot complete provider recovery")
+			w.settle()
+			require.NoError(t, w.pool.QueryRow(t.Context(), watermark, mid.UUID(), psp.UUID()).Scan(&completedAfter))
+			require.Equal(t, completedBefore, completedAfter, "incomplete financial history cannot advance completed coverage")
+			ctx := merchant.WithID(t.Context(), mid)
+			require.ErrorIs(t, providerrecovery.CheckPSP(ctx, engine.Graph(w.rt).Runtime.DB, mid.UUID(), psp.UUID(), w.clock.Now()), providerrecovery.ErrPending)
+			require.Contains(t, w.openFindings("pull.reversal.unlinked"), "nmi:"+refund, "the imported refund remains unresolved")
 			require.Contains(t, w.openFindings("pull.subscription.missing"), stray, "the NMI-only schedule is surfaced")
-			require.Equal(t, billing.SubscriptionCanceled, gone.sub(w, tp).Status, "the schedule NMI deleted is mirrored")
+			require.Equal(t, billing.SubscriptionActive, gone.sub(w, tp).Status, "local cancellation waits for financial recovery despite the missing provider schedule")
+			require.True(t, gone.paid.Equal(*gone.sub(w, tp).CurrentPeriodEndsAt), "the unresolved book retains its paid coverage")
 			require.Empty(t, w.openFindings("pull.subscription.drift"), "matching schedules raise no drift")
 			require.Empty(t, w.openFindings("pull.payment_method.mismatch"), "each card of a multi-card vault matches its own billing entry")
 			require.Equal(t, billing.SubscriptionActive, active.sub(w, tp).Status)
