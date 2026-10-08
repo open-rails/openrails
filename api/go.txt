@@ -562,6 +562,7 @@ pkg openrails/adapters/fiber, func CheckoutFramePolicy(*openrails.Client) fiber.
 pkg openrails/adapters/fiber, func Mount(fiber.Router, *openrails.Client) error
 pkg openrails/adapters/gin, func CheckoutFramePolicy(*openrails.Client) gin.HandlerFunc
 pkg openrails/adapters/gin, func Mount(gin.IRoutes, *openrails.Client) error
+pkg openrails/adapters/gin, func MountRoutes(gin.IRoutes, []openrails.Route, bool) error
 pkg openrails/adapters/http, func CheckoutFramePolicy(*openrails.Client) func(http.Handler) http.Handler
 pkg openrails/adapters/http, func Mount(any, *openrails.Client, ...string) error
 pkg openrails/adapters/http, func MountRoot(any, *openrails.Client) error

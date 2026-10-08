@@ -271,7 +271,8 @@
     ],
     "adapters/gin": [
       "func CheckoutFramePolicy(client *openrails.Client) gin.HandlerFunc",
-      "func Mount(target gin.IRoutes, client *openrails.Client) error"
+      "func Mount(target gin.IRoutes, client *openrails.Client) error",
+      "func MountRoutes(target gin.IRoutes, routes []openrails.Route, rootOnly bool) error"
     ],
     "adapters/http": [
       "func CheckoutFramePolicy(client *openrails.Client) func(http.Handler) http.Handler",
