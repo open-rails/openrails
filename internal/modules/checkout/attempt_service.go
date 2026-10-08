@@ -1335,6 +1335,9 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: unsupported token", ErrCheckoutAttemptValidation)
 	}
 	tokenMint := tokenCfg.Mint
+	if err := solanamodule.ValidateQuoteCurrency(*session.Currency, tokenSymbol, tokenMint); err != nil {
+		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
+	}
 	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
 		return fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutAttemptValidation)
 	}

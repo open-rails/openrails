@@ -67,6 +67,9 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 	if err := validateAccessDuration(p.AccessDurationHours); err != nil {
 		return p, err
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
+		return p, err
+	}
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil ||
 		in.IntentType != TypeNMIUpgrade || in.Rail != "nmi" || in.PspID == nil ||

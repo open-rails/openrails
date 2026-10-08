@@ -113,6 +113,9 @@ type ManualRebillResponse struct {
 // https://docs.nmi.com/reference/subscriptions-management
 // https://docs.nmi.com/reference/transactions-processing
 func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data RecurringPaymentData) (*AddSubscriptionResponse, error) {
+	if err := moneyutil.RequireFiatCurrency(data.Currency); err != nil {
+		return nil, err
+	}
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}

@@ -184,6 +184,10 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
+	if err := ValidateQuoteCurrency(price.Currency, tokenSymbol, tokenCfg.Mint); err != nil {
+		return nil, err
+	}
+
 	// Decimals come from the MINT on-chain, never from config (#817).
 	decimals, err := RequireMintDecimals(ctx, s.mints, tokenCfg.Mint)
 	if err != nil {

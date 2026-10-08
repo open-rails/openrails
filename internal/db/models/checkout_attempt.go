@@ -112,6 +112,8 @@ const (
 	// mode for this price: the rail registry says it cannot make this kind of
 	// new sale (CCBill new subscriptions, any trial first phase).
 	CheckoutRoutingSkipModeUnsupported = "mode_unsupported"
+	// CheckoutRoutingSkipCurrencyUnsupported means this rail cannot charge the price denomination.
+	CheckoutRoutingSkipCurrencyUnsupported = "currency_unsupported"
 	// CheckoutRoutingSkipPostureDisarmed: the PSP's credentials failed their
 	// posture verification, so its mutations are refused.
 	CheckoutRoutingSkipPostureDisarmed = "posture_disarmed"

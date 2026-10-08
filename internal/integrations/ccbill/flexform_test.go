@@ -64,6 +64,8 @@ func TestFlexFormRefusesIncompleteOrUnbillableRequests(t *testing.T) {
 		"flex id":  func(p *GenerateFlexFormURLParams) { p.FlexID = "" },
 		"currency": func(p *GenerateFlexFormURLParams) { p.Currency = "" },
 		"bitcoin":  func(p *GenerateFlexFormURLParams) { p.Currency = "BTC" },
+		"SOL":      func(p *GenerateFlexFormURLParams) { p.Currency = "SOL" },
+		"USDC":     func(p *GenerateFlexFormURLParams) { p.Currency = "USDC" },
 	} {
 		p := valid()
 		mut(&p)

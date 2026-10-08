@@ -52,6 +52,9 @@ type ReplacedMembership struct {
 }
 
 func (t InitialMembershipTerms) Validate() error {
+	if err := moneyutil.RequireFiatCurrency(t.Currency); err != nil {
+		return err
+	}
 	if t.CancelAfterInitial && t.CollectionPolicy != models.CollectionPolicyEngine {
 		return errors.New("non-renewing order requires engine collection without a provider schedule")
 	}

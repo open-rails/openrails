@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -161,6 +162,9 @@ type CreatePriceParams struct {
 // CreatePrice creates a Stripe Price with lookup_key and metadata so reruns and
 // reconciliation paths can find the object without retaining its Stripe ID.
 func (s *StripeCatalogService) CreatePrice(ctx context.Context, params CreatePriceParams) (string, error) {
+	if err := moneyutil.RequireFiatCurrency(params.Currency); err != nil {
+		return "", err
+	}
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return "", fmt.Errorf("stripe is not configured")

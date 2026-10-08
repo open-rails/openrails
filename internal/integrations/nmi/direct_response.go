@@ -1,7 +1,6 @@
 package nmi
 
 import (
-	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -44,10 +43,10 @@ func saleResponse(output url.Values, raw string) *SaleResponse {
 // currency's scale. NMI's x.xx format is retained for zero-decimal currencies:
 // four JPY rail units become "4.00", never "0.04". No float arithmetic.
 func WireAmount(amount moneyutil.Cents, currency string) (string, error) {
-	units, ok := moneyutil.LookupCurrency(currency)
-	if !ok {
-		return "", fmt.Errorf("unknown charge currency %q", currency)
+	if err := moneyutil.RequireFiatCurrency(currency); err != nil {
+		return "", err
 	}
+	units, _ := moneyutil.LookupCurrency(currency)
 	digits := strconv.FormatInt(int64(amount), 10)
 	sign := ""
 	if strings.HasPrefix(digits, "-") {

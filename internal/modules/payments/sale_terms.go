@@ -60,6 +60,9 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
+		return p, err
+	}
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() || p.Entitlements == nil {
 		return p, errors.New("sale operation contradicts its accepted purchase")

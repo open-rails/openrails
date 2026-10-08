@@ -115,15 +115,15 @@ func FiatMicrosToBaseUnitsAtPeg(micros moneyutil.Micros, symbol string, decimals
 	return baseUnitsToUint64(n, symbol)
 }
 
-// fiatMicrosToBaseUnitsAtRate is the depeg/FX branch: base units =
-// ceil(micros * fxRate * 10^decimals / (10^6 * tokenPriceUSD)), evaluated as an
+// nativeToBaseUnitsAtRate is the depeg/FX branch: base units =
+// ceil(amount * fxRate * 10^decimals / (10^nativeDecimals * tokenPriceUSD)), evaluated as an
 // exact rational (rates converted to their exact rational value) with a single
 // final ceiling — never a float multiply followed by math.Ceil.
-func fiatMicrosToBaseUnitsAtRate(micros moneyutil.Micros, symbol string, decimals int, fxRate, tokenPriceUSD float64) (uint64, error) {
+func nativeToBaseUnitsAtRate(amount int64, nativeDecimals int, symbol string, decimals int, fxRate, tokenPriceUSD float64) (uint64, error) {
 	if err := config.ValidateTokenDecimals(symbol, decimals); err != nil {
 		return 0, err
 	}
-	if micros <= 0 {
+	if amount <= 0 {
 		return 0, nil
 	}
 	fxr, err := ratFromRate(fxRate, "fx rate")
@@ -134,10 +134,10 @@ func fiatMicrosToBaseUnitsAtRate(micros moneyutil.Micros, symbol string, decimal
 	if err != nil {
 		return 0, err
 	}
-	q := new(big.Rat).SetInt64(int64(micros))
+	q := new(big.Rat).SetInt64(amount)
 	q.Mul(q, fxr)
 	q.Mul(q, new(big.Rat).SetInt(pow10(decimals)))
-	q.Quo(q, new(big.Rat).SetInt(pow10(microDecimals)))
+	q.Quo(q, new(big.Rat).SetInt(pow10(nativeDecimals)))
 	q.Quo(q, price)
 	return baseUnitsToUint64(ceilRat(q), symbol)
 }
@@ -158,7 +158,7 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micro
 	if pegged {
 		return FiatMicrosToBaseUnitsAtPeg(micros, symbol, decimals)
 	}
-	return fiatMicrosToBaseUnitsAtRate(micros, symbol, decimals, 1.0, priceUSD)
+	return nativeToBaseUnitsAtRate(int64(micros), microDecimals, symbol, decimals, 1.0, priceUSD)
 }
 
 // FormatBaseUnits renders base units as a fixed-point decimal string with
@@ -215,8 +215,9 @@ type TokenPriceProvider interface {
 	PriceUSD(ctx context.Context, symbol string) (float64, error)
 }
 
-// CalculateTokenQuote converts a fiat amount in MICROS (millionths of a major
-// currency unit, any currency) into token base units based on live prices.
+// CalculateTokenQuote converts registered native currency units to token base
+// units. Token-denominated prices pay exactly in that token; fiat prices use
+// the existing FX and token-price quote.
 //
 // `decimals` is the mint's ON-CHAIN base-unit precision (#817) and is an
 // explicit parameter so no caller can fall back to an assumed 6; resolve it via
@@ -238,8 +239,19 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 	if currency == "" {
 		return nil, fmt.Errorf("token quote requires a currency (refusing to default)")
 	}
-	if err := moneyutil.ValidateCurrency(currency); err != nil {
+	if err := ValidateQuoteCurrency(currency, tokenSymbol, mint); err != nil {
 		return nil, err
+	}
+	units, _ := moneyutil.LookupCurrency(currency)
+	if units.Kind == "crypto" {
+		if units.Decimals != decimals {
+			return nil, fmt.Errorf("%s mint precision does not match registered denomination", currency)
+		}
+		if amountMicros < 0 {
+			return nil, fmt.Errorf("token amount cannot be negative")
+		}
+		amount := uint64(amountMicros)
+		return &TokenQuote{Units: amount, Amount: FormatBaseUnits(amount, decimals), FXRate: 1, FXCurrency: currency, QuotedAt: time.Now()}, nil
 	}
 	if amountMicros <= 0 {
 		return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil
@@ -295,7 +307,7 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 	if atPeg && currency == money.DefaultCurrency {
 		tokenUnits, err = FiatMicrosToBaseUnitsAtPeg(amountMicros, tokenSymbol, decimals)
 	} else {
-		tokenUnits, err = fiatMicrosToBaseUnitsAtRate(amountMicros, tokenSymbol, decimals, fxRate, tokenPriceUSD)
+		tokenUnits, err = nativeToBaseUnitsAtRate(int64(amountMicros), units.Decimals, tokenSymbol, decimals, fxRate, tokenPriceUSD)
 	}
 	if err != nil {
 		return nil, err

@@ -433,6 +433,12 @@ func (s *CheckoutService) processOneTimePurchase(
 	if err != nil {
 		return nil, err
 	}
+	if target.Rail != string(models.RailSolana) {
+		if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+			return nil, err
+		}
+	}
+
 	if (price.CustomerAmount != nil || req.Amount != nil) && target.Rail != "nmi" && target.Rail != "stripe" {
 		return nil, fmt.Errorf("%w: customer-selected deposits require NMI or Stripe", ErrCheckoutAttemptValidation)
 	}
@@ -757,6 +763,9 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
+	if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+		return nil, err
+	}
 	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
@@ -839,6 +848,9 @@ func (s *CheckoutService) processStripePayment(
 	price *models.Price,
 	product *models.Product,
 ) (*CheckoutResponse, error) {
+	if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+		return nil, err
+	}
 	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
@@ -1123,6 +1135,11 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
+	if params.InlinePrice != nil {
+		if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
+			return "", err
+		}
+	}
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return "", err

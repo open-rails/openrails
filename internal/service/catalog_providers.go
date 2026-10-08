@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Issue #208 declarative-provider primitives.
@@ -273,6 +274,11 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 			return nil, nil, nil, apperr.Invalidf(
 				"unknown provider %q in providers/provider_links: not a rail (%s) or a declared merchant account key",
 				name, strings.Join(sortedAdapterNames(adapters), ", "))
+		}
+		if t.rail == string(models.RailStripe) || t.rail == string(models.RailNMI) || t.rail == string(models.RailCCBill) {
+			if err := moneyutil.RequireFiatCurrency(req.Currency); err != nil {
+				return nil, nil, nil, apperr.Invalidf("%s: %v", t.declared, err)
+			}
 		}
 		if req.CustomerAmount != nil {
 			if t.rail != string(models.RailStripe) && t.rail != string(models.RailNMI) {

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // CheckoutOption is a locally ready payment-provider choice for a price.
@@ -151,6 +152,11 @@ func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, tar
 	if _, known := rails.Lookup(rail); !known {
 		return models.CheckoutRoutingSkipUnknownSelector
 	}
+	if rail == models.RailStripe || rail == models.RailNMI || rail == models.RailCCBill {
+		if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+			return models.CheckoutRoutingSkipCurrencyUnsupported
+		}
+	}
 	// Customer-selected deposits execute through the existing card-sale
 	// intent, whose frozen amount is honored by NMI and Stripe.
 	if price.CustomerAmount != nil && rail != models.RailNMI && rail != models.RailStripe {
@@ -187,6 +193,14 @@ func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, tar
 		}
 		if link == nil {
 			return models.CheckoutRoutingSkipLinkMissing
+		}
+		if units, ok := moneyutil.LookupCurrency(price.Currency); ok && units.Kind == "crypto" {
+			if subscription {
+				return models.CheckoutRoutingSkipCurrencyUnsupported
+			}
+			if _, ok := providerConfig.Solana.Tokens[units.Code]; !ok {
+				return models.CheckoutRoutingSkipCurrencyUnsupported
+			}
 		}
 		if subscription {
 			if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
