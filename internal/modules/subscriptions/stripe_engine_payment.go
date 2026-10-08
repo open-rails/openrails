@@ -35,6 +35,7 @@ type StripeEnginePaymentParams struct {
 	AmountMinor                                moneyutil.Cents
 	Currency                                   string
 	Initial                                    bool
+	Renewal                                    *StripeRenewal
 }
 
 type StripeEnginePaymentState string
@@ -72,6 +73,7 @@ type StripeEngineReceipt struct {
 	CustomerID          uuid.UUID       `json:"customer_id"`
 	OperationID         uuid.UUID       `json:"operation_id"`
 	Initial             bool            `json:"initial"`
+	RenewalTermsSHA256  string          `json:"renewal_terms_sha256,omitempty"`
 }
 
 func (p StripeEnginePaymentParams) validate() error {
@@ -89,6 +91,17 @@ func (p StripeEnginePaymentParams) validate() error {
 	}
 	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "seti_") {
 		return errors.New("Stripe engine payment lacks a qualified recurring agreement")
+	}
+	if p.Renewal != nil {
+		if p.Initial || p.OneTime || p.Renewal.Attempt < 0 {
+			return errors.New("invalid Stripe renewal binding")
+		}
+		if id, err := uuid.Parse(p.Renewal.Obligation); err != nil || id == uuid.Nil || id.String() != p.Renewal.Obligation {
+			return errors.New("invalid Stripe renewal obligation")
+		}
+		if len(p.Renewal.TermsSHA256) != 64 || strings.Trim(p.Renewal.TermsSHA256, "0123456789abcdef") != "" {
+			return errors.New("invalid Stripe renewal terms")
+		}
 	}
 	return nil
 }
@@ -121,6 +134,11 @@ func (p StripeEnginePaymentParams) metadata() map[string]string {
 	}
 	if p.OneTime {
 		values["openrails_one_time"] = "true"
+	}
+	if p.Renewal != nil {
+		values["openrails_renewal_obligation"] = p.Renewal.Obligation
+		values["openrails_renewal_attempt"] = strconv.Itoa(p.Renewal.Attempt)
+		values["openrails_renewal_terms"] = p.Renewal.TermsSHA256
 	}
 	return values
 }
@@ -215,9 +233,17 @@ func (pi stripeEngineIntent) matches(p StripeEnginePaymentParams) error {
 	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || methodMismatch || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || p.Initial && pi.SetupFutureUsage != "off_session" {
 		return errors.New("Stripe engine payment does not match frozen terms")
 	}
-	for k, v := range p.metadata() {
+	expected := p.metadata()
+	for k, v := range expected {
 		if pi.Metadata[k] != v {
 			return errors.New("Stripe engine payment does not match accepted operation")
+		}
+	}
+	// These flags are omitted when false. A true flag on another copy's PI
+	// must not be ignored merely because this operation expected no key.
+	for _, key := range []string{"openrails_customer_retry", "openrails_one_time"} {
+		if pi.Metadata[key] != expected[key] {
+			return errors.New("Stripe engine payment initiation differs from accepted operation")
 		}
 	}
 	return nil
@@ -380,7 +406,11 @@ func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePayment
 	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured || ch.AmountRefunded < 0 || ch.AmountRefunded > ch.Amount || (ch.Refunded && ch.AmountRefunded != ch.Amount) {
 		return StripeEngineReceipt{}, errors.New("Stripe engine captured charge does not match accepted payment")
 	}
-	return StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, CustomerInitiated: p.CustomerInitiated, OneTime: p.OneTime, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}, nil
+	r := StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, CustomerInitiated: p.CustomerInitiated, OneTime: p.OneTime, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}
+	if p.Renewal != nil {
+		r.RenewalTermsSHA256 = p.Renewal.TermsSHA256
+	}
+	return r, nil
 }
 func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	if err := p.validate(); err != nil {
@@ -391,6 +421,9 @@ func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	}
 	if !stripeEngineID(r.PaymentIntentID, "pi_") || !stripeEngineID(r.ChargeID, "ch_") || r.CustomerRef != p.Instrument.RailCustomerRef || r.MethodRef != p.Instrument.RailMethodRef || r.AmountMinor != p.AmountMinor || r.Currency != p.Currency || r.MerchantID != p.MerchantID || r.PSPID != p.PSPID || r.CustomerID != p.CustomerID || r.OperationID != p.OperationID || r.Initial != p.Initial || r.CustomerInitiated != p.CustomerInitiated || r.OneTime != p.OneTime {
 		return errors.New("Stripe engine receipt differs from accepted operation")
+	}
+	if p.Renewal != nil && r.RenewalTermsSHA256 != p.Renewal.TermsSHA256 || p.Renewal == nil && r.RenewalTermsSHA256 != "" {
+		return errors.New("Stripe engine receipt differs from accepted renewal coverage")
 	}
 	return nil
 }

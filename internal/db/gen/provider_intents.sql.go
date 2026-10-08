@@ -645,16 +645,16 @@ func (q *Queries) CountProviderIntents(ctx context.Context, arg CountProviderInt
 const enqueueProviderIntent = `-- name: EnqueueProviderIntent :one
 
 INSERT INTO billing.provider_intents (
-    merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
+    id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     actor, expires_at, psp_id, custodian_id
 ) VALUES (
-    $1, $2, $3,
-    $4, $5, $6,
-    $7, $8, 'pending',
-    $9::timestamptz, $10,
-    $11, $12, $13,
-    $14::uuid, $15::uuid
+    COALESCE($1::uuid, uuidv7()), $2, $3, $4,
+    $5, $6, $7,
+    $8, $9, 'pending',
+    $10::timestamptz, $11,
+    $12, $13, $14,
+    $15::uuid, $16::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
@@ -702,6 +702,7 @@ RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price
 `
 
 type EnqueueProviderIntentParams struct {
+	ID             *uuid.UUID
 	MerchantID     uuid.UUID
 	Rail           string
 	IntentType     string
@@ -743,6 +744,7 @@ type EnqueueProviderIntentParams struct {
 // Always RETURNs the canonical row for the key.
 func (q *Queries) EnqueueProviderIntent(ctx context.Context, arg EnqueueProviderIntentParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, enqueueProviderIntent,
+		arg.ID,
 		arg.MerchantID,
 		arg.Rail,
 		arg.IntentType,

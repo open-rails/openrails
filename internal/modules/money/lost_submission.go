@@ -40,6 +40,9 @@ func (h *SubscriptionCollectionHandler) lostSubmission(ctx context.Context, in g
 	if history.Resends >= intents.MaxLostSubmissionResends {
 		return h.unresolved(ctx, in, p, fmt.Sprintf("the provider has no transaction after %d resends", history.Resends))
 	}
+	if in.Rail == "stripe" && !history.StripeReplaySafe(h.now()) {
+		return h.unresolved(ctx, in, p, "Stripe idempotency retention window elapsed; provider receipt required")
+	}
 	if in.Rail != "stripe" {
 		if reason := h.vaultActivity(ctx, in, history); reason != "" {
 			return h.unresolved(ctx, in, p, reason)

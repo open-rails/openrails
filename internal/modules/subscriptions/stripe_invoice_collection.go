@@ -551,7 +551,11 @@ func (s *StripeService) CleanupCollection(ctx context.Context, customerID, key s
 
 func (s *StripeService) stripeListAll(ctx context.Context, path string, query url.Values, each func(json.RawMessage) error) error {
 	startingAfter := ""
+	seen := map[string]bool{}
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		q := url.Values{}
 		for k, v := range query {
 			q[k] = v
@@ -569,20 +573,30 @@ func (s *StripeService) stripeListAll(ctx context.Context, path string, query ur
 		}
 		var page struct {
 			Data    []json.RawMessage `json:"data"`
-			HasMore bool              `json:"has_more"`
+			HasMore *bool             `json:"has_more"`
 		}
 		if err := json.Unmarshal(body, &page); err != nil {
 			return fmt.Errorf("parse stripe list %s: %w", path, err)
 		}
+		if page.Data == nil || page.HasMore == nil {
+			return fmt.Errorf("Stripe list %s is missing its data array or pagination flag", path)
+		}
 		for _, raw := range page.Data {
+			startingAfter = rawString(json.RawMessage(rawField(raw, "id")))
+			if startingAfter == "" {
+				return fmt.Errorf("Stripe list %s contains a record without an identity", path)
+			}
 			if err := each(raw); err != nil {
 				return err
 			}
-			startingAfter = rawString(json.RawMessage(rawField(raw, "id")))
 		}
-		if !page.HasMore || len(page.Data) == 0 || startingAfter == "" {
+		if !*page.HasMore {
 			return nil
 		}
+		if len(page.Data) == 0 || startingAfter == "" || seen[startingAfter] {
+			return fmt.Errorf("Stripe list %s has incomplete or repeated pagination", path)
+		}
+		seen[startingAfter] = true
 	}
 }
 
