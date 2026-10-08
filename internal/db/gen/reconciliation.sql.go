@@ -2378,6 +2378,59 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 	return result.RowsAffected(), nil
 }
 
+const reconcileListInvoicePaymentsByTransactionIDs = `-- name: ReconcileListInvoicePaymentsByTransactionIDs :many
+SELECT id, customer_id, invoice_id, rail_payment_id::text, amount, currency
+FROM billing.invoice_payments
+WHERE merchant_id = $1::uuid
+  AND psp_id = $2::uuid AND rail = 'nmi' AND status = 'settled'
+  AND rail_payment_id IS NOT NULL
+  AND rail_payment_id = ANY($3::text[])
+`
+
+type ReconcileListInvoicePaymentsByTransactionIDsParams struct {
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	TransactionIds []string
+}
+
+type ReconcileListInvoicePaymentsByTransactionIDsRow struct {
+	ID            uuid.UUID
+	CustomerID    uuid.UUID
+	InvoiceID     uuid.UUID
+	RailPaymentID string
+	Amount        int64
+	Currency      string
+}
+
+// Canonical invoice receipts live outside billing.payments. Recognize settled
+// NMI charges by their exact accepted PSP and transaction, never by a vault.
+func (q *Queries) ReconcileListInvoicePaymentsByTransactionIDs(ctx context.Context, arg ReconcileListInvoicePaymentsByTransactionIDsParams) ([]ReconcileListInvoicePaymentsByTransactionIDsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListInvoicePaymentsByTransactionIDs, arg.MerchantID, arg.PspID, arg.TransactionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReconcileListInvoicePaymentsByTransactionIDsRow
+	for rows.Next() {
+		var i ReconcileListInvoicePaymentsByTransactionIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.InvoiceID,
+			&i.RailPaymentID,
+			&i.Amount,
+			&i.Currency,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
        card_exp_month, card_exp_year
@@ -2588,7 +2641,7 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 
-SELECT id, customer_id, price_id, product_id, status, rail,
+SELECT id, customer_id, price_id, product_id, status, rail, collection_policy,
        rail_subscription_id, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        canceled_at, cancel_type, deletion_scheduled_at, tier_group,
@@ -2658,6 +2711,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.ProductID,
 			&i.Status,
 			&i.Rail,
+			&i.CollectionPolicy,
 			&i.RailSubscriptionID,
 			&i.PaymentMethodID,
 			&i.CurrentPeriodStartsAt,

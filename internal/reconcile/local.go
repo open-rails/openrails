@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,6 +87,8 @@ type LocalPayment struct {
 	TransactionID     string
 	AmountCents       int64
 	Status            string
+	Currency          string
+	InvoiceID         *uuid.UUID
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
@@ -175,6 +178,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ProductID:                   row.ProductID,
 			Status:                      string(row.Status),
 			Rail:                        row.Rail,
+			CollectionPolicy:            models.CollectionPolicy(row.CollectionPolicy),
 			RailSubscriptionID:          models.DerefStr(row.RailSubscriptionID),
 			PaymentMethodID:             row.PaymentMethodID,
 			CurrentPeriodStartsAt:       row.CurrentPeriodStartsAt,
@@ -299,6 +303,22 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			p.Rail = *row.Rail
 		}
 		out = append(out, p)
+	}
+	if provider == ProviderNMI {
+		invoices, err := l.DB.Gen(ctx).ReconcileListInvoicePaymentsByTransactionIDs(ctx, gen.ReconcileListInvoicePaymentsByTransactionIDsParams{MerchantID: scopeMerchantID.UUID(), PspID: pspID, TransactionIds: transactionIDs})
+		if err != nil {
+			return nil, err
+		}
+		payments := make(map[string]struct{}, len(out))
+		for _, payment := range out {
+			payments[payment.TransactionID] = struct{}{}
+		}
+		for _, row := range invoices {
+			if _, exists := payments[row.RailPaymentID]; exists {
+				return nil, fmt.Errorf("provider transaction %s is allocated to both invoice and payment records", row.RailPaymentID)
+			}
+			out = append(out, LocalPayment{ID: row.ID, CustomerID: row.CustomerID, Rail: "nmi", TransactionID: row.RailPaymentID, AmountCents: row.Amount / moneyutil.MicrosPerCent, Currency: row.Currency, Status: "settled", InvoiceID: &row.InvoiceID})
+		}
 	}
 	return out, nil
 }

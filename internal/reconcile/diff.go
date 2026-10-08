@@ -210,7 +210,10 @@ type correlator struct {
 // subForTxn resolves the local subscription a remote transaction belongs to.
 // how documents the successful path; ambiguous=true means candidates existed
 // but identity could not be pinned to exactly one subscription.
-func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, how string, ambiguous bool) {
+func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *LocalSubscription, how string, ambiguous bool) {
+	if provider == ProviderNMI {
+		return c.nmiSubForTxn(t)
+	}
 	// 1. Direct rail subscription id (CCBill, Solana).
 	if t.SubscriptionID != "" {
 		if s, ok := c.local.byPSID[t.SubscriptionID]; ok {
@@ -282,6 +285,63 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 	}
 
 	return nil, "", ambiguous
+}
+
+// NMI API sales can be invoices, engine collections, or unrelated purchases on
+// the same vault. They are not provider-scheduled subscription payments merely
+// because one local subscription shares that customer's card or email.
+func (c *correlator) nmiSubForTxn(t *RemoteTransaction) (*LocalSubscription, string, bool) {
+	providerOwned := func(s *LocalSubscription) bool {
+		return s != nil && s.CollectionPolicy == models.CollectionPolicyNMISchedule && s.RailSubscriptionID != ""
+	}
+	if t.SubscriptionID != "" {
+		if sub := c.local.byPSID[t.SubscriptionID]; providerOwned(sub) {
+			return sub, "rail_subscription_id", false
+		}
+		return nil, "canonical_operation_required", false
+	}
+	bc := decodeBreadcrumbs(t.Raw)
+	if id, ok := parseRebillOrderID(bc.OrderID); ok {
+		if sub := c.local.byID[id]; sub != nil {
+			if providerOwned(sub) {
+				return sub, "order_id", false
+			}
+			return nil, "canonical_operation_required", false
+		}
+	}
+	if !nmiRecurringTransaction(t) {
+		return nil, "canonical_operation_required", false
+	}
+	remote := c.remote.subsByCust[bc.CustomerVaultID]
+	if bc.CustomerVaultID == "" || len(remote) != 1 {
+		return nil, "", len(remote) > 1
+	}
+	// Only the recurring module's own sale can fall back to its unique saved
+	// vault relationship. Ambiguous historical/live schedules stay unresolved.
+	var candidates []*LocalSubscription
+	if bc.CustomerVaultID != "" {
+		for _, sub := range c.local.byID {
+			if !providerOwned(sub) || sub.PaymentMethodID == nil {
+				continue
+			}
+			if method := c.local.pmByID[*sub.PaymentMethodID]; method != nil && method.RailCustomerRef == bc.CustomerVaultID {
+				candidates = append(candidates, sub)
+			}
+		}
+	}
+	if len(candidates) == 1 && candidates[0].RailSubscriptionID == remote[0].RailSubscriptionID {
+		return candidates[0], "vault_id", false
+	}
+	return nil, "", len(candidates) > 1
+}
+
+func nmiRecurringTransaction(t *RemoteTransaction) bool {
+	var evidence struct {
+		Action struct {
+			Source string `json:"source"`
+		} `json:"action"`
+	}
+	return json.Unmarshal(t.Raw, &evidence) == nil && strings.EqualFold(strings.TrimSpace(evidence.Action.Source), "recurring")
 }
 
 // uniqueSub returns the single subscription of a candidate set, preferring a
@@ -725,6 +785,20 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 		}
 		matched := t.SubscriptionID != "" && t.SubscriptionID == r.RailSubscriptionID
 		if !matched && r.CustomerID != "" {
+			if snap.Provider == ProviderNMI {
+				if !nmiRecurringTransaction(t) {
+					continue
+				}
+				candidates := 0
+				for _, candidate := range snap.Subscriptions {
+					if candidate.CustomerID == r.CustomerID {
+						candidates++
+					}
+				}
+				if candidates != 1 {
+					continue
+				}
+			}
 			bc := decodeBreadcrumbs(t.Raw)
 			matched = bc.CustomerVaultID == r.CustomerID || bc.Customer == r.CustomerID
 		}
@@ -771,6 +845,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts
 	state := SubscriptionState{
 		Status:             s.Status,
 		Rail:               s.Rail,
+		CollectionPolicy:   s.CollectionPolicy,
 		RailSubscriptionID: s.RailSubscriptionID,
 		PeriodStart:        s.CurrentPeriodStartsAt,
 		PeriodEnd:          s.CurrentPeriodEndsAt,
@@ -1058,7 +1133,12 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 			if !t.Success || t.TransactionID == "" {
 				continue
 			}
-			if _, ok := paymentsByTxnID[t.TransactionID]; ok {
+			if payment, ok := paymentsByTxnID[t.TransactionID]; ok {
+				if payment.InvoiceID != nil && (payment.AmountCents != t.AmountCents || !strings.EqualFold(payment.Currency, t.Currency)) {
+					findings = append(findings, Finding{Provider: provider, Type: FindingChargeMissingLocal, SubjectKey: t.TransactionID, Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true,
+						LocalEvidence: map[string]any{"invoice_id": payment.InvoiceID.String(), "amount_cents": payment.AmountCents, "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
+						RecommendedAction: "provider charge contradicts the canonical invoice receipt; reconcile the exact operation before collection resumes"})
+				}
 				continue
 			}
 			// #714 wallet-scan discoveries route on their verdict envelope
@@ -1093,7 +1173,7 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 }
 
 func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time.Time) Finding {
-	sub, how, ambiguous := corr.subForTxn(t)
+	sub, how, ambiguous := corr.subForTxn(provider, t)
 	f := Finding{
 		Provider:       provider,
 		Type:           FindingChargeMissingLocal,
@@ -1106,7 +1186,10 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 	case sub == nil:
 		f.Status = FindingStatusAdminRequired
 		f.RequiresAdmin = true
-		if ambiguous {
+		if how == "canonical_operation_required" {
+			f.RemoteEvidence["recovery_blocked"] = how
+			f.RecommendedAction = "NMI API charge cannot be assigned by vault or email; reconcile its exact accepted operation and receipt, or resolve missing operation identity before collection resumes"
+		} else if ambiguous {
 			f.RecommendedAction = "rail charge has no local payment and its identity matches MULTIPLE local candidates; resolve manually (never guess)"
 		} else {
 			f.RecommendedAction = "rail charge has no local payment and no local identity could be resolved; investigate manually"
@@ -1316,6 +1399,12 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		RemoteEvidence: remoteTxnEvidence(t),
 	}
 
+	if original != nil && original.InvoiceID != nil {
+		f.Status, f.RequiresAdmin = FindingStatusRequiresReview, true
+		f.LocalEvidence = map[string]any{"invoice_id": original.InvoiceID.String(), "transaction_id": original.TransactionID}
+		f.RecommendedAction = "refund belongs to an invoice collection; reconcile its canonical invoice and ledger rather than creating a subscription refund"
+		return f, true
+	}
 	if original == nil {
 		f.Status = FindingStatusAdminRequired
 		f.RequiresAdmin = true
@@ -1367,7 +1456,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 }
 
 func makePS6(provider Provider, t *RemoteTransaction, corr *correlator, paymentsByTxnID map[string]*LocalPayment) (Finding, bool) {
-	sub, how, _ := corr.subForTxn(t)
+	sub, how, _ := corr.subForTxn(provider, t)
 	if sub == nil {
 		// Try via the disputed charge's local payment.
 		bc := decodeBreadcrumbs(t.Raw)

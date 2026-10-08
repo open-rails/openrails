@@ -321,7 +321,7 @@ WHERE id = sqlc.arg(id)
 -- ============================================================================
 
 -- name: ReconcileListSubscriptionsByRails :many
-SELECT id, customer_id, price_id, product_id, status, rail,
+SELECT id, customer_id, price_id, product_id, status, rail, collection_policy,
        rail_subscription_id, payment_method_id,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        canceled_at, cancel_type, deletion_scheduled_at, tier_group,
@@ -1098,3 +1098,13 @@ SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
   AND status = 'requires_review';
+
+-- Canonical invoice receipts live outside billing.payments. Recognize settled
+-- NMI charges by their exact accepted PSP and transaction, never by a vault.
+-- name: ReconcileListInvoicePaymentsByTransactionIDs :many
+SELECT id, customer_id, invoice_id, rail_payment_id::text, amount, currency
+FROM billing.invoice_payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND psp_id = sqlc.arg(psp_id)::uuid AND rail = 'nmi' AND status = 'settled'
+  AND rail_payment_id IS NOT NULL
+  AND rail_payment_id = ANY(sqlc.arg(transaction_ids)::text[]);
