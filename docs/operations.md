@@ -169,6 +169,32 @@ the settle delay minus the 25-second provider timeout. `ci/`'s
 Database claims are not a provider-enforced fence against an arbitrarily paused
 sender or an independently writable database copy.
 
+**Renewal deduplication.** New engine renewal operations have a deterministic
+identity for the merchant, PSP, subscription, original period boundary and
+attempt. A network retry keeps that identity. A new payment attempt follows only
+a conclusively closed earlier attempt; a changed card or amount is not an excuse
+to generate a different identity for the same attempt. Already accepted
+operations retain their original IDs.
+
+Stripe PaymentIntents retain the renewal obligation, attempt and accepted-term
+binding in metadata. Before submission, OpenRails lists the customer's provider
+payments and checks that metadata, then reads any matching payment by ID. An
+existing matching payment is recovered; conflicting terms or another executable
+or paid attempt require reconciliation. This uses customer listing rather than
+Stripe's eventually consistent Search API. NMI uses the persistent obligation
+order reference and checks for a qualified existing payment even before the
+first local attempt. These lookups can find charges after a provider's duplicate
+window has elapsed, but a lookup and a subsequent charge are not atomic.
+
+Stripe may discard idempotency keys after 24 hours. Automatic resubmission of an
+uncertain Stripe renewal therefore stops before that deadline, with clock and
+provider-call margins measured from its original submission fence. Reads of the
+existing payment continue. An empty or unavailable lookup after that deadline
+leaves an unresolved-submission finding; it does not authorize another charge.
+Provider receipts and operator reconciliation must resolve that uncertainty.
+NMI duplicate-check behavior depends on the account/processor; an order reference
+is a lookup key, not a provider-enforced uniqueness constraint.
+
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
 deliver webhooks at-least-once and retry from their end; our handlers are
 idempotent for exactly that reason. **There is deliberately no local inbound
