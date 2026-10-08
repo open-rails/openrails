@@ -54,7 +54,8 @@ if [[ ! -w "$src" || -n "$extensions" ]]; then
   [[ $# -eq 1 ]] || { echo "error: pass an output dir (the source is read-only or this build has extensions)" >&2; exit 2; }
   build_dir="$(mktemp -d)"
   trap 'rm -rf "$build_dir"' EXIT
-  tar -C "$src" --exclude=./node_modules --exclude=./console-host.json -cf - . | tar -C "$build_dir" -xf -
+  find "$src" -mindepth 1 -maxdepth 1 ! -name node_modules ! -name console-host.json \
+    -exec cp -R {} "$build_dir/" \;
   chmod -R u+w "$build_dir"
 fi
 
