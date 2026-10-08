@@ -234,7 +234,7 @@
       "type HTTPConfig = config.HTTPConfig",
       "type HyperSwitchConfig = config.HyperSwitchConfig",
       "type Identity = billingauth.Identity",
-      "type InvoiceSweepArgs struct {\n\tCollect bool `json:\"collect,omitempty\"`\n\n\tUseMonthlyFloor bool `json:\"use_monthly_floor,omitempty\"`\n\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
+      "type InvoiceSweepArgs struct {\n\tMerchantID *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\n\tCollect bool `json:\"collect,omitempty\"`\n\n\tUseMonthlyFloor bool `json:\"use_monthly_floor,omitempty\"`\n\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
       "type LLMConfig = config.LLMConfig",
       "type LoggerConfig = config.LoggerConfig",
       "type MerchantCreationConfig = config.MerchantCreationConfig",
@@ -1595,7 +1595,7 @@
     ],
     "internal/river": [
       "type DunningArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n}",
-      "type InvoiceArgs struct {\n\tMerchantID            uuid.UUID `json:\"merchant_id,omitempty\"`\n\tCollect               bool      `json:\"collect,omitempty\"`\n\tUseMonthlyFloor       bool      `json:\"use_monthly_floor,omitempty\"`\n\tFinalizePreviousMonth bool      `json:\"finalize_previous_month,omitempty\"`\n}",
+      "type InvoiceArgs struct {\n\tMerchantID            *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\tCollect               bool                `json:\"collect,omitempty\"`\n\tUseMonthlyFloor       bool                `json:\"use_monthly_floor,omitempty\"`\n\tFinalizePreviousMonth bool                `json:\"finalize_previous_month,omitempty\"`\n}",
       "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tRequested bool `json:\"requested,omitempty\" river:\"unique\"`\n}",
       "type SolanaPullPayload struct {\n\tSubscriptionPDA string    `json:\"subscription_pda\"`\n\tRowID           uuid.UUID `json:\"row_id\"`\n\tNextPullAt      time.Time `json:\"next_pull_at\"`\n}",
       "type SubscriptionConvergeArgs struct {\n\tPSPID                 uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tMerchantID            uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRail                  string    `json:\"rail\" river:\"unique\"`\n\tSubscriptionReference string    `json:\"subscription_reference\" river:\"unique\"`\n\n\tAfter        int64  `json:\"after,omitempty\" river:\"unique\"`\n\tEventType    string `json:\"event_type,omitempty\"`\n\tEventCreated int64  `json:\"event_created,omitempty\"`\n}"
@@ -2869,6 +2869,7 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "math": "math",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "river": "github.com/riverqueue/river",
       "time": "time",
       "uuid": "github.com/google/uuid",
@@ -4159,8 +4160,7 @@
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "progress": "github.com/open-rails/openrails/internal/shared/progress",
       "river": "github.com/riverqueue/river",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
+      "time": "time"
     },
     "internal/river/jobs_dunning.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4180,6 +4180,7 @@
       "intents": "github.com/open-rails/openrails/internal/intents",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "normalize": "github.com/open-rails/openrails/internal/shared/normalize",
