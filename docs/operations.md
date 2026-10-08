@@ -221,10 +221,16 @@ boundary. `TestNMIFiveDayRestartRecovery` exercises real process termination and
 restart with two replicas; provider fixtures establish the local contract, not
 live processor qualification.
 
-Invoice collection and finalization also scan at startup. River's existing
-hour/day/month period keys preserve their cadence across replicas and repeated
-restarts: a restart cannot turn the monthly small-balance sweep into an extra
-collection run. A collection scan held by `limited` or `readonly` remains queued,
+Invoice collection and finalization also scan at startup. Monthly small-balance
+collection retains its last completed thirty-day period in the merchant book,
+including export/restore; pruning completed River jobs cannot reset its cadence.
+The marker advances only after the entire eligible scan succeeds. Partial errors
+leave the scan retryable, while already accepted payment operations retain their
+own claims and receipts. Monthly scans serialize through a PostgreSQL session
+lock without holding a transaction across provider requests. Worker pools need
+at least two connections (coordination and billing); a five-second coordination
+acquisition failure leaves the scan retryable. A collection scan held by
+`limited` or `readonly` remains queued,
 so it can resume after writes are enabled instead of consuming its monthly slot.
 
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe

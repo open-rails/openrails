@@ -74,7 +74,12 @@ func TestSelectEngineRenewalPeriod(t *testing.T) {
 		_, err := SelectEngineRenewalPeriod(accepted, now)
 		require.ErrorContains(t, err, "entire renewal period elapsed")
 	}
-	_, err := SelectEngineRenewalPeriod(accepted, oldEnd.Add(-time.Second))
+	shortAccess := accepted
+	shortAccess.AccessDurationHours = new(72)
+	terms, err := SelectEngineRenewalPeriod(shortAccess, oldEnd.Add(5*24*time.Hour))
+	require.NoError(t, err, "short access duration does not shorten the monthly billing recovery window")
+	require.Equal(t, oldEnd.Add(cycle), terms.PeriodEnd)
+	_, err = SelectEngineRenewalPeriod(accepted, oldEnd.Add(-time.Second))
 	require.Error(t, err, "not yet due")
 	_, err = SelectEngineRenewalPeriod(accepted, time.Time{})
 	require.Error(t, err)

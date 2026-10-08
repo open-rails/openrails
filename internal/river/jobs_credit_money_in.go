@@ -136,11 +136,11 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 			logger.Debug("invoice collection runner not configured; skipping collection")
 			return nil
 		}
-		threshold := settings.CollectionThresholdAmount
+		threshold, collect := settings.CollectionThresholdAmount, w.Money.ChargeOutstanding
 		if job.Args.UseMonthlyFloor {
-			threshold = settings.MonthlyFloorAmount
+			threshold, collect = settings.MonthlyFloorAmount, w.Money.ChargeMonthlyOutstanding
 		}
-		n, err := w.Money.ChargeOutstanding(ctx, w.Intents, threshold)
+		n, err := collect(ctx, w.Intents, threshold)
 		if err != nil {
 			return err
 		}

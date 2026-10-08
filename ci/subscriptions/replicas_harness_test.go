@@ -364,6 +364,14 @@ func (f *fleet) startPasses(on ...*world) []pass {
 // to, without errors.
 func (f *fleet) awaitPasses(passes []pass) {
 	f.t.Helper()
+	f.waitPassJobs(passes)
+	f.settle()
+}
+
+// waitPassJobs waits only for these passes, permitting another provider call
+// to remain paused at a concurrency barrier.
+func (f *fleet) waitPassJobs(passes []pass) {
+	f.t.Helper()
 	for _, p := range passes {
 		var job *rivertype.JobRow
 		require.Eventually(f.t, func() bool {
@@ -376,7 +384,6 @@ func (f *fleet) awaitPasses(passes []pass) {
 		}, 60*time.Second, 20*time.Millisecond, "due pass on replica %s", p.r.replica.name)
 		require.Contains(f.t, job.AttemptedBy[len(job.AttemptedBy)-1], "gf-"+p.r.replica.name+"-", "the pass ran on its own replica")
 	}
-	f.settle()
 }
 
 // passes runs one due pass on every live replica at once and waits for all.

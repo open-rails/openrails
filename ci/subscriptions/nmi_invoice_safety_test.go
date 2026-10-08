@@ -27,10 +27,13 @@ type collectInvoicePass struct {
 
 func (collectInvoicePass) Kind() string { return "openrails.invoice" }
 
-func invoicePasses(f *fleet, collect bool) []pass {
+func invoicePasses(f *fleet, collect bool, on ...*world) []pass {
 	f.t.Helper()
 	var pending []pass
-	for _, r := range f.live() {
+	if len(on) == 0 {
+		on = f.live()
+	}
+	for _, r := range on {
 		job, err := r.jobs.Insert(f.t.Context(), collectInvoicePass{Collect: collect}, &river.InsertOpts{Queue: r.replica.queue})
 		require.NoError(f.t, err)
 		pending = append(pending, pass{r: r, id: job.Job.ID})
@@ -40,20 +43,26 @@ func invoicePasses(f *fleet, collect bool) []pass {
 
 // Usage enters through the merchant API and the ordinary invoice worker closes
 // it. Provider and financial tables are observed, never fabricated or edited.
-func newNMIInvoice(f *fleet, c *customer) billing.InvoiceID {
+func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.InvoiceID {
 	f.t.Helper()
 	client := f.any().client[remote]
-	_, err := client.SetCreditLimit(f.t.Context(), c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 3 * nmiInvoiceAmount})
+	previous, err := client.ListInvoices(f.t.Context(), billing.InvoiceListParams{CustomerID: c.cid()})
+	require.NoError(f.t, err)
+	existing := make(map[billing.InvoiceID]bool, len(previous.Items))
+	for _, invoice := range previous.Items {
+		existing[invoice.ID] = true
+	}
+	_, err = client.SetCreditLimit(f.t.Context(), c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 3 * nmiInvoiceAmount})
 	require.NoError(f.t, err)
 	_, err = client.RecordUsage(f.t.Context(), billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(f.t, err)
 	f.advance(time.Minute)
-	f.awaitPasses(invoicePasses(f, false))
+	f.waitPassJobs(invoicePasses(f, false, on...))
 	list, err := client.ListInvoices(f.t.Context(), billing.InvoiceListParams{CustomerID: c.cid()})
 	require.NoError(f.t, err)
 	var selected billing.InvoiceID
 	for _, invoice := range list.Items {
-		if invoice.AmountDue > 0 {
+		if invoice.AmountDue > 0 && !existing[invoice.ID] {
 			require.True(f.t, selected.IsZero())
 			selected = invoice.ID
 			require.Equal(f.t, nmiInvoiceAmount, invoice.AmountDue)

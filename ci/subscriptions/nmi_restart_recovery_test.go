@@ -276,12 +276,21 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), invoice.UUID()).Scan(&status)
 				return err == nil && status == "paid"
 			}, 30*time.Second, 50*time.Millisecond, "ordinary startup recovers monthly-floor invoice collection")
+			require.Eventually(t, func() bool {
+				var completed int
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed)
+				return err == nil && completed == 1
+			}, 15*time.Second, 50*time.Millisecond, "the complete monthly scan retains its cadence before shutdown")
 			first.kill(t)
 			second.kill(t)
 			w.start()
 			requireInvoicePaidOnce(f, invoice, 2, 2, 10_000_000, 1)
 			next := smallInvoice()
 			w.stop()
+			// River normally prunes completed jobs after a day. Remove only the
+			// completed monthly job: billing cadence must outlive this queue GC.
+			_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`))
+			require.NoError(t, err)
 			var before int64
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(max(id),0) FROM billing.river_job`)).Scan(&before))
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
@@ -289,18 +298,36 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			third := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			require.Eventually(t, func() bool {
 				var passes int
-				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.dunning' AND id>$1 AND state='completed'`), before).Scan(&passes)
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND id>$1 AND state='completed'`), before).Scan(&passes)
 				return err == nil && passes > 0
-			}, 30*time.Second, 50*time.Millisecond, "the next process's startup scheduler has run")
+			}, 30*time.Second, 50*time.Millisecond, "the replacement monthly job has checked retained cadence")
 			third.kill(t)
 			var monthly int
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true'`)).Scan(&monthly))
-			require.Equal(t, 1, monthly, "restarting cannot schedule another monthly-floor pass in the same durable bucket")
+			require.Equal(t, 1, monthly, "the replacement queue job rechecks the book's retained cadence")
 			require.Len(t, w.nmi.Attempts(), 2, "a new small balance waits for the next monthly pass")
 			w.start()
 			unpaid, err := w.client[remote].GetInvoice(t.Context(), next)
 			require.NoError(t, err)
 			require.Equal(t, int64(10_000_000), unpaid.AmountDue)
+			w.stop()
+			f.advance(32 * day)
+			_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND state='completed'`))
+			require.NoError(t, err)
+			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
+			require.NoError(t, err)
+			fourth := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			require.Eventually(t, func() bool {
+				var status string
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), next.UUID()).Scan(&status)
+				return err == nil && status == "paid"
+			}, 30*time.Second, 50*time.Millisecond, "the next monthly period recovers the remaining small invoice")
+			fourth.kill(t)
+			w.start()
+			requireInvoicePaidOnce(f, next, 3, 3, 10_000_000, 1)
+			var period time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&period))
+			require.True(t, period.Equal(w.clock.Now().UTC().Truncate(30*day)), "cadence advanced only after the complete scan")
 		})
 	}
 }
