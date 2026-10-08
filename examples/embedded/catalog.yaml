@@ -8,13 +8,13 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 4990000 # $4.99; every USD amount is in micros
-        access_duration_hours: null # permanent access to this post
-        auto_renew: false
+        access_duration: null # permanent access to this post
+        billing_interval: null
       - key: rental-3-days
         currency: USD
         unit_amount: 1990000 # $1.99, paid once
-        access_duration_hours: 72 # three days of access
-        auto_renew: false
+        access_duration: 3 days
+        billing_interval: null
 
   - key: post-102
     display_name: Post 102 — The full shoot
@@ -23,8 +23,8 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 6990000 # $6.99, paid once
-        access_duration_hours: null
-        auto_renew: false
+        access_duration: null
+        billing_interval: null
 
   - key: featured-posts-bundle
     display_name: Featured posts — 101 and 102
@@ -33,8 +33,8 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 9990000 # $9.99 for both, instead of $11.98 separately
-        access_duration_hours: null
-        auto_renew: false
+        access_duration: null
+        billing_interval: null
 
   - key: channel-main-monthly
     display_name: Main channel — 30-day membership
@@ -45,8 +45,8 @@ products:
       - key: subscription
         currency: USD
         unit_amount: 9990000 # $9.99 every 30 days
-        access_duration_hours: 720
-        auto_renew: true
+        access_duration: 30 days
+        billing_interval: 30 days
 
   - key: channel-main-yearly
     display_name: Main channel — 365-day membership
@@ -57,5 +57,5 @@ products:
       - key: subscription
         currency: USD
         unit_amount: 99990000 # $99.99 every 365 days
-        access_duration_hours: 8760
-        auto_renew: true
+        access_duration: 365 days
+        billing_interval: 365 days

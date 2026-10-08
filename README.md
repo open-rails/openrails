@@ -56,13 +56,13 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 4990000 # $4.99; every USD amount is in micros
-        access_duration_hours: null # permanent access to this post
-        auto_renew: false
+        access_duration: null # permanent access to this post
+        billing_interval: null
       - key: rental-3-days
         currency: USD
         unit_amount: 1990000 # $1.99, paid once
-        access_duration_hours: 72 # three days of access
-        auto_renew: false
+        access_duration: 3 days
+        billing_interval: null
 
   - key: post-102
     display_name: Post 102 — The full shoot
@@ -71,8 +71,8 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 6990000 # $6.99, paid once
-        access_duration_hours: null
-        auto_renew: false
+        access_duration: null
+        billing_interval: null
 
   - key: featured-posts-bundle
     display_name: Featured posts — 101 and 102
@@ -81,8 +81,8 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 9990000 # $9.99 for both, instead of $11.98 separately
-        access_duration_hours: null
-        auto_renew: false
+        access_duration: null
+        billing_interval: null
 
   - key: channel-main-monthly
     display_name: Main channel — 30-day membership
@@ -93,8 +93,8 @@ products:
       - key: subscription
         currency: USD
         unit_amount: 9990000 # $9.99 every 30 days
-        access_duration_hours: 720
-        auto_renew: true
+        access_duration: 30 days
+        billing_interval: 30 days
 
   - key: channel-main-yearly
     display_name: Main channel — 365-day membership
@@ -105,8 +105,8 @@ products:
       - key: subscription
         currency: USD
         unit_amount: 99990000 # $99.99 every 365 days
-        access_duration_hours: 8760
-        auto_renew: true
+        access_duration: 365 days
+        billing_interval: 365 days
 ```
 
 Product keys identify commercial offerings; entitlement keys identify the access
@@ -125,8 +125,10 @@ that post includes.
 
 This executable example uses the current schema: `entitlements_spec` is a map
 of keys, with `null` following the purchased access terms. A product's name or key
-does not implicitly grant a same-named entitlement. This schema requires numeric hours and `auto_renew`; plain entitlement lists
-and duration strings are not accepted.
+does not implicitly grant a same-named entitlement. Durations accept positive
+whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
+`access_duration_hours`, `billing_interval_hours` and `trial_duration_hours` are
+also accepted; use only one form of each field.
 
 **Access and ownership.** Use `HasEntitlement` to check whether the customer may
 access a post now. That includes individual purchases, bundles and unexpired
@@ -135,14 +137,21 @@ expiry: a bundle purchase records the bundle product, while its entitlement
 grants unlock the constituent posts. Current access alone does not prove a
 permanent purchase. Refunds and revocations can withdraw granted access.
 
-**Paid time and dunning access.** In the current recurring contract,
-`access_duration_hours` specifies both the paid period and billing interval. The
-separate monthly and yearly products above sell the same membership benefit on
-different terms. A one-time annual pass would set `auto_renew: false` on a
-365-day offer. These are fixed day counts, not calendar months or years.
-Dunning can keep access beyond paid coverage through a separate grace policy;
-those extra days do not change the price or become paid time. Independent
-recurring billing and access durations are not supported by this schema yet.
+**Billing and access.** `billing_interval` sets the time between payments. A
+positive interval recurs until the customer cancels; `null` means a one-time
+payment. There is no separate renewal switch. `access_duration` sets the access
+granted by each payment; `null` means no scheduled expiry. These fields are
+independent: an offer may charge every 30 days and grant 45 days of access per
+payment. A one-time annual pass uses `billing_interval: null` with
+`access_duration: 365 days`. Day counts are fixed durations, not calendar months
+or years. Zero and negative durations are invalid.
+
+On creation, omitted billing and access durations default to no recurrence and
+no scheduled expiry. In a partial catalog update, omitted fields preserve the
+existing terms; explicit `null` clears that duration. Changed terms create a new
+immutable price revision. Cancellation stops future payments and preserves
+access already purchased; refunds and explicit revocations may withdraw it.
+Dunning access follows the separate grace policy and does not extend paid time.
 
 Product keys are merchant-wide; price keys belong to their product. For example,
 `channel-main-monthly.subscription` selects the 30-day membership offer.
@@ -247,8 +256,8 @@ products:
       - key: rental-7-days
         currency: USD
         unit_amount: 2990000 # $2.99, paid once
-        access_duration_hours: 168 # seven days
-        auto_renew: false
+        access_duration: 7 days
+        billing_interval: null
 ```
 
 The permanent `post-101.purchase` offer and the bundle remain available.
@@ -293,8 +302,8 @@ products:
       - key: subscription
         currency: USD
         unit_amount: 9990000 # the original $9.99 terms
-        access_duration_hours: 720
-        auto_renew: true
+        access_duration: 30 days
+        billing_interval: 30 days
         trial_unit_amount: null
         trial_duration_hours: null
         archived: false
@@ -724,7 +733,7 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 10000000 # pay $10
-        auto_renew: false
+        billing_interval: null
 
   - key: api-credit-100
     display_name: $100 prepaid API balance
@@ -736,7 +745,7 @@ products:
       - key: purchase
         currency: USD
         unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
-        auto_renew: false
+        billing_interval: null
 
   - key: api-deposit
     display_name: Top up your prepaid API balance
@@ -751,7 +760,7 @@ products:
         customer_amount:
           min_amount: 1000000 # at least $1
           max_amount: 1000000000 # at most $1,000
-        auto_renew: false
+        billing_interval: null
 ```
 
 Customers pay ahead of time; metered API usage draws down
