@@ -764,7 +764,11 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 		rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 		})
-		return rows, nextAttemptAt, err
+		wake := nextAttemptAt
+		if held, _ := evidence["recovery_held"].(bool); held {
+			wake = time.Time{} // durable immediate readiness check; the held retry date remains
+		}
+		return rows, wake, err
 	}))
 }
 
@@ -809,12 +813,16 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 		return scopeErr
 	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
+		wake := nextAttemptAt
+		if len(recovery) > 0 {
+			wake = time.Time{}
+		}
 		rows, err := txs.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 			RecoveryEvidence: recovery,
 		})
 		if err != nil || rows != 0 {
-			return rows, nextAttemptAt, err
+			return rows, wake, err
 		}
 		// The SQL fence refuses to return a submitted payment to pending.
 		// Retain it as unknown inside this same transition/wakeup transaction.
@@ -835,7 +843,7 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 				ResultEvidence: recovery,
 			})
-			return rows, nextAttemptAt, err
+			return rows, wake, err
 		}
 		return 0, time.Time{}, nil
 	}))

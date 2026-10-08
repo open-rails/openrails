@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -164,6 +165,19 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		case config.IsLimitedMode(w.Config):
 			materialize = true
 			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — stale subscriptions park as unknown (no local cancellations), charge intents enqueue PARKED (no provider writes until mode=full)")
+		}
+	}
+	// The completion transaction inserts this scoped normal job as its durable
+	// recovery handoff. It must wake eligible held work even if a verifier's
+	// hold committed after that transaction skipped its live lease.
+	if job.Args.MerchantID != uuid.Nil && w.Config != nil && !materialize && !observeOnly {
+		mctx := merchant.WithID(ctx, billing.MerchantID(job.Args.MerchantID))
+		resumed, err := intents.NewStore(w.DB).ResumeRecoveryHeld(mctx, w.now(), 100)
+		if err != nil {
+			return fmt.Errorf("resume recovered merchant work: %w", err)
+		}
+		if resumed == 100 {
+			return river.JobSnooze(time.Second)
 		}
 	}
 

@@ -581,7 +581,19 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		return out
 	}
 
-	since, err := w.loadAppliedWatermark(ctx, mid, pspID)
+	qualifiedRecovery := provider == reconcile.ProviderNMI || provider == reconcile.ProviderStripe
+	var since time.Time
+	var err error
+	if qualifiedRecovery {
+		since, err = w.loadAppliedWatermark(ctx, mid, pspID)
+	} else {
+		// Other rails retain their observation cursor and existing lanes;
+		// they do not acquire the card-account financial recovery contract.
+		since, err = w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, PspID: pspID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			since, err = horizon.Add(-90*24*time.Hour), nil
+		}
+	}
 	if err != nil {
 		out.WatermarkErrors++
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
@@ -589,7 +601,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	}
 	// Repeat a bounded window for late provider indexing. This is recovery
 	// overlap, not a claim that the provider can never publish older history.
-	since = since.Add(-w.window())
+	if qualifiedRecovery {
+		since = since.Add(-w.window())
+	}
 	if !since.Before(horizon) {
 		return out
 	}
@@ -655,18 +669,20 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
 			break
 		}
-		if !res.AppliedEventCoverage(provider, since, until) {
-			out.ProviderErrors++
-			break
-		}
-		if err := w.DB.Gen(ctx).UpsertPSPAppliedRefreshWatermark(ctx, gen.UpsertPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: until}); err != nil {
-			out.WatermarkErrors++
-			break
+		if qualifiedRecovery {
+			if !res.AppliedEventCoverage(provider, since, until) {
+				out.ProviderErrors++
+				break
+			}
+			if err := w.DB.Gen(ctx).UpsertPSPAppliedRefreshWatermark(ctx, gen.UpsertPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: until}); err != nil {
+				out.WatermarkErrors++
+				break
+			}
 		}
 		since = until
 	}
 	out.More = since.Before(horizon) && out.ProviderErrors == 0 && out.WatermarkErrors == 0
-	if !out.More && out.ProviderErrors == 0 && out.WatermarkErrors == 0 {
+	if qualifiedRecovery && !out.More && out.ProviderErrors == 0 && out.WatermarkErrors == 0 {
 		conflicts, err := w.DB.Gen(ctx).PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: pspID})
 		if err != nil || conflicts {
 			out.ProviderErrors++
@@ -715,7 +731,8 @@ func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp u
 		if changed == 0 && resumed == 0 {
 			return nil
 		}
-		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, InvoiceArgs{MerchantID: mid, Collect: true}, InvoiceArgs{MerchantID: mid, Collect: true, UseMonthlyFloor: true}}
+		merchantID := billing.MerchantID(mid)
+		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, InvoiceArgs{MerchantID: &merchantID, Collect: true}, InvoiceArgs{MerchantID: &merchantID, Collect: true, UseMonthlyFloor: true}}
 		for _, args := range jobs {
 			// Do not deduplicate against a scan sleeping on an earlier outage.
 			// Canonical invoice/renewal admission and durable cadence own money.

@@ -91,6 +91,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
  SELECT id FROM billing.provider_intents
  WHERE merchant_id=sqlc.arg(merchant_id)::uuid
    AND (sqlc.narg(intent_id)::uuid IS NULL OR id=sqlc.narg(intent_id)::uuid)
+   AND (psp_id=ANY(sqlc.arg(ready_psp_ids)::uuid[]) OR (psp_id IS NULL AND sqlc.arg(all_accounts_ready)::boolean))
    AND status IN ('pending','failed_retryable','unknown_needs_verify')
    AND result_evidence @> '{"recovery_held":true}'::jsonb
    AND (lease_expires_at IS NULL OR lease_expires_at<=sqlc.arg(now)::timestamptz)

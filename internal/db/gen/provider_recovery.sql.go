@@ -158,20 +158,23 @@ WHERE merchant_id=$2::uuid AND id IN (
  SELECT id FROM billing.provider_intents
  WHERE merchant_id=$2::uuid
    AND ($3::uuid IS NULL OR id=$3::uuid)
+   AND (psp_id=ANY($4::uuid[]) OR (psp_id IS NULL AND $5::boolean))
    AND status IN ('pending','failed_retryable','unknown_needs_verify')
    AND result_evidence @> '{"recovery_held":true}'::jsonb
    AND (lease_expires_at IS NULL OR lease_expires_at<=$1::timestamptz)
- ORDER BY id LIMIT $4::int
+ ORDER BY id LIMIT $6::int
  FOR UPDATE SKIP LOCKED
 )
 RETURNING id
 `
 
 type ResumeProviderRecoveryHeldOperationsParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	IntentID   *uuid.UUID
-	BatchSize  int32
+	Now              time.Time
+	MerchantID       uuid.UUID
+	IntentID         *uuid.UUID
+	ReadyPspIds      []uuid.UUID
+	AllAccountsReady bool
+	BatchSize        int32
 }
 
 // Only recovery delays are expedited; issuer retry dates and live leases stand.
@@ -180,6 +183,8 @@ func (q *Queries) ResumeProviderRecoveryHeldOperations(ctx context.Context, arg 
 		arg.Now,
 		arg.MerchantID,
 		arg.IntentID,
+		arg.ReadyPspIds,
+		arg.AllAccountsReady,
 		arg.BatchSize,
 	)
 	if err != nil {

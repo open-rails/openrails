@@ -104,6 +104,14 @@ func Retryable(reason string) Outcome { return Outcome{Class: OutcomeRetryable, 
 func RecoveryHeld(reason string) Outcome {
 	return Outcome{Class: OutcomeParked, Reason: reason, Evidence: map[string]any{"recovery_held": true}}
 }
+
+// IsRecoveryHeld identifies dispatcher waiting, never evidence of provider work.
+func IsRecoveryHeld(in gen.BillingProviderIntent) bool {
+	var evidence struct {
+		Held bool `json:"recovery_held"`
+	}
+	return json.Unmarshal(in.ResultEvidence, &evidence) == nil && evidence.Held
+}
 func Ambiguous(reason string) Outcome { return Outcome{Class: OutcomeAmbiguous, Reason: reason} }
 
 // AmbiguousWithEvidence retains an exact provider receipt while local effects

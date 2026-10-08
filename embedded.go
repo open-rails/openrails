@@ -255,6 +255,8 @@ const QueueBilling = riverjobs.QueueBilling
 // InvoiceSweepArgs{FinalizePreviousMonth: true} to finalize every payer's
 // previous period now. Every run is idempotent.
 type InvoiceSweepArgs struct {
+	// MerchantID limits this run to one merchant; nil visits active merchants.
+	MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
 	// Collect runs the collection pass over open receivables.
 	Collect bool `json:"collect,omitempty"`
 	// UseMonthlyFloor collects down to the merchant's monthly floor instead of
