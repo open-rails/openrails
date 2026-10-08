@@ -6,6 +6,9 @@ import (
 	"net/http"
 
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/verify"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -100,6 +103,37 @@ func (c *Client) ListMerchantsForSubject(ctx context.Context, subject string) ([
 		return nil, err
 	}
 	return operator.ListMerchantsForSubject(ctx, a, subject)
+}
+
+// ListUserMerchants returns the live merchants the user authenticated by r
+// holds a staff or owner role in. It checks the sign-in is still active and
+// reads current memberships; customer relationships are a separate listing.
+// This is a local control-plane operation, not a remote Client method.
+func (c *Client) ListUserMerchants(ctx context.Context, r *http.Request) ([]billing.UserMerchant, error) {
+	_, cp, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, ErrUnauthenticated
+	}
+	claims, err := cp.Core().VerifyRequest(r.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	actor, ok := verify.ActorFromClaims(claims)
+	if !ok || actor.Kind() != iam.ActorUser {
+		return nil, ErrUnauthenticated
+	}
+	// Listing memberships takes a user ID, unlike Can's session-bound actor.
+	// Check the verified session explicitly before crossing that boundary.
+	if err := cp.Core().CheckSession(ctx, claims); err != nil {
+		if errors.Is(err, iam.ErrSessionRevoked) {
+			err = errors.Join(err, helpersauth.ErrRevoked)
+		}
+		return nil, err
+	}
+	return cp.ListUserMerchants(ctx, actor.ID())
 }
 
 // ListActiveMerchantIDs pages the live merchants, newest first, for host
