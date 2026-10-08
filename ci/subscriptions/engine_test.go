@@ -104,6 +104,7 @@ func (e *engineCase) refreshBeforePeriodEnd() {
 		e.w.advance(d)
 	}
 	e.w.refreshProviders()
+	e.w.settleCollectionScans()
 	require.True(e.w.t, e.w.clock.Now().Before(end), "install the fault before the renewal becomes due")
 	require.True(e.w.t, end.Equal(e.periodEnd()), "healthy observation did not advance the paid period")
 }

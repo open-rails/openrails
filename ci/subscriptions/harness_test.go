@@ -467,6 +467,16 @@ func (w *world) refreshProviders() {
 	}
 }
 
+// settleCollectionScans drains the ordinary scans created by healthy refresh.
+// Fault fixtures call this while still before due, then install their barrier.
+func (w *world) settleCollectionScans() {
+	w.t.Helper()
+	require.Eventually(w.t, func() bool {
+		jobs, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds("openrails.dunning", "openrails.invoice").States(rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStatePending).First(100))
+		return err == nil && len(jobs.Jobs) == 0
+	}, 30*time.Second, 20*time.Millisecond, "healthy refresh's ordinary scans finish before the fault")
+}
+
 var workKinds = []string{"openrails.provider_operation", "openrails.subscription_converge"}
 
 // settle waits until no operation or convergence work is runnable. Jobs the
@@ -573,6 +583,7 @@ func (w *world) advanceHealthyTo(at time.Time) {
 		w.advance(d)
 	}
 	w.refreshProviders()
+	w.settleCollectionScans()
 	if d := at.Sub(w.clock.Now()); d > 0 {
 		w.advance(d)
 	}
