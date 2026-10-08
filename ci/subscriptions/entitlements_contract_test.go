@@ -84,7 +84,7 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			client := w.client[topology]
 			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 				Key: "product-without-implicit-access-" + string(topology), DisplayName: "Mixed opaque benefits",
-				Entitlements: []string{"post:101", "premium"},
+				Entitlements: []string{"post:101", "premium", " private key "},
 			})
 			require.NoError(t, err)
 			price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "purchase", Currency: "USD", UnitAmount: 10_000_000})
@@ -102,6 +102,8 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			w.settle()
 			require.True(t, customer.entitled("post:101"))
 			require.True(t, customer.entitled("premium"), "content and service names receive identical access")
+			require.True(t, customer.entitled(" private key "), "opaque spelling must survive granting and lookup")
+			require.False(t, customer.entitled("private key"), "lookup must not trim an opaque entitlement")
 			require.False(t, customer.entitled(product.Key), "the product key is not an implicit entitlement")
 			_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"post:202"})})
 			require.NoError(t, err)
