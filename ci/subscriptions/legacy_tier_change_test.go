@@ -260,6 +260,8 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 				require.Equal(t, "9.99", w.nmi.Schedule(l.railSub).Amount)
 				require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID, "the local change waits for NMI")
 				w.nmi.FailScheduleUpdates(0)
+				w.refreshProviders()
+				w.settleCollectionScans()
 			}
 			w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the schedule update converges")
 			require.Len(t, l.tierSales(), sales+1, "exactly one charge")
