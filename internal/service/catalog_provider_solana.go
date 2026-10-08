@@ -129,7 +129,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	if in.UnitAmount <= 0 {
 		return nil, fmt.Errorf("solana create-mode requires a positive unit_amount (micros)")
 	}
-	if in.AccessDurationHours == nil || *in.AccessDurationHours <= 0 {
+	if in.BillingIntervalHours == nil || *in.BillingIntervalHours <= 0 {
 		return nil, fmt.Errorf("solana create-mode requires a positive recurring interval")
 	}
 
@@ -154,7 +154,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 		return nil, fmt.Errorf("solana auto-create requires a local price ID")
 	}
 	planID := solanaPlanID(in.PriceID, mint)
-	periodHours := uint64(*in.AccessDurationHours)
+	periodHours := uint64(*in.BillingIntervalHours)
 
 	if in.RemoteWritesDisabled {
 		// Read-only attach to an existing plan stays available in limited/readonly
@@ -173,7 +173,7 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 		AmountBaseUnits:   amountBaseUnits,
 		AmountDecimals:    decimals,
 		PeriodHours:       periodHours,
-		BillingCycleHours: *in.AccessDurationHours,
+		BillingCycleHours: *in.BillingIntervalHours,
 		EndTs:             0, // perpetual; OpenRails models open-ended subscriptions
 	})
 	if err != nil {
@@ -300,8 +300,8 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	if err != nil {
 		return nil, fmt.Errorf("decode solana plan account %q: %w", pda, err)
 	}
-	if in.AccessDurationHours != nil && *in.AccessDurationHours > 0 {
-		wantPeriod := uint64(*in.AccessDurationHours)
+	if in.BillingIntervalHours != nil && *in.BillingIntervalHours > 0 {
+		wantPeriod := uint64(*in.BillingIntervalHours)
 		if acct.PeriodHours != wantPeriod {
 			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
 		}

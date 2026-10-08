@@ -60,6 +60,11 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 			return err
 		}
 		fields := map[string]reflect.Type{}
+		if shape == reflect.TypeFor[ApplyPrice]() {
+			for _, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
+				fields[name] = reflect.TypeFor[Field[string]]()
+			}
+		}
 		for i := 0; i < shape.NumField(); i++ {
 			field := shape.Field(i)
 			if !field.IsExported() {

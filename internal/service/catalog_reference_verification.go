@@ -95,7 +95,7 @@ func verifyNMICatalogReference(ctx context.Context, adapter *nmiAdapter, account
 	if planID == "" {
 		return nil, apperr.Invalidf("an existing NMI plan_id is required; create plans in the separate provider workflow")
 	}
-	if !req.AutoRenew || req.AccessDurationHours == nil || *req.AccessDurationHours <= 0 || *req.AccessDurationHours%24 != 0 || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
+	if req.BillingIntervalHours == nil || *req.BillingIntervalHours <= 0 || *req.BillingIntervalHours%24 != 0 || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
 		return nil, apperr.Invalidf("NMI references require recurring whole-day terms without a trial")
 	}
 	client, key, ok := adapter.nmiClientFor(ctx, accountID)
@@ -113,7 +113,7 @@ func verifyNMICatalogReference(ctx context.Context, adapter *nmiAdapter, account
 	if err != nil {
 		return nil, err
 	}
-	if amount != req.UnitAmount || detail.DayFrequency != *req.AccessDurationHours/24 {
+	if amount != req.UnitAmount || detail.DayFrequency != *req.BillingIntervalHours/24 {
 		return nil, apperr.Invalidf("NMI plan %q does not match the catalog amount and day frequency", planID)
 	}
 	if detail.ID != planID || detail.Payments == nil || *detail.Payments != 0 {
@@ -151,11 +151,11 @@ func verifyStripeCatalogReference(ctx context.Context, adapter *stripeAdapter, a
 	if remote.ID != id || remote.Product == "" || remote.UnitAmount != int64(amount) || !strings.EqualFold(remote.Currency, req.Currency) || (!req.Archived && !remote.Active) {
 		return nil, apperr.Invalidf("Stripe price does not match catalog identity, amount, currency or active state")
 	}
-	if req.AutoRenew {
-		if req.AccessDurationHours == nil || *req.AccessDurationHours <= 0 || *req.AccessDurationHours%24 != 0 {
+	if req.BillingIntervalHours != nil {
+		if *req.BillingIntervalHours <= 0 || *req.BillingIntervalHours%24 != 0 {
 			return nil, apperr.Invalidf("Stripe recurring references require whole-day duration")
 		}
-		interval, count := catalog.StripeIntervalForDays(*req.AccessDurationHours / 24)
+		interval, count := catalog.StripeIntervalForDays(*req.BillingIntervalHours / 24)
 		if remote.Recurring == nil || remote.Recurring.Interval != interval || remote.Recurring.Count != count {
 			return nil, apperr.Invalidf("Stripe price recurring terms do not match the catalog")
 		}
@@ -182,7 +182,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if err := catalogReferenceKeys(link, solanaKeyPlanPDA, solanaKeyPlanID, solanaKeyMint, solanaKeyToken, solanaKeyMintSymbol, solanaKeyAmountBaseUnits, solanaKeyPeriodHours, solanaKeyCreatedAt, solanaKeyMerchant); err != nil {
 		return nil, err
 	}
-	if !req.AutoRenew {
+	if req.BillingIntervalHours == nil {
 		for key, value := range link {
 			if key != models.RailKeyRail && key != models.RailKeyProvider && strings.TrimSpace(value) != "" {
 				return nil, apperr.Invalidf("one-time Solana offers take no plan reference")
@@ -192,7 +192,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 		// verify or create. Preserve the declared rail instead of dropping it.
 		return map[string]string{models.RailKeyProvider: "solana"}, nil
 	}
-	if req.TrialUnitAmount != nil || req.TrialDurationHours != nil || req.AccessDurationHours == nil || *req.AccessDurationHours <= 0 {
+	if req.TrialUnitAmount != nil || req.TrialDurationHours != nil || *req.BillingIntervalHours <= 0 {
 		return nil, apperr.Invalidf("Solana recurring references require a positive period without a trial")
 	}
 	if plan == nil || reader == nil {
@@ -256,7 +256,7 @@ func verifySolanaCatalogReference(ctx context.Context, plan *recurring.PlanServi
 	if account.Owner != owner || derived != pda || account.Bump != bump {
 		return nil, apperr.Invalidf("Solana plan does not belong to the selected merchant and program address")
 	}
-	if account.PeriodHours != uint64(*req.AccessDurationHours) || account.EndTs != 0 || (!req.Archived && account.Status != subscriptions.PlanStatusActive) {
+	if account.PeriodHours != uint64(*req.BillingIntervalHours) || account.EndTs != 0 || (!req.Archived && account.Status != subscriptions.PlanStatusActive) {
 		return nil, apperr.Invalidf("Solana plan period, expiry or active state does not match the catalog")
 	}
 	token, err := resolveSolanaTokenFromMint(plan, account.Mint.String())

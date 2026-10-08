@@ -125,18 +125,18 @@ type ApplyProduct struct {
 // price, and the previous one is archived. ID pins the declaration to one
 // existing price.
 type ApplyPrice struct {
-	Key                 string                              `json:"key"`
-	ID                  string                              `json:"id,omitempty"`
-	Currency            Field[string]                       `json:"currency,omitzero"`
-	UnitAmount          Field[int64]                        `json:"unit_amount,omitzero"`
-	AccessDurationHours Field[int]                          `json:"access_duration_hours,omitzero"`
-	AutoRenew           Field[bool]                         `json:"auto_renew,omitzero"`
-	Archived            Field[bool]                         `json:"archived,omitzero"`
-	TrialUnitAmount     Field[int64]                        `json:"trial_unit_amount,omitzero"`
-	TrialDurationHours  Field[int]                          `json:"trial_duration_hours,omitzero"`
-	CustomerAmount      Field[CustomerAmount]               `json:"customer_amount,omitzero"`
-	PSPs                Field[[]string]                     `json:"psps,omitzero"`
-	PSPLinks            Field[map[string]map[string]string] `json:"psp_links,omitzero"`
+	Key                  string                              `json:"key"`
+	ID                   string                              `json:"id,omitempty"`
+	Currency             Field[string]                       `json:"currency,omitzero"`
+	UnitAmount           Field[int64]                        `json:"unit_amount,omitzero"`
+	AccessDurationHours  Field[int]                          `json:"access_duration_hours,omitzero"`
+	BillingIntervalHours Field[int]                          `json:"billing_interval_hours,omitzero"`
+	Archived             Field[bool]                         `json:"archived,omitzero"`
+	TrialUnitAmount      Field[int64]                        `json:"trial_unit_amount,omitzero"`
+	TrialDurationHours   Field[int]                          `json:"trial_duration_hours,omitzero"`
+	CustomerAmount       Field[CustomerAmount]               `json:"customer_amount,omitzero"`
+	PSPs                 Field[[]string]                     `json:"psps,omitzero"`
+	PSPLinks             Field[map[string]map[string]string] `json:"psp_links,omitzero"`
 }
 
 // Validate checks the bounded syntax only; row-dependent validation happens
@@ -169,14 +169,16 @@ func (a Application) Validate() error {
 			if err := uniqueApplicationKey(prices, price.Key, "price"); err != nil {
 				return err
 			}
-			if price.Currency.Null || price.UnitAmount.Null || price.AutoRenew.Null || price.Archived.Null {
+			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null {
 				return fmt.Errorf("price %q: nonnullable field is null", price.Key)
 			}
 			if price.UnitAmount.Set && price.UnitAmount.Value < 0 || price.TrialUnitAmount.Set && !price.TrialUnitAmount.Null && price.TrialUnitAmount.Value < 0 {
 				return fmt.Errorf("price %q: money cannot be negative", price.Key)
 			}
-			if price.AccessDurationHours.Set && !price.AccessDurationHours.Null && price.AccessDurationHours.Value <= 0 || price.TrialDurationHours.Set && !price.TrialDurationHours.Null && price.TrialDurationHours.Value <= 0 {
-				return fmt.Errorf("price %q: duration must be positive or null", price.Key)
+			for _, duration := range []Field[int]{price.BillingIntervalHours, price.AccessDurationHours, price.TrialDurationHours} {
+				if duration.Set && !duration.Null && (duration.Value <= 0 || duration.Value > MaxDurationHours) {
+					return fmt.Errorf("price %q: duration must be between 1 and %d hours or null", price.Key, MaxDurationHours)
+				}
 			}
 		}
 	}

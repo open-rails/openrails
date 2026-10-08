@@ -99,7 +99,7 @@ func solanaCtx() context.Context {
 }
 
 func recurringTerms(micros int64) autoCreateContext {
-	return autoCreateContext{PriceID: priceDeterministicID(uuid.MustParse("11111111-1111-4111-8111-111111111111"), "monthly", micros, "USD", intPtr(720), true, nil, nil), ProductKey: "premium", Currency: "usd", UnitAmount: micros, AccessDurationHours: intPtr(30 * 24), BillingCycleDays: intPtr(30)}
+	return autoCreateContext{PriceID: priceDeterministicID(uuid.MustParse("11111111-1111-4111-8111-111111111111"), "monthly", micros, "USD", intPtr(720), intPtr(720), nil, nil), ProductKey: "premium", Currency: "usd", UnitAmount: micros, BillingIntervalHours: intPtr(30 * 24), BillingCycleDays: intPtr(30)}
 }
 
 // #817: catalog micros become token BASE UNITS using the mint's on-chain
@@ -143,7 +143,7 @@ func TestSolanaAdapterBranches(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "DUSD", out[solanaKeyMintSymbol], "sandbox recurring defaults to DUSD")
 
-	out, err = (&solanaAdapter{}).AutoCreate(context.Background(), autoCreateContext{Currency: "eur", UnitAmount: 29_000_000, AccessDurationHours: intPtr(720)})
+	out, err = (&solanaAdapter{}).AutoCreate(context.Background(), autoCreateContext{Currency: "eur", UnitAmount: 29_000_000, BillingIntervalHours: intPtr(720)})
 	require.NoError(t, err)
 	require.Equal(t, "solana", out["provider"], "one-off prices need no on-chain plan")
 
@@ -211,7 +211,7 @@ func TestSolanaCatalogReapplyEnsuresReceivingATA(t *testing.T) {
 // Reference preflight only reads: an existing plan must match owner, amount,
 // period and status exactly, and a missing plan is never created here.
 func TestSolanaCatalogReferencePreflight(t *testing.T) {
-	req := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
+	req := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(72), BillingIntervalHours: intPtr(720)}
 	setup := func() (*fakeChain, *recurring.PlanService, solanago.PublicKey) {
 		chain := newFakeChain(map[string]uint8{usdcMint: 6})
 		chain.readOnly = true

@@ -50,7 +50,7 @@ func validateCreditPrice(credit *catalogwire.CreditGrantSpec, price billing.Crea
 		}
 		return nil
 	}
-	if price.AutoRenew {
+	if price.BillingIntervalHours != nil {
 		return apperr.Invalidf("recurring credit grants are not supported")
 	}
 	if !strings.EqualFold(credit.Currency, price.Currency) {
@@ -73,7 +73,7 @@ func (s *Service) validateProductCreditUpdate(ctx context.Context, id billing.Pr
 		return err
 	}
 	for _, price := range prices {
-		if err := validateCreditPrice(credit, billing.CreatePriceParams{Currency: price.Currency, UnitAmount: price.UnitAmount, AutoRenew: price.AutoRenew, CustomerAmount: price.CustomerAmount}); err != nil {
+		if err := validateCreditPrice(credit, billing.CreatePriceParams{Currency: price.Currency, UnitAmount: price.UnitAmount, BillingIntervalHours: price.BillingIntervalHours, CustomerAmount: price.CustomerAmount}); err != nil {
 			return err
 		}
 	}

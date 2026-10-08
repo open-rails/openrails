@@ -143,12 +143,12 @@ type autoCreateContext struct {
 	ProductID uuid.UUID
 	Product   *models.Product
 	// ProductKey labels the remote product; PriceID identifies each immutable price.
-	ProductKey          string
-	UnitAmount          int64
-	Currency            string
-	BillingCycleDays    *int
-	AccessDurationHours *int
-	LookupKey           string
+	ProductKey           string
+	UnitAmount           int64
+	Currency             string
+	BillingCycleDays     *int
+	BillingIntervalHours *int
+	LookupKey            string
 
 	// RemoteWritesDisabled tells adapters that catalog provider WRITES are
 	// blocked by the operating mode (mode=limited/readonly, #346). Adapters
@@ -335,7 +335,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		UnitAmount:           req.UnitAmount,
 		Currency:             req.Currency,
 		BillingCycleDays:     reqCycle,
-		AccessDurationHours:  req.AccessDurationHours,
+		BillingIntervalHours: req.BillingIntervalHours,
 		LookupKey:            internalStripeLookupKey(priceID),
 		RemoteWritesDisabled: remoteWritesDisabled,
 	}
@@ -553,12 +553,12 @@ func (s *Service) priceLinkContext(ctx context.Context, price *models.Price) (au
 		return autoCreateContext{}, fmt.Errorf("price required")
 	}
 	pctx := autoCreateContext{
-		PriceID:             price.ID,
-		ProductID:           price.ProductID,
-		UnitAmount:          price.Amount,
-		Currency:            price.Currency,
-		BillingCycleDays:    price.RecurringCycleDays(),
-		AccessDurationHours: price.AccessDurationHours,
+		PriceID:              price.ID,
+		ProductID:            price.ProductID,
+		UnitAmount:           price.Amount,
+		Currency:             price.Currency,
+		BillingCycleDays:     price.RecurringCycleDays(),
+		BillingIntervalHours: price.BillingIntervalHours,
 		// Attach can publish (e.g. a Solana plan from token), so the
 		// link-rotation path must carry the same write gate resolveProviders
 		// does — otherwise limited/readonly deployments submit provider writes.

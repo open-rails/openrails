@@ -60,20 +60,20 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		return err
 	}
 	row, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
-		ID:                  price.ID,
-		MerchantID:          price.MerchantID,
-		ProductID:           price.ProductID,
-		Archived:            price.Archived,
-		Amount:              price.Amount,
-		Currency:            price.Currency,
-		CustomerAmount:      customAmount,
-		AccessDurationHours: models.IntPtrTo32(price.AccessDurationHours),
-		AutoRenew:           price.AutoRenew,
-		TrialUnitAmount:     price.TrialUnitAmount,
-		TrialDurationHours:  models.IntPtrTo32(price.TrialDurationHours),
-		Key:                 price.Key,
-		CreatedAt:           price.CreatedAt,
-		UpdatedAt:           price.UpdatedAt,
+		ID:                   price.ID,
+		MerchantID:           price.MerchantID,
+		ProductID:            price.ProductID,
+		Archived:             price.Archived,
+		Amount:               price.Amount,
+		Currency:             price.Currency,
+		CustomerAmount:       customAmount,
+		AccessDurationHours:  models.IntPtrTo32(price.AccessDurationHours),
+		BillingIntervalHours: models.IntPtrTo32(price.BillingIntervalHours),
+		TrialUnitAmount:      price.TrialUnitAmount,
+		TrialDurationHours:   models.IntPtrTo32(price.TrialDurationHours),
+		Key:                  price.Key,
+		CreatedAt:            price.CreatedAt,
+		UpdatedAt:            price.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -229,7 +229,7 @@ type PriceFilter struct {
 	Archived  *bool
 	Currency  string
 	ProductID *uuid.UUID
-	AutoRenew *bool
+	Recurring *bool
 }
 
 // List returns one keyset page of prices, newest first.
@@ -251,7 +251,7 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 		currency = &filter.Currency
 	}
 	rows, err := s.db.Gen(ctx).ListPricesFiltered(ctx, gen.ListPricesFilteredParams{MerchantID: queryMerchant.UUID(),
-		Archived: filter.Archived, Currency: currency, ProductID: filter.ProductID, AutoRenew: filter.AutoRenew,
+		Archived: filter.Archived, Currency: currency, ProductID: filter.ProductID, Recurring: filter.Recurring,
 		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*models.Price]{}, err
@@ -549,7 +549,7 @@ func (s *PriceService) FindByTerms(ctx context.Context, req billing.CreatePriceP
 	}
 	row, err := s.db.Gen(ctx).GetPriceByTerms(ctx, gen.GetPriceByTermsParams{
 		MerchantID: mid.UUID(), ProductID: req.ProductID.UUID(), Key: key,
-		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), AutoRenew: req.AutoRenew,
+		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), BillingIntervalHours: models.IntPtrTo32(req.BillingIntervalHours),
 		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours), CustomerAmount: customAmount,
 	})
 	if err != nil {

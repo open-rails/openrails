@@ -261,7 +261,7 @@ func (s *Service) ListPrices(ctx context.Context, params billing.PriceListParams
 	if err != nil {
 		return billing.ListPage[billing.Price]{}, err
 	}
-	filter := catalog.PriceFilter{Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency), AutoRenew: params.AutoRenew}
+	filter := catalog.PriceFilter{Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency), Recurring: params.Recurring}
 	if !params.ProductID.IsZero() {
 		id := params.ProductID.UUID()
 		filter.ProductID = &id
@@ -340,7 +340,7 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 	if err != nil {
 		return nil, productLookup(err)
 	}
-	if err := validateCreditPrice(product.CreditGrant, billing.CreatePriceParams{Currency: current.Currency, UnitAmount: current.Amount, AutoRenew: current.AutoRenew, CustomerAmount: current.CustomerAmount}); err != nil {
+	if err := validateCreditPrice(product.CreditGrant, billing.CreatePriceParams{Currency: current.Currency, UnitAmount: current.Amount, BillingIntervalHours: current.BillingIntervalHours, CustomerAmount: current.CustomerAmount}); err != nil {
 		return nil, err
 	}
 	wasArchived := current.Archived

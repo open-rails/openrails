@@ -18,7 +18,7 @@ products:
     prices:
       - key: monthly
         unit_amount: 9007199254740993
-        auto_renew: false
+        billing_interval: null
         trial_unit_amount: null
 `))
 	if err != nil {

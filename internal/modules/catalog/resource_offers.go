@@ -96,7 +96,11 @@ func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListPa
 			continue
 		}
 		last[row.Entitlement] = offerCursor{Scope: scopes[row.Entitlement], Currency: row.Currency, PriceID: row.PriceID}
-		offer := billing.Offer{Kind: params.Kind, ProductID: billing.ProductID(row.ProductID), ProductKey: row.ProductKey, ProductDisplayName: row.ProductName, PriceID: billing.PriceID(row.PriceID), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency, AutoRenew: row.AutoRenew}
+		offer := billing.Offer{Kind: params.Kind, ProductID: billing.ProductID(row.ProductID), ProductKey: row.ProductKey, ProductDisplayName: row.ProductName, PriceID: billing.PriceID(row.PriceID), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency}
+		if row.BillingIntervalHours != nil {
+			value := int(*row.BillingIntervalHours)
+			offer.BillingIntervalHours = &value
+		}
 		if row.AccessDurationHours != nil {
 			value := int(*row.AccessDurationHours)
 			offer.AccessDurationHours = &value

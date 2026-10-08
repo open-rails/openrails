@@ -49,6 +49,9 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction
 // is a loud error. When Stripe is not configured there is no read API to verify
 // against, so the ids are stored as operator-owned.
 func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
+	if in.BillingIntervalHours != nil && *in.BillingIntervalHours%24 != 0 {
+		return nil, fmt.Errorf("stripe recurring prices require a whole-day billing interval")
+	}
 	link = normalizeLinkMap(link)
 	priceID := strings.TrimSpace(link[models.RailKeyStripePriceID])
 	if priceID == "" {
@@ -164,6 +167,9 @@ func (a *stripeAdapter) stripeServiceFor(ctx context.Context, targetAccountID st
 // Price by immutable local price ID. Equal money terms under different keys
 // remain distinct prices. Existing explicit bindings continue through Attach.
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
+	if in.BillingIntervalHours != nil && *in.BillingIntervalHours%24 != 0 {
+		return nil, fmt.Errorf("stripe recurring prices require a whole-day billing interval")
+	}
 	stripeSvc, ok := a.stripeServiceFor(ctx, in.TargetAccountID)
 	if !ok {
 		// Same error string used by stripe_catalog.go so callers can detect

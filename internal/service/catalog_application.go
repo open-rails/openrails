@@ -454,7 +454,7 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 					return nil, req, apperr.Invalidf("archived deposit key %q is ambiguous; select a price id or include customer_amount in complete terms", decl.Key)
 				}
 			}
-			if !decl.Currency.Set || !decl.UnitAmount.Set || !decl.AccessDurationHours.Set || !decl.AutoRenew.Set || !decl.TrialUnitAmount.Set || !decl.TrialDurationHours.Set {
+			if !decl.Currency.Set || !decl.UnitAmount.Set || !decl.AccessDurationHours.Set || !decl.BillingIntervalHours.Set || !decl.TrialUnitAmount.Set || !decl.TrialDurationHours.Set {
 				return nil, req, apperr.Invalidf("archived price key %q is ambiguous; select a price id or complete terms", decl.Key)
 			}
 		}
@@ -465,7 +465,7 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 		req.UnitAmount = current.UnitAmount
 		req.Currency = current.Currency
 		req.AccessDurationHours = current.AccessDurationHours
-		req.AutoRenew = current.AutoRenew
+		req.BillingIntervalHours = current.BillingIntervalHours
 		req.TrialUnitAmount = current.TrialUnitAmount
 		req.TrialDurationHours = current.TrialDurationHours
 		req.Archived = current.Archived
@@ -499,8 +499,11 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 			req.AccessDurationHours = &decl.AccessDurationHours.Value
 		}
 	}
-	if decl.AutoRenew.Set {
-		req.AutoRenew = decl.AutoRenew.Value
+	if decl.BillingIntervalHours.Set {
+		req.BillingIntervalHours = nil
+		if !decl.BillingIntervalHours.Null {
+			req.BillingIntervalHours = &decl.BillingIntervalHours.Value
+		}
 	}
 	if decl.TrialUnitAmount.Set {
 		req.TrialUnitAmount = nil

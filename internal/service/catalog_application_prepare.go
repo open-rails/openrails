@@ -358,7 +358,7 @@ func sameCatalogLinks(a, b map[string]map[string]string) bool {
 // can sell new: none of its declared rails supports its kind, and no armed
 // rail sells it on local terms (#1078). Checkout would otherwise be empty.
 func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []gen.BillingPsp, environment string) error {
-	recurring := request.AutoRenew
+	recurring := request.BillingIntervalHours != nil
 	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil
 	for _, rail := range declared {
 		if railreg.CanSellNew(models.Rail(rail), recurring, trial) {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestNMICatalogReferencePreflightRejectsMismatch(t *testing.T) {
-	req := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
+	req := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(72), BillingIntervalHours: intPtr(720)}
 	for _, remote := range []string{nmiPlanJSON("known", "23.00", "0"), nmiPlanJSON("known", "23.00", "31"), nmiPlanJSON("known", "19.00", "30")} {
 		srv, creates := fakeNMIPlans(t, map[string]string{"known": remote})
 		_, err := verifyNMICatalogReference(nmiCatalogCtx(), newMobiusAdapterWithServer(srv.URL), "mobius", req, map[string]string{"plan_id": "known"})
@@ -37,13 +37,13 @@ func TestStripeCatalogReferencePreflight(t *testing.T) {
 		t.Cleanup(srv.Close)
 		return srv.URL
 	}
-	monthly := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(720), AutoRenew: true}
+	monthly := billing.CreatePriceParams{Currency: "USD", UnitAmount: 23_000_000, AccessDurationHours: intPtr(72), BillingIntervalHours: intPtr(720)}
 	adapter := newStripeAdapterWithServer(serve(t, `{"id":"price_existing","product":"prod_existing","unit_amount":2300,"currency":"usd","active":true,"recurring":{"interval":"month","interval_count":1}}`))
 	out, err := verifyStripeCatalogReference(t.Context(), adapter, "", monthly, map[string]string{"price_id": "price_existing"})
 	require.NoError(t, err)
 	require.Equal(t, "prod_existing", out["product_id"])
 	oneTime := monthly
-	oneTime.AutoRenew = false
+	oneTime.BillingIntervalHours = nil
 	_, err = verifyStripeCatalogReference(t.Context(), adapter, "", oneTime, map[string]string{"price_id": "price_existing"})
 	require.ErrorContains(t, err, "recurring")
 	_, err = verifyStripeCatalogReference(t.Context(), adapter, "", monthly, map[string]string{"lookup_key": "would-create"})

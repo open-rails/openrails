@@ -88,21 +88,21 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 			price = existing
 		} else {
 			price = &models.Price{
-				ID:                  priceID,
-				MerchantID:          tid.UUID(),
-				ProductID:           req.ProductID.UUID(),
-				Archived:            req.Archived,
-				Amount:              req.UnitAmount,
-				CustomerAmount:      req.CustomerAmount,
-				Currency:            req.Currency,
-				AccessDurationHours: req.AccessDurationHours,
-				AutoRenew:           req.AutoRenew,
-				TrialUnitAmount:     req.TrialUnitAmount,
-				TrialDurationHours:  req.TrialDurationHours,
-				PSPLinks:            rails,
-				Key:                 key,
-				CreatedAt:           now,
-				UpdatedAt:           now,
+				ID:                   priceID,
+				MerchantID:           tid.UUID(),
+				ProductID:            req.ProductID.UUID(),
+				Archived:             req.Archived,
+				Amount:               req.UnitAmount,
+				CustomerAmount:       req.CustomerAmount,
+				Currency:             req.Currency,
+				AccessDurationHours:  req.AccessDurationHours,
+				BillingIntervalHours: req.BillingIntervalHours,
+				TrialUnitAmount:      req.TrialUnitAmount,
+				TrialDurationHours:   req.TrialDurationHours,
+				PSPLinks:             rails,
+				Key:                  key,
+				CreatedAt:            now,
+				UpdatedAt:            now,
 			}
 			if err := prices.Create(ctx, price); err != nil {
 				return catalogWrite(err)

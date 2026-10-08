@@ -19,20 +19,20 @@ type priceTerms struct {
 	amount   int64
 	currency string
 	access   *int
-	renew    bool
+	billing  *int
 	trialAmt *int64
 	trialDur *int
 }
 
 func (p priceTerms) id() uuid.UUID {
-	return priceDeterministicID(p.product, "monthly", p.amount, p.currency, p.access, p.renew, p.trialAmt, p.trialDur)
+	return priceDeterministicID(p.product, "monthly", p.amount, p.currency, p.access, p.billing, p.trialAmt, p.trialDur)
 }
 
 // #662: the price id is a pure function of the immutable financial tuple
 // (the prices_product_amount_window_key columns), so every column
 // participates and equal terms always hash equal.
 func TestPriceDeterministicID(t *testing.T) {
-	base := priceTerms{uuid.MustParse("11111111-1111-4111-8111-111111111111"), 1_000_000, "usd", intPtr(720), true, int64Ptr(0), intPtr(72)}
+	base := priceTerms{uuid.MustParse("11111111-1111-4111-8111-111111111111"), 1_000_000, "usd", intPtr(720), intPtr(720), int64Ptr(0), intPtr(72)}
 	with := func(mut func(*priceTerms)) priceTerms { p := base; mut(&p); return p }
 	require.Equal(t, base.id(), base.id())
 	require.Equal(t, base.id(), with(func(p *priceTerms) { p.currency = "USD" }).id(), "currency case is canonical")
@@ -41,16 +41,17 @@ func TestPriceDeterministicID(t *testing.T) {
 		"amount":    with(func(p *priceTerms) { p.amount = 2_000_000 }),
 		"currency":  with(func(p *priceTerms) { p.currency = "eur" }),
 		"access":    with(func(p *priceTerms) { p.access = intPtr(1) }),
-		"renew":     with(func(p *priceTerms) { p.renew = false }),
+		"billing":   with(func(p *priceTerms) { p.billing = intPtr(24) }),
 		"trial amt": with(func(p *priceTerms) { p.trialAmt = int64Ptr(500) }),
 		"trial dur": with(func(p *priceTerms) { p.trialDur = intPtr(24) }),
 		// NULLS NOT DISTINCT: an absent value differs from a present zero.
-		"nil trial":  with(func(p *priceTerms) { p.trialAmt, p.trialDur = nil, nil }),
-		"nil access": with(func(p *priceTerms) { p.access = nil }),
+		"nil trial":   with(func(p *priceTerms) { p.trialAmt, p.trialDur = nil, nil }),
+		"nil access":  with(func(p *priceTerms) { p.access = nil }),
+		"nil billing": with(func(p *priceTerms) { p.billing = nil }),
 	} {
 		require.NotEqual(t, base.id(), changed.id(), name)
 	}
-	reseeded := priceTerms{base.product, 1_000_000, "usd", intPtr(720), true, nil, nil}
+	reseeded := priceTerms{base.product, 1_000_000, "usd", intPtr(720), intPtr(720), nil, nil}
 	require.Equal(t, with(func(p *priceTerms) { p.trialAmt, p.trialDur = nil, nil }).id(), reseeded.id(), "equal NULL tuples re-seed stably")
 }
 
@@ -58,9 +59,9 @@ func TestPriceDeterministicID(t *testing.T) {
 // Existing objects remain bound even when they carry older financial markers.
 func TestProviderPriceIdentity(t *testing.T) {
 	productID := uuid.New()
-	base := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, nil, nil)
-	sibling := priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), true, nil, nil)
-	trial := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, int64Ptr(0), intPtr(24))
+	base := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), intPtr(720), nil, nil)
+	sibling := priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), intPtr(720), nil, nil)
+	trial := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), intPtr(720), int64Ptr(0), intPtr(24))
 	for _, other := range []uuid.UUID{sibling, trial} {
 		require.NotEqual(t, internalStripeLookupKey(base), internalStripeLookupKey(other))
 		require.NotEqual(t, nmiDeterministicPlanID(base), nmiDeterministicPlanID(other))

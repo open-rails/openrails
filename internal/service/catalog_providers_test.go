@@ -291,7 +291,7 @@ func TestResolveProviders(t *testing.T) {
 	unconfigured := func() *Service { return &Service{rt: &app.Runtime{}} }
 	product := &models.Product{ID: uuid.New(), Key: "premium"}
 	recurring := func(psps ...string) billing.CreatePriceParams {
-		return billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), AutoRenew: true, PSPs: psps}
+		return billing.CreatePriceParams{ProductID: billing.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), BillingIntervalHours: intPtr(720), PSPs: psps}
 	}
 
 	t.Run("unknown provider fails loudly", func(t *testing.T) {
@@ -302,7 +302,7 @@ func TestResolveProviders(t *testing.T) {
 	t.Run("engine terms request no provider mirrors", func(t *testing.T) {
 		svc := &Service{rt: &app.Runtime{Config: &config.Config{}}}
 		oneTime := recurring("stripe", "nmi")
-		oneTime.AutoRenew, oneTime.AccessDurationHours = false, nil
+		oneTime.BillingIntervalHours, oneTime.AccessDurationHours = nil, nil
 		for _, req := range []billing.CreatePriceParams{recurring("stripe", "nmi"), oneTime} {
 			links, states, pending, err := svc.resolveProviders(context.Background(), product, req, uuid.New())
 			require.NoError(t, err)
@@ -318,7 +318,7 @@ func TestResolveProviders(t *testing.T) {
 
 	t.Run("linked ccbill beside engine nmi", func(t *testing.T) {
 		req := recurring("ccbill", "nmi")
-		req.AutoRenew, req.AccessDurationHours = false, nil
+		req.BillingIntervalHours, req.AccessDurationHours = nil, nil
 		req.PSPLinks = map[string]map[string]string{"ccbill": {"form_name": "premium", "flex_id": "abc-123"}}
 		links, states, pending, err := unconfigured().resolveProviders(context.Background(), product, req, uuid.New())
 		require.NoError(t, err)
@@ -333,7 +333,7 @@ func TestResolveProviders(t *testing.T) {
 	t.Run("remote writes disabled defers", func(t *testing.T) {
 		svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}}}
 		req := recurring("stripe", "nmi", "solana")
-		req.AutoRenew, req.AccessDurationHours = false, nil
+		req.BillingIntervalHours, req.AccessDurationHours = nil, nil
 		links, states, pending, err := svc.resolveProviders(context.Background(), product, req, uuid.New())
 		require.NoError(t, err)
 		require.Empty(t, links)
@@ -372,9 +372,9 @@ func TestResolveProviders(t *testing.T) {
 func TestStripeAdapterDistinctLocalPricesAndReplay(t *testing.T) {
 	productID := uuid.New()
 	ids := []uuid.UUID{
-		priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, nil, nil),
-		priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), true, nil, nil),
-		priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, int64Ptr(0), intPtr(24)),
+		priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), intPtr(720), nil, nil),
+		priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), intPtr(720), nil, nil),
+		priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), intPtr(720), int64Ptr(0), intPtr(24)),
 	}
 	prices := map[string]catalog.StripePrice{}
 	created := map[string]string{}

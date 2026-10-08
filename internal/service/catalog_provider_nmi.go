@@ -65,6 +65,9 @@ func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) billing.PendingAct
 }
 
 func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
+	if in.BillingIntervalHours != nil && *in.BillingIntervalHours%24 != 0 {
+		return nil, fmt.Errorf("nmi recurring prices require a whole-day billing interval")
+	}
 	link = normalizeLinkMap(link)
 	planID := strings.TrimSpace(link[models.RailKeyPlanID])
 	if planID == "" {
@@ -199,6 +202,9 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 // deterministic plan_id. When no NMI rail is configured it returns
 // errPendingManualLink so the dispatcher converts the slot to a manual link.
 func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
+	if in.BillingIntervalHours != nil && *in.BillingIntervalHours%24 != 0 {
+		return nil, fmt.Errorf("nmi recurring prices require a whole-day billing interval")
+	}
 	client, pspKey, ok := a.nmiClientFor(ctx, in.TargetAccountID)
 	if !ok || client == nil {
 		// No NMI rail configured (or unknown target account): defer to manual link.

@@ -328,10 +328,14 @@ const priceNaturalKeyNull = "\x00null"
 // fields → priceNaturalKeyNull). Equal terms therefore always hash equal, so a
 // derived id can never violate the constraint; a reprice changes a frozen field
 // and correctly hashes to a new id while the archived old row keeps its own.
-func priceDeterministicID(productID uuid.UUID, key string, amount int64, currency string, accessDurationHours *int, autoRenew bool, trialUnitAmount *int64, trialDurationHours *int) uuid.UUID {
+func priceDeterministicID(productID uuid.UUID, key string, amount int64, currency string, accessDurationHours, billingIntervalHours *int, trialUnitAmount *int64, trialDurationHours *int) uuid.UUID {
 	accessDur := priceNaturalKeyNull
 	if accessDurationHours != nil {
 		accessDur = strconv.Itoa(*accessDurationHours)
+	}
+	billingInterval := priceNaturalKeyNull
+	if billingIntervalHours != nil {
+		billingInterval = strconv.Itoa(*billingIntervalHours)
 	}
 	trialAmt := priceNaturalKeyNull
 	if trialUnitAmount != nil {
@@ -347,20 +351,19 @@ func priceDeterministicID(productID uuid.UUID, key string, amount int64, currenc
 		strconv.FormatInt(amount, 10),
 		strings.ToLower(currency),
 		accessDur,
-		strconv.FormatBool(autoRenew),
+		billingInterval,
 		trialAmt,
 		trialDur,
 	)
 }
 
-// RecurringCycleDays returns the recurring billing cadence in WHOLE DAYS for an
-// auto-renewing request, or nil for a one-off/durable price (#622). The window
-// is in hours; providers bill in days, so the cadence is hours/24.
+// priceRequestCycleDays returns the billing cadence in days, independently of
+// the access window. A nil interval means a one-time price.
 func priceRequestCycleDays(req billing.CreatePriceParams) *int {
-	if !req.AutoRenew || req.AccessDurationHours == nil {
+	if req.BillingIntervalHours == nil {
 		return nil
 	}
-	days := *req.AccessDurationHours / 24
+	days := *req.BillingIntervalHours / 24
 	return &days
 }
 
@@ -436,7 +439,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
 	key, _ := resolvePriceKey(product, req)
-	priceID := priceDeterministicID(req.ProductID.UUID(), key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	priceID := priceDeterministicID(req.ProductID.UUID(), key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.BillingIntervalHours, req.TrialUnitAmount, req.TrialDurationHours)
 	if req.CustomerAmount != nil {
 		priceID = uuidutil.DeterministicID(priceID, "customer_amount", strconv.FormatInt(req.CustomerAmount.MinAmount, 10), strconv.FormatInt(req.CustomerAmount.MaxAmount, 10))
 	}
@@ -759,7 +762,7 @@ func priceToCatalogPrice(p *models.Price) *billing.Price {
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 	if req.CustomerAmount != nil {
-		if req.UnitAmount != 0 || req.AutoRenew || req.AccessDurationHours != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
+		if req.UnitAmount != 0 || req.BillingIntervalHours != nil || req.AccessDurationHours != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
 			return apperr.Invalidf("customer_amount requires a one-off price with unit_amount zero and no access or trial duration")
 		}
 		if req.CustomerAmount.MinAmount <= 0 || req.CustomerAmount.MaxAmount < req.CustomerAmount.MinAmount {
@@ -777,15 +780,22 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 	if req.Currency == "" {
 		return apperr.Invalidf("currency required")
 	}
-	// #622 access window: a finite window must be positive; auto_renew needs one.
-	if req.AccessDurationHours != nil && *req.AccessDurationHours <= 0 {
-		return apperr.Invalidf("access_duration_hours must be positive (omit for indefinite)")
-	}
-	if req.AutoRenew && req.AccessDurationHours == nil {
-		return apperr.Invalidf("auto_renew requires a finite access_duration_hours")
+	// Access and billing are independent. Every finite value must fit the time
+	// arithmetic used for access grants and scheduled billing.
+	for _, duration := range []struct {
+		name  string
+		hours *int
+	}{
+		{"access_duration_hours", req.AccessDurationHours},
+		{"billing_interval_hours", req.BillingIntervalHours},
+		{"trial_duration_hours", req.TrialDurationHours},
+	} {
+		if duration.hours != nil && (*duration.hours <= 0 || *duration.hours > catalogwire.MaxDurationHours) {
+			return apperr.Invalidf("%s must be between 1 and %d hours or null", duration.name, catalogwire.MaxDurationHours)
+		}
 	}
 	// #622 trial: both-or-neither; non-negative amount (0 = free trial); positive
-	// period; only on an auto-renewing price (there is a "then recurring" part).
+	// period; only on a recurring price (there is a "then recurring" part).
 	if (req.TrialUnitAmount == nil) != (req.TrialDurationHours == nil) {
 		return apperr.Invalidf("trial_unit_amount and trial_duration_hours must be set together")
 	}
@@ -793,11 +803,8 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 		if *req.TrialUnitAmount < 0 {
 			return apperr.Invalidf("trial_unit_amount must be >= 0 (0 = free trial)")
 		}
-		if *req.TrialDurationHours <= 0 {
-			return apperr.Invalidf("trial_duration_hours must be positive")
-		}
-		if !req.AutoRenew {
-			return apperr.Invalidf("trial pricing requires auto_renew")
+		if req.BillingIntervalHours == nil {
+			return apperr.Invalidf("trial pricing requires billing_interval_hours")
 		}
 	}
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
@@ -811,6 +818,6 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 // was minted. Financial identity includes the product-local key.
 func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
 	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(p.Currency, req.Currency) &&
-		p.AutoRenew == req.AutoRenew && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
+		reflect.DeepEqual(p.BillingIntervalHours, req.BillingIntervalHours) && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
 		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount)
 }

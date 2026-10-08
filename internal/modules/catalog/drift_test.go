@@ -213,7 +213,7 @@ func TestExtrasIndexAndPriceIdentity(t *testing.T) {
 	productID := uuid.New()
 	hours := 30 * 24
 	recurring := stripePrice(productID, uuid.New(), 9_990_000, "USD", "price_linked", "prod_linked")
-	recurring.AutoRenew, recurring.AccessDurationHours = true, &hours
+	recurring.BillingIntervalHours, recurring.AccessDurationHours = &hours, &hours
 	ix := BuildExtrasIndex([]*models.Product{{ID: productID, Key: "prod"}}, []*models.Price{recurring})
 	for _, tc := range []struct {
 		price StripePrice
