@@ -17,7 +17,33 @@ SELECT COALESCE(min(at), sqlc.arg(fallback)::timestamptz)::timestamptz AS oldest
     WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
       AND status IN ('active','past_due','awaiting_method','unverified') AND deleted_at IS NULL
   UNION ALL
-  SELECT created_at FROM billing.provider_intents
+  SELECT COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz, NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at)
+    FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
+    WHERE pi.merchant_id=sqlc.arg(merchant_id)::uuid AND pi.psp_id=sqlc.arg(psp_id)::uuid
+      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+) facts;
+
+-- name: PSPRecoveryBookAge :one
+-- Semantic obligation dates survive process clocks and invoice-only books.
+-- A recent additional fact cannot hide older state; impossible future evidence
+-- is not permission to treat an inherited book as new.
+SELECT COALESCE(bool_or(at < sqlc.arg(before)::timestamptz), false)::boolean AS established,
+       COALESCE(bool_or(at > sqlc.arg(latest)::timestamptz), false)::boolean AS future
+FROM (
+  SELECT started_at AS at FROM billing.subscriptions
     WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
-      AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+  UNION ALL
+  SELECT purchased_at FROM billing.payments
+    WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
+  UNION ALL
+  SELECT COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz, NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at)
+    FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
+    WHERE pi.merchant_id=sqlc.arg(merchant_id)::uuid AND pi.psp_id=sqlc.arg(psp_id)::uuid
+      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+  UNION ALL
+  SELECT i.period_starts_at FROM billing.invoices i
+    JOIN billing.money_settings ms ON ms.merchant_id=i.merchant_id AND ms.customer_id=i.customer_id AND ms.currency=i.currency
+    JOIN billing.payment_methods pm ON pm.merchant_id=ms.merchant_id AND pm.id=ms.collection_payment_method
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND pm.psp_id=sqlc.arg(psp_id)::uuid
+      AND i.status IN ('draft','open')
 ) facts;

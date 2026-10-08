@@ -30,6 +30,41 @@ func (q *Queries) GetPSPAppliedRefreshWatermark(ctx context.Context, arg GetPSPA
 	return watermark_at, err
 }
 
+const pSPHasEstablishedBook = `-- name: PSPHasEstablishedBook :one
+SELECT EXISTS (
+  SELECT 1 FROM billing.subscriptions
+    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+      AND started_at < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.payment_methods
+    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+      AND created_at < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.provider_intents
+    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+      AND created_at < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.payments
+    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+      AND purchased_at < $3::timestamptz
+)::boolean
+`
+
+type PSPHasEstablishedBookParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Before     time.Time
+}
+
+// Any older bound fact requires observation; adding a recent fact cannot make
+// an inherited book fresh. This is a staleness detector, not a clone fence.
+func (q *Queries) PSPHasEstablishedBook(ctx context.Context, arg PSPHasEstablishedBookParams) (bool, error) {
+	row := q.db.QueryRow(ctx, pSPHasEstablishedBook, arg.MerchantID, arg.PspID, arg.Before)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const pSPRecoveryHistoryFloor = `-- name: PSPRecoveryHistoryFloor :one
 SELECT COALESCE(min(at), $1::timestamptz)::timestamptz AS oldest_at FROM (
   SELECT COALESCE(current_period_starts_at, started_at) AS at FROM billing.subscriptions
