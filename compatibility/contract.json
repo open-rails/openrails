@@ -134,6 +134,7 @@
       "func (c *Client) ListReprices(ctx context.Context, params billing.RepriceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Reprice], error)",
       "func (c *Client) ListSpendDelegations(ctx context.Context, customer billing.CustomerID, requestOptions ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error)",
       "func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Subscription], error)",
+      "func (c *Client) ListUserMerchants(ctx context.Context, r *http.Request) ([]billing.UserMerchant, error)",
       "func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error)",
       "func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id billing.InvoiceID, requestOptions ...RequestOption) (*billing.Invoice, error)",
       "func (c *Client) MarkNotificationRead(ctx context.Context, id billing.NotificationID, options ...RequestOption) (*billing.MerchantNotification, error)",
@@ -1868,8 +1869,11 @@
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/internal/controlplane",
       "errors": "errors",
+      "helpersauth": "github.com/open-rails/helpers/auth",
       "http": "net/http",
-      "operator": "github.com/open-rails/openrails/internal/operator"
+      "iam": "github.com/open-rails/authkit/iam",
+      "operator": "github.com/open-rails/openrails/internal/operator",
+      "verify": "github.com/open-rails/authkit/verify"
     },
     "credits.go": {
       "billing": "github.com/open-rails/openrails/billing",
