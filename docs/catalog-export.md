@@ -56,6 +56,17 @@ cards must also exist with their original merchant-scoped UUID. The snapshot
 lists these prerequisites without copying credentials or customer records; it
 never remaps a reference merely because a destination account has the same name.
 
+For ordinary OpenRails accounts, the PSP UUID is derived from rail, environment
+and provider account ID. Applying the same merchant PSP configuration in the
+destination recreates that UUID; supply credentials separately and use the same
+sandbox/production environment. Verify those IDs against the snapshot before
+import. The public `Client.EnsureCustomer` accepts each original customer UUID.
+Older externally imported PSPs may have non-derived UUIDs: the normal creation
+API cannot select an arbitrary replacement ID. Those require explicit identity
+provisioning by a database operator; importing the whole billing archive instead
+retains its PSP/customer rows directly. Never rewrite snapshot IDs to bypass an
+unmet dependency.
+
 An identical successfully imported artifact remains a no-op even after later
 catalog edits. A different artifact is refused on that occupied destination.
 **Restore is not rollback.** Original catalog-application hashes are retained, so
@@ -67,7 +78,10 @@ accepted request; their associated refunds, reviews and provider jobs are outsid
 this catalog-only snapshot. Purchases, subscriptions, grants, balances and billing
 history require the full [merchant billing archive](../internal/merchantarchive/README.md).
 For a whole billing-book restore, use `billing export/import` directly into its
-empty destination, rather than importing a catalog first.
+empty destination, rather than importing a catalog first. The full billing
+archive currently excludes product-archive operation replay receipts; this
+catalog snapshot includes them. Its [documented exclusions](../internal/merchantarchive/README.md#exclusions-and-refusals)
+remain relevant when planning a complete deployment move.
 
 Artifacts are bounded at 64 MiB, with bounded YAML depth and node counts. Export
 also bounds accumulated rows before building YAML. An oversized or unsupported

@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/configdocument"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantarchive"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/stretchr/testify/require"
 )
 
@@ -202,6 +203,34 @@ products:
 	var title string
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT display_name FROM "+dst+".products WHERE id=$1", first.ProductID.UUID()).Scan(&title))
 	require.Equal(t, "Later edit", title)
+	// Normal host configuration recreates natural PSP IDs; customer provisioning
+	// uses the public Client with the original host UUID. No raw PSP inserts are
+	// required for this ordinary destination path.
+	provisionedSchema := "catalog_provisioned_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: provisionedSchema, River: openrails.RiverHostOwned}))
+	provisionedName := pgx.Identifier{provisionedSchema}.Sanitize()
+	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+provisionedName+" CASCADE") })
+	provisioned, err := db.NewWithPGXPool(w.pool, provisionedSchema)
+	require.NoError(t, err)
+	directory, err := merchants.NewDirectoryService(provisioned.DataPool())
+	require.NoError(t, err)
+	_, _, err = directory.RegisterForRestore(t.Context(), mid, "catalog-provisioned")
+	require.NoError(t, err)
+	client, err := openrails.New(t.Context(), openrails.Config{
+		Schema: provisionedSchema, River: openrails.RiverHostOwned, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+		Merchant: openrails.MerchantDeclaration{Slug: "catalog-provisioned", DisplayName: "Catalog destination", PSPs: w.psps},
+	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	_, err = client.EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{})
+	require.NoError(t, err)
+	var provisionedPSP uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+provisionedName+".psps WHERE merchant_id=$1 AND rail='nmi'", mid.UUID()).Scan(&provisionedPSP))
+	require.Equal(t, w.psp["nmi"].UUID(), provisionedPSP)
+	require.NoError(t, client.Close(t.Context()))
+	_, err = merchantarchive.RestoreCatalog(t.Context(), provisioned, mid, bytes.NewReader(artifact.Bytes()))
+	require.NoError(t, err, "publicly provisioned prerequisites must satisfy restore")
+
 	document.Tables["products"][0]["display_name"] = json.RawMessage(`"Different snapshot"`)
 	var different bytes.Buffer
 	require.NoError(t, merchantarchive.WriteCatalogSnapshot(&different, document))
