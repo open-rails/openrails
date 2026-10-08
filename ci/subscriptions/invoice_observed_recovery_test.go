@@ -220,6 +220,8 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 				require.NoError(t, err)
 			}
 			mid := source.client[embedded].MerchantID()
+			source.refreshProviders()
+			source.settleCollectionScans()
 			source.settle()
 			source.stop()
 			sourceDB, err := db.NewWithPGXPool(source.pool, source.schema)

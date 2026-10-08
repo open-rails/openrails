@@ -61,6 +61,8 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, list.Items, 1)
 				invoice = list.Items[0].ID
+				w.refreshProviders()
+				w.settleCollectionScans()
 				status, body := e.c.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "pull-invoice", map[string]string{"payment_method_id": e.method})
 				require.Equal(t, http.StatusAccepted, status, body)
 			} else {

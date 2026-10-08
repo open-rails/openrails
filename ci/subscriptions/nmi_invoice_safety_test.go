@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -151,6 +152,8 @@ func TestNMIInvoiceReplicasCollectRemainingAmountOnce(t *testing.T) {
 	// The customer-present first payment establishes this card's unscheduled
 	// agreement through the real adapter, allowing later automatic collection.
 	first := newNMIInvoice(f, c)
+	f.any().refreshProviders()
+	f.any().settleCollectionScans()
 	gate := f.hold("nmi", submission("nmi"), false)
 	start := make(chan struct{})
 	initial := make([]invoiceAnswer, 6)
@@ -187,10 +190,16 @@ func TestNMIInvoiceReplicasCollectRemainingAmountOnce(t *testing.T) {
 		r.stop()
 	}
 	f.advance(5 * 24 * time.Hour)
+	h := f.hold("nmi", submission("nmi"), false)
 	for _, r := range f.replicas {
 		r.start()
 	}
-	h := f.hold("nmi", submission("nmi"), false)
+	// Read normal provider history before asking the scheduler to collect.
+	// The fault is already installed: catch-up may itself wake due collection.
+	r := f.any()
+	refreshID, _, err := riverjobs.EnqueueMerchantRefresh(t.Context(), r.jobs, r.client[embedded].MerchantID().UUID(), r.replica.queue)
+	require.NoError(t, err)
+	f.waitPassJobs([]pass{{r: r, id: refreshID}})
 	passes := invoicePasses(f, true)
 	h.wait()
 	var wg sync.WaitGroup
@@ -233,6 +242,8 @@ func TestNMIInvoiceReplicasAmbiguousFiveDayRestart(t *testing.T) {
 			c := f.any().newCustomer()
 			method := c.saveCard("nmi", visa)
 			invoice := newNMIInvoice(f, c)
+			f.any().refreshProviders()
+			f.any().settleCollectionScans()
 			if committed {
 				f.base.nmi.HideSales(1)
 				f.base.nmi.DropSaleResponses(1)
@@ -310,6 +321,8 @@ func TestNMIInvoiceReplicaCrashAfterProviderCommit(t *testing.T) {
 	c := a.newCustomer()
 	method := c.saveCard("nmi", visa)
 	invoice := newNMIInvoice(f, c)
+	f.any().refreshProviders()
+	f.any().settleCollectionScans()
 	h := f.hold("nmi", submission("nmi"), true)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -352,6 +365,8 @@ func TestNMIInvoiceAcceptedBeforeFiveDayRestart(t *testing.T) {
 	c := f.any().newCustomer()
 	method := c.saveCard("nmi", visa)
 	invoice := newNMIInvoice(f, c)
+	f.any().refreshProviders()
+	f.any().settleCollectionScans()
 	for _, r := range f.replicas {
 		r.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 		f.restart(r)
@@ -374,6 +389,8 @@ func TestNMIInvoiceAcceptedBeforeFiveDayRestart(t *testing.T) {
 	for _, r := range f.replicas {
 		r.start()
 	}
+	f.any().refreshProviders()
+	f.any().settleCollectionScans()
 	f.wake()
 	f.settle()
 	replay := payNMIInvoice(t.Context(), f.replicas[1], c, invoice, method, "accepted-readonly")

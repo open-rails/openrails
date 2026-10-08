@@ -32,6 +32,8 @@ func TestInvoicePreflightRecoversPaymentNewerThanBulkWindow(t *testing.T) {
 	method := c.saveCard("nmi", visa)
 	invoice := observedInvoice(t, source, c, 50_000_001)
 	mid := source.client[embedded].MerchantID()
+	source.refreshProviders()
+	source.settleCollectionScans()
 	source.settle()
 	source.stop()
 	sourceDB, err := db.NewWithPGXPool(source.pool, source.schema)
@@ -136,6 +138,8 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	c := w.newCustomer()
 	method := c.saveCard("nmi", visa)
 	invoice := observedInvoice(t, w, c, 50_000_000)
+	w.refreshProviders()
+	w.settleCollectionScans()
 	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 	w.restart()
 	answer := payNMIInvoice(t.Context(), w, c, invoice, method, "fence-race")
@@ -211,6 +215,8 @@ func TestInvoicePreflightResolvesUnsentAcceptedOperation(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard("nmi", visa)
 			invoice := observedInvoice(t, w, c, 50_000_000)
+			w.refreshProviders()
+			w.settleCollectionScans()
 			w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 			w.restart()
 			answer := payNMIInvoice(t.Context(), w, c, invoice, method, "accepted-unsent")
