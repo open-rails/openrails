@@ -148,6 +148,7 @@ export const checkoutLineItemSchema = z.object({
 export type CheckoutLineItem = z.infer<typeof checkoutLineItemSchema>
 
 export const checkoutPlanSchema = z.object({
+  auto_renew: z.boolean(),
   display_name: z.string(),
   unit_amount: amountSchema,
   currency: z.string().min(1),

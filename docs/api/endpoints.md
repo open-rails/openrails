@@ -200,8 +200,9 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 One shape per noun: a product (with its current `prices`), a price, a meter and
 a rate override are the same object on every route that returns them and in the
 Go client (`billing.Product`, `billing.Price`, `billing.Meter`,
-`billing.RateOverride`). A price's cadence is `access_duration_hours` (`null`:
-for good) and `auto_renew`. `psps` maps each PSP key to the price's state on
+`billing.RateOverride`). A price's cadence is `billing_interval_hours` (`null`:
+one-time); `access_duration_hours` independently determines access (`null`: no
+scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
 Reads need `merchant:catalog:read`. Writes need `merchant:catalog:update` and

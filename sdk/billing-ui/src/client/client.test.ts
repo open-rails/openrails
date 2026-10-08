@@ -236,6 +236,16 @@ describe("checkout sessions", () => {
     expect(JSON.parse(String(init.body))).toEqual({ price_id: "price_1" })
   })
 
+  it.each([undefined, true, false])("preserves the order renewal preference %s", async (autoRenew) => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({
+      id: `ocs_${"a".repeat(64)}`, url: null, expires_at: "2026-10-03T00:00:00Z",
+    }, { status: 201 }))
+    await createBillingClient({ fetch }).createCheckoutSession({ priceId: "price_1", autoRenew })
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    const body = JSON.parse(String(init.body))
+    expect(body).toEqual(autoRenew === undefined ? { price_id: "price_1" } : { price_id: "price_1", auto_renew: autoRenew })
+  })
+
   it("binds a customer-selected deposit to the minted checkout", async () => {
     const fetch = vi.fn().mockResolvedValue(
       Response.json(

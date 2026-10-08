@@ -10,7 +10,7 @@ import { accessLabel, everyLabel, perLabel } from "#orck/lib/period"
 import type { CheckoutLineItem, CheckoutSession } from "#orck/types"
 
 function renewsLabel(session: CheckoutSession, m: Translator) {
-  const every = session.plan.billing_interval_hours
+  const every = session.plan.auto_renew
     ? everyLabel(session.plan.billing_interval_hours, m)
     : null
   const access = session.plan.access_duration_hours !== session.plan.billing_interval_hours
@@ -108,7 +108,7 @@ export function OrderSummary({ session }: { session: CheckoutSession }) {
       <div className="text-[38px] leading-[1.05] font-semibold tracking-[-0.02em] tabular-nums">
         {money(session.plan.unit_amount)}
         <span className="ml-1 text-[15px] font-normal tracking-normal text-muted-foreground">
-          {perLabel(session.plan.billing_interval_hours, m)}
+          {session.plan.auto_renew ? perLabel(session.plan.billing_interval_hours, m) : null}
         </span>
       </div>
       <div className="grid">
@@ -143,7 +143,7 @@ export function CompactSummary({
 }) {
   const m = useMessages()
   const renews = renewsLabel(session, m)
-  const per = perLabel(session.plan.billing_interval_hours, m)
+  const per = session.plan.auto_renew ? perLabel(session.plan.billing_interval_hours, m) : null
   return (
     <div
       className={cn(

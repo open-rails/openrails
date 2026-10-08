@@ -67,7 +67,7 @@ prices:
     currency: USD
     unit_amount: 9990000        # micros ($9.99)
     access_duration_hours: 720
-    auto_renew: true
+    billing_interval_hours: 720
     psps: [ccbill]
     psp_links:
       ccbill:

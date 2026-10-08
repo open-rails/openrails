@@ -14,13 +14,13 @@ products:
         currency: usd
         unit_amount: "20000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 8760
         psps: [stripe]
       - key: claude-code-pro-offer-2
         currency: usd
         unit_amount: "200000000"
         access_duration_hours: 8760
-        auto_renew: true
+        billing_interval_hours: 8760
         psps: [stripe]
 
   - key: claude-code-max-5x
@@ -33,7 +33,7 @@ products:
         currency: usd
         unit_amount: "100000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
         psps: [stripe]
 
   - key: claude-code-max-20x
@@ -46,5 +46,5 @@ products:
         currency: usd
         unit_amount: "200000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
         psps: [stripe]

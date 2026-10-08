@@ -18,6 +18,7 @@ const session = fixtureSession({
     currency: "USD",
     unit_decimals: 6,
     billing_interval_hours: renews ? 1 : undefined,
+    auto_renew: renews,
     access_duration_hours: renews ? 1 : undefined,
   },
   expires_at: undefined,

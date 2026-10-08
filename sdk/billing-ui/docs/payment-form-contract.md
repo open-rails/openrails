@@ -17,6 +17,7 @@ as an exact signed int64 decimal string of `plan.currency`'s native unit, and
     "unit_amount": "99000000",
     "currency": "USD",
     "unit_decimals": 6,
+    "auto_renew": true,
     "billing_interval_hours": 720,
     "access_duration_hours": 720
   },

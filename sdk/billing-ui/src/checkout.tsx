@@ -796,7 +796,7 @@ export function Checkout({
         session.plan.unit_decimals
       )
     : ""
-  const renews = session?.plan.billing_interval_hours
+  const renews = session?.plan.auto_renew
     ? everyLabel(session.plan.billing_interval_hours, m)
     : null
   const payLabel =

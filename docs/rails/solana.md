@@ -141,7 +141,7 @@ checkout only, across every merchant and PSP.
       currency: USD
       unit_amount: 23_000_000
       access_duration_hours: 720
-      auto_renew: true
+      billing_interval_hours: 720
       psps: [solana]
       # Optional:
       # psp_links:

@@ -16,7 +16,7 @@ products:
         currency: usd
         unit_amount: "12000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
         psps: [stripe]
 
   - key: craftsman
@@ -31,7 +31,7 @@ products:
         currency: usd
         unit_amount: "29000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
         psps: [stripe]
 
   - key: expert
@@ -46,7 +46,7 @@ products:
         currency: usd
         unit_amount: "59000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
         psps: [stripe]
 
   - key: grandmaster
@@ -61,5 +61,5 @@ products:
         currency: usd
         unit_amount: "119000000"
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
         psps: [stripe]

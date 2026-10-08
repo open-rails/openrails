@@ -285,7 +285,10 @@ fields (`400 unknown_field`), and every error code is in
   `address`), and answers 201. A save the PSP refuses is 502
   `payment_provider_rejected`.
 - **Prices.** One `Price`: `product_id`, `archived`, `access_duration_hours`
-  (null: for good), `auto_renew`, `psps`. The public `type`, `recurring.interval`,
+  (null: for good), `billing_interval_hours` (null: one-time), `psps`.
+  Price `auto_renew` is removed. Existing recurring prices migrate their former
+  access duration into the new billing interval; both durations may then differ
+  on new price revisions. The public `type`, `recurring.interval`,
   `active` and `providers` are gone.
 - **Subscriptions.** Cancel, resume and the payment-method switch answer the
   `Subscription` in the request (200). A merchant tier change on CCBill or

@@ -52,8 +52,12 @@ products:
         currency: USD
         unit_amount: 12000000
         access_duration_hours: 720
-        auto_renew: true
+        billing_interval_hours: 720
 ```
+
+Duration fields also accept readable aliases: `access_duration: 3 days`,
+`billing_interval: 30 days`, and `trial_duration: 24 hours`. Use one form per
+field; zero is invalid, omission preserves existing terms, and null clears.
 
 Price fields worth knowing:
 
@@ -61,14 +65,14 @@ Price fields worth knowing:
 |---|---|
 | `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON application (`POST /v1/merchant/catalog/applications`) spells it as a decimal string |
 | `access_duration_hours` | positive hour count, or null for indefinite access |
-| `auto_renew` | charge again and extend at each period end; requires a finite access duration |
-| `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together and enable renewal |
+| `billing_interval_hours` | positive interval between recurring payments, or null for a one-time purchase; independent of access duration |
+| `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together with a billing interval |
 | `key` | required stable application handle for the price version chain |
 | `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
 
-**A one-time purchase** — false `auto_renew` with a finite duration gives timed
+**A one-time purchase** — null `billing_interval_hours` with a finite duration gives timed
 access; null `access_duration_hours` gives indefinite access:
 
 ```yaml
@@ -80,7 +84,7 @@ access; null `access_duration_hours` gives indefinite access:
             currency: USD
             unit_amount: 20000000
             access_duration_hours: null
-            auto_renew: false
+            billing_interval_hours: null
 ```
 
 Prepaid balances are not catalog products: fund them with

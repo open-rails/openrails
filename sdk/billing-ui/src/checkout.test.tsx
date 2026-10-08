@@ -77,6 +77,15 @@ describe("Checkout", () => {
     expect(document.body).not.toHaveTextContent(/month/i)
   })
 
+  it("shows a nonrenewing order without changing its catalog cadence", async () => {
+    const plan = { ...fixtureSession().plan, billing_interval_hours: 720, access_duration_hours: 1080, auto_renew: false }
+    render(<Checkout source={createFixtureSource({ session: { plan } })} />)
+    expect(await screen.findByText("Pay $99.00")).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent("Renews every")
+    expect(document.body).not.toHaveTextContent("/ 30 days")
+    expect(document.body).toHaveTextContent("45 days of access")
+  })
+
   it("renders exact money at the plan's registered scale", async () => {
     render(
       <Checkout
@@ -88,6 +97,7 @@ describe("Checkout", () => {
               currency: "JPY",
               unit_decimals: 4,
               billing_interval_hours: undefined,
+              auto_renew: false,
             },
             line_items: [
               { label: "Lifetime", amount: "9223372036854775807" },

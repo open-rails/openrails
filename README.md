@@ -153,6 +153,29 @@ immutable price revision. Cancellation stops future payments and preserves
 access already purchased; refunds and explicit revocations may withdraw it.
 Dunning access follows the separate grace policy and does not extend paid time.
 
+**Renewal belongs to the order.** A checkout request can select a recurring price
+and set `auto_renew: false` in the same command. This buys the initial term and
+prevents the next charge; it does not change the catalog price. Omit the flag
+(or send `true`) to renew until explicit cancellation. For example, a signed-in
+customer can send:
+
+```http
+POST /billing/v1/me/checkout-sessions
+Content-Type: application/json
+
+{
+  "product_key": "channel-main-monthly",
+  "price_key": "subscription",
+  "auto_renew": false
+}
+```
+
+The returned session retains that choice through payment and retries. This
+option requires an engine-managed NMI or Stripe checkout without a trial.
+Provider-native flows that cannot enforce it atomically refuse before payment.
+Hosts that require manual cancellation simply omit the flag and need no renewal
+toggle in their checkout UI.
+
 Product keys are merchant-wide; price keys belong to their product. For example,
 `channel-main-monthly.subscription` selects the 30-day membership offer.
 OpenRails assigns immutable price revisions automatically, starting at v0.

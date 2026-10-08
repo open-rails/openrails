@@ -17,6 +17,7 @@ export function fixtureSession(
       currency: "USD",
       unit_decimals: 6,
       billing_interval_hours: 720,
+      auto_renew: true,
       access_duration_hours: 720,
     },
     tax: "0",

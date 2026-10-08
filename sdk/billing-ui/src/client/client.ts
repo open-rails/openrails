@@ -405,6 +405,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "POST",
           body: {
             price_id: input.priceId,
+          auto_renew: input.autoRenew,
             signature: input.signature,
           } satisfies wire.CustomerChangeTierParams,
           headers: { "Idempotency-Key": input.idempotencyKey },
@@ -574,6 +575,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       priceId?: string
       /** Customer-selected deposit in the price currency’s native units. */
       amount?: string
+      /** Defaults to true for recurring prices; false buys the initial term only. */
+      autoRenew?: boolean
       successUrl?: string
     }): Promise<CheckoutSessionLink> {
       if (
@@ -592,6 +595,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           price_key: input.priceKey,
           product_key: input.productKey,
           price_id: input.priceId,
+          auto_renew: input.autoRenew,
           amount: input.amount,
           success_url: input.successUrl,
         } satisfies wire.MintCheckoutSessionParams,
