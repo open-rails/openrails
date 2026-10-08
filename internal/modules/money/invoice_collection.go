@@ -487,10 +487,25 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err != nil {
 			return fmt.Errorf("route invoice %s collection: %w", invoice.ID, err)
 		}
-		// Before a new invoice attempt chooses an account, recover every
-		// known account that may have collected it after the old snapshot.
-		if err := providerrecovery.CheckMerchant(ctx, s.db.NewWithPgxTx(tx), tid.UUID(), now); err != nil {
+		receipt, found, err := s.findObservedInvoicePayment(ctx, q, tid.UUID(), invoice.ID, psp)
+		if err != nil {
 			return err
+		}
+		if found {
+			local := NewMoneyService(s.db.NewWithPgxTx(tx), s.Clock())
+			_, err := local.RecoverObservedInvoicePayment(ctx, receipt)
+			return err // committed readback; no new operation or invented initiator
+		}
+		// A recent read on the newly selected account cannot exclude a payment
+		// through another known card account after the restored snapshot.
+		accounts, err := q.InvoiceRecoveryAccounts(ctx, gen.InvoiceRecoveryAccountsParams{MerchantID: tid.UUID(), RoutedPsp: psp})
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			if err := providerrecovery.CheckPSP(ctx, s.db.NewWithPgxTx(tx), tid.UUID(), account.ID, now); err != nil {
+				return err
+			}
 		}
 		var custody *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {

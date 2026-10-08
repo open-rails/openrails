@@ -101,6 +101,46 @@ func (q *Queries) GetInvoiceRecoveryPayment(ctx context.Context, arg GetInvoiceR
 	return items, nil
 }
 
+const invoiceRecoveryAccounts = `-- name: InvoiceRecoveryAccounts :many
+SELECT p.id,p.rail FROM billing.psps p
+WHERE p.merchant_id=$1::uuid AND p.rail IN ('nmi','stripe')
+ AND p.environment=(SELECT environment FROM billing.psps WHERE merchant_id=p.merchant_id AND id=$2::uuid)
+ORDER BY p.id
+`
+
+type InvoiceRecoveryAccountsParams struct {
+	MerchantID uuid.UUID
+	RoutedPsp  uuid.UUID
+}
+
+type InvoiceRecoveryAccountsRow struct {
+	ID   uuid.UUID
+	Rail string
+}
+
+// A different chosen card does not hide a prior account's paid invoice, even
+// if that card was added after the backup. Inspect every known invoice-capable
+// account in this deployment environment; unrelated rails cannot collect it.
+func (q *Queries) InvoiceRecoveryAccounts(ctx context.Context, arg InvoiceRecoveryAccountsParams) ([]InvoiceRecoveryAccountsRow, error) {
+	rows, err := q.db.Query(ctx, invoiceRecoveryAccounts, arg.MerchantID, arg.RoutedPsp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InvoiceRecoveryAccountsRow
+	for rows.Next() {
+		var i InvoiceRecoveryAccountsRow
+		if err := rows.Scan(&i.ID, &i.Rail); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const invoiceRecoveryAllocationTotal = `-- name: InvoiceRecoveryAllocationTotal :one
 SELECT COALESCE(sum(l.amount),0)::bigint AS amount,
  COALESCE(bool_and(l.id IS NOT NULL AND l.invoice_id IS NOT DISTINCT FROM p.invoice_id AND l.customer_id IS NOT DISTINCT FROM p.customer_id

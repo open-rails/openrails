@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // ErrNotInvoiceReceipt distinguishes ordinary provider transactions from the
@@ -47,93 +47,117 @@ func (c *NMIClient) ReadInvoiceSaleEvidence(ctx context.Context, transactionID s
 	if err != nil || invoice == uuid.Nil || observed.OrderDescription != "invoice "+invoice.String() {
 		return InvoiceSaleEvidence{}, errors.New("invoice description is not an exact invoice identity")
 	}
-	order, err := uuid.Parse(observed.OrderID)
-	if err != nil || order == uuid.Nil || observed.OrderID != order.String() {
-		return InvoiceSaleEvidence{}, errors.New("invoice sale has no exact operation order")
-	}
-	sale, found, err := c.ReadSaleEvidence(ctx, observed.OrderID, transactionID)
+	facts, found, err := c.FindInvoiceSaleEvidence(ctx, invoice)
 	if err != nil {
 		return InvoiceSaleEvidence{}, err
+	}
+	if !found || facts.Sale.TransactionID != transactionID {
+		return InvoiceSaleEvidence{}, errors.New("invoice transaction is not its sole successful sale")
+	}
+	if observed.OrderID != facts.Sale.OrderReference || (observed.CustomerVaultID != "" && observed.CustomerVaultID != facts.Sale.CustomerVaultID) || (observed.Currency != "" && !strings.EqualFold(observed.Currency, facts.Sale.Currency)) {
+		return InvoiceSaleEvidence{}, errors.New("invoice transaction changed while being read")
+	}
+	return facts, nil
+}
+
+// FindInvoiceSaleEvidence reads the current invoice history without the bulk
+// refresh's safety lag. An empty result is only a completed observation, never
+// proof of nonexecution for a possibly submitted operation or an atomic claim
+// against independently writable database copies.
+func (c *NMIClient) FindInvoiceSaleEvidence(ctx context.Context, invoice uuid.UUID) (InvoiceSaleEvidence, bool, error) {
+	c = c.scoped()
+	if invoice == uuid.Nil {
+		return InvoiceSaleEvidence{}, false, errors.New("invoice identity is required")
+	}
+	candidate, action, found, err := c.invoiceSaleCandidate(ctx, invoice)
+	if err != nil || !found {
+		return InvoiceSaleEvidence{}, found, err
+	}
+	order, err := uuid.Parse(candidate.OrderID)
+	if err != nil || order == uuid.Nil || candidate.OrderID != order.String() {
+		return InvoiceSaleEvidence{}, false, errors.New("invoice sale has no exact operation order")
+	}
+	sale, found, err := c.ReadSaleEvidence(ctx, candidate.OrderID, candidate.TransactionID)
+	if err != nil {
+		return InvoiceSaleEvidence{}, false, err
 	}
 	if !found || sale.CustomerVaultID == "" ||
-		(observed.CustomerVaultID != "" && sale.CustomerVaultID != observed.CustomerVaultID) ||
-		(observed.Currency != "" && !strings.EqualFold(sale.Currency, observed.Currency)) {
-		return InvoiceSaleEvidence{}, errors.New("invoice sale does not match exact provider read")
+		(candidate.CustomerVaultID != "" && sale.CustomerVaultID != candidate.CustomerVaultID) ||
+		(candidate.Currency != "" && !strings.EqualFold(sale.Currency, candidate.Currency)) {
+		return InvoiceSaleEvidence{}, false, errors.New("invoice sale does not match exact provider read")
 	}
-	var paidAt time.Time
-	var reportedMinor moneyutil.Cents
-	candidates := map[string]bool{}
-	const pageSize = 1000
-	complete := false
-	for page := 0; page < 100; page++ {
-		history, err := c.TransactionReport(ctx, QueryFilter{OrderDescription: observed.OrderDescription, ResultLimit: pageSize, PageNumber: page})
-		if err != nil {
-			return InvoiceSaleEvidence{}, err
-		}
-		for _, txn := range history.Transactions {
-			if txn.OrderDescription != observed.OrderDescription || txn.TransactionID == "" {
-				return InvoiceSaleEvidence{}, errors.New("invoice history contains an unbound transaction")
-			}
-			if txn.Reversed() {
-				return InvoiceSaleEvidence{}, errors.New("invoice history contains a reversal")
-			}
-			for _, action := range txn.Actions {
-				if !action.Is("sale") && !action.Is("refund") && !action.Is("credit") && !action.Is("void") {
-					continue
-				}
-				if action.Success != "0" && action.Success != "1" {
-					return InvoiceSaleEvidence{}, errors.New("invoice history has an unreadable outcome")
-				}
-				if !action.Succeeded() {
-					continue
-				}
-				if !action.Is("sale") {
-					return InvoiceSaleEvidence{}, errors.New("invoice history contains a reversal")
-				}
-				if candidates[txn.TransactionID] {
-					return InvoiceSaleEvidence{}, errors.New("invoice history repeats a successful sale")
-				}
-				candidates[txn.TransactionID] = true
-				if txn.TransactionID != transactionID {
-					return InvoiceSaleEvidence{}, errors.New("invoice has another successful provider sale")
-				}
-				if txn.OrderID != observed.OrderID || (txn.CustomerVaultID != "" && txn.CustomerVaultID != sale.CustomerVaultID) || (txn.Currency != "" && !strings.EqualFold(txn.Currency, sale.Currency)) {
-					return InvoiceSaleEvidence{}, errors.New("invoice transaction changed while being read")
-				}
-				amount, ok := exactMinorAmount(action.Amount, sale.Currency)
-				if !ok || amount <= 0 {
-					return InvoiceSaleEvidence{}, errors.New("invoice sale has no exact positive amount")
-				}
-				at, ok := action.At()
-				if !ok {
-					return InvoiceSaleEvidence{}, errors.New("invoice sale has no readable time")
-				}
-				paidAt = at
-				reportedMinor = moneyutil.Cents(amount)
-			}
-		}
-		if len(history.Transactions) < pageSize {
-			complete = true
-			break
-		}
+	amount, ok := exactMinorAmount(action.Amount, sale.Currency)
+	if !ok || amount <= 0 || int64(sale.Amount) != amount {
+		return InvoiceSaleEvidence{}, false, errors.New("invoice sale has no consistent exact positive amount")
 	}
-	if !complete || len(candidates) != 1 || paidAt.IsZero() {
-		return InvoiceSaleEvidence{}, errors.New("invoice history is incomplete or has no successful sale")
+	paidAt, ok := action.At()
+	if !ok {
+		return InvoiceSaleEvidence{}, false, errors.New("invoice sale has no readable time")
 	}
-	if sale.Amount != reportedMinor {
-		return InvoiceSaleEvidence{}, errors.New("invoice amount changed while being read")
-	}
-	payment, found, err := c.GetPayment(ctx, transactionID)
+	payment, found, err := c.GetPayment(ctx, candidate.TransactionID)
 	if err != nil {
-		return InvoiceSaleEvidence{}, err
+		return InvoiceSaleEvidence{}, false, err
 	}
-	if !found || payment.ID != transactionID {
-		return InvoiceSaleEvidence{}, errors.New("invoice payment disappeared during verification")
+	if !found || payment.ID != candidate.TransactionID {
+		return InvoiceSaleEvidence{}, false, errors.New("invoice payment disappeared during verification")
 	}
 	for _, action := range payment.Actions {
 		if (action.Success || action.Response == "1" || action.ResponseCode == "100") && (strings.EqualFold(action.Type, "refund") || strings.EqualFold(action.Type, "credit") || strings.EqualFold(action.Type, "void")) {
-			return InvoiceSaleEvidence{}, fmt.Errorf("invoice transaction %s has a reversal", transactionID)
+			return InvoiceSaleEvidence{}, false, fmt.Errorf("invoice transaction %s has a reversal", candidate.TransactionID)
 		}
 	}
-	return InvoiceSaleEvidence{InvoiceID: invoice, Sale: sale, PaidAt: paidAt}, nil
+	return InvoiceSaleEvidence{InvoiceID: invoice, Sale: sale, PaidAt: paidAt}, true, nil
+}
+
+func (c *NMIClient) invoiceSaleCandidate(ctx context.Context, invoice uuid.UUID) (candidate QueryTransaction, approved QueryAction, found bool, err error) {
+	description := "invoice " + invoice.String()
+	seen := map[string]bool{}
+	const pageSize = 1000
+	for page := 0; page < 100; page++ {
+		history, err := c.TransactionReport(ctx, QueryFilter{OrderDescription: description, ResultLimit: pageSize, PageNumber: page})
+		if err != nil {
+			return candidate, approved, false, err
+		}
+		for _, txn := range history.Transactions {
+			if txn.OrderDescription != description || txn.TransactionID == "" || seen[txn.TransactionID] {
+				return candidate, approved, false, errors.New("invoice history contains an unbound or repeated transaction")
+			}
+			seen[txn.TransactionID] = true
+			if txn.Reversed() {
+				return candidate, approved, false, errors.New("invoice history contains a reversal")
+			}
+			hasSale := false
+			for _, action := range txn.Actions {
+				if !action.Is("sale") && !action.Is("refund") && !action.Is("credit") && !action.Is("void") && !action.Is("auth") {
+					continue
+				}
+				if action.Success != "0" && action.Success != "1" {
+					return candidate, approved, false, errors.New("invoice history has an unreadable outcome")
+				}
+				hasSale = hasSale || action.Is("sale")
+				if !action.Succeeded() {
+					code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
+					condition := strings.ToLower(strings.TrimSpace(txn.Condition))
+					if err != nil || code < 200 || code >= 300 || UncertainResponseCode(code) || (condition != "" && condition != "failed" && condition != "complete") {
+						return candidate, approved, false, errors.New("invoice history contains an unresolved financial outcome")
+					}
+					continue
+				}
+				if !action.Is("sale") {
+					return candidate, approved, false, errors.New("invoice history contains another financial action")
+				}
+				if found {
+					return candidate, approved, false, errors.New("invoice has multiple successful provider sales")
+				}
+				candidate, approved, found = txn, action, true
+			}
+			if !hasSale {
+				return candidate, approved, false, errors.New("invoice history does not establish a sale outcome")
+			}
+		}
+		if len(history.Transactions) < pageSize {
+			return candidate, approved, found, nil
+		}
+	}
+	return candidate, approved, false, errors.New("invoice history exceeds the bounded page limit")
 }

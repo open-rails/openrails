@@ -39,3 +39,12 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(invoice_id)::uuid
 -- name: GetInvoiceRecoveryLedgerTransfer :one
 SELECT * FROM billing.ledger_transfers
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(transfer_id)::uuid;
+
+-- A different chosen card does not hide a prior account's paid invoice, even
+-- if that card was added after the backup. Inspect every known invoice-capable
+-- account in this deployment environment; unrelated rails cannot collect it.
+-- name: InvoiceRecoveryAccounts :many
+SELECT p.id,p.rail FROM billing.psps p
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.rail IN ('nmi','stripe')
+ AND p.environment=(SELECT environment FROM billing.psps WHERE merchant_id=p.merchant_id AND id=sqlc.arg(routed_psp)::uuid)
+ORDER BY p.id;

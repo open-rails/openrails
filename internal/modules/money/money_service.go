@@ -79,10 +79,11 @@ var ErrInsufficientCredits = billing.ErrInsufficientCredits
 
 type MoneyService struct {
 	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.
-	EngineAdmissionHold   bool
-	hyperSwitchDeployment string
-	db                    *db.DB
-	clock                 clockwork.Clock
+	EngineAdmissionHold     bool
+	hyperSwitchDeployment   string
+	invoiceRecoveryResolver NMIClientResolver
+	db                      *db.DB
+	clock                   clockwork.Clock
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {

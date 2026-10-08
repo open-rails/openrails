@@ -38,25 +38,116 @@ type ObservedNMIInvoiceReceipt struct {
 }
 
 func ReadObservedNMIInvoiceReceipt(ctx context.Context, resolver railresolve.NMIClientResolver, mid, psp uuid.UUID, transactionID string) (ObservedNMIInvoiceReceipt, error) {
-	if resolver == nil || mid == uuid.Nil || psp == uuid.Nil {
-		return ObservedNMIInvoiceReceipt{}, fmt.Errorf("%w: account reader unavailable", ErrInvoiceRecoveryHeld)
-	}
-	client, ok, err := resolver.ResolveNMIClient(ctx, mid, &psp)
+	client, err := invoiceRecoveryClient(ctx, resolver, mid, psp)
 	if err != nil {
 		return ObservedNMIInvoiceReceipt{}, err
-	}
-	if !ok || client == nil {
-		return ObservedNMIInvoiceReceipt{}, fmt.Errorf("%w: account cannot be read", ErrInvoiceRecoveryHeld)
-	}
-	owner, account := client.AccountIdentity()
-	if owner != mid || account != psp {
-		return ObservedNMIInvoiceReceipt{}, fmt.Errorf("%w: reader belongs to another account", ErrInvoiceRecoveryHeld)
 	}
 	facts, err := client.ReadInvoiceSaleEvidence(ctx, transactionID)
 	if err != nil {
 		return ObservedNMIInvoiceReceipt{}, err
 	}
 	return ObservedNMIInvoiceReceipt{merchant: mid, psp: psp, facts: facts}, nil
+}
+
+func invoiceRecoveryClient(ctx context.Context, resolver railresolve.NMIClientResolver, mid, psp uuid.UUID) (*nmi.NMIClient, error) {
+	if resolver == nil || mid == uuid.Nil || psp == uuid.Nil {
+		return nil, fmt.Errorf("%w: account reader unavailable", ErrInvoiceRecoveryHeld)
+	}
+	client, ok, err := resolver.ResolveNMIClient(ctx, mid, &psp)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || client == nil {
+		return nil, fmt.Errorf("%w: account cannot be read", ErrInvoiceRecoveryHeld)
+	}
+	owner, account := client.AccountIdentity()
+	if owner != mid || account != psp {
+		return nil, fmt.Errorf("%w: reader belongs to another account", ErrInvoiceRecoveryHeld)
+	}
+	return client, nil
+}
+
+// SetInvoiceRecoveryResolver wires account-bound readback before serving work.
+func (s *MoneyService) SetInvoiceRecoveryResolver(resolver NMIClientResolver) {
+	s.invoiceRecoveryResolver = resolver
+}
+
+// findObservedInvoicePayment checks the current history of every retained NMI
+// account in this environment before another account can charge, including
+// accounts whose card was added after the retained backup.
+// A bulk refresh deliberately ending before now cannot replace this read.
+func (s *MoneyService) findObservedInvoicePayment(ctx context.Context, q *gen.Queries, mid, invoice, routedPSP uuid.UUID) (ObservedNMIInvoiceReceipt, bool, error) {
+	accounts, err := q.InvoiceRecoveryAccounts(ctx, gen.InvoiceRecoveryAccountsParams{MerchantID: mid, RoutedPsp: routedPSP})
+	if err != nil {
+		return ObservedNMIInvoiceReceipt{}, false, err
+	}
+	var receipt ObservedNMIInvoiceReceipt
+	found := false
+	for _, account := range accounts {
+		if account.Rail != "nmi" {
+			continue
+		}
+		client, err := invoiceRecoveryClient(ctx, s.invoiceRecoveryResolver, mid, account.ID)
+		if err != nil {
+			return ObservedNMIInvoiceReceipt{}, false, err
+		}
+		facts, exists, err := client.FindInvoiceSaleEvidence(ctx, invoice)
+		if err != nil {
+			return ObservedNMIInvoiceReceipt{}, false, fmt.Errorf("%w: account %s invoice history: %v", ErrInvoiceRecoveryHeld, account.ID, err)
+		}
+		if !exists {
+			continue
+		}
+		if found {
+			return ObservedNMIInvoiceReceipt{}, false, fmt.Errorf("%w: invoice paid on multiple accounts", ErrInvoiceRecoveryHeld)
+		}
+		receipt, found = ObservedNMIInvoiceReceipt{merchant: mid, psp: account.ID, facts: facts}, true
+	}
+	return receipt, found, nil
+}
+
+// recoverBeforeDispatch handles an accepted operation restored without a local
+// submission fence. Its own provider order remains canonical. Another order is
+// never adopted as its charge: only atomic, still-unsent completion can release
+// this operation before the observed invoice receipt is recorded.
+func (h *InvoiceCollectionHandler) recoverBeforeDispatch(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (intents.Outcome, bool) {
+	if p.Rail != string(models.RailNMI) {
+		return intents.Outcome{}, false
+	}
+	resolver, ok := h.Verifier.(NMIClientResolver)
+	if !ok {
+		return intents.Parked("invoice history reader unavailable"), true
+	}
+	service := NewMoneyService(h.DB, h.Clock)
+	service.SetInvoiceRecoveryResolver(resolver)
+	receipt, found, err := service.findObservedInvoicePayment(ctx, h.DB.Gen(ctx), intent.MerchantID, p.InvoiceID, *intent.PspID)
+	if err != nil {
+		return intents.Parked("read current invoice history: " + err.Error()), true
+	}
+	if !found {
+		return intents.Outcome{}, false
+	}
+	if receipt.psp == *intent.PspID && receipt.facts.Sale.OrderReference == intent.ID.String() {
+		return h.qualifyAndSettle(ctx, intent, receipt.facts.Sale.TransactionID), true
+	}
+	var outcome intents.Outcome
+	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		local := *h
+		local.DB = h.DB.NewWithPgxTx(tx)
+		outcome = local.finalizeNotExecuted(ctx, intent, p, "invoice_paid_elsewhere", "invoice already has a verified payment under another operation")
+		if outcome.Class != intents.OutcomeTerminal {
+			return errors.New(outcome.Reason)
+		}
+		// CompleteInvoiceCollection locks and rereads the intent. If another
+		// executor fenced submission, its nonexecution check fails and all
+		// attempt/invoice changes roll back. Terminal rows cannot gain a fence.
+		_, err := NewMoneyService(local.DB, h.Clock).RecoverObservedInvoicePayment(ctx, receipt)
+		return err
+	})
+	if err != nil {
+		return intents.Ambiguous("invoice receipt could not safely replace unsent collection: " + err.Error()), true
+	}
+	return outcome, true
 }
 
 // RecoverObservedInvoicePayment settles an existing finalized invoice from a
