@@ -230,6 +230,7 @@ pkg openrails, type AdminConsoleConfig struct
 pkg openrails, type AdminConsoleConfig struct, APIBaseURL string
 pkg openrails, type AdminConsoleConfig struct, AuthBaseURL string
 pkg openrails, type AdminConsoleConfig struct, Enabled bool
+pkg openrails, type AdminConsoleConfig struct, NewMerchantURL string
 pkg openrails, type AdminConsoleConfig struct, Path string
 pkg openrails, type AuthConfig = config.AuthConfig
 pkg openrails, type AuthConfig struct

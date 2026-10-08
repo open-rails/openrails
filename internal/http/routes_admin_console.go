@@ -37,6 +37,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		AskEnabled:             config.LLMAskConfigured(s.cfg.LLM),
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(s.cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
+		NewMerchantURL:         s.cfg.AdminConsole.NewMerchantURL,
 	}
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = s.controlPlane.AuthAPIBase()

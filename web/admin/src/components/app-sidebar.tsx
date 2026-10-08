@@ -2,6 +2,7 @@
 // (inset variant, brand header, nav, footer user menu, rail).
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
+  Add01Icon,
   CreditCardIcon,
   DashboardCircleIcon,
   PackageIcon,
@@ -20,6 +21,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -37,6 +39,7 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
+import { getBootstrap } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth"
 
 interface NavItem {
@@ -152,6 +155,7 @@ export function AppSidebar() {
 
 function MerchantSwitcher() {
   const { activeMerchant, merchants, selectMerchant } = useAuth()
+  const newMerchantURL = getBootstrap().new_merchant_url
   const label =
     activeMerchant?.display_name || activeMerchant?.slug || "Select merchant"
   const role = activeMerchant?.role ?? "Merchant console"
@@ -217,11 +221,23 @@ function MerchantSwitcher() {
                   </DropdownMenuItem>
                 )
               })}
-              {/* No "create merchant" entry: this console administers one
-                  merchant and has no endpoint that makes another. It used to
-                  link to /account, a route only the hosted product serves, so
-                  on a standalone deployment the menu item led to a 404. */}
             </DropdownMenuGroup>
+            {/* The engine creates no merchants itself: the entry exists only
+                when the host serves a creation page (NewMerchantURL). */}
+            {newMerchantURL && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => window.location.assign(newMerchantURL)}
+                  className="gap-2 py-2"
+                >
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-dashed border-border">
+                    <HugeiconsIcon icon={Add01Icon} className="size-4" />
+                  </span>
+                  New merchant
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

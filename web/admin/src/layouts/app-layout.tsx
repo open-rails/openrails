@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { NoMerchants } from "@/components/no-merchants"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -30,7 +31,7 @@ const trails: [string, { label: string; to?: string }[]][] = [
 ]
 
 export function AppLayout() {
-  const { ready, signedIn } = useAuth()
+  const { ready, signedIn, merchants, merchantsFailed } = useAuth()
   const { pathname } = useLocation()
 
   if (!ready) {
@@ -41,6 +42,23 @@ export function AppLayout() {
     )
   }
   if (!signedIn) return <Navigate to="/login" replace />
+  if (merchantsFailed) {
+    return (
+      <div className="flex min-h-svh items-center justify-center p-6 text-center text-sm text-muted-foreground">
+        <div>
+          <p>Could not load your merchants.</p>
+          <button
+            type="button"
+            className="mt-2 text-primary underline"
+            onClick={() => window.location.reload()}
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
+  if (merchants.length === 0) return <NoMerchants />
 
   const trail =
     trails.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? []

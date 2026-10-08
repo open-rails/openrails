@@ -34,12 +34,22 @@ admin_console:
   # path: /admin              # default; e.g. /billing/admin when the host owns /admin
   # auth_base_url: /auth/v1   # default: the standalone control plane's AuthKit JSON API
   # api_base_url: /v1      # default standalone; embedded hosts typically /billing/v1
+  # new_merchant_url: /merchants/new  # host page behind "New merchant"; unset hides it
 ```
 
 Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_PATH`, `ADMIN_CONSOLE_AUTH_BASE_URL`,
-`ADMIN_CONSOLE_API_BASE_URL`. Turning it **off** is the default: leave
+`ADMIN_CONSOLE_API_BASE_URL`, `ADMIN_CONSOLE_NEW_MERCHANT_URL`. Turning it **off** is the default: leave
 `enabled` unset (and/or build without assets — plain `go build ./...` links
 zero frontend bytes and never needs Node).
+
+**Users without a merchant.** A signed-in user who belongs to no merchant sees
+an empty state instead of a dashboard. OpenRails creates no merchants itself, so
+by default it tells them to ask an operator. A host that does (a hosted product)
+sets `new_merchant_url` (`AdminConsoleConfig.NewMerchantURL`) to its own page: the
+empty state and the merchant switcher then offer "New merchant", which navigates
+there. The value is a same-origin path or an https URL. The host sends the user
+back with `#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the console selects
+that merchant if the user belongs to it, and drops the fragment.
 
 **Standalone binary.** `web/admin/embed.go` go:embeds `web/admin/dist`, where
 Vite builds. Only `dist/.gitkeep` is committed, so `go build ./...` needs no
