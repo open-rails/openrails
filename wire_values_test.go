@@ -43,7 +43,7 @@ func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
 	hours := 720
 	plan, err := checkoutsession.NewPlan("Premium", math.MaxInt64, "jpy", &hours, &hours)
 	require.NoError(t, err)
-	require.Equal(t, checkoutsession.CheckoutSessionPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, BillingIntervalHours: &hours, AccessDurationHours: &hours}, plan)
+	require.Equal(t, checkoutsession.CheckoutSessionPlan{AutoRenew: true, DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, BillingIntervalHours: &hours, AccessDurationHours: &hours}, plan)
 	raw, err := json.Marshal(plan)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"unit_amount":"9223372036854775807"`)

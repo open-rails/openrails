@@ -64,7 +64,7 @@ func canonicalWireFixtures() map[string]any {
 		}},
 		"checkout_session.json": checkoutsession.CheckoutSession{
 			ID: "ocs_fixture", Status: "requires_action", Merchant: checkoutsession.CheckoutSessionMerchant{DisplayName: "Acme Demo"},
-			Plan:      checkoutsession.CheckoutSessionPlan{DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, BillingIntervalHours: &periodHours, AccessDurationHours: &periodHours},
+			Plan:      checkoutsession.CheckoutSessionPlan{AutoRenew: true, DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, BillingIntervalHours: &periodHours, AccessDurationHours: &periodHours},
 			LineItems: []checkoutsession.CheckoutSessionLineItem{{Label: "Premium Membership", Sublabel: ptr("Renews monthly"), Amount: maxMoney}, {Label: "Launch discount", Amount: minMoney}},
 			Tax:       &zero, DueToday: &maxMoney,
 			Options: []checkoutsession.CheckoutSessionOption{

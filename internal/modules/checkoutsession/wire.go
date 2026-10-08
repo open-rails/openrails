@@ -53,6 +53,8 @@ type CheckoutSessionMerchant struct {
 
 // CheckoutSessionPlan is the offer: what the buyer pays and how often.
 type CheckoutSessionPlan struct {
+	// AutoRenew is the customer's accepted order preference, not a catalog term.
+	AutoRenew            bool   `json:"auto_renew"`
 	DisplayName          string `json:"display_name"`
 	UnitAmount           int64  `json:"unit_amount,string"`
 	Currency             string `json:"currency"`
@@ -69,7 +71,7 @@ func NewPlan(displayName string, amount int64, currency string, billingIntervalH
 	if !ok {
 		return CheckoutSessionPlan{}, fmt.Errorf("%w: currency %q is not registered", billing.ErrInvalid, currency)
 	}
-	return CheckoutSessionPlan{DisplayName: displayName, UnitAmount: amount, Currency: units.Code, UnitDecimals: units.Decimals, BillingIntervalHours: billingIntervalHours, AccessDurationHours: accessDurationHours}, nil
+	return CheckoutSessionPlan{DisplayName: displayName, UnitAmount: amount, Currency: units.Code, UnitDecimals: units.Decimals, BillingIntervalHours: billingIntervalHours, AccessDurationHours: accessDurationHours, AutoRenew: billingIntervalHours != nil}, nil
 }
 
 // CheckoutSessionLineItem is one order line in the plan currency.
