@@ -9,13 +9,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -404,6 +407,18 @@ func (e paymentTransactionTaken) Error() string        { return string(e) }
 func (e paymentTransactionTaken) Is(target error) bool { return target == ErrPaymentTransactionTaken }
 
 func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
+	if req == nil {
+		return nil, errors.New("purchase is required")
+	}
+	if req.CheckoutAttemptID == uuid.Nil && s.database != nil && s.transactionDB == nil {
+		var result *payments.RegisterPurchaseResponse
+		err := s.database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			result, err = s.transactionBound(s.database.NewWithPgxTx(tx)).RegisterPurchase(ctx, req)
+			return err
+		})
+		return result, err
+	}
 	if req != nil && req.CheckoutAttemptID != uuid.Nil {
 		return s.registerSessionPurchase(ctx, req)
 	}
@@ -421,6 +436,16 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
+	if req.Channel == models.ChannelManual && price.CustomerAmount != nil {
+		var chosen *int64
+		if req.AmountProvided {
+			chosen = &req.Amount
+		}
+		price, err = CheckoutPriceForAmount(price, chosen)
+		if err != nil {
+			return nil, err
+		}
+	}
 	product, err := s.ProductService.GetByID(ctx, price.ProductID)
 	if err != nil {
 		return nil, fmt.Errorf("product not found: %w", err)
@@ -432,13 +457,30 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		eligibility = &EligibilityResult{Status: EligibilityAllowed}
 	}
 
-	return s.applyPurchase(ctx, req, price, product, eligibility, s.now(), uuid.Nil)
+	acceptedAt := s.now().UTC().Truncate(time.Microsecond)
+	if req.PurchasedAt != nil {
+		acceptedAt = req.PurchasedAt.UTC().Truncate(time.Microsecond)
+	}
+	benefitPrice := *price
+	if req.AmountProvided {
+		benefitPrice.Amount = req.Amount
+	}
+	var credit *models.CreditGrantSnapshot
+	// Native provider purchases require durable accepted terms. Historical
+	// observations without them must never inherit a newly added benefit.
+	if req.Channel == models.ChannelManual {
+		credit, err = acceptedCreditGrant(product, &benefitPrice)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.applyPurchase(ctx, req, price, product, eligibility, acceptedAt, uuid.Nil, credit)
 }
 
 // applyPurchase is the shared financial/access writer. Observed purchases
 // prepare current facts above; durable sales supply their accepted snapshots.
 // Every service on s must share the caller's transaction for durable completion.
-func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest, price *models.Price, product *models.Product, eligibility *EligibilityResult, acceptedAt time.Time, acceptedPaymentID uuid.UUID) (*payments.RegisterPurchaseResponse, error) {
+func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest, price *models.Price, product *models.Product, eligibility *EligibilityResult, acceptedAt time.Time, acceptedPaymentID uuid.UUID, credit *models.CreditGrantSnapshot) (*payments.RegisterPurchaseResponse, error) {
 	coverage := eligibility.Coverage
 	if coverage == nil {
 		coverage = &CoverageInfo{}
@@ -466,6 +508,12 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 	if paymentID == uuid.Nil {
 		paymentID = uuidutil.NewV7()
 	}
+	settledCredit := models.CloneCreditGrantSnapshot(credit)
+	if settledCredit != nil {
+		settledCredit.StartsAt = now.UTC().Truncate(time.Microsecond)
+		expires := settledCredit.StartsAt.AddDate(0, 0, settledCredit.ExpiresAfterDays)
+		settledCredit.ExpiresAt = &expires
+	}
 	payment := &models.Payment{
 		ID:                       paymentID,
 		CustomerID:               customerID,
@@ -485,6 +533,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		DiscountMetadata:         req.DiscountMetadata,
 		Metadata:                 req.Metadata,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
+		CreditGrantSnapshot:      settledCredit,
 		// or#827: RegisterPurchase records a charge the rail already approved,
 		// keyed on the rail's own transaction id.
 		MoneyMovement: models.MoneyMovementRail,
@@ -544,7 +593,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 			if accepted == nil {
 				accepted = map[string]*int{}
 			}
-			if !reflect.DeepEqual(observed, accepted) || existingPayment.ListAmount != price.Amount {
+			if !reflect.DeepEqual(observed, accepted) || !models.SameCreditGrantPromise(existingPayment.CreditGrantSnapshot, credit) || existingPayment.ListAmount != price.Amount {
 				return nil, errors.New("existing payment contradicts accepted purchase benefits")
 			}
 		}
@@ -554,7 +603,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 			sourceID = *existingPayment.SubscriptionID
 		}
 		if acceptedPaymentID != uuid.Nil {
-			if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, existingPayment.ID, entitlementsSpec, price.AccessDurationHours, acceptedAt, coverage); err != nil {
+			if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, existingPayment.ID, entitlementsSpec, price.AccessDurationHours, acceptedAt, coverage, existingPayment.CreditGrantSnapshot == nil); err != nil {
 				return nil, err
 			}
 		} else {
@@ -565,10 +614,13 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 			// Idempotently (re)record the product access grant for one-time purchases
 			// (issue #250) so a replayed webhook/poll repairs a missing grant the same
 			// way it repairs entitlements.
-			if err := s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours, acceptedAt); err != nil {
+			if err := s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil || existingPayment.CreditGrantSnapshot != nil, price.AutoRenew, price.AccessDurationHours, acceptedAt); err != nil {
 				return nil, fmt.Errorf("failed to repair product access for existing payment: %w", err)
 			}
 
+		}
+		if err := s.grantPurchasedCredits(ctx, existingPayment, product.ID); err != nil {
+			return nil, err
 		}
 		grantedEntitlements := make([]string, 0, len(entitlementsSpec))
 		for entName := range entitlementsSpec {
@@ -589,7 +641,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 
 	var grantedEntitlements []string
 	if acceptedPaymentID != uuid.Nil {
-		if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, paymentID, product.EntitlementsSpec, price.AccessDurationHours, acceptedAt, coverage); err != nil {
+		if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, paymentID, product.EntitlementsSpec, price.AccessDurationHours, acceptedAt, coverage, credit == nil); err != nil {
 			return nil, err
 		}
 		for name := range product.EntitlementsSpec {
@@ -608,10 +660,13 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		// Durable product ownership/access grant (issue #250) for one-time product
 		// purchases — additive to the feature entitlements granted above. Keyed on the
 		// payment id so it is idempotent; skipped for subscription purchases.
-		if err := s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours, acceptedAt); err != nil {
+		if err := s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil || credit != nil, price.AutoRenew, price.AccessDurationHours, acceptedAt); err != nil {
 			return nil, fmt.Errorf("failed to grant product access after payment: %w", err)
 		}
 
+	}
+	if err := s.grantPurchasedCredits(ctx, payment, product.ID); err != nil {
+		return nil, err
 	}
 	var delayedStart *time.Time
 	if coverage.HasCoverage && coverage.EndDate != nil {
@@ -725,4 +780,26 @@ func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, 
 	}
 
 	return nil
+}
+
+// grantPurchasedCredits fulfills the payment snapshot using the existing credit
+// ledger in the same transaction as the receipt. Replays retain an expired or
+// revoked lot; they never mint replacement credit.
+func (s *CheckoutPurchaseService) grantPurchasedCredits(ctx context.Context, payment *models.Payment, productID uuid.UUID) error {
+	credit := payment.CreditGrantSnapshot
+	if credit == nil {
+		return nil
+	}
+	if err := credit.Validate(); err != nil {
+		return err
+	}
+	if s.transactionDB == nil {
+		return errors.New("purchased credit requires the payment transaction")
+	}
+	_, err := purchasedcredits.New(s.transactionDB, s.clock).Fund(ctx, purchasedcredits.Params{
+		CustomerID: identity.CustomerID(payment.CustomerID), PaymentID: payment.ID, ProductID: productID,
+		Amount: credit.Amount, PaidAmount: payment.Amount, Currency: credit.Currency,
+		StartsAt: credit.StartsAt, ExpiresAt: credit.ExpiresAt,
+	})
+	return err
 }

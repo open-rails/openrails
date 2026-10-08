@@ -47,7 +47,6 @@ import type { Price, Product } from "@/lib/api/generated/wire"
 import {
   currencyScale,
   formatDate,
-  formatNativeAmount,
   nativeAmountFromInput,
   shortId,
   supportedCurrencies,
@@ -56,7 +55,10 @@ import { toastApiError } from "@/lib/toast"
 import { adminMutations } from "@/lib/mutations"
 import { CatalogApplicationDialog } from "@/pages/catalog/application-dialog"
 import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
-import { priceIntervalLabel } from "@/pages/catalog/price-format"
+import {
+  priceAmountLabel,
+  priceIntervalLabel,
+} from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 import { adminQueries } from "@/lib/queries"
 
@@ -641,9 +643,7 @@ function PriceRow({
         </Link>
       </TableCell>
       <TableCell className="font-medium">{productName}</TableCell>
-      <TableCell className="tabular-nums">
-        {formatNativeAmount(price.unit_amount, price.currency)}
-      </TableCell>
+      <TableCell className="tabular-nums">{priceAmountLabel(price)}</TableCell>
       <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">

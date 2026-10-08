@@ -52,6 +52,37 @@ granting anything. Pass `successUrl` to return the buyer from a redirect step
 server that starts checkout itself mints the session with the Go
 `Client.CreateCheckoutSession` and hands the browser its `id` and `url`.
 
+For prepaid credits, a fixed pack is another product/price selection. A
+`customer_amount` price also accepts `amount` when minting. Collect the amount
+on your product page before opening checkout; the resulting session shows and
+charges that exact amount, and its payment form cannot change it:
+
+```tsx
+import { decimalToAmount } from "@openrails/billing-ui/client"
+
+// `depositPrice` comes from listPrices; `currency` from listCurrencies.
+// `enteredAmount` is the text from an <input inputMode="decimal">, e.g. "100".
+const amount = decimalToAmount(enteredAmount, currency.decimals)
+const bounds = depositPrice.customer_amount
+if (
+  !amount ||
+  !bounds ||
+  BigInt(amount) < BigInt(bounds.min_amount) ||
+  BigInt(amount) > BigInt(bounds.max_amount)
+) {
+  throw new Error("Choose an amount within the deposit limits")
+}
+const session = await billing.createCheckoutSession({
+  priceId: depositPrice.id,
+  amount, // USD 100 becomes "100000000"; no floating-point conversion
+})
+```
+
+OpenRails validates the bounds and whole currency minor units before accepting
+payment. Fixed prices reject `amount`; their pack benefit can be greater than
+the purchase price for a bulk discount. Customer-selected deposits currently
+use NMI or Stripe. Changing the selected amount requires minting a new session.
+
 A rail's own step is the pay result's `next_action`: `redirect_to_url` (an
 https page, opened in the top window) or `solana_pay` (a `solana:` link shown
 as a QR code). A card challenge is its `operation`, authenticated in the page.

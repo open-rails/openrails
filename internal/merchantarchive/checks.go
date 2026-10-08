@@ -256,6 +256,33 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
 // restoration still refuses missing/cross-payer retained business references.
 var referenceChecks = []rowCheck{
+	// Current available offers obey the same product/price contract as ordinary
+	// catalog writes; incompatible archived history remains portable.
+	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
+   WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (
+    (prices.customer_amount IS NOT NULL AND (pr.credit_grant IS NULL OR NOT COALESCE((pr.credit_grant->>'from_payment')::boolean,false)))
+    OR (pr.credit_grant IS NOT NULL AND (prices.auto_renew
+       OR prices.currency IS DISTINCT FROM pr.credit_grant->>'currency'
+       OR (prices.customer_amount IS NULL AND prices.amount<=0)))))`},
+
+	// A native lot retains its payment's accepted promise. The product's current
+	// benefit is deliberately irrelevant to previously purchased credit.
+	{"payments", `credit_grant_snapshot IS NOT NULL AND status='completed' AND NOT EXISTS (
+  SELECT 1 FROM billing.grants g JOIN billing.prices pr ON pr.merchant_id=$1 AND pr.id=payments.price_id
+  WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.kind='credit' AND g.event='grant'
+    AND g.source_type='purchase' AND g.source_id=payments.id::text
+    AND g.customer_id=payments.customer_id AND g.product_id=pr.product_id
+    AND g.currency=payments.currency AND g.amount=(payments.credit_grant_snapshot->>'amount')::bigint
+    AND (g.spec_snapshot->'deposit'->>'paid_amount')::bigint=payments.amount AND payments.amount>0
+    AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
+    AND g.ends_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
+	{"grants", `kind='credit' AND event='grant' AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL AND NOT EXISTS (
+  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=grants.payment_id
+    AND p.status='completed' AND p.credit_grant_snapshot IS NOT NULL
+    AND p.customer_id=grants.customer_id AND p.currency=grants.currency
+    AND (p.credit_grant_snapshot->>'amount')::bigint=grants.amount
+    AND p.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)`},
+
 	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
            (m.custodian='psp' AND m.psp_id=provider_intents.psp_id AND m.rail_customer_ref=provider_intents.payload->>'rail_customer_ref' AND
@@ -266,7 +293,14 @@ var referenceChecks = []rowCheck{
              (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
               (provider_intents.payload->>'detach_only'='false' AND m.custodian_id=provider_intents.custodian_id AND m.rail_method_ref=provider_intents.payload->'instrument'->>'rail_method_ref'))))`},
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
-	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
+	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g
+   WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND (
+     g.customer_id=ledger_transfers.customer_id OR (
+       ledger_transfers.customer_id IS NULL AND g.kind='credit'
+       AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
+       AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
+       AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
+         AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
 	// Restore preserves historical denormalized tiers, but a live subscription
 	// must still agree with its product, as required by the ordinary tier

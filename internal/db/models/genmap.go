@@ -37,6 +37,14 @@ func ToJSONB[M ~map[string]V, V any](m M) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// PointerToJSONB preserves an absent optional object as SQL NULL.
+func PointerToJSONB[T any](value *T) ([]byte, error) {
+	if value == nil {
+		return nil, nil
+	}
+	return json.Marshal(value)
+}
+
 // UpdateTimestamp keeps a zero UpdatedAt from clobbering the column with
 // 0001-01-01 on full-row updates.
 func UpdateTimestamp(t time.Time) time.Time {
@@ -132,6 +140,9 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	if err := FromJSONB(p.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "payments.entitlements_spec_snapshot"); err != nil {
 		return nil, err
 	}
+	if err := FromJSONB(p.CreditGrantSnapshot, &m.CreditGrantSnapshot, "payments.credit_grant_snapshot"); err != nil {
+		return nil, err
+	}
 	if p.Rail != nil {
 		m.Rail = Rail(*p.Rail)
 	}
@@ -166,6 +177,9 @@ func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 		CreatedAt:           p.CreatedAt,
 		UpdatedAt:           p.UpdatedAt,
 	}
+	if err := FromJSONB(p.CustomerAmount, &m.CustomerAmount, "prices.customer_amount"); err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 
@@ -183,6 +197,9 @@ func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 		UpdatedAt:   p.UpdatedAt,
 	}
 	if err := FromJSONB(p.EntitlementsSpec, &m.EntitlementsSpec, "products.entitlements_spec"); err != nil {
+		return nil, err
+	}
+	if err := FromJSONB(p.CreditGrant, &m.CreditGrant, "products.credit_grant"); err != nil {
 		return nil, err
 	}
 	return m, nil

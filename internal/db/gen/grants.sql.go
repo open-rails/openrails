@@ -183,9 +183,9 @@ func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGra
 
 const getCreditLotRemaining = `-- name: GetCreditLotRemaining :one
 SELECT (g.amount - COALESCE((
-    SELECT SUM(t.amount) FROM billing.ledger_transfers t
+    SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
     WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-      AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
+      AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
 ), 0))::bigint AS remaining
 FROM billing.grants g
 WHERE g.merchant_id = $1::uuid AND g.id = $2::uuid
@@ -531,9 +531,9 @@ WHERE g.merchant_id = $1::uuid AND g.kind = 'credit' AND g.event = 'grant'
       SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = $1::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
   AND (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM billing.ledger_transfers t
+        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = $1::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'credit_expire')
+          AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_refund', 'credit_refund_restore')
     ), 0)) > 0
 LIMIT $3::int
 `
@@ -729,9 +729,9 @@ func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLaps
 const listLapsedCreditLots = `-- name: ListLapsedCreditLots :many
 SELECT g.id,
     (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM billing.ledger_transfers t
+        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'credit_expire')
+          AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_refund', 'credit_refund_restore')
     ), 0))::bigint AS remaining
 FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
@@ -1175,9 +1175,18 @@ func (q *Queries) ListRenewalGrantsForArchive(ctx context.Context, arg ListRenew
 const listSpendableCreditLots = `-- name: ListSpendableCreditLots :many
 SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM billing.ledger_transfers t
+        SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'credit_expire')
+          AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_refund', 'credit_refund_restore')
+    ), 0) - COALESCE((
+        SELECT ceil(g.amount::numeric * sum(-refund.amount) / payment.amount)
+        FROM billing.payments refund JOIN billing.payments payment
+          ON payment.merchant_id=g.merchant_id AND payment.id=g.payment_id AND payment.deleted_at IS NULL
+        WHERE refund.merchant_id=g.merchant_id AND refund.customer_id=g.customer_id
+          AND refund.currency=g.currency AND refund.refunded_payment_id=g.payment_id
+          AND refund.status='pending' AND refund.amount<0 AND refund.deleted_at IS NULL
+          AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
+        GROUP BY payment.amount
     ), 0))::bigint AS remaining
 FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
@@ -1488,9 +1497,9 @@ WHERE g.merchant_id = $1::uuid
     OR
     (g.kind = 'credit' AND (
         g.amount - COALESCE((
-            SELECT SUM(t.amount) FROM billing.ledger_transfers t
+            SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
             WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-              AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
+              AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
         ), 0)) > 0)
   )
 ORDER BY g.created_at

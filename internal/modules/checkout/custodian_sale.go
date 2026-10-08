@@ -58,13 +58,14 @@ func CustodianSaleIdempotencyKey(checkoutIdempotencyKey string) string {
 // CustodianSalePayload carries everything Execute/Verify need without the
 // originating request. NEVER a PAN — the intent id is the only card handle.
 type CustodianSalePayload struct {
-	TokenIntentID string    `json:"bt_token_intent_id"`
-	AmountMicros  int64     `json:"amount_micros"`
-	Currency      string    `json:"currency"`
-	Description   string    `json:"description"`
-	UserID        string    `json:"user_id"`
-	PriceID       uuid.UUID `json:"price_id"`
-	E2ERunID      string    `json:"e2e_run_id,omitempty"`
+	CheckoutAttemptID uuid.UUID `json:"checkout_attempt_id,omitempty"`
+	TokenIntentID     string    `json:"bt_token_intent_id"`
+	AmountMicros      int64     `json:"amount_micros"`
+	Currency          string    `json:"currency"`
+	Description       string    `json:"description"`
+	UserID            string    `json:"user_id"`
+	PriceID           uuid.UUID `json:"price_id"`
+	E2ERunID          string    `json:"e2e_run_id,omitempty"`
 }
 
 // CheckoutCustodianSaleService runs one-time sales on custodian-held cards.
@@ -210,6 +211,16 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
 		return nil, err
 	}
+	var checkoutAttemptID uuid.UUID
+	if req.CheckoutAttemptID != "" {
+		id, err := billing.ParseCheckoutAttemptID(req.CheckoutAttemptID)
+		if err != nil {
+			return nil, err
+		}
+		checkoutAttemptID = id.UUID()
+	} else if product.CreditGrant != nil {
+		return nil, errors.New("purchased credit requires a checkout attempt with accepted terms")
+	}
 	params := intents.EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   string(models.RailNMI),
@@ -217,13 +228,14 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		PspID:      db.PSPIDFromContext(ctx),
 		PriceID:    &price.ID,
 		Payload: CustodianSalePayload{
-			TokenIntentID: intentID,
-			AmountMicros:  price.Amount,
-			Currency:      price.Currency,
-			Description:   fmt.Sprintf("Purchase: %s", product.DisplayName),
-			UserID:        user.ID,
-			PriceID:       price.ID,
-			E2ERunID:      strings.TrimSpace(req.Metadata["e2e_run_id"]),
+			CheckoutAttemptID: checkoutAttemptID,
+			TokenIntentID:     intentID,
+			AmountMicros:      price.Amount,
+			Currency:          price.Currency,
+			Description:       fmt.Sprintf("Purchase: %s", product.DisplayName),
+			UserID:            user.ID,
+			PriceID:           price.ID,
+			E2ERunID:          strings.TrimSpace(req.Metadata["e2e_run_id"]),
 		},
 		IdempotencyKey: CustodianSaleIdempotencyKey(idempotencyKey),
 		NextAttemptAt:  time.Now().UTC(),
@@ -593,15 +605,16 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		metadata["e2e_run_id"] = p.E2ERunID
 	}
 	result, err := h.Sale.PurchaseService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:        p.UserID,
-		PriceID:       p.PriceID,
-		Rail:          nmiproxy.Rail,
-		TransactionID: res.TransactionID,
-		Amount:        p.AmountMicros,
-		Currency:      p.Currency,
-		Metadata:      metadata,
-		AttemptKind:   payments.AttemptInitial,
-		TokenType:     res.TokenType,
+		CheckoutAttemptID: p.CheckoutAttemptID,
+		UserID:            p.UserID,
+		PriceID:           p.PriceID,
+		Rail:              nmiproxy.Rail,
+		TransactionID:     res.TransactionID,
+		Amount:            p.AmountMicros,
+		Currency:          p.Currency,
+		Metadata:          metadata,
+		AttemptKind:       payments.AttemptInitial,
+		TokenType:         res.TokenType,
 	})
 	if err != nil {
 		return intents.Ambiguous("sale charged, but purchase registration failed: " + err.Error())

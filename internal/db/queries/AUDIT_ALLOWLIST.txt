@@ -40,7 +40,6 @@ unindexed-filter ListReconciliationFindings      # optional admin filter, paged
 unindexed-filter ListProviderIntents                 # optional admin filter, paged
 unindexed-filter CountProviderIntents                # optional admin filter, paged
 unindexed-filter ListSubscriptionRepricesPage    # optional admin filter, keyset page
-unindexed-filter ListPricesFiltered              # optional filters, keyset page of the operator-declared catalog
 
 # Transaction-level concurrency fences are executable SQL but cannot be
 # wrapped in EXPLAIN by the query auditor.

@@ -396,11 +396,15 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, fmt.Errorf("resolve checkout session product: %w", err)
 	}
+	price, err = checkout.CheckoutPriceForAmount(price, in.Amount)
+	if err != nil {
+		return checkoutsession.Offer{}, uuid.Nil, err
+	}
 	plan, err := checkoutsession.NewPlan(product.DisplayName, price.Amount, price.Currency, price.AccessDurationHours, price.AutoRenew)
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, fmt.Errorf("checkout session plan: %w", err)
 	}
-	offer := checkoutsession.Offer{Plan: plan, DueToday: price.Amount}
+	offer := checkoutsession.Offer{Plan: plan, DueToday: price.Amount, CustomerAmount: in.Amount}
 	if price.TrialUnitAmount != nil {
 		offer.DueToday = *price.TrialUnitAmount
 	}
@@ -514,6 +518,7 @@ func hostedEngineRequest(session checkoutsession.Session, customer billing.Check
 	return billing.CreateCheckoutAttemptParams{
 		Customer:       customer,
 		PriceID:        billing.PriceID(session.PriceID),
+		Amount:         session.Offer.CustomerAmount,
 		IdempotencyKey: session.AttemptKey(),
 		SuccessURL:     session.SuccessURL,
 		CancelURL:      session.SuccessURL,

@@ -15,6 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -52,6 +54,23 @@ func (s *PaymentService) Clock() clockwork.Clock {
 }
 
 func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) error {
+	if payment != nil && payment.RefundedPaymentID != nil && payment.ReversalKind != nil && *payment.ReversalKind == ReversalDisputeReversal && payment.Amount > 0 && PaymentStatusCompleted(payment.Status) {
+		return s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := s.repo.db.NewWithPgxTx(tx)
+			scoped := NewPaymentService(d, s.clock)
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payment.CustomerID}); err != nil {
+				return err
+			}
+			if err := scoped.repo.Create(ctx, payment); err != nil {
+				return err
+			}
+			return scoped.syncPurchasedCreditRefund(ctx, *payment.RefundedPaymentID)
+		})
+	}
 	return s.repo.Create(ctx, payment)
 }
 
@@ -116,13 +135,22 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 		// event IDs can describe the same refund; validation and replay lookup must
 		// share the lock so neither duplicate insertion nor double counting races.
 		transactionDB := s.repo.db.NewWithPgxTx(tx)
+		original, err := NewPaymentService(transactionDB, s.clock).GetByID(ctx, originalPaymentID)
+		if err != nil {
+			return err
+		}
+		if _, err := transactionDB.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: original.CustomerID}); err != nil {
+			return err
+		}
 		if _, err := transactionDB.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: mid.UUID(), PaymentID: originalPaymentID}); err != nil {
 			return err
 		}
 		scoped := NewPaymentService(transactionDB, s.clock)
-		var err error
 		refund, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind)
-		return err
+		if err != nil {
+			return err
+		}
+		return scoped.syncPurchasedCreditRefund(ctx, originalPaymentID)
 	})
 	return refund, err
 }
@@ -205,6 +233,34 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 }
 
 func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, metadata map[string]any) (*models.Payment, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var reservation *models.Payment
+	err = s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.repo.db.NewWithPgxTx(tx)
+		scoped := NewPaymentService(d, s.clock)
+		original, err := scoped.GetByID(ctx, originalPaymentID)
+		if err != nil {
+			return err
+		}
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: original.CustomerID}); err != nil {
+			return err
+		}
+		if _, err := d.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: mid.UUID(), PaymentID: originalPaymentID}); err != nil {
+			return err
+		}
+		if err := purchasedcredits.New(d, s.clock).ValidateRefund(ctx, originalPaymentID, amount); err != nil {
+			return err
+		}
+		reservation, err = scoped.reserveRefundLocked(ctx, originalPaymentID, reservationTransactionID, amount, metadata)
+		return err
+	})
+	return reservation, err
+}
+
+func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, metadata map[string]any) (*models.Payment, error) {
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
 		return nil, err
@@ -255,10 +311,72 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 	if strings.TrimSpace(refundTransactionID) == "" {
 		return nil, errors.New("refund transaction id is required")
 	}
-	if err := s.repo.CompleteRefundReservation(ctx, reservationID, strings.TrimSpace(refundTransactionID), metadata); err != nil {
-		return nil, err
+	var result *models.Payment
+	err := s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.repo.db.NewWithPgxTx(tx)
+		scoped := NewPaymentService(d, s.clock)
+		reservation, err := scoped.GetByID(ctx, reservationID)
+		if err != nil {
+			return err
+		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: reservation.CustomerID}); err != nil {
+			return err
+		}
+		if err := scoped.repo.CompleteRefundReservation(ctx, reservationID, strings.TrimSpace(refundTransactionID), metadata); err != nil {
+			return err
+		}
+		if reservation.RefundedPaymentID != nil {
+			if err := scoped.syncPurchasedCreditRefund(ctx, *reservation.RefundedPaymentID); err != nil {
+				return err
+			}
+		}
+		result, err = scoped.GetByID(ctx, reservationID)
+		return err
+	})
+	return result, err
+}
+
+// syncPurchasedCreditRefund uses each settled reversal's identity. A dispute
+// recovery may restore only the credit withdrawn by that dispute; aggregating
+// cash reversals would accidentally undo unrelated voluntary refunds.
+func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentID uuid.UUID) error {
+	rows, err := s.repo.ListRefunds(ctx, paymentID)
+	if err != nil {
+		return err
 	}
-	return s.GetByID(ctx, reservationID)
+	credits := purchasedcredits.New(s.repo.db, s.clock)
+	// ListRefunds is newest first. Apply negative events oldest first, then
+	// their positive recoveries, so every recovery finds its exact effect.
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if PaymentStatusCompleted(row.Status) && row.Amount < 0 {
+			if err := credits.ApplyReversal(ctx, paymentID, row.ID, nil); err != nil {
+				return err
+			}
+		}
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if !PaymentStatusCompleted(row.Status) || row.Amount <= 0 {
+			continue
+		}
+		var reversed *uuid.UUID
+		if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
+			id, err := uuid.Parse(raw)
+			if err != nil || id == uuid.Nil {
+				return errors.New("dispute recovery has invalid reversal identity")
+			}
+			reversed = &id
+		}
+		if err := credits.ApplyReversal(ctx, paymentID, row.ID, reversed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *models.Payment) (*models.Payment, error) {
@@ -370,7 +488,25 @@ func (s *PaymentService) GetRefundTotalByPaymentID(ctx context.Context, paymentI
 }
 
 func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
-	return s.repo.LinkRefundedPayment(ctx, paymentID, originalPaymentID)
+	return s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.repo.db.NewWithPgxTx(tx)
+		scoped := NewPaymentService(d, s.clock)
+		original, err := scoped.GetByID(ctx, originalPaymentID)
+		if err != nil {
+			return err
+		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: original.CustomerID}); err != nil {
+			return err
+		}
+		if err := scoped.repo.LinkRefundedPayment(ctx, paymentID, originalPaymentID); err != nil {
+			return err
+		}
+		return scoped.syncPurchasedCreditRefund(ctx, originalPaymentID)
+	})
 }
 
 // ListPage is one page of payments, newest first.
@@ -383,7 +519,46 @@ func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, su
 }
 
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
-	return s.repo.MarkFailed(ctx, id)
+	payment, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if payment.Amount >= 0 || payment.RefundedPaymentID == nil {
+		return s.repo.MarkFailed(ctx, id)
+	}
+	return s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.repo.db.NewWithPgxTx(tx)
+		scoped := NewPaymentService(d, s.clock)
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payment.CustomerID}); err != nil {
+			return err
+		}
+		current, err := scoped.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.Status != PaymentStatusPendingValue && current.Status != PaymentStatusFailedValue {
+			return errors.New("a completed refund cannot be released")
+		}
+		if err := scoped.repo.MarkFailed(ctx, id); err != nil {
+			return err
+		}
+		if _, err := d.Gen(ctx).GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: *payment.RefundedPaymentID}); err != nil {
+			if db.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		// Releasing a pending refund must not expose a lot which expired while
+		// the provider result was unresolved. Retire it in the same transaction.
+		ledger := grants.New(d.Gen(ctx), mid.UUID())
+		ledger.SetClock(s.now)
+		_, err = ledger.ExpireLapsed(ctx, payment.CustomerID, payment.Currency)
+		return err
+	})
 }
 
 // RefundTotals reports the completed refunds against each listed charge.

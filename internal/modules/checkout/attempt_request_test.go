@@ -43,6 +43,7 @@ func TestCheckoutAttemptFingerprint(t *testing.T) {
 		"cancel url":        func(r *CheckoutAttemptCreateRequest) { r.CancelURL = "https://other.example/cancel" },
 		"name on card":      func(r *CheckoutAttemptCreateRequest) { r.Payment.NameOnCard = "María José" },
 		"metadata value":    func(r *CheckoutAttemptCreateRequest) { r.Metadata = map[string]string{"post": "post-124"} },
+		"selected amount":   func(r *CheckoutAttemptCreateRequest) { r.Amount = new(int64(100000000)) },
 		"offer kind":        func(r *CheckoutAttemptCreateRequest) { r.OfferKind = billing.OfferRecurring },
 	} {
 		changed := base

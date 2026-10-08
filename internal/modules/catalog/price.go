@@ -55,6 +55,10 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 	// canonical whatever minted it (service API, catalog manifest apply,
 	// importer).
 	price.Currency = moneyutil.NormalizeCurrency(price.Currency)
+	customAmount, err := models.PointerToJSONB(price.CustomerAmount)
+	if err != nil {
+		return err
+	}
 	row, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  price.ID,
 		MerchantID:          price.MerchantID,
@@ -62,6 +66,7 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		Archived:            price.Archived,
 		Amount:              price.Amount,
 		Currency:            price.Currency,
+		CustomerAmount:      customAmount,
 		AccessDurationHours: models.IntPtrTo32(price.AccessDurationHours),
 		AutoRenew:           price.AutoRenew,
 		TrialUnitAmount:     price.TrialUnitAmount,
@@ -538,10 +543,14 @@ func (s *PriceService) FindByTerms(ctx context.Context, req billing.CreatePriceP
 	if err != nil {
 		return nil, err
 	}
+	customAmount, err := models.PointerToJSONB(req.CustomerAmount)
+	if err != nil {
+		return nil, err
+	}
 	row, err := s.db.Gen(ctx).GetPriceByTerms(ctx, gen.GetPriceByTermsParams{
 		MerchantID: mid.UUID(), ProductID: req.ProductID.UUID(), Key: key,
 		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), AutoRenew: req.AutoRenew,
-		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours),
+		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours), CustomerAmount: customAmount,
 	})
 	if err != nil {
 		return nil, err

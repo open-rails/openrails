@@ -69,6 +69,10 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
 	}
+	creditSnap, err := models.PointerToJSONB(p.CreditGrantSnapshot)
+	if err != nil {
+		return gen.CreatePaymentParams{}, err
+	}
 	entSnap, err := models.ToJSONB(p.EntitlementsSpecSnapshot)
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
@@ -111,6 +115,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		DiscountReason:           p.DiscountReason,
 		DiscountMetadata:         discountMeta,
 		EntitlementsSpecSnapshot: entSnap,
+		CreditGrantSnapshot:      creditSnap,
 		Metadata:                 meta,
 		PurchasedAt:              p.PurchasedAt,
 		CreatedAt:                p.CreatedAt,

@@ -10,6 +10,7 @@ import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { priceAmountLabel } from "@/pages/catalog/price-format"
 import { FormFieldErrors } from "@/components/form-field-errors"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
@@ -778,9 +779,33 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
       value,
       prices?.data.find((price) => price.id === priceId)?.currency ?? ""
     )
+  const amountError = (value: string, priceId: string) => {
+    const price = prices?.data.find((price) => price.id === priceId)
+    if (!value)
+      return price?.customer_amount
+        ? "Enter the deposit amount received"
+        : undefined
+    const amount = receivedAmount(value, priceId)
+    if (amount === null || BigInt(amount) < 0n)
+      return "Enter a non-negative amount"
+    const range = price?.customer_amount
+    if (
+      range &&
+      (BigInt(amount) < BigInt(range.min_amount) ||
+        BigInt(amount) > BigInt(range.max_amount))
+    ) {
+      return "Enter an amount within the deposit limits"
+    }
+    return undefined
+  }
   const form = useForm({
     defaultValues: { priceId: "", transactionId: "", amount: "" },
     onSubmit: async ({ value }) => {
+      const invalid = amountError(value.amount, value.priceId)
+      if (invalid) {
+        toast.error(invalid)
+        return
+      }
       const amount = value.amount
         ? receivedAmount(value.amount, value.priceId)
         : undefined
@@ -863,7 +888,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                     <SelectContent>
                       {(prices?.data ?? []).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {formatNativeAmount(p.unit_amount, p.currency)}
+                          {priceAmountLabel(p)}
                           {p.auto_renew ? " · recurring" : ""} ({shortId(p.id)})
                         </SelectItem>
                       ))}
@@ -907,14 +932,10 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
               validators={{
                 onChangeListenTo: ["priceId"],
                 onChange: ({ value, fieldApi }) => {
-                  if (!value) return undefined
-                  const amount = receivedAmount(
+                  return amountError(
                     value,
                     fieldApi.form.getFieldValue("priceId")
                   )
-                  return amount !== null && !amount.startsWith("-")
-                    ? undefined
-                    : "Enter a non-negative amount"
                 },
               }}
             >
@@ -922,15 +943,16 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                 <div className="grid gap-1.5">
                   <Label htmlFor="oc-amount">Amount received</Label>
                   <p className="text-[13px] text-muted-foreground">
-                    Only if it differs from the price above, for example a part
-                    payment. Enter it the way you would write it, such as 19.90.
+                    Required for a customer-selected deposit; optional for a
+                    fixed price if the received amount differs. Enter it as a
+                    decimal, such as 19.90.
                   </p>
                   <Input
                     id="oc-amount"
                     type="number"
                     step="any"
                     min="0"
-                    placeholder="Same as the price"
+                    placeholder="Amount received, e.g. 100.00"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}

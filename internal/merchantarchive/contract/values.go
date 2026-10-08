@@ -48,6 +48,16 @@ func ValidateValues(p Profile, values []*string) error {
 			return fmt.Errorf("invalid catalog application digest")
 		}
 	}
+	if p.Name == "payments" {
+		if raw := value(p, values, "credit_grant_snapshot"); raw != nil && *raw != "null" {
+			var benefit models.CreditGrantSnapshot
+			currency := value(p, values, "currency")
+			status := value(p, values, "status")
+			if json.Unmarshal([]byte(*raw), &benefit) != nil || benefit.Validate() != nil || currency == nil || benefit.Currency != *currency || status != nil && *status == "completed" && benefit.StartsAt.IsZero() {
+				return fmt.Errorf("invalid purchased credit payment snapshot")
+			}
+		}
+	}
 	if p.Name == "subscriptions" {
 		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")
 		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil {
@@ -224,13 +234,17 @@ func ValidateValues(p Profile, values []*string) error {
 				PaymentID        uuid.UUID `json:"payment_id"`
 				Amount           int64     `json:"amount,string"`
 				Currency         string
-				AcceptedAt       time.Time `json:"accepted_at"`
-				EntitlementStart time.Time `json:"entitlement_start"`
-				Duration         *int      `json:"access_duration_hours"`
+				AcceptedAt       time.Time                   `json:"accepted_at"`
+				EntitlementStart time.Time                   `json:"entitlement_start"`
+				Duration         *int                        `json:"access_duration_hours"`
+				CreditGrant      *models.CreditGrantSnapshot `json:"credit_grant"`
 			}
 
 			if json.Unmarshal(state.Purchase, &terms) != nil || terms.PriceID.String() != field("price_id") || terms.ProductID == uuid.Nil || terms.PaymentID == uuid.Nil || terms.Amount < 0 || strconv.FormatInt(terms.Amount, 10) != field("amount") || terms.Currency != field("currency") || field("mode") != "one_off" || terms.AcceptedAt.IsZero() || terms.EntitlementStart.Before(terms.AcceptedAt) || terms.Duration != nil && *terms.Duration <= 0 {
 				return fmt.Errorf("invalid retained purchase checkout terms")
+			}
+			if terms.CreditGrant != nil && (terms.CreditGrant.Validate() != nil || terms.CreditGrant.Currency != terms.Currency) {
+				return fmt.Errorf("invalid retained purchase credit terms")
 			}
 			if field("rail") == "stripe" && state.Submitted && !state.Closed && field("status") != "succeeded" {
 				return fmt.Errorf("submitted Stripe checkout outcome is unresolved")

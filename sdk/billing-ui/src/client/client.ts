@@ -572,6 +572,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       priceKey?: string
       productKey?: string
       priceId?: string
+      /** Customer-selected deposit in the price currency’s native units. */
+      amount?: string
       successUrl?: string
     }): Promise<CheckoutSessionLink> {
       if (
@@ -590,6 +592,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           price_key: input.priceKey,
           product_key: input.productKey,
           price_id: input.priceId,
+          amount: input.amount,
           success_url: input.successUrl,
         } satisfies wire.MintCheckoutSessionParams,
       })

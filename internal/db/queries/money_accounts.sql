@@ -28,7 +28,24 @@ SELECT
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = a.merchant_id AND ao.customer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
                AND ao.admitted_at >= sqlc.arg(held_since)::timestamptz
-               AND ao.expires_at > sqlc.arg(as_of)::timestamptz), 0))::bigint AS held,
+               AND ao.expires_at > sqlc.arg(as_of)::timestamptz), 0)
+     -- Retired credit funds its refund from the retired account. Only value
+     -- still in customer_balance remains reserved here; an unswept expired
+     -- source is entirely unavailable, including its unrefunded remainder.
+     + COALESCE((SELECT sum(CASE WHEN g.ends_at <= sqlc.arg(as_of)::timestamptz
+         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * r.pending / p.amount),lot.remaining) END)
+       FROM (SELECT refunded_payment_id, sum(-refund.amount)::numeric AS pending
+         FROM billing.payments refund WHERE refund.merchant_id=a.merchant_id
+           AND refund.customer_id=a.customer_id AND refund.currency=a.currency
+           AND refund.status='pending' AND refund.amount<0 AND refund.deleted_at IS NULL
+         GROUP BY refunded_payment_id) r
+       JOIN billing.payments p ON p.merchant_id=a.merchant_id AND p.id=r.refunded_payment_id AND p.amount>0 AND p.deleted_at IS NULL
+       JOIN billing.grants g ON g.merchant_id=a.merchant_id AND g.payment_id=p.id
+         AND g.kind='credit' AND g.event='grant'
+         AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
+       JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
+         FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
+           AND lt.transfer_type IN ('credit_spend','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of

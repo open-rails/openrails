@@ -35,7 +35,10 @@ const (
 	// is revoked (distinct from ExpiredCredits = time-lapse). The money is frozen
 	// here (recoverable/reversible), not refunded; a refund moves it out to
 	// RailClearing. (#514, see docs/consistency-invariants.md §11 decision 4.)
-	RevokedCredits AccountType = "revoked_credits"
+	RevokedCredits       AccountType = "revoked_credits"
+	PromotionalFunding   AccountType = "promotional_funding"
+	CreditRefundClearing AccountType = "credit_refund_clearing"
+	CreditRefundLoss     AccountType = "credit_refund_loss"
 )
 
 // TransferType is the closed vocabulary of ledger_transfers.transfer_type,
@@ -46,10 +49,17 @@ const (
 type TransferType string
 
 const (
-	Deposit      TransferType = "deposit"       // rail clearing -> customer balance
-	CreditSpend  TransferType = "credit_spend"  // customer balance -> platform revenue
-	CreditExpire TransferType = "credit_expire" // unspent lot remainder, time-lapsed
-	CreditRevoke TransferType = "credit_revoke" // unspent lot remainder, clawed back
+	DepositBonus            TransferType = "deposit_bonus" // merchant-funded credit, not processor cash
+	CreditPurchaseRevenue   TransferType = "credit_purchase_revenue"
+	CreditRefund            TransferType = "credit_refund"
+	CreditRefundRestore     TransferType = "credit_refund_restore"
+	CreditRefundCash        TransferType = "credit_refund_cash"
+	CreditRefundCashRestore TransferType = "credit_refund_cash_restore"
+	CreditRefundFunding     TransferType = "credit_refund_funding"
+	Deposit                 TransferType = "deposit"       // rail clearing -> customer balance
+	CreditSpend             TransferType = "credit_spend"  // customer balance -> platform revenue
+	CreditExpire            TransferType = "credit_expire" // unspent lot remainder, time-lapsed
+	CreditRevoke            TransferType = "credit_revoke" // unspent lot remainder, clawed back
 	// CreditReinstate reverses a clawback (revoked_credits -> customer_balance).
 	// The revoke is deliberately reversible (#514); this is how.
 	CreditReinstate TransferType = "credit_reinstate"
@@ -62,11 +72,11 @@ const (
 )
 
 // AllTransferTypes must equal the DB CHECK exactly (TestTransferTypeVocabularyMatchesSchema).
-var AllTransferTypes = []TransferType{Deposit, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff}
+var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_grant_id_transfer_type_key.
-var LotOnceTransferTypes = []TransferType{Deposit, CreditExpire, CreditRevoke}
+var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
 
 // Operation is the KIND of money write that posted a transfer — the or#894
 // discriminator in the idempotency coordinate. It is ENGINE-COMPOSED: a caller

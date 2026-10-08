@@ -32,3 +32,25 @@ it.each([
     queries.clear()
   }
 )
+
+it("keeps customer-selected deposit limits out of the fixed-price wizard", async () => {
+  browserEnvironment()
+  await server()
+  const queries = client()
+  await mount(
+    <QueryClientProvider client={queries}>
+      <PriceChangeWizard
+        price={aPrice("price_deposit", "prod_1", {
+          unit_amount: "0",
+          customer_amount: { min_amount: "1000000", max_amount: "500000000" },
+        })}
+        productName="API credit"
+        productKey="api-credit"
+      />
+    </QueryClientProvider>
+  )
+  const button = document.querySelector<HTMLButtonElement>("button")
+  expect(button?.disabled).toBe(true)
+  expect(button?.title).toContain("Change its limits")
+  queries.clear()
+})

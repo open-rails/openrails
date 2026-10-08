@@ -84,6 +84,25 @@ export function amountToDecimal(
   return decimalFromUnits(units, decimals)
 }
 
+// decimalToAmount parses a major-unit decimal exactly ("100.25" at 6 ->
+// "100250000"). Excess precision, scientific notation and int64 overflow
+// are refused; input is never rounded or converted through a JS number.
+export function decimalToAmount(
+  decimal: string,
+  decimals: number
+): Amount | null {
+  if (!isUnitDecimals(decimals) || decimal.length > 40) return null
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(decimal)
+  if (!match) return null
+  const fraction = match[3] ?? ""
+  if (fraction.length > decimals) return null
+  const units =
+    BigInt(match[2]) * 10n ** BigInt(decimals) +
+    BigInt(fraction.padEnd(decimals, "0") || "0")
+  const signed = match[1] ? -units : units
+  return signed < INT64_MIN || signed > INT64_MAX ? null : signed.toString()
+}
+
 // formatAmount renders an exact amount in its currency for the buyer. It never
 // passes money through a JS number; an amount it cannot show exactly is
 // refused with a visible notice rather than a rounded figure.

@@ -115,6 +115,7 @@ type ApplyProduct struct {
 	TierRank         Field[int]             `json:"tier_rank,omitzero"`
 	Archived         Field[bool]            `json:"archived,omitzero"`
 	EntitlementsSpec Field[map[string]*int] `json:"entitlements_spec,omitzero"`
+	CreditGrant      Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
 	Prices           []ApplyPrice           `json:"prices,omitempty"`
 	RateCards        Field[[]RateCard]      `json:"rate_cards,omitzero"`
 }
@@ -133,6 +134,7 @@ type ApplyPrice struct {
 	Archived            Field[bool]                         `json:"archived,omitzero"`
 	TrialUnitAmount     Field[int64]                        `json:"trial_unit_amount,omitzero"`
 	TrialDurationHours  Field[int]                          `json:"trial_duration_hours,omitzero"`
+	CustomerAmount      Field[CustomerAmount]               `json:"customer_amount,omitzero"`
 	PSPs                Field[[]string]                     `json:"psps,omitzero"`
 	PSPLinks            Field[map[string]map[string]string] `json:"psp_links,omitzero"`
 }

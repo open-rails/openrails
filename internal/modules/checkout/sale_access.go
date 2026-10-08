@@ -18,7 +18,7 @@ import (
 // with exact accepted intervals and validation of original source windows.
 // Ordinary indefinite entitlement insertion can advance a historical NotBefore
 // to now; a delayed accepted purchase must retain its historical start.
-func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Context, user string, product, payment uuid.UUID, spec map[string]*int, duration *int, accepted time.Time, coverage *CoverageInfo) error {
+func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Context, user string, product, payment uuid.UUID, spec map[string]*int, duration *int, accepted time.Time, coverage *CoverageInfo, ownership bool) error {
 	if s.transactionDB == nil || s.transactionDB.Pool() != nil {
 		return errors.New("accepted access requires purchase transaction")
 	}
@@ -46,7 +46,7 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 		}
 	}
 	q := s.transactionDB.Gen(ctx)
-	limit, err := safecast.Convert[int32](len(names) + 2)
+	limit, err := safecast.Convert[int32](len(names) + 3)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,15 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	history, err := grants.ValidatePurchaseHistory(mid.UUID(), customer, product, payment, wanted, ownershipWindow, original)
+	access := original[:0]
+	for _, event := range original {
+		// Purchased credit has its own immutable promise validation and source
+		// lot; it shares the payment but is not an access window.
+		if event.Kind != string(grants.Credit) {
+			access = append(access, event)
+		}
+	}
+	history, err := grants.ValidatePurchaseHistory(mid.UUID(), customer, product, payment, wanted, ownershipWindow, access)
 	if err != nil {
 		return err
 	}
@@ -77,7 +85,7 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 			materialized[g.ID] = true
 		}
 	}
-	if history.Ownership == nil {
+	if ownership && history.Ownership == nil {
 		_, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Product: &product, Kind: grants.Ownership, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, StartsAt: accepted, EndsAt: ownershipWindow.End})
 	}
 	return err

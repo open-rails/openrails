@@ -882,6 +882,8 @@ type BillingPayment struct {
 	DestructiveRunClass *string
 	// rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
 	MoneyMovement string
+	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
+	CreditGrantSnapshot []byte
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1014,6 +1016,8 @@ type BillingPrice struct {
 	// Product-local handle for an immutable price version chain. One live row per (merchant_id, product_id, key); archived versions retain their key and product.
 	Key      string
 	Revision int64
+	// Immutable inclusive customer-selected deposit bounds in currency micros; NULL means fixed amount.
+	CustomerAmount []byte
 }
 
 // Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
@@ -1056,6 +1060,8 @@ type BillingProduct struct {
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
 	Revision   int64
+	// Purchased currency credit policy; accepted checkouts freeze amount and expiry duration.
+	CreditGrant []byte
 }
 
 // Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.

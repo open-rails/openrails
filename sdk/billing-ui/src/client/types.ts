@@ -84,6 +84,10 @@ export const priceSchema = z.object({
   product_id: z.string(),
   archived: z.boolean(),
   unit_amount: amount,
+  /** Optional bounds for a deposit whose amount is selected before checkout. */
+  customer_amount: z
+    .object({ min_amount: amount, max_amount: amount })
+    .nullish(),
   currency: z.string(),
   access_duration_hours: z.number().nullable(),
   auto_renew: z.boolean(),
@@ -235,6 +239,15 @@ export const productSchema = z.object({
   description: z.string(),
   /** Keyed by the entitlements the product grants. */
   entitlements_spec: z.record(z.string(), z.number().nullable()).nullish(),
+  /** Prepaid balance fulfilled once for each qualifying successful payment. */
+  credit_grant: z
+    .object({
+      currency: z.string(),
+      amount: amount.nullish(),
+      from_payment: z.boolean().optional(),
+      expires_after_days: z.number().int().positive().nullish(),
+    })
+    .nullish(),
   /** Products sharing a group are tiers a subscription can change between. */
   tier_group: z.string().nullable(),
   tier_rank: z.number(),

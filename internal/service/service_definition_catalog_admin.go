@@ -140,6 +140,13 @@ func (s *Service) activateProduct(ctx context.Context, id billing.ProductID) (*b
 		return nil, apperr.Invalidf("product_id required")
 	}
 	productID := id.UUID()
+	current, err := products.GetByID(ctx, productID)
+	if err != nil {
+		return nil, productLookup(err)
+	}
+	if err := s.validateProductCreditUpdate(ctx, id, current.CreditGrant); err != nil {
+		return nil, err
+	}
 	if err := products.Activate(ctx, productID); err != nil {
 		return nil, productLookup(err)
 	}
@@ -324,6 +331,17 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 	current, err := prices.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, priceLookup(err)
+	}
+	products, err := s.requireProductService()
+	if err != nil {
+		return nil, err
+	}
+	product, err := products.GetByID(ctx, current.ProductID)
+	if err != nil {
+		return nil, productLookup(err)
+	}
+	if err := validateCreditPrice(product.CreditGrant, billing.CreatePriceParams{Currency: current.Currency, UnitAmount: current.Amount, AutoRenew: current.AutoRenew, CustomerAmount: current.CustomerAmount}); err != nil {
+		return nil, err
 	}
 	wasArchived := current.Archived
 	if wasArchived {

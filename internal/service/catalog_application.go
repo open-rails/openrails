@@ -187,6 +187,9 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 				return apperr.Invalidf("new product %q requires display_name", decl.Key)
 			}
 			req := billing.CreateProductParams{Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
+			if decl.CreditGrant.Set && !decl.CreditGrant.Null {
+				req.CreditGrant = &decl.CreditGrant.Value
+			}
 			if decl.TierGroup.Set && !decl.TierGroup.Null {
 				req.TierGroup = &decl.TierGroup.Value
 			}
@@ -197,7 +200,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			}
 			receipt.ProductsChanged++
 		} else {
-			req := UpdateProductRequest{SkipRailSync: true}
+			req := UpdateProductRequest{SkipRailSync: true, DeferCreditPriceValidation: true}
 			if decl.DisplayName.Set {
 				req.DisplayName = &decl.DisplayName.Value
 			}
@@ -213,6 +216,12 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			if decl.EntitlementsSpec.Set {
 				req.SetEntitlements = true
 				req.EntitlementsSpec = decl.EntitlementsSpec.Value
+			}
+			if decl.CreditGrant.Set {
+				req.SetCreditGrant = true
+				if !decl.CreditGrant.Null {
+					req.CreditGrant = &decl.CreditGrant.Value
+				}
 			}
 			if decl.TierGroup.Set {
 				req.SetTierGroup = true
@@ -231,6 +240,11 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 		}
 		if err := s.applyCatalogPrices(ctx, p, decl.Prices, params.Prune, receipt); err != nil {
 			return err
+		}
+		if !p.Archived {
+			if err := s.validateProductCreditUpdate(ctx, p.ID, p.CreditGrant); err != nil {
+				return err
+			}
 		}
 	}
 	if params.Prune {
@@ -252,7 +266,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 }
 
 func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool {
-	return r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.EntitlementsSpec, p.EntitlementsSpec)
+	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.EntitlementsSpec, p.EntitlementsSpec)
 }
 
 func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations []catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
@@ -435,6 +449,11 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 			current = &p
 		}
 		if current == nil && len(byKey[decl.Key]) > 1 {
+			for _, prior := range byKey[decl.Key] {
+				if prior.CustomerAmount != nil && !decl.CustomerAmount.Set {
+					return nil, req, apperr.Invalidf("archived deposit key %q is ambiguous; select a price id or include customer_amount in complete terms", decl.Key)
+				}
+			}
 			if !decl.Currency.Set || !decl.UnitAmount.Set || !decl.AccessDurationHours.Set || !decl.AutoRenew.Set || !decl.TrialUnitAmount.Set || !decl.TrialDurationHours.Set {
 				return nil, req, apperr.Invalidf("archived price key %q is ambiguous; select a price id or complete terms", decl.Key)
 			}
@@ -442,6 +461,7 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 	}
 	req = billing.CreatePriceParams{ProductID: product.ID, Key: decl.Key}
 	if current != nil {
+		req.CustomerAmount = current.CustomerAmount
 		req.UnitAmount = current.UnitAmount
 		req.Currency = current.Currency
 		req.AccessDurationHours = current.AccessDurationHours
@@ -459,6 +479,12 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 		}
 		if len(byKey[decl.Key]) > 0 {
 			req.Archived = true
+		}
+	}
+	if decl.CustomerAmount.Set {
+		req.CustomerAmount = nil
+		if !decl.CustomerAmount.Null {
+			req.CustomerAmount = &decl.CustomerAmount.Value
 		}
 	}
 	if decl.Currency.Set {

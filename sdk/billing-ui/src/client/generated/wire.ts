@@ -177,6 +177,13 @@ export type CreatePaymentMethodParams = {
   billing_details?: BillingDetails
 }
 
+export type CreditGrantSpec = {
+  currency: string
+  amount?: string
+  from_payment?: boolean
+  expires_after_days?: number
+}
+
 export type CreditTransaction = {
   id: string
   customer_id: string
@@ -199,6 +206,11 @@ export type CurrencyUnits = {
   code: string
   decimals: number
   minor_decimals: number
+}
+
+export type CustomerAmount = {
+  min_amount: string
+  max_amount: string
 }
 
 export type CustomerCancelSubscriptionParams = {
@@ -313,6 +325,7 @@ export type MintCheckoutSessionParams = {
   price_id?: string
   price_key?: string
   product_key?: string
+  amount?: string
   success_url?: string
 }
 
@@ -487,6 +500,7 @@ export type PortalResponse = {
 }
 
 export type Price = {
+  customer_amount?: CustomerAmount
   revision: number
   id: string
   key: string
@@ -511,6 +525,7 @@ export type Product = {
   display_name: string
   description: string
   entitlements_spec: Record<string, number | null> | null
+  credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number
   archived: boolean

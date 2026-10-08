@@ -40,7 +40,7 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 	amount := r.Amount
 	txType := r.TransferType
 	switch r.TransferType {
-	case "deposit":
+	case "deposit", "deposit_bonus":
 		txType = "deposit"
 	case "credit_spend", "spend", "capture":
 		amount = -amount
@@ -53,7 +53,7 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 	case "credit_expire", "expire":
 		amount = -amount
 		txType = "expiry"
-	case "credit_revoke":
+	case "credit_revoke", "credit_refund":
 		amount = -amount
 	}
 	// Every ledger transfer is posted (single-phase) since migration 014 retired
@@ -87,6 +87,12 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 func creditTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.CreditTransaction {
 	txType, amount := billing.CreditTransactionType(r.TransferType), r.Amount
 	switch r.TransferType {
+	case "deposit_bonus":
+		txType = billing.CreditDeposit
+	case "credit_refund":
+		txType, amount = billing.CreditRevoke, -amount
+	case "credit_refund_restore":
+		txType = billing.CreditReinstate
 	case "credit_spend":
 		txType, amount = billing.CreditSpend, -amount
 	case "credit_expire":

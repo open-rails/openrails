@@ -256,7 +256,7 @@ func checkoutCreateRequest(req billing.CreateCheckoutAttemptParams, card *cardgu
 	payment := req.PaymentOptions
 	return &checkout.CheckoutAttemptCreateRequest{
 		PriceID:  priceID,
-		PriceKey: req.PriceKey, ProductKey: req.ProductKey,
+		PriceKey: req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
 		Entitlement:    req.Entitlement,
 		OfferKind:      req.OfferKind,
 		Metadata:       req.Metadata,

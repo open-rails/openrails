@@ -75,7 +75,7 @@ products:
         auto_renew: false
 
   - key: api-credit-10
-    display_name: $10 of API credit
+    display_name: $10 prepaid API balance
     credit_grant:
       currency: USD
       amount: 10000000 # $10 of spendable API balance
@@ -87,7 +87,7 @@ products:
         auto_renew: false
 
   - key: api-credit-100
-    display_name: $100 of API credit
+    display_name: $100 prepaid API balance
     credit_grant:
       currency: USD
       amount: 100000000
@@ -99,7 +99,7 @@ products:
         auto_renew: false
 
   - key: api-deposit
-    display_name: Add money to your API balance
+    display_name: Top up your prepaid API balance
     credit_grant:
       currency: USD
       from_payment: true # grant exactly the amount paid
@@ -139,7 +139,8 @@ access while collection continues or suspend it; it does not silently label grac
 as paid time. Independent recurring schedules, such as monthly installments buying
 a year of access, are not expressed by this field.
 
-**Prepaid API credits** use the existing currency balance and usage ledger.
+**Prepaid API balance.** Customers pay ahead of time; metered API usage draws down
+the funded balance. Each top-up uses the existing currency balance and usage ledger.
 The two packs above give different value per dollar. Each successful purchase
 automatically and idempotently creates a credit lot; another purchase creates
 another lot. Credit-only products do not create permanent ownership that would
@@ -171,6 +172,24 @@ corresponding credits to remain unused and unheld; forced reversals use the sour
 lot and preserve the existing rules for already-authorized usage.
 
 ### Evolving the catalog
+
+Credit benefits evolve through the same partial updates. For example, this changes
+only the expiry offered by new $100-pack checkouts. Existing credit lots keep the
+expiry promised when they were bought:
+
+```yaml
+schema_version: 1
+products:
+  - key: api-credit-100
+    credit_grant: # replaces the complete credit policy; omitted credit_grant preserves it
+      currency: USD
+      amount: 100000000
+      expires_after_days: 180
+```
+
+Archiving the pack or deposit stops new sales. It does not expire, revoke, or
+otherwise change credits already granted.
+
 
 All the changes below are YAML applications. Apply each file through the same
 `catalog.ParseApplicationYAML` → `client.ApplyCatalog` startup path shown below,
@@ -714,8 +733,8 @@ Archetypes — the site you're building, and what OpenRails does for it:
   downgrades, and proration. Your app asks "is this person a patron at tier 2 right now?"
   against its own database, not a provider API.
 - **Building a Gumroad, itch.io, or Teachable** — videos, courses, games, downloads sold
-  individually. Every purchase is a permanent ownership record (entitlement) your server
-  queries forever; one checkout model whether the buyer pays by card or USDC.
+  individually. Purchases can grant permanent ownership or time-limited rental access; your
+  server checks the stored access grant. There is one checkout model whether the buyer pays by card or USDC.
 - **Building a Linear, Notion, or Figma** — classic SaaS seat billing: define the tier
   list once, customers self-serve upgrades with proration previews, Stripe rail today
   with an exit ramp built in.

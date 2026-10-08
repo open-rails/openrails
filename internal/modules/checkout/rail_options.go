@@ -151,6 +151,11 @@ func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, tar
 	if _, known := rails.Lookup(rail); !known {
 		return models.CheckoutRoutingSkipUnknownSelector
 	}
+	// Customer-selected deposits execute through the existing card-sale
+	// intent, whose frozen amount is honored by NMI and Stripe.
+	if price.CustomerAmount != nil && rail != models.RailNMI && rail != models.RailStripe {
+		return models.CheckoutRoutingSkipModeUnsupported
+	}
 	subscription := mode == models.CheckoutAttemptModeSubscription
 	if subscription && (price.Amount <= 0 || price.RecurringCycleHours() == nil) {
 		return models.CheckoutRoutingSkipModeUnsupported

@@ -274,6 +274,14 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 				"unknown provider %q in providers/provider_links: not a rail (%s) or a declared merchant account key",
 				name, strings.Join(sortedAdapterNames(adapters), ", "))
 		}
+		if req.CustomerAmount != nil {
+			if t.rail != string(models.RailStripe) && t.rail != string(models.RailNMI) {
+				return nil, nil, nil, apperr.Invalidf("customer_amount requires Stripe or NMI")
+			}
+			if len(req.PSPLinks[name]) > 0 {
+				return nil, nil, nil, apperr.Invalidf("customer_amount uses checkout amounts, not provider catalog links")
+			}
+		}
 		targets = append(targets, t)
 	}
 

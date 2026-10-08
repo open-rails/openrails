@@ -27,7 +27,7 @@ products:
         auto_renew: false
 
   - key: api-credit-10
-    display_name: $10 of API credit
+    display_name: $10 prepaid API balance
     credit_grant:
       currency: USD
       amount: 10000000 # $10 of spendable API balance
@@ -39,7 +39,7 @@ products:
         auto_renew: false
 
   - key: api-credit-100
-    display_name: $100 of API credit
+    display_name: $100 prepaid API balance
     credit_grant:
       currency: USD
       amount: 100000000
@@ -51,7 +51,7 @@ products:
         auto_renew: false
 
   - key: api-deposit
-    display_name: Add money to your API balance
+    display_name: Top up your prepaid API balance
     credit_grant:
       currency: USD
       from_payment: true # grant exactly the amount paid
