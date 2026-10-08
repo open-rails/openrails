@@ -653,9 +653,13 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 	rep.AutoResolved = resolved
 
-	// ...while transaction-window findings (PS-4/5/6) only auto-resolve when
-	// this run's window re-covered the transaction and it no longer diffed.
-	coveredSince, coveredUntil := e.coveredWindow(provider, params, now)
+	// Transaction windows may be keyed by provider modification time (NMI),
+	// not occurrence time. Only an actually returned transaction can qualify
+	// its earlier finding as resolved; an absent date-window match proves none.
+	observedTransactions := make(map[string]bool, len(snap.Transactions))
+	for _, transaction := range snap.Transactions {
+		observedTransactions[transaction.TransactionID] = true
+	}
 	actionable, err := e.Store.ListActionablePullFindings(ctx, binding.ID)
 	if err != nil {
 		return rep, records, planned, appliedChanges, fmt.Errorf("list actionable findings: %w", err)
@@ -669,12 +673,8 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		default:
 			continue
 		}
-		occurredAt, ok := evidenceTime(rec.RemoteEvidence, "occurred_at")
-		if !ok {
+		if !observedTransactions[rec.SubjectKey] {
 			continue
-		}
-		if occurredAt.Before(coveredSince) || occurredAt.After(coveredUntil) {
-			continue // this run did not look at that part of the timeline
 		}
 		if err := e.Store.MarkFindingVanished(ctx, rec.ID); err != nil {
 			return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve windowed finding %s: %w", rec.ID, err)
@@ -745,23 +745,6 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 	return events, fmt.Sprintf("ok: %d events", len(events))
 }
 
-// coveredWindow is the transaction timeline this run actually examined for
-// the provider (fetcher defaults applied).
-func (e *Engine) coveredWindow(provider Provider, params RunParams, now time.Time) (time.Time, time.Time) {
-	until := params.Until
-	if until.IsZero() {
-		until = now
-	}
-	since := params.Since
-	if since.IsZero() {
-		if provider == ProviderCCBill {
-			since = until.Add(-30 * 24 * time.Hour) // CCBillFetcher's default export window
-		}
-		// NMI/Stripe unbounded queries cover the full timeline.
-	}
-	return since, until
-}
-
 // bindApplyActions stamps the pull's PSP onto every local write the pass will
 // perform. or#893: the pass always HAS a PSP now (runProvider refuses a section
 // without one), so no mirror row the pull path creates is unattributed.
@@ -785,21 +768,6 @@ func bindApplyActions(findings []Finding, psp uuid.UUID) {
 			}
 		}
 	}
-}
-
-func evidenceTime(m map[string]any, key string) (time.Time, bool) {
-	if m == nil {
-		return time.Time{}, false
-	}
-	s, ok := m[key].(string)
-	if !ok {
-		return time.Time{}, false
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
 }
 
 // applyFinding executes one finding's local-write instruction. Returns the

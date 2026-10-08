@@ -192,3 +192,42 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	require.True(t, end.Add(monthHours*time.Hour).Equal(*target.subscription(embedded, member.sub).CurrentPeriodEndsAt))
 	require.Empty(t, target.nmi.Unexpected())
 }
+
+func TestRecoveryGateRequiresCompletedAccountCoverage(t *testing.T) {
+	w := prepareWorld(t, 12)
+	w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe"); delete(psps, "ccbill") }
+	w.start()
+	_ = enroll(t, w, "nmi", embedded)
+	mid := w.client[embedded].MerchantID()
+	psp := w.psp["nmi"]
+	w.stop()
+	w.advance(5 * 24 * time.Hour)
+	database, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.psp_refresh_watermarks WHERE merchant_id=$1`), mid.UUID())
+	require.NoError(t, err)
+	check := func() error {
+		return providerrecovery.CheckPSP(t.Context(), database, mid.UUID(), psp.UUID(), w.clock.Now())
+	}
+	require.ErrorIs(t, check(), providerrecovery.ErrPending)
+	stamp := func(domain string, at time.Time) {
+		_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at) VALUES($1,$2,$3,$4) ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE SET watermark_at=EXCLUDED.watermark_at`), mid.UUID(), psp.UUID(), domain, at)
+		require.NoError(t, err)
+	}
+	stamp("events", w.clock.Now())
+	stamp("applied_events", w.clock.Now().Add(-10*time.Minute))
+	require.ErrorIs(t, check(), providerrecovery.ErrPending, "an advisory or partial applied cursor never authorizes a write")
+	stamp("completed_events", w.clock.Now().Add(-5*time.Minute))
+	require.NoError(t, check())
+	// Starting another ordinary client does not clear shared completed coverage.
+	w.start()
+	require.NoError(t, check())
+	w.stop()
+	stamp("completed_events", w.clock.Now().Add(time.Hour))
+	require.ErrorIs(t, check(), providerrecovery.ErrPending, "future observation timestamps are not freshness")
+	stamp("completed_events", w.clock.Now().Add(-5*time.Minute))
+	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,recommended_action,evidence) VALUES($1,$2,'nmi','pull.charge.missing','unqualified-invoice','high','ignored',now(),'ignored','qualify actual receipt','{}')`), mid.UUID(), psp.UUID())
+	require.NoError(t, err)
+	require.ErrorIs(t, check(), providerrecovery.ErrPending, "new unresolved financial evidence overrides even recent complete coverage")
+	require.Len(t, w.nmi.Ledger(""), 1)
+}
