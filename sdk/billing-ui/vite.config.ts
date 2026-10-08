@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
+import { DiagnosticCategory } from "typescript"
 import { defineConfig } from "vite"
 import dts from "vite-plugin-dts"
 
@@ -34,6 +35,18 @@ export default defineConfig({
       entryRoot: "src",
       exclude: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"],
       tsconfigPath: path.resolve(root, "tsconfig.json"),
+      // These paths make pnpm's inferred types portable; consumers still
+      // resolve the normal peer/dependency package names.
+      aliasesExclude: ["react", "class-variance-authority"],
+      afterDiagnostic(diagnostics) {
+        if (
+          diagnostics.some(
+            ({ category }) => category === DiagnosticCategory.Error
+          )
+        ) {
+          throw new Error("Billing UI declaration generation failed")
+        }
+      },
     }),
     checkoutCssPlugin({ entries: ["index"] }),
   ],
