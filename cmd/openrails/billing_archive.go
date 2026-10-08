@@ -118,17 +118,21 @@ func newBillingExportCmd() *cobra.Command {
 func newBillingImportCmd() *cobra.Command {
 	opts := billingArchiveOptions{}
 	var in string
+	var targetStopped bool
 	cmd := &cobra.Command{
 		Use:   "import --merchant UUID --in PATH",
 		Short: "Restore a billing snapshot into an empty, separately provisioned merchant",
 		Long: "Restore a complete snapshot atomically, preserving the merchant UUID and billing identities. " +
 			"Provision the destination separately and keep its writers and workers stopped until cutover. " +
-			"Import does not transfer credentials or replay financial operations.",
+			"Import does not transfer credentials or replay financial operations. --target-stopped attests that destination writers and workers are stopped.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			mid, err := opts.validate()
 			if err != nil {
 				return err
+			}
+			if !targetStopped {
+				return fmt.Errorf("--target-stopped is required: attest that destination billing writers and workers are stopped for import")
 			}
 			f, err := openBillingArchiveInput(in)
 			if err != nil {
@@ -154,6 +158,7 @@ func newBillingImportCmd() *cobra.Command {
 	}
 	addBillingArchiveFlags(cmd, &opts)
 	cmd.Flags().StringVar(&in, "in", "", "Snapshot file to restore (required; stdin is not supported)")
+	cmd.Flags().BoolVar(&targetStopped, "target-stopped", false, "Attest that destination billing writers and workers are stopped; the importer cannot verify this operational condition")
 	return cmd
 }
 

@@ -69,6 +69,20 @@ omitting it. Resolve the named state on the source and export again; do not edit
 the archive or delete financial history to force acceptance. A successful export
 still requires the operator to prevent concurrent writes throughout final cutover.
 
+## One authoritative database
+
+Normal replicas share one writable PostgreSQL database. Database claims and
+stable provider operation keys coordinate their work. Independently writable
+copies of a billing book using the same provider credentials are not replicas;
+operating both is an operator error. Migration is an offline handoff, not an
+active-active deployment or a lease service shared with OpenRails SaaS.
+
+`--source-stopped` and `--target-stopped` record operator attestations. They do
+not stop processes or verify another fleet. `provider_write_mode=readonly`
+blocks provider mutations but still permits local writes and webhook ingestion;
+it is not a substitute for stopping all writers. Direct SDK callers must enforce
+the same stopped-source/stopped-target procedure.
+
 ## Prerequisites
 
 1. Use compatible OpenRails builds and apply the destination migration chain
@@ -130,7 +144,9 @@ never provisions or rebinds the target implicitly.
 
 1. Stop source writes from application requests, scheduled jobs, workers,
    maintenance tools, and webhook ingestion. Drain or resolve pending financial
-   work before stopping the last writer. Keep incoming webhook deliveries queued
+   work before stopping the last writer. Disable automatic restarts, scheduled
+   jobs and deployment reconciliation that would restart the old writer fleet.
+   Record the stopped instances and selected source database. Keep incoming webhook deliveries queued
    outside the source during the move so they can be delivered to the selected
    destination after validation. A database snapshot alone does not establish a
    safe cutover boundary.
@@ -160,17 +176,19 @@ never provisions or rebinds the target implicitly.
    unless `--overwrite` is explicit. A failed or truncated export leaves the
    previous file intact. There is no stdout export or stdin import, so archive
    contents do not enter normal CLI output or shell pipelines.
-4. Import into the prepared destination with its writers still stopped:
+4. Import into the prepared destination with its writers still stopped.
+   `--target-stopped` confirms this operational condition; neither a prepared
+   merchant nor a successful import enables or disables external workers:
 
    ```sh
    openrails --config destination.yaml --provider-write-mode readonly \
-     billing import --merchant "$MERCHANT_UUID" --in merchant-billing.jsonl
+     billing import --target-stopped --merchant "$MERCHANT_UUID" --in merchant-billing.jsonl
    ```
 
    Or use its protected remote maintenance endpoint:
 
    ```sh
-   openrails billing import --merchant "$MERCHANT_UUID" \
+   openrails billing import --target-stopped --merchant "$MERCHANT_UUID" \
      --url https://destination.example --token-file destination-bearer.txt \
      --in merchant-billing.jsonl
    ```
@@ -193,6 +211,22 @@ never provisions or rebinds the target implicitly.
 7. Switch application traffic and provider webhook destinations, then enable only
    the destination workers. Retire or keep the source fenced and read-only.
    **Never let the stale source and restored destination run billing concurrently.**
+   Record the destination activation and confirm the source remains stopped.
+
+Before destination activation, a failed import leaves the source as the authority;
+keep the destination stopped while retrying the same archive or abandoning that
+empty/partially prepared target. If restarting the source changes its book, the
+next attempt needs a fresh final export and an empty target. Once the destination
+has accepted new billing work, restarting the old source is not rollback: move
+the now-authoritative destination book back through the same offline procedure.
+
+Rotating or revoking source provider credentials is optional stronger protection
+against an accidental restart, when the provider supports suitably scoped keys.
+It is not required for the normal stopped-source procedure and may affect other
+merchants when an account shares credentials. Provider-managed subscriptions are
+not recreated by import; their references and provider ownership must remain
+valid. Idempotency keys protect retries of the same logical operation, not
+arbitrary concurrent work from independently writable copies.
 
 A remote server's HTTP limits and any reverse proxy must permit the full archive
 request/response. The CLI's `--timeout` cannot override a proxy/server limit. A
@@ -218,3 +252,23 @@ active-active billing, automatic customer identity migration, credential transfe
 or card-vault portability. Successful restore proves the local billing book was
 accepted; provider access, identity integration, webhook routing, and worker
 readiness must be qualified before live operation.
+
+## Qualification boundary
+
+The core `TestOfflineBillingHandoff` runs the normal CLI against two independent
+PostgreSQL databases. It prepares the destination through `prepare-target`, checks
+both stop attestations, rejects an interrupted import without retained billing
+rows, and retries the same completed import. It then starts the destination with
+separately supplied provider credentials, renews the retained subscription once,
+and cancels/refunds through the ordinary embedded or HTTP Client. NMI and Stripe
+use local provider fixtures; no live provider is qualified by this test.
+`TestBillingRestoreTargetUsesDestinationAuthority` checks the group-bound
+operator preparation against real AuthKit, including wrong-owner and conflicting
+binding refusals.
+
+These core checks are not a test of the separately deployed OpenRails SaaS
+application. Before declaring SaaS-to-self-hosted or the reverse complete, run the
+same operator procedure through the actual host's supported dependency graph,
+authentication, routing and worker lifecycle. A host still using a discarded
+archive layout must first adopt the current supported library contract; a test
+against a substitute core HTTP server does not qualify that host.
