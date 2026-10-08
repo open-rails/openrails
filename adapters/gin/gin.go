@@ -21,10 +21,16 @@ func Mount(target gin.IRoutes, client *openrails.Client) error {
 	if err != nil {
 		return err
 	}
-	return mount(target, routes, client.RoutesRequireRoot())
+	return MountRoutes(target, routes, client.RoutesRequireRoot())
 }
 
-func mount(target gin.IRoutes, routes []openrails.Route, rootOnly bool) error {
+// MountRoutes registers a host-selected subset of Client.Routes. Pass
+// Client.RoutesRequireRoot as rootOnly so issuer-anchored paths stay at the root.
+// Hosts can own an individual route without duplicating path or HEAD handling.
+func MountRoutes(target gin.IRoutes, routes []openrails.Route, rootOnly bool) error {
+	if target == nil {
+		return fmt.Errorf("openrails Gin: router is required")
+	}
 	if rootOnly {
 		if _, ok := target.(*gin.Engine); !ok {
 			return fmt.Errorf("openrails Gin: standalone routes must mount on the root Engine")

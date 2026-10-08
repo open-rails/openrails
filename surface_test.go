@@ -55,6 +55,7 @@ var embeddedMethods = map[string]string{
 	"SetMerchantAPIHost":                 "the hosted product: binds a host of the deployment's own, which a merchant cannot claim",
 	"ListActiveMerchantIDs":              "the hosted product: its usage settlement walks the merchant directory",
 	"ListMerchantsForSubject":            "the hosted product: the merchants a portal user is a customer of",
+	"ListUserMerchants":                  "the hosted product: current staff and owner memberships for its verified live user request",
 	"EnsureCustomerPermissionGroup":      "the hosted product: the portal group of a customer organisation",
 	"SubjectHasVaultedPaymentMethod":     "the hosted product: Deps.HasVaultedPaymentMethod, for its merchant-creation policy",
 	"FleetAnalytics":                     "the hosted product: its operator analytics",

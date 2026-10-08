@@ -58,8 +58,33 @@ func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in g
 	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	existing, found, err := service.ReadEngineRenewal(ctx, params)
+	if existing.PaymentIntentID != "" {
+		if retainErr := intents.NewStore(h.DB).RetainCollectionCandidate(ctx, in, intents.CollectionCandidate{TransactionID: existing.PaymentIntentID}); retainErr != nil {
+			return intents.Ambiguous("retain existing Stripe renewal: " + retainErr.Error())
+		}
+	}
+	if err != nil {
+		return h.unresolved(ctx, in, p, "Stripe renewal history cannot authorize a charge: "+err.Error())
+	}
+	if found {
+		return h.executeStripeEngineDecline(ctx, in)
+	}
+	// Recheck after the provider read and any paused executor/failpoint. An
+	// earlier arming decision does not extend the original key's retention.
+	current, err := intents.NewStore(h.DB).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous("read Stripe submission fence: " + err.Error())
+	}
+	history, err := intents.LoadSubmissionHistory(current)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	if err := intents.NewStore(h.DB).RequireClaim(ctx, in.ID, h.now()); err != nil {
 		return intents.Ambiguous("nothing sent: " + err.Error())
+	}
+	if !history.StripeReplaySafe(h.now()) {
+		return h.unresolved(ctx, current, p, "Stripe idempotency retention window elapsed; provider receipt required")
 	}
 	result, err := service.CreateEnginePayment(ctx, params)
 	if hitErr := h.hit(ctx, in, failpoint.AfterProvider); hitErr != nil {
@@ -94,6 +119,9 @@ func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, 
 		return h.unresolved(ctx, in, p, "Stripe engine receipt did not qualify: "+err.Error())
 	}
 	if !found {
+		if reference != "" {
+			return h.unresolved(ctx, in, p, "known Stripe payment is no longer readable; no replacement payment may be created")
+		}
 		return h.lostSubmission(ctx, in, p)
 	}
 	if result.PaymentIntentID != "" && reference == "" {
@@ -162,6 +190,9 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 		return h.Verify(ctx, current)
 	}
 	if !found {
+		if reference != "" {
+			return h.Verify(ctx, current)
+		}
 		return h.resendLostStripeSubmission(ctx, current, service, params)
 	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
@@ -191,8 +222,9 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 	return h.Verify(ctx, current)
 }
 
-// resendLostStripeSubmission sends an armed resend with the original
-// idempotency key: Stripe replays the first PaymentIntent if it ever existed.
+// resendLostStripeSubmission sends an armed resend with the original key only
+// inside its retention window. Persistent PaymentIntent readback remains usable
+// after that window; an empty read never permits an expired-key resend.
 func (h *SubscriptionCollectionHandler) resendLostStripeSubmission(ctx context.Context, in gen.BillingProviderIntent, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams) intents.Outcome {
 	attempt := armedResend(in)
 	if attempt == 0 {

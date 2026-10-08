@@ -61,6 +61,15 @@ never falls back to an attached cookie. AuthKit's own `/auth` transport keeps
 its separate session/refresh/CSRF cookie protocol and must not be wrapped by
 the billing cookie adapter.
 
+The control plane enables AuthKit's browser refresh transport: access tokens
+stay in memory, while the rotating refresh credential is an HttpOnly,
+SameSite=Lax cookie (`__Host-authkit_rt` on HTTPS; `authkit_rt` on explicitly
+allowed plain-HTTP development deployments). Auth responses contain no refresh
+token for JavaScript storage. A page reload restores the session with
+`POST /auth/v1/token` and the cookie; body refresh tokens, duplicate cookies and
+cross-origin consumption are refused. Logout clears the cookie and revokes its
+server-side session. Go AuthKit calls retain their own explicit token results.
+
 Privileged local users pass AuthKit request verification and live account
 admission. Enrollment-only tokens remain restricted after enrollment completes;
 clients obtain a new normal token. Every permission check acts as the token's

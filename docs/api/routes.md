@@ -4,7 +4,7 @@
 
 Every route of the HTTP API (218), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
 **Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `catalog write` a route mounted only where the deployment allows catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
@@ -28,8 +28,8 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 | GET | `/v1/currencies` | public | — | — | 200 `CurrencyRegistry` |  |
 | GET | `/v1/checkout-config` | public | — | — | 200 `CheckoutConfig` |  |
 | GET | `/v1/solana/tokens` | public | — | — | 200 `SupportedTokensResponse` | when `solana` |
-| GET | `/v1/checkout-sessions/{id}` | session_id | — | — | 200 `CheckoutSession` |  |
-| POST | `/v1/checkout-sessions/{id}/pay` | session_id | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
+| GET | `/v1/checkout-sessions/{id}` | checkout_session | — | — | 200 `CheckoutSession` |  |
+| POST | `/v1/checkout-sessions/{id}/pay` | checkout_session | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
 | GET | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | — | 200 `SolanaPayGetResponse` | when `solana` |
 | POST | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/captcha/status` | public | — | — | 200 `CaptchaStatus` |  |

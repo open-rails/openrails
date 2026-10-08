@@ -193,6 +193,8 @@ func (e *Env) gates(route Route) []router.Middleware {
 	switch route.Auth {
 	case AuthPublic, AuthSessionID, AuthProvider:
 		mw = conn
+	case AuthCheckoutSession:
+		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime)}, conn...)
 	case AuthOptional:
 		mw = append(conn, e.optionalMW())
 	case AuthUser:

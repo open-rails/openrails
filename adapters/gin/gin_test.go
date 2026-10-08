@@ -40,7 +40,7 @@ func (b *Bundle) Mount(target gin.IRoutes) error {
 	if b == nil || target == nil {
 		return errors.New("nil bundle or router")
 	}
-	return mount(target, b.routes, b.rootOnly)
+	return MountRoutes(target, b.routes, b.rootOnly)
 }
 
 type routeSource struct {

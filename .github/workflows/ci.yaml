@@ -64,16 +64,22 @@ jobs:
           version: ${{ steps.tool_versions.outputs.golangci_lint }}
           args: --timeout=15m
 
-  e2e:
-    name: End-to-end
+  e2e-shards:
+    name: End-to-end worker ${{ matrix.worker }}
     runs-on: ubuntu-latest
-    # The PR gate is intentionally small: the e2e contracts are the
-    # database/provider test suite, including the adversarial security cases.
+    # Complementary global shards keep the full suite while halving the
+    # concurrent test processes and PostgreSQL work on each runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [0, 1]
     timeout-minutes: 28
     env:
       OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
       OPENRAILS_E2E_REDIS_ADDR: 127.0.0.1:6379
       OPENRAILS_E2E_SHARDS: "4"
+      OPENRAILS_E2E_WORKERS: "2"
+      OPENRAILS_E2E_WORKER: ${{ matrix.worker }}
       OPENRAILS_E2E_TIMEOUT: 20m
     steps:
       # A step rather than a service: the multi-replica fleets (#1075) need
@@ -95,6 +101,7 @@ jobs:
       - name: Wait for PostgreSQL
         run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
       - name: Generated SQL bindings match the queries
+        if: ${{ matrix.worker == 0 }}
         env:
           SQLC_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
         run: |
@@ -106,6 +113,7 @@ jobs:
       # setup-go's cache is keyed on go.sum alone and never re-saved, so it
       # would recompile pg_query_go's C parser on every run.
       - name: Restore query audit build cache
+        if: ${{ matrix.worker == 0 }}
         id: sqlaudit-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -114,18 +122,33 @@ jobs:
           restore-keys: |
             sqlaudit-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       - name: Query audit (EXPLAIN every sqlc query)
+        if: ${{ matrix.worker == 0 }}
         env:
           CGO_ENABLED: "1"
           GOCACHE: ${{ runner.temp }}/sqlaudit-gocache
         run: bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
       - name: Save query audit build cache
-        if: ${{ !cancelled() && steps.sqlaudit-cache.outcome == 'success' && steps.sqlaudit-cache.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.worker == 0 && !cancelled() && steps.sqlaudit-cache.outcome == 'success' && steps.sqlaudit-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sqlaudit-gocache
           key: ${{ steps.sqlaudit-cache.outputs.cache-primary-key }}
       - name: Run focused e2e contracts
         run: bash scripts/e2e.sh
+
+  # Preserve the required check name. A skipped, cancelled or failed matrix
+  # child must never turn into a successful aggregate.
+  e2e:
+    name: End-to-end
+    needs: e2e-shards
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every worker to pass
+        env:
+          E2E_RESULT: ${{ needs.e2e-shards.result }}
+        run: test "$E2E_RESULT" = success
 
   security:
     name: Required Security

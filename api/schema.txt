@@ -7,6 +7,7 @@ migration 0003_product_price_keys.up.sql sha256:86d4b378bbdc547fe3d617034749fb4a
 migration 0004_catalog_credit_benefits.up.sql sha256:70d01a7b2e045503724d00488ff4601b68dd613c236fc67c8904e9c1392d541f
 migration 0005_purchased_credit_accounting.up.sql sha256:a60a5b3a64bbe0a882350e3decadc89566e09fcfe008cd22cacc6e22c6899e41
 migration 0006_catalog_snapshots.up.sql sha256:e45102e6cb5b778a67aa5dbdfb95c095efd4df018a237969b84e74c07773fb12
+migration 0007_checkout_session_directory.up.sql sha256:28f5ee3c7d980e9d607fb82e6bb76f94b43315e1f5c4531117fcc1b4076546e6
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -283,6 +284,7 @@ table billing.checkout_sessions
   constraint checkout_sessions_success_url_check CHECK ((success_url <> ''::text))
   index CREATE INDEX checkout_sessions_attempt_id_idx ON billing.checkout_sessions USING btree (merchant_id, attempt_id) WHERE (attempt_id IS NOT NULL)
   index CREATE INDEX checkout_sessions_customer_id_idx ON billing.checkout_sessions USING btree (merchant_id, customer_id)
+  index CREATE INDEX checkout_sessions_id_hash_idx ON billing.checkout_sessions USING btree (id_hash)
   index CREATE UNIQUE INDEX checkout_sessions_pkey ON billing.checkout_sessions USING btree (merchant_id, id_hash)
   index CREATE INDEX checkout_sessions_purge_at_idx ON billing.checkout_sessions USING btree (purge_at)
 

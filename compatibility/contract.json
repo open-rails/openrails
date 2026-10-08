@@ -134,6 +134,7 @@
       "func (c *Client) ListReprices(ctx context.Context, params billing.RepriceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Reprice], error)",
       "func (c *Client) ListSpendDelegations(ctx context.Context, customer billing.CustomerID, requestOptions ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error)",
       "func (c *Client) ListSubscriptions(ctx context.Context, params billing.SubscriptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Subscription], error)",
+      "func (c *Client) ListUserMerchants(ctx context.Context, r *http.Request) ([]billing.UserMerchant, error)",
       "func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error)",
       "func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id billing.InvoiceID, requestOptions ...RequestOption) (*billing.Invoice, error)",
       "func (c *Client) MarkNotificationRead(ctx context.Context, id billing.NotificationID, options ...RequestOption) (*billing.MerchantNotification, error)",
@@ -270,7 +271,8 @@
     ],
     "adapters/gin": [
       "func CheckoutFramePolicy(client *openrails.Client) gin.HandlerFunc",
-      "func Mount(target gin.IRoutes, client *openrails.Client) error"
+      "func Mount(target gin.IRoutes, client *openrails.Client) error",
+      "func MountRoutes(target gin.IRoutes, routes []openrails.Route, rootOnly bool) error"
     ],
     "adapters/http": [
       "func CheckoutFramePolicy(client *openrails.Client) func(http.Handler) http.Handler",
@@ -1480,7 +1482,7 @@
       "type ReplacedMembership struct {\n\tSubscriptionID uuid.UUID `json:\"subscription_id\"`\n\tPriceID        uuid.UUID `json:\"price_id\"`\n\tPeriodEnd      time.Time `json:\"period_end\"`\n\tCredit         int64     `json:\"credit,string\"`\n}",
       "type StripeCollectionReceipt struct {\n\tChargeInvoiceID       string `json:\"charge_invoice_id\"`\n\tChargePaymentIntentID string `json:\"charge_payment_intent_id\"`\n\tChargedAmount         int64  `json:\"charged_amount,string\"`\n\tChargeCurrency        string `json:\"charge_currency\"`\n\tChargeCustomerID      string `json:\"charge_customer_id\"`\n\tChargePaid            bool   `json:\"charge_paid\"`\n\tChargeCaptured        bool   `json:\"charge_captured\"`\n\tChargeStatus          string `json:\"charge_status\"`\n\tCustomerID            string `json:\"customer_id\"`\n\tPaymentMethodID       string `json:\"payment_method_id\"`\n\tInvoiceID             string `json:\"invoice_id\"`\n\tStatus                string `json:\"status\"`\n\tAmountPaid            int64  `json:\"amount_paid,string\"`\n\tCurrency              string `json:\"currency\"`\n\tChargeID              string `json:\"charge_id\"`\n\tPaymentIntentID       string `json:\"payment_intent_id\"`\n\n\tCollectionKey string `json:\"collection_key\"`\n}",
       "type StripeEnginePaymentResult struct {\n\tDeclineCode     string                   `json:\"decline_code,omitempty\"`\n\tState           StripeEnginePaymentState `json:\"state\"`\n\tPaymentIntentID string                   `json:\"payment_intent_id\"`\n\tFailureCode     string                   `json:\"failure_code,omitempty\"`\n\tReceipt         *StripeEngineReceipt     `json:\"receipt,omitempty\"`\n}",
-      "type StripeEngineReceipt struct {\n\tCustomerInitiated   bool            `json:\"customer_initiated,omitempty\"`\n\tOneTime             bool            `json:\"one_time,omitempty\"`\n\tRefundedAmountMinor moneyutil.Cents `json:\"refunded_amount_minor,string,omitempty\"`\n\tRefunded            bool            `json:\"refunded,omitempty\"`\n\tDisputed            bool            `json:\"disputed,omitempty\"`\n\tPaymentIntentID     string          `json:\"payment_intent_id\"`\n\tChargeID            string          `json:\"charge_id\"`\n\tCustomerRef         string          `json:\"customer_ref\"`\n\tMethodRef           string          `json:\"method_ref\"`\n\tAmountMinor         moneyutil.Cents `json:\"amount_minor,string\"`\n\tCurrency            string          `json:\"currency\"`\n\tMerchantID          uuid.UUID       `json:\"merchant_id\"`\n\tPSPID               uuid.UUID       `json:\"psp_id\"`\n\tCustomerID          uuid.UUID       `json:\"customer_id\"`\n\tOperationID         uuid.UUID       `json:\"operation_id\"`\n\tInitial             bool            `json:\"initial\"`\n}",
+      "type StripeEngineReceipt struct {\n\tCustomerInitiated   bool            `json:\"customer_initiated,omitempty\"`\n\tOneTime             bool            `json:\"one_time,omitempty\"`\n\tRefundedAmountMinor moneyutil.Cents `json:\"refunded_amount_minor,string,omitempty\"`\n\tRefunded            bool            `json:\"refunded,omitempty\"`\n\tDisputed            bool            `json:\"disputed,omitempty\"`\n\tPaymentIntentID     string          `json:\"payment_intent_id\"`\n\tChargeID            string          `json:\"charge_id\"`\n\tCustomerRef         string          `json:\"customer_ref\"`\n\tMethodRef           string          `json:\"method_ref\"`\n\tAmountMinor         moneyutil.Cents `json:\"amount_minor,string\"`\n\tCurrency            string          `json:\"currency\"`\n\tMerchantID          uuid.UUID       `json:\"merchant_id\"`\n\tPSPID               uuid.UUID       `json:\"psp_id\"`\n\tCustomerID          uuid.UUID       `json:\"customer_id\"`\n\tOperationID         uuid.UUID       `json:\"operation_id\"`\n\tInitial             bool            `json:\"initial\"`\n\tRenewalTermsSHA256  string          `json:\"renewal_terms_sha256,omitempty\"`\n}",
       "type StripeEngineSetup struct {\n\tID                string\n\tStatus            string\n\tClientSecret      string `json:\"-\"`\n\tMethodRef         string\n\tLastFour          string\n\tBrand             string\n\tExpMonth, ExpYear int\n}",
       "type StripeSchedulePhase struct {\n\tStartDate int64  `json:\"start_date\"`\n\tEndDate   int64  `json:\"end_date\"`\n\tPriceID   string `json:\"price_id\"`\n\tQuantity  int64  `json:\"quantity\"`\n}",
       "type StripeScheduleState struct {\n\tID             string                `json:\"id\"`\n\tSubscriptionID string                `json:\"subscription_id\"`\n\tStatus         string                `json:\"status\"`\n\tEndBehavior    string                `json:\"end_behavior,omitempty\"`\n\tTierChangeKey  string                `json:\"tier_change_key,omitempty\"`\n\tPhases         []StripeSchedulePhase `json:\"phases\"`\n}",
@@ -1868,8 +1870,11 @@
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/internal/controlplane",
       "errors": "errors",
+      "helpersauth": "github.com/open-rails/helpers/auth",
       "http": "net/http",
-      "operator": "github.com/open-rails/openrails/internal/operator"
+      "iam": "github.com/open-rails/authkit/iam",
+      "operator": "github.com/open-rails/openrails/internal/operator",
+      "verify": "github.com/open-rails/authkit/verify"
     },
     "credits.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -3282,6 +3287,7 @@
     },
     "internal/modules/checkoutsession/session.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",

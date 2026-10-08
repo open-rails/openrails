@@ -56,6 +56,9 @@ func (s *Store) withTxDB(txdb *db.DB) *Store {
 // IdempotencyKey makes the enqueue effectively-once (see the query's conflict
 // semantics: pending refreshed, superseded/expired revived, rest untouched).
 type EnqueueParams struct {
+	// operationID is set only after validating a new engine renewal admission.
+	// Existing operations always retain their stored identity.
+	operationID    uuid.UUID
 	MerchantID     uuid.UUID
 	Provider       string
 	IntentType     string
@@ -227,6 +230,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if payload.Attempt != ordinal {
 				return errors.New("engine admission changed its accepted attempt ordinal")
 			}
+			p.operationID = subscriptions.SubscriptionCollectionOperationID(p.MerchantID, p.PspID, payload)
 		}
 		if p.IntentType == "nmi_upgrade" {
 			if err := subscriptions.RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
@@ -353,6 +357,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueProviderIntent(ctx, gen.EnqueueProviderIntentParams{
+			ID:             uuidPtrOrNil(p.operationID),
 			MerchantID:     p.MerchantID,
 			Rail:           p.Provider,
 			IntentType:     p.IntentType,

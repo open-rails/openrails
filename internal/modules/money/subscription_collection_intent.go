@@ -106,11 +106,12 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	return h.dispatchNMI(ctx, in, p, charger, proof, 0)
 }
 
-// obligationPaid reads the obligation's shared order before a later attempt
-// is fenced: an earlier attempt's charge, found late, pays the period and
-// nothing is sent.
+// obligationPaid reads the obligation's shared order before every new attempt,
+// including the first one in this database. A restored or stale copy may not
+// know about a provider charge yet. This lookup recovers visible payments;
+// it cannot serialize independent senders while provider reads lag.
 func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
-	if in.Rail == "stripe" || p.Attempt == 0 || p.Instrument.CustodianHeld() {
+	if in.Rail == "stripe" || p.Instrument.CustodianHeld() {
 		return intents.Outcome{}, false
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, "")

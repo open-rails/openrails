@@ -21,6 +21,29 @@ exactly four ways the system diverges, each with its own mechanism:
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
 | 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
 
+## One authoritative billing database
+
+All active replicas for a merchant's billing book must share one PostgreSQL
+database with one writable primary. Database admission locks, unique operation
+keys and executor claims coordinate those replicas. Independently writable
+copies of that database using the same payment-provider account are unsupported:
+each copy can acquire its own locks and try to collect the same renewal.
+
+Provider idempotency supplements database coordination within each provider's
+documented limits; it does not make independent copies safe for active-active
+billing. A provider lookup followed by a charge is not an atomic lock.
+
+Follow the [offline merchant transfer procedure](merchant-portability.md) when
+moving a book: stop and drain source writers, disable automatic restarts, keep
+destination writers stopped during restore, then activate only the destination.
+Once destination billing starts, rollback requires another controlled transfer
+of current state. Never restart the stale source snapshot as a rollback.
+
+`provider_write_mode: readonly` blocks provider mutations, but still permits
+local state changes and webhook ingestion. It does not make a running source
+quiescent. Where supported, revoking separately scoped source credentials at the
+provider offers stronger protection against accidentally restarting an old copy.
+
 ## Mutation Flags
 
 Provider pull and merchant-configuration commands use mutation flags. Catalog
@@ -133,8 +156,8 @@ additionally send `Idempotency-Key`. Every attempt/outcome is appended to
 `billing.provider_mutation_logs`.
 
 **Several replicas.** Hosts may run any number of processes against one
-database and River schema. Exactly-once rebilling rests on the database, not
-on process state or timing: admission locks the customer and subscription
+authoritative database and River schema. Rebilling coordination uses the
+database: admission locks the customer and subscription
 rows; unique indexes allow one unresolved charge operation per subscription
 and one engine operation per (period, attempt) slot; the write-once submission
 fence admits one sender per charge; completion re-reads the operation under the
@@ -142,7 +165,37 @@ same locks. A pass that finds its membership already settled by another replica
 does nothing. Leases and the lost-submission settle delay (5 minutes) use each
 process's clock, so keep replicas NTP-synchronized: skew must stay well under
 the settle delay minus the 25-second provider timeout. `ci/`'s
-`TestReplicas*` fleets are the proof.
+`TestReplicas*` fleets exercise shared-database concurrency and recovery.
+Database claims are not a provider-enforced fence against an arbitrarily paused
+sender or an independently writable database copy.
+
+**Renewal deduplication.** New engine renewal operations have a deterministic
+identity for the merchant, PSP, subscription, original period boundary and
+attempt. A network retry keeps that identity. A new payment attempt follows only
+a conclusively closed earlier attempt; a changed card or amount is not an excuse
+to generate a different identity for the same attempt. Already accepted
+operations retain their original IDs.
+
+Stripe PaymentIntents retain the renewal obligation, attempt and accepted-term
+binding in metadata. Before submission, OpenRails lists the customer's provider
+payments and checks that metadata, then reads any matching payment by ID. An
+existing matching payment is recovered; conflicting terms or another executable
+or paid attempt require reconciliation. This uses customer listing rather than
+Stripe's [eventually consistent Search API](https://docs.stripe.com/api/payment_intents/search).
+Native NMI saved-card renewals use the persistent obligation
+order reference and check for a qualified existing payment even before the
+first local attempt. These lookups can find charges after a provider's duplicate
+window has elapsed, but a lookup and a subsequent charge are not atomic.
+
+[Stripe may discard idempotency keys after 24 hours](https://docs.stripe.com/api/idempotent_requests).
+Automatic resubmission of an
+uncertain Stripe renewal therefore stops before that deadline, with clock and
+provider-call margins measured from its original submission fence. Reads of the
+existing payment continue. An empty or unavailable lookup after that deadline
+leaves an unresolved-submission finding; it does not authorize another charge.
+Provider receipts and operator reconciliation must resolve that uncertainty.
+NMI duplicate-check behavior depends on the account/processor; an order reference
+is a lookup key, not a provider-enforced uniqueness constraint.
 
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
 deliver webhooks at-least-once and retry from their end; our handlers are

@@ -34,8 +34,19 @@ type obj = map[string]any
 
 // providerCall is one journaled provider mutation.
 type providerCall struct {
-	Method, Path string
-	Form         url.Values
+	Method, Path   string
+	IdempotencyKey string
+	Form           url.Values
+}
+
+// Stripe retains an executed request's status and body, including declines,
+// for at least 24 hours. This fake chooses the earliest permitted expiry.
+// https://docs.stripe.com/api/idempotent_requests
+type stripeIdempotentRequest struct {
+	method, path, params string
+	createdAt            time.Time
+	status               int
+	body                 []byte
 }
 
 // gate parks one matching provider request until released or its caller
@@ -59,25 +70,29 @@ func newGate(match func(*http.Request) bool, commit bool) *gate {
 // methods, payment intents with charges, refunds and provider-owned
 // subscriptions. Every mutation is journaled; idempotency keys replay.
 type stripeFake struct {
-	mu        sync.Mutex
-	seq       int
-	customers map[string]obj
-	setups    map[string]obj
-	methods   map[string]obj
-	declines  map[string]string
-	intents   map[string]obj
-	order     []string
-	charges   map[string]obj
-	refunds   map[string]obj
-	subs      map[string]obj
-	idem      map[string][]byte
-	writes    []providerCall
-	gates     []*gate
-	odd       []string
-	lose      int
-	lost      int
-	listDown  bool
-	subsDown  bool
+	mu              sync.Mutex
+	seq             int
+	customers       map[string]obj
+	setups          map[string]obj
+	methods         map[string]obj
+	declines        map[string]string
+	intents         map[string]obj
+	order           []string
+	charges         map[string]obj
+	refunds         map[string]obj
+	subs            map[string]obj
+	idem            map[string]*stripeIdempotentRequest
+	now             func() time.Time
+	visibilityDelay time.Duration
+	visibleAt       map[string]time.Time
+	requests        []providerCall
+	writes          []providerCall
+	gates           []*gate
+	odd             []string
+	lose            int
+	lost            int
+	listDown        bool
+	subsDown        bool
 	// pricesDown fails every Price read with a 503.
 	pricesDown bool
 	// amounts are legacy prices created at Stripe at other than 9.99.
@@ -86,7 +101,8 @@ type stripeFake struct {
 
 func newStripeFake() *stripeFake {
 	return &stripeFake{customers: map[string]obj{}, setups: map[string]obj{}, methods: map[string]obj{}, declines: map[string]string{},
-		intents: map[string]obj{}, charges: map[string]obj{}, refunds: map[string]obj{}, subs: map[string]obj{}, idem: map[string][]byte{}}
+		intents: map[string]obj{}, charges: map[string]obj{}, refunds: map[string]obj{}, subs: map[string]obj{}, idem: map[string]*stripeIdempotentRequest{},
+		now: time.Now, visibleAt: map[string]time.Time{}}
 }
 
 func (f *stripeFake) id(prefix string) string {
@@ -101,6 +117,9 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	form, _ := url.ParseQuery(string(body))
 	f.mu.Lock()
+	if r.Method != http.MethodGet {
+		f.requests = append(f.requests, providerCall{Method: r.Method, Path: r.URL.Path, IdempotencyKey: r.Header.Get("Idempotency-Key"), Form: form})
+	}
 	var g *gate
 	for _, candidate := range f.gates {
 		if candidate.match(r) {
@@ -128,8 +147,15 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		res.Request = r
 		return res, nil
 	}
+	replay, key, claimed := f.beginIdempotentRequest(r, form)
+	if replay != nil {
+		res := replay.Result()
+		res.Request = r
+		return res, nil
+	}
+	defer f.abandonIdempotentRequest(key, claimed)
 	if g != nil && g.served {
-		rec := f.serve(r, form)
+		rec := f.serve(r, form, claimed)
 		g.once.Do(func() { close(g.arrived) })
 		select {
 		case <-g.release:
@@ -146,15 +172,74 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		case <-g.release:
 		case <-r.Context().Done():
 			if g.commit {
-				f.serve(r, form)
+				f.serve(r, form, claimed)
 			}
 			return nil, r.Context().Err()
 		}
 	}
-	rec := f.serve(r, form)
+	rec := f.serve(r, form, claimed)
 	res := rec.Result()
 	res.Request = r
 	return res, nil
+}
+
+func stripeResponse(status int, raw []byte) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json")
+	rec.WriteHeader(status)
+	_, _ = rec.Write(raw)
+	return rec
+}
+
+func (f *stripeFake) beginIdempotentRequest(r *http.Request, form url.Values) (*httptest.ResponseRecorder, string, *stripeIdempotentRequest) {
+	key := r.Header.Get("Idempotency-Key")
+	if r.Method != http.MethodPost || key == "" {
+		return nil, "", nil
+	}
+	key = r.Header.Get("Stripe-Account") + "|" + key
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if previous := f.idem[key]; previous != nil {
+		if previous.status != 0 && !f.now().Before(previous.createdAt.Add(24*time.Hour)) {
+			delete(f.idem, key)
+		} else if previous.method != r.Method || previous.path != r.URL.Path || previous.params != form.Encode() {
+			return stripeResponse(http.StatusBadRequest, []byte(`{"error":{"type":"idempotency_error","message":"Keys for idempotent requests can only be used with the same parameters"}}`)), key, nil
+		} else if previous.status == 0 {
+			return stripeResponse(http.StatusConflict, []byte(`{"error":{"type":"invalid_request_error","code":"idempotency_key_in_use","message":"Another request is executing with this idempotency key"}}`)), key, nil
+		} else {
+			return stripeResponse(previous.status, previous.body), key, nil
+		}
+	}
+	claim := &stripeIdempotentRequest{method: r.Method, path: r.URL.Path, params: form.Encode(), createdAt: f.now()}
+	f.idem[key] = claim
+	return nil, key, claim
+}
+
+func (f *stripeFake) abandonIdempotentRequest(key string, claim *stripeIdempotentRequest) {
+	if claim == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.idem[key] == claim && claim.status == 0 {
+		delete(f.idem, key)
+	}
+}
+
+// setClock controls provider key age and creation timestamps independently of
+// either OpenRails deployment's clock. The supplied clock must be concurrency-safe.
+func (f *stripeFake) setClock(now func() time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.now = now
+}
+
+// delayIntentVisibility models a read that has not caught up with a completed
+// create. Direct ID reads still work; list recovery sees it after this delay.
+func (f *stripeFake) delayIntentVisibility(delay time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.visibilityDelay = delay
 }
 
 // loseSubmissions makes the next n PaymentIntent creates fail in transit,
@@ -192,28 +277,23 @@ func (f *stripeFake) unhold() {
 	f.gates = nil
 }
 
-func (f *stripeFake) serve(r *http.Request, form url.Values) *httptest.ResponseRecorder {
+func (f *stripeFake) serve(r *http.Request, form url.Values, claimed *stripeIdempotentRequest) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	rec.Header().Set("Content-Type", "application/json")
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	key := r.Header.Get("Idempotency-Key")
-	if r.Method != http.MethodGet && key != "" {
-		if cached, ok := f.idem[r.URL.Path+"|"+key]; ok {
-			_, _ = rec.Write(cached)
-			return rec
-		}
-	}
 	if r.Method != http.MethodGet {
-		f.writes = append(f.writes, providerCall{Method: r.Method, Path: r.URL.Path, Form: form})
+		f.writes = append(f.writes, providerCall{Method: r.Method, Path: r.URL.Path, IdempotencyKey: r.Header.Get("Idempotency-Key"), Form: form})
 	}
 	status, out := f.route(r, form)
 	raw, _ := json.Marshal(out)
 	if os.Getenv("GF_DEBUG") != "" && strings.Contains(r.URL.Path, "subscriptions") {
 		fmt.Fprintf(os.Stderr, "STRIPE %s %s -> %d %s\n", r.Method, r.URL.String(), status, raw)
 	}
-	if status == http.StatusOK && r.Method != http.MethodGet && key != "" {
-		f.idem[r.URL.Path+"|"+key] = raw
+	// Validation failures do not start an operation. Executed outcomes,
+	// including issuer declines and server failures, retain status and body.
+	if claimed != nil && status != http.StatusBadRequest && status != http.StatusNotFound {
+		claimed.status, claimed.body = status, raw
 	}
 	rec.WriteHeader(status)
 	_, _ = rec.Write(raw)
@@ -241,7 +321,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 	case p == "/v1/balance":
 		return 200, obj{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
 	case r.Method == http.MethodGet && p == "/v1/customers/search":
-		var data []any
+		data := []any{}
 		for _, c := range f.customers {
 			match := true
 			for _, m := range metadataQuery.FindAllStringSubmatch(q.Get("query"), -1) {
@@ -290,9 +370,9 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 	case r.Method == http.MethodPost && p == "/v1/payment_intents":
 		return f.createIntent(form)
 	case r.Method == http.MethodGet && p == "/v1/payment_intents":
-		var data []any
+		data := []any{}
 		for _, id := range f.order {
-			if pi := f.intents[id]; pi["customer"] == q.Get("customer") {
+			if pi := f.intents[id]; pi["customer"] == q.Get("customer") && !f.now().Before(f.visibleAt[id]) {
 				data = append(data, pi)
 			}
 		}
@@ -330,7 +410,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		}
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && p == "/v1/refunds":
-		var data []any
+		data := []any{}
 		for _, re := range f.refunds {
 			if (q.Get("charge") == "" || re["charge"] == q.Get("charge")) && (q.Get("payment_intent") == "" || re["payment_intent"] == q.Get("payment_intent")) {
 				data = append(data, re)
@@ -338,7 +418,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		}
 		return 200, obj{"object": "list", "data": data, "has_more": false}
 	case r.Method == http.MethodGet && p == "/v1/subscriptions":
-		var data []any
+		data := []any{}
 		for _, s := range f.subs {
 			if q.Get("customer") == "" || s["customer"] == q.Get("customer") {
 				data = append(data, s)
@@ -369,13 +449,20 @@ func stripeErr(code string) obj {
 }
 
 func (f *stripeFake) createIntent(form url.Values) (int, any) {
-	amount, _ := strconv.ParseInt(form.Get("amount"), 10, 64)
+	amount, err := strconv.ParseInt(form.Get("amount"), 10, 64)
+	if err != nil || amount <= 0 {
+		return http.StatusBadRequest, stripeErr("parameter_invalid_integer")
+	}
 	pm := form.Get("payment_method")
+	if form.Get("currency") == "" {
+		return http.StatusBadRequest, stripeErr("parameter_missing")
+	}
 	pi := obj{"object": "payment_intent", "id": f.id("pi"), "amount": amount, "amount_received": 0, "currency": form.Get("currency"), "customer": form.Get("customer"),
 		"payment_method": pm, "capture_method": form.Get("capture_method"), "confirmation_method": form.Get("confirmation_method"), "setup_future_usage": form.Get("setup_future_usage"),
-		"livemode": false, "metadata": metadataOf(form), "created": time.Now().Unix()}
+		"livemode": false, "metadata": metadataOf(form), "created": f.now().Unix()}
 	pi["client_secret"] = pi["id"].(string) + "_secret_gf"
 	f.intents[pi["id"].(string)] = pi
+	f.visibleAt[pi["id"].(string)] = f.now().Add(f.visibilityDelay)
 	f.order = append(f.order, pi["id"].(string))
 	switch decline := f.declines[pm]; decline {
 	case "":
@@ -520,6 +607,20 @@ func (f *stripeFake) mutations(path string) []providerCall {
 	for _, c := range f.writes {
 		if strings.HasPrefix(c.Path, path) {
 			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// submitted counts requests sent to Stripe, including replays and conflicts,
+// so a recovery test can distinguish readback from a fresh submission attempt.
+func (f *stripeFake) submitted(path string) []providerCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []providerCall
+	for _, call := range f.requests {
+		if call.Path == path {
+			out = append(out, call)
 		}
 	}
 	return out

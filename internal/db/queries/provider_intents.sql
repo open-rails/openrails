@@ -21,11 +21,11 @@
 -- Always RETURNs the canonical row for the key.
 -- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
-    merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
+    id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
     actor, expires_at, psp_id, custodian_id
 ) VALUES (
-    sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
+    COALESCE(sqlc.narg(id)::uuid, uuidv7()), sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
@@ -866,4 +866,3 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(inten
   AND subscription_id = sqlc.arg(subscription_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
-

@@ -73,6 +73,13 @@ func StripeEngineParams(in gen.BillingProviderIntent) (subscriptions.StripeEngin
 		params.Instrument = p.Instrument
 		params.AmountMinor = p.AmountMinor
 		params.Currency = p.Renewal.Currency
+		if in.ID == subscriptions.SubscriptionCollectionOperationID(in.MerchantID, *in.PspID, p) {
+			renewal, err := subscriptions.NewStripeRenewal(p)
+			if err != nil {
+				return params, err
+			}
+			params.Renewal = &renewal
+		}
 	default:
 		return params, errors.New("operation has no Stripe engine receipt contract")
 	}

@@ -25,6 +25,9 @@ const (
 	ClockMargin              = 2 * time.Minute
 	resendArmedKey           = "resend_armed"
 	duplicateRefusedKey      = "duplicate_refused_at"
+	// Stripe may prune idempotency keys after 24 hours. Include the existing
+	// clock margin and provider-call hold rather than start a resend at expiry.
+	stripeIdempotencyRetention = 24 * time.Hour
 )
 
 func resentKey(attempt int) string { return fmt.Sprintf("resent_%d_at", attempt) }
@@ -66,6 +69,13 @@ func LoadSubmissionHistory(in gen.BillingProviderIntent) (SubmissionHistory, err
 // the provider to be its answer rather than lag.
 func (h SubmissionHistory) Settled(now time.Time) bool {
 	return !now.Before(h.Latest.Add(LostSubmissionSettle))
+}
+
+// StripeReplaySafe bounds retransmission, not receipt reads. A request whose
+// original key may have expired remains unresolved instead of creating another
+// PaymentIntent from an empty provider lookup.
+func (h SubmissionHistory) StripeReplaySafe(now time.Time) bool {
+	return !h.First.IsZero() && !now.Before(h.First) && now.Before(h.First.Add(stripeIdempotencyRetention-ClockMargin-ProviderCallHold))
 }
 
 // Window is the start of every provider read for this operation's charge.
