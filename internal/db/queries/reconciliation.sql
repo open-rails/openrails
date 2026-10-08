@@ -794,12 +794,12 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.current_period_ends_at < sqlc.arg(now)::timestamptz;
 
 -- Episode analytics totals for the gauges header. Freeloader episodes are spans
--- of entitlement access not covered by payment (subscription paid-through
+-- of entitlement access not covered by payment (accepted subscription access
 -- snapshot, completed purchase payment, or a live matching grant); their cause
 -- separates sanctioned unpaid access (sanctioned_dunning, awaiting_verification)
 -- from failure (unsanctioned). Orphaned episodes are the mirror: payment
 -- coverage with no entitlement window. Open = the span still accrues at now().
--- Approximations: paid-through is the current-period snapshot, and only the
+-- Approximations: coverage uses the current accepted access snapshot, and only the
 -- uncovered tail is measured.
 -- name: CountErrorEpisodeTotals :one
 WITH win AS (
@@ -807,7 +807,9 @@ WITH win AS (
            LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
                  COALESCE(e.ends_at, 'infinity'::timestamptz)) AS window_end,
            s.status AS sub_status, s.next_retry_at,
-           GREATEST(s.current_period_ends_at, s.ended_at) AS paid_through,
+           CASE WHEN s.id IS NULL THEN NULL
+                ELSE COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
+                    s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) END AS paid_through,
            p.status AS payment_status,
            COALESCE((SELECT max(r.purchased_at) FROM billing.payments r
                       WHERE r.merchant_id = e.merchant_id AND r.refunded_payment_id = p.id AND r.deleted_at IS NULL),
@@ -850,12 +852,13 @@ WITH win AS (
 ), coverage AS (
     SELECT s.merchant_id, s.customer_id, 'subscription'::text AS source_type, s.id AS source_id,
            COALESCE(s.current_period_starts_at, s.started_at) AS cov_start,
-           GREATEST(s.current_period_ends_at, s.ended_at) AS cov_end
+           COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
+               s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) AS cov_end
       FROM billing.subscriptions s
       JOIN billing.products pd ON pd.merchant_id = s.merchant_id AND pd.id = s.product_id
      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
        AND s.deleted_at IS NULL AND s.status <> 'pending'
-       AND GREATEST(s.current_period_ends_at, s.ended_at) IS NOT NULL
+       AND s.cancel_type IS DISTINCT FROM 'chargeback'
        AND ((pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
             OR (s.entitlements_spec_snapshot IS NOT NULL AND s.entitlements_spec_snapshot <> '{}'::jsonb))
     UNION ALL
