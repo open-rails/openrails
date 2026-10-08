@@ -25,6 +25,7 @@ type fakeLedger struct {
 	due, dueVerify         []gen.BillingProviderIntent
 	refuseClaim            bool
 	markErr, logErr        error
+	recoveryErr            error
 	recs                   map[uuid.UUID]*ledgerRec
 	logs                   []MutationLogParams
 	pruned, prunedTerminal []uuid.UUID
@@ -316,4 +317,41 @@ func TestEnqueueAndExecute(t *testing.T) {
 	assert.Zero(t, h.executed)
 	assert.Equal(t, 1, ledger.claims)
 	assert.Equal(t, StatusPending, row.Status)
+}
+
+func (f *fakeLedger) CheckRecovery(context.Context, gen.BillingProviderIntent, time.Time) error {
+	return f.recoveryErr
+}
+
+func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		mode     ModeView
+		evidence []byte
+	}{
+		{"restored renewal without local fence", modeFull, nil},
+		{"old retryable submitted operation", modeFull, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+		{"readonly submitted operation", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			intent := testIntent("subscription_collection", OriginSystem, 1)
+			intent.Status = StatusFailedRetryable
+			intent.ResultEvidence = test.evidence
+			store := &fakeLedger{row: intent, due: []gen.BillingProviderIntent{intent}, recoveryErr: errors.New("provider recovery required")}
+			handler := &fakeHandler{typ: intent.IntentType, relevance: StillRelevant(), verify: Succeeded(nil)}
+			runner := &Runner{Store: store, Registry: NewRegistry(handler), Config: test.mode}
+			_, err := runner.RunExecuteOnce(context.Background())
+			require.NoError(t, err)
+			require.Zero(t, handler.executed)
+			require.Equal(t, StatusUnknownNeedsVerify, store.recs[intent.ID].status)
+			require.Equal(t, test.evidence, store.row.ResultEvidence, "recovery does not fabricate a submission fence")
+			intent.Status = StatusUnknownNeedsVerify
+			store.dueVerify = []gen.BillingProviderIntent{intent}
+			_, err = runner.RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, 1, handler.verified)
+			require.Zero(t, handler.executed)
+			require.Equal(t, StatusSucceeded, store.recs[intent.ID].status)
+		})
+	}
 }

@@ -2672,6 +2672,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	ProductID                   uuid.UUID
 	Status                      string
 	Rail                        string
+	CollectionPolicy            string
 	RailSubscriptionID          *string
 	PaymentMethodID             *uuid.UUID
 	CurrentPeriodStartsAt       *time.Time

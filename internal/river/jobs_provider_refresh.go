@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -43,11 +44,10 @@ const (
 	// the kind onto QueueBilling instead (see AddBillingWorkersTo).
 	QueueProviderRefresh = "provider_refresh"
 
-	providerRefreshDomainEvents   = "events"
-	defaultRefreshWindow          = 24 * time.Hour
-	defaultRefreshSafetyLag       = 5 * time.Minute
-	defaultRefreshInitialLookback = 90 * 24 * time.Hour
-	defaultRefreshMaxWindows      = 8
+	providerRefreshDomainEvents = "events"
+	defaultRefreshWindow        = 24 * time.Hour
+	defaultRefreshSafetyLag     = 5 * time.Minute
+	defaultRefreshMaxWindows    = 8
 	// defaultRefreshStagger spreads the scheduler's fan-out so merchant pull
 	// windows don't align on the tick instant.
 	defaultRefreshStagger = 30 * time.Minute
@@ -291,10 +291,9 @@ type ProviderRefreshWorker struct {
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
 
-	Window          time.Duration
-	SafetyLag       time.Duration
-	InitialLookback time.Duration
-	MaxWindows      int
+	Window     time.Duration
+	SafetyLag  time.Duration
+	MaxWindows int
 }
 
 func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshMerchant }
@@ -382,7 +381,6 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		// the operator's destructive arming; readonly never changes its mode.
 		verdict := gate.Check(tctx, mid)
 		overwrite := verdict.Allowed && verdict.EnforceArmed && (w.Config == nil || !config.IsProviderReadOnly(w.Config))
-		mutations := &reconcile.LocalMutationPolicy{Insert: true, Overwrite: overwrite}
 		if !overwrite {
 			stats.Gated++
 		}
@@ -404,6 +402,8 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				stats.ProviderErrors++
 				continue
 			}
+			accountOverwrite := overwrite && providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) == nil
+			mutations := &reconcile.LocalMutationPolicy{Insert: true, Overwrite: accountOverwrite}
 			accountResult := w.runEventRefresh(tctx, mid, reconcile.ModeEnforce, mutations, armed.Coverage, map[reconcile.Provider]reconcile.RailFetcher{provider: fetcher})
 			res.add(accountResult.providerRefreshProviderResult)
 			stats.add(accountResult)
@@ -413,7 +413,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				}
 			}
 		}
-		if !overwrite {
+		if !overwrite || providerrecovery.CheckMerchant(tctx, w.DB, mid, w.now()) != nil {
 			return nil
 		}
 		armed := builder.Build(tctx, billing.MerchantID(mid))
@@ -481,6 +481,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		clock = clockwork.NewRealClock()
 	}
 	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, clock)
+	lc.SetConfig(w.Config)
 	if w.DeferDelete != nil {
 		// #679: a stale-decline cancel must durably queue the deferred NMI
 		// delete; without this the lifecycle WARNs and the remote keeps retrying.
@@ -575,7 +576,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		return out
 	}
 
-	since, err := w.loadAppliedWatermark(ctx, mid, pspID, horizon.Add(-w.initialLookback()))
+	since, err := w.loadAppliedWatermark(ctx, mid, pspID)
 	if err != nil {
 		out.WatermarkErrors++
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
@@ -659,6 +660,14 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		since = until
 	}
 	out.More = since.Before(horizon) && out.ProviderErrors == 0 && out.WatermarkErrors == 0
+	if !out.More && out.ProviderErrors == 0 && out.WatermarkErrors == 0 {
+		conflicts, err := w.DB.Gen(ctx).PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: pspID})
+		if err != nil || conflicts {
+			out.ProviderErrors++
+		} else if err := w.DB.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: horizon}); err != nil {
+			out.WatermarkErrors++
+		}
+	}
 	// #786: advance the pull watermark AFTER the pass so the NEXT pass's drift
 	// gate compares against this pull.
 	if out.Windows > 0 {
@@ -669,7 +678,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID, fallback time.Time) (time.Time, error) {
+func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {
 	watermark, err := w.DB.Gen(ctx).GetPSPAppliedRefreshWatermark(ctx, gen.GetPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: psp})
 	if err == nil {
 		return watermark.UTC(), nil
@@ -681,9 +690,7 @@ func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, p
 	if err != nil {
 		return time.Time{}, err
 	}
-	if floor.Before(fallback) {
-		return time.Time{}, fmt.Errorf("provider recovery requires an explicit baseline: relevant obligation predates the %s automatic lookback", w.initialLookback())
-	}
+
 	return floor.UTC(), nil
 }
 
@@ -703,13 +710,6 @@ func (w *ProviderRefreshWorker) safetyLag() time.Duration {
 		return w.SafetyLag
 	}
 	return defaultRefreshSafetyLag
-}
-
-func (w *ProviderRefreshWorker) initialLookback() time.Duration {
-	if w.InitialLookback > 0 {
-		return w.InitialLookback
-	}
-	return defaultRefreshInitialLookback
 }
 
 func (w *ProviderRefreshWorker) maxWindows() int {

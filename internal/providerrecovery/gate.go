@@ -34,14 +34,14 @@ func CheckPSP(ctx context.Context, database *db.DB, mid, psp uuid.UUID, now time
 	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := database.Gen(ctx)
 		floor := now.Add(-RefreshInterval - SafetyLag)
-		age, err := q.PSPRecoveryBookAge(ctx, gen.PSPRecoveryBookAgeParams{MerchantID: mid, PspID: psp, Before: floor, Latest: now.Add(SafetyLag)})
+		conflicts, err := q.PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: psp})
 		if err != nil {
-			return fmt.Errorf("%w: read account history: %v", ErrPending, err)
+			return fmt.Errorf("%w: read unresolved receipts: %v", ErrPending, err)
 		}
-		if age.Future {
-			return fmt.Errorf("%w: PSP %s has future-dated billing evidence", ErrPending, psp)
+		if conflicts {
+			return fmt.Errorf("%w: PSP %s has unresolved financial findings", ErrPending, psp)
 		}
-		applied, err := q.GetPSPAppliedRefreshWatermark(ctx, gen.GetPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: psp})
+		applied, err := q.GetPSPCompletedRefreshWatermark(ctx, gen.GetPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: psp})
 		if err == nil && applied.After(now.Add(SafetyLag)) {
 			return fmt.Errorf("%w: PSP %s has future-dated applied coverage", ErrPending, psp)
 		}
@@ -51,7 +51,11 @@ func CheckPSP(ctx context.Context, database *db.DB, mid, psp uuid.UUID, now time
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: read applied coverage: %v", ErrPending, err)
 		}
-		if !age.Established {
+		age, err := q.PSPRecoveryBookAge(ctx, gen.PSPRecoveryBookAgeParams{MerchantID: mid, PspID: psp, Before: floor})
+		if err != nil {
+			return fmt.Errorf("%w: read account history: %v", ErrPending, err)
+		}
+		if !age {
 			return nil
 		}
 		return fmt.Errorf("%w: PSP %s needs complete applied provider coverage", ErrPending, psp)

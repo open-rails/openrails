@@ -39,6 +39,7 @@ func localRailNames(p Provider) []string {
 // LocalSubscription is the slice of billing.subscriptions the diff engine
 // consumes.
 type LocalSubscription struct {
+	CollectionPolicy            models.CollectionPolicy
 	ID                          uuid.UUID
 	CustomerID                  uuid.UUID
 	PriceID                     *uuid.UUID

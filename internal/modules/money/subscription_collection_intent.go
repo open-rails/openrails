@@ -293,9 +293,7 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	if outcome, done := h.completeEvidence(ctx, in, p); done {
 		return outcome
 	}
-	if intents.EvidenceString(in, "submitted_at") == "" {
-		return intents.Retryable("unsubmitted payment awaits gated execution")
-	}
+	unsubmitted := intents.EvidenceString(in, "submitted_at") == ""
 	reference := ""
 	if candidate, found, err := intents.LoadCollectionCandidate(in); err != nil {
 		return intents.Ambiguous(err.Error())
@@ -303,6 +301,24 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 		reference = candidate.TransactionID
 	}
 	if in.Rail == "stripe" {
+		if unsubmitted && reference == "" {
+			service, err := h.stripeEngineService(ctx, in)
+			if err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+			params, err := intents.StripeEngineParams(in)
+			if err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+			found, exists, err := service.ReadEngineRenewal(ctx, params)
+			if err != nil {
+				return h.unresolved(ctx, in, p, "existing renewal observation is inconclusive: "+err.Error())
+			}
+			if !exists {
+				return h.awaitRecoveredSubmission(ctx, in)
+			}
+			reference = found.PaymentIntentID
+		}
 		return h.verifyStripeEngine(ctx, in, p, reference)
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
@@ -311,6 +327,9 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	}
 	if found {
 		return h.completePaid(ctx, in, p, receipt)
+	}
+	if unsubmitted {
+		return h.awaitRecoveredSubmission(ctx, in)
 	}
 	if p.Instrument.CustodianHeld() {
 		return h.unresolved(ctx, in, p, "custodian-held engine charge has no exact receipt")
@@ -485,4 +504,17 @@ func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd}
 	a.TokenType = payments.DefaultTokenType(in.Rail, p.Instrument.Custodian)
 	return attempts.Record(ctx, d.Gen(ctx), a)
+}
+
+// A restored book may have lost the original operation, while its stable
+// obligation is already paid. Verify may recover an exact positive receipt
+// without inventing a local submission fence; absence never authorizes a POST.
+func (h *SubscriptionCollectionHandler) awaitRecoveredSubmission(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
+	if reason := h.submissionHeld(in); reason != "" {
+		return intents.Parked(reason)
+	}
+	if err := intents.NewStore(h.DB).CheckRecovery(ctx, in, h.now()); err != nil {
+		return intents.Parked(err.Error())
+	}
+	return intents.Retryable("unsubmitted payment awaits gated execution")
 }

@@ -18,6 +18,7 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
+	CheckRecovery(context.Context, gen.BillingProviderIntent, time.Time) error
 	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
 	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
 	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
@@ -221,7 +222,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	}
 
 	if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
-		r.park(ctx, logEntry, stats, intent.ID, now, reason)
+		r.holdForRecovery(ctx, logEntry, stats, intent, now, reason)
+		return
+	}
+	if err := r.Store.CheckRecovery(ctx, intent, now); err != nil {
+		r.holdForRecovery(ctx, logEntry, stats, intent, now, err.Error())
 		return
 	}
 
@@ -710,4 +715,22 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 	var stats Stats
 	r.apply(ctx, logger, &stats, h, in, out, true)
 	return r.Store.Get(ctx, id)
+}
+
+// A held write must not strand a possibly submitted operation in an execute
+// state. Redispatch it through Verify, which can record positive receipts while
+// the write gate remains closed, without issuing another provider mutation.
+func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
+	submitted, malformed := hasSubmissionEvidence(in)
+	if in.IntentType == "subscription_collection" || submitted || malformed != nil {
+		writeCtx, cancel := LedgerWriteContext(ctx)
+		defer cancel()
+		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, nil); err != nil {
+			logger.WithError(err).Error("cannot schedule held operation readback")
+			return
+		}
+		stats.Parked++
+		return
+	}
+	r.park(ctx, logger, stats, in.ID, now, reason)
 }

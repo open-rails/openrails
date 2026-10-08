@@ -10,11 +10,13 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // EffectOptions is the caller's context for a transition's effects.
@@ -36,6 +38,14 @@ type EffectOptions struct {
 // Transition owns retry fields; these effects project the corresponding grace
 // policy. The unverified trigger separately wakes provider resolution on commit.
 func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects []lifecycle.Effect, now time.Time, opts EffectOptions) ([]*models.NotificationQueue, error) {
+	for _, effect := range effects {
+		switch effect.(type) {
+		case lifecycle.EndAccess, lifecycle.QueueProviderCancel:
+			if err := s.CheckCancellationRecovery(ctx, d, sub, now); err != nil {
+				return nil, err
+			}
+		}
+	}
 	ents := s.newLifecycleEntitlementService(d)
 	var out []*models.NotificationQueue
 	var granted *lifecycle.GrantPeriod
@@ -198,4 +208,17 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
 	sub.Price = price
 	return nil // The caller grants the newly paid period from this snapshot.
+}
+
+// CheckCancellationRecovery keeps automated local revocation and its eventual
+// provider delete behind the same recovered-account boundary. A positive paid
+// renewal has no cancellation effect and can still settle while writes hold.
+func (s *SubscriptionLifecycleService) CheckCancellationRecovery(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) error {
+	if s.Config != nil && config.IsProviderReadOnly(s.Config) {
+		return fmt.Errorf("%w: readonly holds local cancellation", providerrecovery.ErrPending)
+	}
+	if sub.PspID == uuid.Nil {
+		return nil
+	}
+	return providerrecovery.CheckPSP(ctx, d, sub.MerchantID, sub.PspID, now)
 }

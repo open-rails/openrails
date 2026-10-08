@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -424,6 +425,11 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		psp, err := charge.RoutePSP(ctx, q, *method)
 		if err != nil {
 			return fmt.Errorf("route invoice %s collection: %w", invoice.ID, err)
+		}
+		// Before a new invoice attempt chooses an account, recover every
+		// known account that may have collected it after the old snapshot.
+		if err := providerrecovery.CheckMerchant(ctx, s.db.NewWithPgxTx(tx), tid.UUID(), now); err != nil {
+			return err
 		}
 		var custody *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {

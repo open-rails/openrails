@@ -30,53 +30,87 @@ func (q *Queries) GetPSPAppliedRefreshWatermark(ctx context.Context, arg GetPSPA
 	return watermark_at, err
 }
 
-const pSPRecoveryBookAge = `-- name: PSPRecoveryBookAge :one
-SELECT COALESCE(bool_or(at < $1::timestamptz), false)::boolean AS established,
-       COALESCE(bool_or(at > $2::timestamptz), false)::boolean AS future
-FROM (
-  SELECT started_at AS at FROM billing.subscriptions
-    WHERE merchant_id=$3::uuid AND psp_id=$4::uuid
-  UNION ALL
-  SELECT purchased_at FROM billing.payments
-    WHERE merchant_id=$3::uuid AND psp_id=$4::uuid
-  UNION ALL
-  SELECT COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz, NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at)
-    FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
-    WHERE pi.merchant_id=$3::uuid AND pi.psp_id=$4::uuid
-      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-  UNION ALL
-  SELECT i.period_starts_at FROM billing.invoices i
-    JOIN billing.payment_methods pm ON pm.merchant_id=i.merchant_id AND pm.customer_id=i.customer_id
-    WHERE i.merchant_id=$3::uuid AND pm.psp_id=$4::uuid
-      AND i.status IN ('draft','open','past_due','uncollectible')
-) facts
+const getPSPCompletedRefreshWatermark = `-- name: GetPSPCompletedRefreshWatermark :one
+SELECT watermark_at FROM billing.psp_refresh_watermarks
+WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+  AND event_domain='completed_events'
 `
 
-type PSPRecoveryBookAgeParams struct {
-	Before     time.Time
-	Latest     time.Time
+type GetPSPCompletedRefreshWatermarkParams struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
 }
 
-type PSPRecoveryBookAgeRow struct {
-	Established bool
-	Future      bool
+func (q *Queries) GetPSPCompletedRefreshWatermark(ctx context.Context, arg GetPSPCompletedRefreshWatermarkParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID)
+	var watermark_at time.Time
+	err := row.Scan(&watermark_at)
+	return watermark_at, err
 }
 
-// Semantic obligation dates survive process clocks and invoice-only books.
-// A recent additional fact cannot hide older state; impossible future evidence
-// is not permission to treat an inherited book as new.
-func (q *Queries) PSPRecoveryBookAge(ctx context.Context, arg PSPRecoveryBookAgeParams) (PSPRecoveryBookAgeRow, error) {
-	row := q.db.QueryRow(ctx, pSPRecoveryBookAge,
-		arg.Before,
-		arg.Latest,
-		arg.MerchantID,
-		arg.PspID,
-	)
-	var i PSPRecoveryBookAgeRow
-	err := row.Scan(&i.Established, &i.Future)
-	return i, err
+const pSPHasUnresolvedFinancialFindings = `-- name: PSPHasUnresolvedFinancialFindings :one
+SELECT EXISTS(SELECT 1 FROM billing.reconciliation_findings
+ WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+   AND status IN ('reconcile_required','requires_review','ignored')
+   AND finding_type IN ('pull.charge.missing','pull.refund.missing','pull.reversal.unlinked',
+     'pull.dispute.chargeback','pull.subscription.missing','pull.subscription.duplicate','pull.subscription.drift'))::boolean
+`
+
+type PSPHasUnresolvedFinancialFindingsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+// Ignore silences an operator notification; it does not settle a receipt.
+func (q *Queries) PSPHasUnresolvedFinancialFindings(ctx context.Context, arg PSPHasUnresolvedFinancialFindingsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, pSPHasUnresolvedFinancialFindings, arg.MerchantID, arg.PspID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const pSPRecoveryBookAge = `-- name: PSPRecoveryBookAge :one
+SELECT EXISTS (
+  SELECT 1 FROM billing.subscriptions
+    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+      AND started_at < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.payments
+    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+      AND purchased_at < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.invoice_payments ip
+    JOIN billing.invoices i ON i.merchant_id=ip.merchant_id AND i.id=ip.invoice_id
+    WHERE ip.merchant_id=$1::uuid AND ip.psp_id=$2::uuid
+      AND i.period_starts_at < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.provider_intents pi
+    LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
+    WHERE pi.merchant_id=$1::uuid AND pi.psp_id=$2::uuid
+      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+      AND COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz,
+        NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at) < $3::timestamptz
+  UNION ALL
+  SELECT 1 FROM billing.invoices i
+    WHERE i.merchant_id=$1::uuid AND i.collection_intent_id IS NULL
+      AND i.status IN ('draft','open','past_due','uncollectible')
+      AND i.period_starts_at < $3::timestamptz
+)::boolean
+`
+
+type PSPRecoveryBookAgeParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Before     time.Time
+}
+
+// This cold-path exemption uses EXISTS: one older bound fact is sufficient.
+// Fresh completed coverage is checked first; ordinary writes do not scan history.
+func (q *Queries) PSPRecoveryBookAge(ctx context.Context, arg PSPRecoveryBookAgeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, pSPRecoveryBookAge, arg.MerchantID, arg.PspID, arg.Before)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const pSPRecoveryHistoryFloor = `-- name: PSPRecoveryHistoryFloor :one
@@ -90,9 +124,11 @@ SELECT COALESCE(min(at), $1::timestamptz)::timestamptz AS oldest_at FROM (
     WHERE pi.merchant_id=$2::uuid AND pi.psp_id=$3::uuid
       AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
   UNION ALL
+  -- An unbound unpaid invoice may have charged on any known merchant account
+  -- after the restored snapshot. Looking only at its newly selected card is
+  -- not evidence that the old invoice was unpaid elsewhere.
   SELECT i.period_starts_at FROM billing.invoices i
-    JOIN billing.payment_methods pm ON pm.merchant_id=i.merchant_id AND pm.customer_id=i.customer_id
-    WHERE i.merchant_id=$2::uuid AND pm.psp_id=$3::uuid
+    WHERE i.merchant_id=$2::uuid AND i.collection_intent_id IS NULL
       AND i.status IN ('draft','open','past_due','uncollectible')
 ) facts
 `
@@ -127,5 +163,23 @@ type UpsertPSPAppliedRefreshWatermarkParams struct {
 
 func (q *Queries) UpsertPSPAppliedRefreshWatermark(ctx context.Context, arg UpsertPSPAppliedRefreshWatermarkParams) error {
 	_, err := q.db.Exec(ctx, upsertPSPAppliedRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
+	return err
+}
+
+const upsertPSPCompletedRefreshWatermark = `-- name: UpsertPSPCompletedRefreshWatermark :exec
+INSERT INTO billing.psp_refresh_watermarks(merchant_id,psp_id,event_domain,watermark_at)
+VALUES($1::uuid,$2::uuid,'completed_events',$3::timestamptz)
+ON CONFLICT(merchant_id,psp_id,event_domain) DO UPDATE
+SET watermark_at=GREATEST(billing.psp_refresh_watermarks.watermark_at,EXCLUDED.watermark_at),updated_at=now()
+`
+
+type UpsertPSPCompletedRefreshWatermarkParams struct {
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
+	WatermarkAt time.Time
+}
+
+func (q *Queries) UpsertPSPCompletedRefreshWatermark(ctx context.Context, arg UpsertPSPCompletedRefreshWatermarkParams) error {
+	_, err := q.db.Exec(ctx, upsertPSPCompletedRefreshWatermark, arg.MerchantID, arg.PspID, arg.WatermarkAt)
 	return err
 }

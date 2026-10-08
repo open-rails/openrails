@@ -72,7 +72,7 @@ func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Ti
 
 func (r *RunResult) hasUnapplied(provider string, financialOnly bool) bool {
 	for _, finding := range r.Findings {
-		if string(finding.Provider) != provider || (finding.Status != FindingStatusReconcileRequired && finding.Status != FindingStatusRequiresReview) {
+		if string(finding.Provider) != provider || (finding.Status != FindingStatusReconcileRequired && finding.Status != FindingStatusRequiresReview && finding.Status != FindingStatusIgnored) {
 			continue
 		}
 		if financialOnly {

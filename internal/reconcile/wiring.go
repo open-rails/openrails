@@ -16,13 +16,15 @@ import (
 // CLI) supplies the system-origin scheduler. The caller supplies a
 // merchant-scoped context at Run time.
 func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher, cancels subscriptions.ProviderCancelScheduler) *Engine {
+	decisions := NewDecisionApplier(d, cancels)
+	decisions.LC.SetConfig(cfg)
 	e := &Engine{
 		Fetchers: fetchers,
 		Store:    &PGStore{DB: d},
 		Local:    &PGLocalStateLoader{DB: d},
 		Writer:   &PGLocalWriter{DB: d},
 		// #665: subscription transitions route through the decider.
-		Decisions: NewDecisionApplier(d, cancels),
+		Decisions: decisions,
 		// #835 evidence-staleness floor, read per run from the merchant's
 		// destructive policy.
 		Policy: destructive.New(d),

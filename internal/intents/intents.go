@@ -203,3 +203,24 @@ func EvidenceString(intent gen.BillingProviderIntent, key string) string {
 	_ = json.Unmarshal(evidence[key], &value)
 	return value
 }
+
+// hasSubmissionEvidence is shared by parking and recovery redispatch. A
+// durable marker is evidence of possible provider acceptance, never permission
+// to infer non-execution from an empty read or to issue another POST.
+func hasSubmissionEvidence(in gen.BillingProviderIntent) (bool, error) {
+	var evidence map[string]json.RawMessage
+	if len(in.ResultEvidence) > 0 {
+		if err := json.Unmarshal(in.ResultEvidence, &evidence); err != nil {
+			return false, err
+		}
+	}
+	key := "submitted_at"
+	switch in.IntentType {
+	case "initial_membership":
+		key = "initial_submitted"
+	case "nmi_sale":
+		key = "sale_submitted"
+	}
+	_, found := evidence[key]
+	return found, nil
+}

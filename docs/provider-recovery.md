@@ -9,7 +9,8 @@ never automatically changed to full mode.
 Observation and application use separate domains in `psp_refresh_watermarks`:
 
 - `events` records provider-window observation, including older advisory runs.
-- `applied_events` records complete account-bound windows whose required
+- `applied_events` records successfully applied account-bound windows for resuming a partial catch-up.
+- `completed_events` records the captured target only after its whole financial catch-up completes. Its required
   financial facts have been applied. Old observation cursors are never copied
   into this domain. Fetch failures, incomplete pagination, failed financial
   writes and unresolved receipt identity prevent advancement.
@@ -28,8 +29,9 @@ of provider finality or an exactly-once fence across independent databases.
 When applied progress exists, recovery continues from that cursor. On a first
 upgrade without it, the lower bound comes from relevant current subscriptions
 and unresolved accepted operations, not every historical completed payment.
-Relevant obligations older than the automatic lookback require an explicit
-reviewed baseline; they are not silently certified by truncating the read.
+Long billing periods are read in bounded batches from their relevant obligation
+floor. Unavailable provider history remains an explicit unresolved error; the
+read is not truncated and an operator flag cannot manufacture its proof.
 
 Known engine renewals and invoice payments must recover through their accepted
 operation and normal settlement path. An unmatched provider receipt is a
@@ -37,6 +39,6 @@ review finding, not permission to insert an unrelated subscription payment.
 
 This work is still under qualification: the stale-book mutation gate, native
 receipt correlation and strict NMI report completeness must be reviewed together
-before the restore workflow is considered complete. Migration 0009 depends on
-0008 from the billing-duration change and must be relinked onto that final parent
+before the restore workflow is considered complete. Migration 0010 depends on
+0009 from the invoice-cadence change and must be relinked onto that final parent
 before merge. No live provider or deployed restore is qualified by local tests.

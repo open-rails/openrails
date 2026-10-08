@@ -1569,6 +1569,9 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		return fmt.Errorf("apply local cancellation: db handle and subscription are required")
 	}
 	now := s.now()
+	if err := s.CheckCancellationRecovery(ctx, dbb, sub, now); err != nil {
+		return err
+	}
 	endedAt := c.EndedAt
 	// canceled_at is the operation instant, but never after ended_at: the
 	// subscriptions_ended_not_before_canceled_check constraint requires ended_at >= canceled_at,
