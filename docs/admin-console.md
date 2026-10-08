@@ -163,7 +163,8 @@ export default [
   `user` pages belong to the signed-in user and stay reachable without one.
 - **Navigation.** `nav` entries join the sidebar by `group` (merchant entries
   default to the console's "Billing" group, user entries to "Account") and
-  `order`; `roles` and `visible(ctx)` hide them. `userMenu` adds account-menu
+  `order`; `roles`, `visible(ctx)` and the `useVisible` hook (for data the
+  extension loads) hide them. `userMenu` adds account-menu
   entries. A path the console already routes refuses to start.
 - **Runtime.** `useConsole(id)` gives the user, their merchants, the selected
   one and the extension's `Routes.AdminConsole.Extensions[id]`; `authFetch()` calls

@@ -39,7 +39,15 @@ const hosted: ConsoleExtension = {
     { path: "/account", scope: "user", lazy: page },
     { path: "/merchants/new", scope: "user", lazy: page },
   ],
-  nav: [{ title: "Overview", path: "/account", scope: "user" }],
+  nav: [
+    { title: "Overview", path: "/account", scope: "user" },
+    {
+      title: "Operators only",
+      path: "/platform",
+      scope: "user",
+      useVisible: () => false,
+    },
+  ],
 }
 
 // renderAt renders node at a console path with the given extensions.
@@ -98,6 +106,7 @@ describe("a user with no merchants", () => {
     const userPage = renderAt("/account", [hosted], <AppLayout />)
     expect(userPage).not.toContain("any merchants yet")
     expect(userPage).toContain("Overview")
+    expect(userPage).not.toContain("Operators only")
   })
 
   it("is told a failed load is a failure, not an empty list", () => {

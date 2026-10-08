@@ -38,6 +38,7 @@ import {
   newMerchantPath,
   useExtensions,
 } from "@/extensions/registry"
+import type { ConsoleNavItem } from "@/extensions/types"
 import { useConsoleContextFor } from "@/extensions/use-console"
 import { useAuth } from "@/lib/auth"
 
@@ -70,43 +71,14 @@ export function AppSidebar() {
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => {
-                  const inSection = item.path === active
-                  return (
-                    <SidebarMenuItem key={item.path}>
-                      <SidebarMenuButton
-                        isActive={inSection}
-                        tooltip={item.title}
-                        render={
-                          <Link to={item.path}>
-                            {item.icon && <HugeiconsIcon icon={item.icon} />}
-                            <span>{item.title}</span>
-                          </Link>
-                        }
-                      />
-                      {item.items && inSection && (
-                        <SidebarMenuSub>
-                          {item.items.map((sub) => (
-                            <SidebarMenuSubItem key={sub.path}>
-                              <SidebarMenuSubButton
-                                isActive={subItemIsActive(
-                                  pathname,
-                                  sub.path,
-                                  item.path
-                                )}
-                                render={
-                                  <Link to={sub.path}>
-                                    <span>{sub.title}</span>
-                                  </Link>
-                                }
-                              />
-                            </SidebarMenuSubItem>
-                          ))}
-                        </SidebarMenuSub>
-                      )}
-                    </SidebarMenuItem>
-                  )
-                })}
+                {group.items.map((item) => (
+                  <NavEntry
+                    key={item.path}
+                    item={item}
+                    active={item.path === active}
+                    pathname={pathname}
+                  />
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -114,6 +86,52 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarRail />
     </Sidebar>
+  )
+}
+
+const always = () => true
+
+function NavEntry({
+  item,
+  active,
+  pathname,
+}: {
+  item: ConsoleNavItem
+  active: boolean
+  pathname: string
+}) {
+  // A fixed hook per entry: an extension's item list never changes.
+  const visible = (item.useVisible ?? always)()
+  if (!visible) return null
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
+        tooltip={item.title}
+        render={
+          <Link to={item.path}>
+            {item.icon && <HugeiconsIcon icon={item.icon} />}
+            <span>{item.title}</span>
+          </Link>
+        }
+      />
+      {item.items && active && (
+        <SidebarMenuSub>
+          {item.items.map((sub) => (
+            <SidebarMenuSubItem key={sub.path}>
+              <SidebarMenuSubButton
+                isActive={subItemIsActive(pathname, sub.path, item.path)}
+                render={
+                  <Link to={sub.path}>
+                    <span>{sub.title}</span>
+                  </Link>
+                }
+              />
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
   )
 }
 

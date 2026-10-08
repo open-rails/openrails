@@ -43,6 +43,9 @@ export interface ConsoleNavItem {
   // Merchant roles that see a merchant-scoped item; unset is every role.
   roles?: string[]
   visible?: (ctx: ConsoleContext) => boolean
+  // A React hook, for visibility that depends on data the extension loads
+  // (the item renders once it returns true).
+  useVisible?: () => boolean
   // Position within its group; the console's own items use 0–90 in tens.
   order?: number
   items?: { title: string; path: string }[]
@@ -61,6 +64,7 @@ export interface ConsoleMenuItem {
   path: string
   icon?: IconSvgElement
   visible?: (ctx: ConsoleContext) => boolean
+  useVisible?: () => boolean
 }
 
 export interface ConsoleExtension {

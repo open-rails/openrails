@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import type { ConsoleMenuItem } from "@/extensions/types"
 import { useExtensions, userMenuItems } from "@/extensions/registry"
 import { useConsoleContextFor } from "@/extensions/use-console"
 import { useAuth } from "@/lib/auth"
@@ -135,10 +136,7 @@ function UserMenu() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         {hostItems.map((item) => (
-          <DropdownMenuItem key={item.path} onClick={() => navigate(item.path)}>
-            {item.icon && <HugeiconsIcon icon={item.icon} />}
-            {item.title}
-          </DropdownMenuItem>
+          <HostMenuItem key={item.path} item={item} />
         ))}
         <DropdownMenuItem onClick={() => navigate("/settings")}>
           <HugeiconsIcon icon={Settings01Icon} />
@@ -166,5 +164,20 @@ function UserMenu() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+const always = () => true
+
+function HostMenuItem({ item }: { item: ConsoleMenuItem }) {
+  const navigate = useNavigate()
+  // A fixed hook per entry: an extension's menu never changes.
+  const visible = (item.useVisible ?? always)()
+  if (!visible) return null
+  return (
+    <DropdownMenuItem onClick={() => navigate(item.path)}>
+      {item.icon && <HugeiconsIcon icon={item.icon} />}
+      {item.title}
+    </DropdownMenuItem>
   )
 }
