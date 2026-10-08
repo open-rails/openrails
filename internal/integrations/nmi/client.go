@@ -378,20 +378,23 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 			"provider":     c.providerName,
 			"request_type": requestType,
 		}).Warn("NMI direct request blocked: provider is read-only (mode=readonly)")
-		return "", ErrProviderReadOnly
+		return "", errors.Join(ErrNotDispatched, ErrProviderReadOnly)
 	}
 
-	// Every direct-post request is a MUTATION: any failure past this point may
-	// have executed at the gateway, so it is wrapped transport-ambiguous (#674).
+	// Local validation and arming still precede dispatch. Only failures after
+	// HTTP Do begins are transport-ambiguous.
 	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.DirectPostURL, bytes.NewReader(body), true)
 	if err != nil {
-		return "", fmt.Errorf("build direct request: %w", err)
+		return "", errors.Join(ErrNotDispatched, fmt.Errorf("build direct request: %w", err))
 	}
 	defer cancel()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	if err := c.requireArmed(ctx, c.DirectPostURL); err != nil {
-		return "", err
+		return "", errors.Join(ErrNotDispatched, err)
+	}
+	if err := req.Context().Err(); err != nil {
+		return "", errors.Join(ErrNotDispatched, err)
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {

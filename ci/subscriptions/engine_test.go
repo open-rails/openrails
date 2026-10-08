@@ -722,9 +722,9 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 // Scenario 6: a process dies mid-renewal and a new one takes over the same
 // database. Before submission the renewal simply runs after restart. After a
 // submission whose response was lost, recovery adopts the provider's charge.
-// A request that never reached the provider is re-sent under the same
-// reference once the provider's read settles on "no transaction" (the soak's
-// SIGKILL case). Every path ends with exactly one renewal charge.
+// After a submission fence, only Stripe can safely replay its provider key.
+// NMI cannot distinguish a lost request from a delayed receipt and remains
+// pending until provider evidence resolves it.
 func TestEngineCrashDurability(t *testing.T) {
 	t.Parallel()
 	submit := map[string]func(*http.Request) bool{
@@ -808,6 +808,15 @@ func TestEngineCrashDurability(t *testing.T) {
 				}
 				w.wake()
 				w.runRenewals()
+				if rail == "nmi" && !tc.commit && tc.name != "before_submit" {
+					w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unknown dispatch remains visibly held")
+					w.advance(time.Hour)
+					w.wake()
+					require.Len(t, e.providerLedger(), 1, "an empty query cannot authorize another NMI sale")
+					require.Len(t, completed(w.payments(embedded, e.c.id)), 1)
+					require.True(t, e.periodEnd().Equal(end))
+					return
+				}
 				w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the renewal resolves")
 				w.advance(time.Hour)
 				w.wake()
@@ -819,10 +828,9 @@ func TestEngineCrashDurability(t *testing.T) {
 	}
 }
 
-// A submitted renewal the provider has no record of is decided by the
-// provider's authoritative read: nothing after the settle delay re-sends the
-// same operation (capped); a recorded decline or charge is adopted; an
-// unavailable read never re-sends and raises an operator finding.
+// A missing NMI transaction remains unresolved because its Query API has no
+// documented visibility bound. Stripe may resend inside its idempotency window.
+// Both providers recover positive receipts and expose unavailable reads.
 func TestEngineLostSubmission(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -834,6 +842,15 @@ func TestEngineLostSubmission(t *testing.T) {
 			e.toPeriodEnd()
 			w.loseSubmissions(rail, 1)
 			w.runRenewals()
+			if rail == "nmi" {
+				w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the lost NMI submission requires evidence")
+				w.advance(day)
+				w.wake()
+				require.Len(t, e.providerLedger(), 1)
+				require.Equal(t, 1, w.lostSubmissions(rail), "never automatically repeat an unknown submission")
+				require.True(t, e.periodEnd().Equal(end))
+				return
+			}
 			w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the lost renewal is re-sent")
 			require.Len(t, e.providerLedger(), 2, "exactly one renewal charge")
 			require.Len(t, completed(w.payments(embedded, e.c.id)), 2)
@@ -857,6 +874,15 @@ func TestEngineLostSubmission(t *testing.T) {
 			require.Equal(t, 1, e.providerAttempts(), "never re-sent while the provider cannot be read")
 			require.False(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
 			w.readUnavailable(rail, false)
+			if rail == "nmi" {
+				w.until(func() bool { return w.lostSubmissions(rail) == 1 }, "the first submission resumes after the preflight read recovers")
+				w.advance(time.Hour)
+				w.wake()
+				require.Len(t, e.providerLedger(), 1)
+				require.Equal(t, 1, w.lostSubmissions(rail), "a lost submission remains held after the provider read recovers")
+				require.Len(t, w.openFindings("life.submission.unresolved"), 1)
+				return
+			}
 			w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the renewal resolves once the provider answers")
 			require.Len(t, e.providerLedger(), 2)
 			require.Empty(t, w.openFindings("life.submission.unresolved"), "the finding closes with the operation")
@@ -875,7 +901,11 @@ func TestEngineLostSubmission(t *testing.T) {
 				w.wake()
 			}
 			require.Len(t, e.providerLedger(), 1, "nothing reached the provider")
-			require.Equal(t, 3, w.lostSubmissions(rail), "the original and two resends, no more")
+			if rail == "stripe" {
+				require.Equal(t, 3, w.lostSubmissions(rail), "the original and two idempotent resends, no more")
+			} else {
+				require.Equal(t, 1, w.lostSubmissions(rail), "NMI has no provider idempotency guarantee permitting a resend")
+			}
 			require.False(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
 		})
 	}

@@ -9,11 +9,10 @@ import (
 	"time"
 )
 
-// OrderAttempts is what the Query API holds under one order reference since
-// an attempt's fence: every transaction of any outcome, not only approved
-// sales. An order is shared by every attempt of one obligation, so earlier
-// attempts' transactions are left out, except an approved sale, which counts
-// wherever it falls.
+// OrderAttempts describes the visible transactions for one accepted attempt.
+// Any approved sale under the shared obligation order prevents a decline from
+// releasing it. Renewal declines are bound by exact attempt description, not
+// timestamps which can overlap when a payer retries immediately.
 type OrderAttempts struct {
 	Transactions int
 	// Declined is set when the attempt's only transaction is one refused sale
@@ -68,11 +67,19 @@ func (c *NMIClient) scoped() *NMIClient {
 // operation. An error is an inconclusive read; zero transactions is the
 // gateway's answer that nothing was recorded under the order.
 func (c *NMIClient) ReadOrderAttempts(ctx context.Context, orderReference string) (OrderAttempts, error) {
-	return c.ReadOrderAttemptsSince(ctx, orderReference, time.Time{})
+	return c.readOrderAttempts(ctx, orderReference, nil)
 }
 
-// ReadOrderAttemptsSince reads a shared order for the attempt fenced at since.
-func (c *NMIClient) ReadOrderAttemptsSince(ctx context.Context, orderReference string, since time.Time) (OrderAttempts, error) {
+// ReadRecurringOrderAttempts binds a declined sale to the exact transmitted
+// attempt and financial terms. Its order remains shared by the whole period.
+func (c *NMIClient) ReadRecurringOrderAttempts(ctx context.Context, accepted SaleParams) (OrderAttempts, error) {
+	if accepted.OrderDescription == "" || accepted.CustomerVaultID == "" || accepted.BillingID == "" || accepted.Amount <= 0 || accepted.Currency == "" {
+		return OrderAttempts{}, errors.New("recurring attempt requires exact description, instrument, amount and currency")
+	}
+	return c.readOrderAttempts(ctx, accepted.OrderID, &accepted)
+}
+
+func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string, accepted *SaleParams) (OrderAttempts, error) {
 	c = c.scoped()
 	if strings.TrimSpace(orderReference) == "" {
 		return OrderAttempts{}, errors.New("order reference is required")
@@ -86,23 +93,24 @@ func (c *NMIClient) ReadOrderAttemptsSince(ctx context.Context, orderReference s
 		if txn.OrderID != orderReference {
 			return OrderAttempts{}, receiptMismatch("order search returned another order's transaction")
 		}
-		if since.IsZero() || txn.approvedSale() != 0 {
-			mine = append(mine, txn)
-			continue
+		if accepted != nil && txn.approvedSale() == 0 {
+			if txn.OrderDescription != accepted.OrderDescription {
+				continue
+			}
+			if txn.CustomerVaultID != accepted.CustomerVaultID || !strings.EqualFold(txn.Currency, accepted.Currency) {
+				return OrderAttempts{}, receiptMismatch("decline does not match accepted instrument and currency")
+			}
 		}
-		at, err := txn.at()
-		if err != nil {
-			return OrderAttempts{}, err
-		}
-		if !at.Before(since) {
-			mine = append(mine, txn)
-		}
+		mine = append(mine, txn)
 	}
 	out := OrderAttempts{Transactions: len(mine)}
 	if len(mine) != 1 {
 		return out, nil
 	}
 	txn := mine[0]
+	if strings.TrimSpace(txn.TransactionID) == "" {
+		return out, nil
+	}
 	for _, action := range txn.Actions {
 		if !action.Is("sale") {
 			continue
@@ -110,8 +118,17 @@ func (c *NMIClient) ReadOrderAttemptsSince(ctx context.Context, orderReference s
 		if action.Succeeded() {
 			return OrderAttempts{Transactions: 1}, nil
 		}
+		if accepted != nil {
+			amount, ok := exactMinorAmount(action.Amount, txn.Currency)
+			if !ok || amount != int64(accepted.Amount) {
+				return OrderAttempts{}, receiptMismatch("decline does not match accepted amount")
+			}
+			if _, err := c.ReadSingleCardVaultBilling(ctx, accepted.CustomerVaultID, accepted.BillingID); err != nil {
+				return OrderAttempts{}, err
+			}
+		}
 		code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
-		if err != nil || code <= 0 || UncertainResponseCode(code) || out.Declined {
+		if err != nil || code < 200 || code >= 300 || UncertainResponseCode(code) || out.Declined {
 			return OrderAttempts{Transactions: 1}, nil
 		}
 		out.Declined, out.DeclineCode, out.DeclineTransactionID = true, code, strings.TrimSpace(txn.TransactionID)

@@ -2,6 +2,10 @@ package nmi
 
 import "errors"
 
+// ErrNotDispatched marks a failure established before the financial HTTP call.
+// It cannot be inferred from a transport failure or an empty provider query.
+var ErrNotDispatched = errors.New("nmi: financial request was not dispatched")
+
 // TransportAmbiguousError marks a gateway call whose MUTATION MAY HAVE
 // EXECUTED even though we got no usable answer: the request was (or may have
 // been) sent and the response was lost (timeout after send, connection reset,

@@ -12,13 +12,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// A submitted engine charge the provider has no record of is resolved from the
-// provider's authoritative reads: after LostSubmissionSettle with no
-// transaction under the obligation's order and none at all on the vault since
-// the fence, the same operation is sent again under the same order, at most
-// MaxLostSubmissionResends times. An inconclusive or contradictory read never
-// arms a resend. ClockMargin widens every read window for clock skew between
-// replicas and the gateway.
+// Stripe engine charges may retry the original idempotency key after a settle
+// delay and within its documented retention window. NMI submissions only read
+// receipts: empty Query API results do not prove nonexecution. ClockMargin
+// widens read windows for clock skew between replicas and the gateway.
 const (
 	LostSubmissionSettle     = 5 * time.Minute
 	MaxLostSubmissionResends = 2
@@ -65,8 +62,8 @@ func LoadSubmissionHistory(in gen.BillingProviderIntent) (SubmissionHistory, err
 	return h, nil
 }
 
-// Settled reports whether the latest submission is old enough for absence at
-// the provider to be its answer rather than lag.
+// Settled reports whether an unresolved submission has passed the observation
+// delay. It does not make absent provider records proof of nonexecution.
 func (h SubmissionHistory) Settled(now time.Time) bool {
 	return !now.Before(h.Latest.Add(LostSubmissionSettle))
 }
@@ -76,15 +73,6 @@ func (h SubmissionHistory) Settled(now time.Time) bool {
 // PaymentIntent from an empty provider lookup.
 func (h SubmissionHistory) StripeReplaySafe(now time.Time) bool {
 	return !h.First.IsZero() && !now.Before(h.First) && now.Before(h.First.Add(stripeIdempotencyRetention-ClockMargin-ProviderCallHold))
-}
-
-// Window is the start of every provider read for this operation's charge.
-func (h SubmissionHistory) Window() time.Time { return h.First.Add(-ClockMargin) }
-
-// DupSeconds is the NMI duplicate-check window a resend sends: from the
-// original fence to now, so any charge the original made is refused.
-func (h SubmissionHistory) DupSeconds(now time.Time) int {
-	return int(now.Sub(h.Window()) / time.Second)
 }
 
 // RecordDuplicateRefusal marks that NMI refused the charge as a duplicate of
@@ -100,10 +88,12 @@ func DuplicateRefusedAt(in gen.BillingProviderIntent) (time.Time, bool) {
 	return at, err == nil
 }
 
-// ArmLostSubmissionResend records that an authoritative read found nothing
-// under the operation after the settle delay. It opens the retry transition
-// for exactly the next resend.
+// ArmLostSubmissionResend arms one Stripe replay of the original idempotency
+// key after its retention and observation checks.
 func (s *Store) ArmLostSubmissionResend(ctx context.Context, in gen.BillingProviderIntent, attempt int) error {
+	if in.Rail != "stripe" {
+		return errors.New("only Stripe renewals support idempotent resubmission")
+	}
 	if attempt < 1 || attempt > MaxLostSubmissionResends {
 		return errors.New("resend attempt is outside the cap")
 	}
@@ -121,8 +111,8 @@ func (s *Store) ArmLostSubmissionResend(ctx context.Context, in gen.BillingProvi
 // writer may send; a crash after it counts toward the cap. The proof it mints
 // stays bound to the operation's original fence.
 func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.BillingProviderIntent, attempt int, now time.Time) (CollectionNonexecutionProof, bool, error) {
-	if in.IntentType != subscriptions.TypeSubscriptionCollection {
-		return CollectionNonexecutionProof{}, false, errors.New("only engine collections resend lost submissions")
+	if in.Rail != "stripe" || in.IntentType != subscriptions.TypeSubscriptionCollection {
+		return CollectionNonexecutionProof{}, false, errors.New("only Stripe engine collections resend lost submissions")
 	}
 	if attempt < 1 || attempt > MaxLostSubmissionResends || evidenceInt(in, resendArmedKey) != attempt {
 		return CollectionNonexecutionProof{}, false, errors.New("resend is not armed")
@@ -141,10 +131,6 @@ func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.BillingPro
 // ReadNMIOrderAttempts reads this attempt's transactions under the
 // obligation's shared order from its accepted account.
 func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, resolver NMIClientResolver) (nmi.OrderAttempts, error) {
-	history, err := LoadSubmissionHistory(in)
-	if err != nil {
-		return nmi.OrderAttempts{}, err
-	}
 	p, err := decodeCollectedTerms(in)
 	if err != nil {
 		return nmi.OrderAttempts{}, err
@@ -153,7 +139,11 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, res
 	if err != nil {
 		return nmi.OrderAttempts{}, err
 	}
-	return client.ReadOrderAttemptsSince(ctx, p.OrderReference, history.Window())
+	return client.ReadRecurringOrderAttempts(ctx, nmi.SaleParams{
+		OrderID: p.OrderReference, OrderDescription: subscriptions.SubscriptionCollectionDescription(in.ID),
+		CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
+		Amount: p.AmountMinor, Currency: p.Currency,
+	})
 }
 
 // ReadNMIVaultTransactions reads every transaction on the operation's frozen

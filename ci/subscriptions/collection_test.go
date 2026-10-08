@@ -17,9 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// Exactly-once collection (#1092): one NMI order per obligation, a resend
-// only on a clean vault-wide absence, dup_seconds as NMI's backstop, and
-// failpoint interleavings across replicas.
+// Collection custody: one NMI order per obligation, no retransmission of an
+// unknown NMI outcome, and failpoint interleavings across replicas.
 
 // A lost NMI submission is not re-sent while the vault shows any transaction
 // since its fence, even one under another order: it may be this charge.
@@ -42,25 +41,22 @@ func TestEngineNMILostSubmissionVaultActivity(t *testing.T) {
 	require.False(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
 }
 
-// An original the Query API has not indexed yet looks lost; the resend under
-// the same order carries dup_seconds back to the fence, so NMI refuses it.
-// Once the original is searchable it pays the period: one charge.
-func TestEngineNMIResendDupSecondsBackstop(t *testing.T) {
+// A configured duplicate window does not relax the single-dispatch rule.
+// Once the original is searchable it pays the period without another sale.
+func TestEngineNMIHiddenChargeWithDuplicateChecking(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
 	e.toPeriodEnd()
 	before := len(w.nmi.saleOrders())
+	w.nmi.SetDuplicateWindow(time.Hour)
 	w.nmi.DropSaleResponses(1)
 	w.nmi.HideSales(1)
 	w.runRenewals()
-	w.until(func() bool { return len(w.nmi.saleOrders()) == before+2 }, "the apparently lost submission is re-sent")
-	w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the refused resend is an operator finding")
-	orders := w.nmi.saleOrders()[before:]
-	require.Equal(t, orders[0], orders[1], "the resend reuses the obligation's order")
-	require.NotEmpty(t, w.nmi.lastAttempt().Get("dup_seconds"), "the resend sets NMI's duplicate window")
-	require.Len(t, e.providerLedger(), 2, "the resend charged nothing")
+	w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unknown submission is an operator finding")
+	require.Len(t, w.nmi.saleOrders()[before:], 1, "no repeat submission even with duplicate checking available")
+	require.Len(t, e.providerLedger(), 2)
 
 	w.nmi.Reveal()
 	w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the indexed original pays the period")
@@ -103,7 +99,8 @@ func TestEngineNMISharedOrderFindsEarlierCharge(t *testing.T) {
 }
 
 // Replica A reaches a failpoint in a renewal and dies there; replica B takes
-// the renewal over. Whatever A had done, the period is charged exactly once.
+// the renewal over. An ambiguous NMI pre-dispatch crash stays held; qualified
+// receipts and Stripe idempotency let the other cases recover exactly once.
 func TestReplicasFailpointInterleavings(t *testing.T) {
 	t.Parallel()
 	cases := map[failpoint.Point][]string{
@@ -128,6 +125,16 @@ func TestReplicasFailpointInterleavings(t *testing.T) {
 				p.release()
 				f.recover()
 				f.passes()
+				if rail == "nmi" && (point == failpoint.AfterFence || point == failpoint.BeforeProvider) {
+					f.until(func() bool { return len(f.base.openFindings("life.submission.unresolved")) == 1 }, "the crashed fence owner cannot prove non-dispatch")
+					f.advance(time.Hour)
+					f.wake()
+					f.revive(a)
+					f.passes()
+					require.Len(t, f.charges(e), 1)
+					require.True(t, f.periodEnd(e).Equal(end))
+					return
+				}
 				f.until(func() bool { return f.periodEnd(e).After(end) }, "replica B completes the renewal")
 				f.advance(time.Hour)
 				f.wake()
@@ -183,7 +190,10 @@ func TestReplicasStalledExecutorSendsNothing(t *testing.T) {
 			case <-time.After(30 * time.Second):
 				t.Fatal("the renewal never reached the provider call")
 			}
-			f.until(func() bool { return f.periodEnd(e).After(end) }, "the holding executor completes the renewal")
+			f.until(func() bool {
+				f.passes() // a retained non-dispatch proof releases a new admission
+				return f.periodEnd(e).After(end)
+			}, "the next due pass completes the renewal")
 			f.advance(time.Hour)
 			f.wake()
 			f.passes()
