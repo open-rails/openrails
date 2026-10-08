@@ -39,6 +39,8 @@ func NewStripeRenewal(p SubscriptionCollectionPayload) (StripeRenewal, error) {
 	// These are payment/access facts, not a hash of the operation's serialized
 	// payload. Ordinary admission timestamps, request keys, display labels and
 	// local reprice bookkeeping do not change a provider request.
+	// Field names and normalization persist at the provider: harmless Go
+	// refactors must preserve this representation and already accepted bindings.
 	entitlements := models.CloneEntitlementsSpec(p.Renewal.Entitlements)
 	if entitlements == nil {
 		entitlements = map[string]*int{}

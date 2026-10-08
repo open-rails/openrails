@@ -73,3 +73,17 @@ func TestRenewalTermsBindCoverageWithoutAdmissionNoise(t *testing.T) {
 		require.NotEqual(t, terms.TermsSHA256, other.TermsSHA256)
 	}
 }
+
+func TestStripeRenewalTermsCanonicalVector(t *testing.T) {
+	start := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	downloads := 3
+	p := SubscriptionCollectionPayload{Renewal: RenewalTerms{
+		PriceID: uuid.MustParse("10000000-0000-0000-0000-000000000002"), ProductID: uuid.MustParse("10000000-0000-0000-0000-000000000003"),
+		Amount: 1_000_000, Currency: "USD", PeriodStart: start, PeriodEnd: start.Add(24 * time.Hour),
+		Entitlements: map[string]*int{"view": nil, "download": &downloads},
+	}}
+	terms, err := NewStripeRenewal(p)
+	require.NoError(t, err)
+	// This digest is a persisted provider contract, not a Go struct-layout hash.
+	require.Equal(t, "0669122397632a04432436a0fd2f360861e7f06021f70e1e2f389c217c913b31", terms.TermsSHA256)
+}
