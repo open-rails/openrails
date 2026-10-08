@@ -1,6 +1,6 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
-// video site where users sign in with AuthKit and buy a monthly premium plan
-// or an individual video. newBilling and run are
+// creator site where users sign in with AuthKit, buy posts individually or
+// in a bundle, and choose a channel membership term. newBilling and run are
 // the README's code; newAuth is a development AuthKit.
 //
 // Run it from this directory (it reads catalog.yaml) with DATABASE_URL and the
@@ -38,7 +38,7 @@ import (
 func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
 	cfg := authkit.Config{
 		Schema:       "profiles",
-		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"myvideos"}},
+		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"onlydemo"}},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
@@ -75,7 +75,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		TestMode:          openrails.Sandbox,            // Sandbox or Live: which PSP credentials are accepted
 		ProviderWriteMode: openrails.ProviderWritesFull, // ProviderWritesReadOnly never charges anyone
 		Merchant: openrails.MerchantDeclaration{
-			Slug: "myvideos", // you, the seller
+			Slug: "onlydemo", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
 		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
@@ -164,32 +164,36 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Premium members can watch any video; a one-off buyer can watch the video they bought.
-	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
+	// The host decides which key grants access to each post. Paid posts stay
+	// separate from membership-included posts; a bundle grants both paid keys.
+	postAccess := map[string]string{
+		"101": "post:101",
+		"102": "post:102",
+		"103": "channel:main:membership",
+	}
+	r.GET("/posts/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
+		id := c.Param("id")
+		entitlement, exists := postAccess[id]
+		if !exists {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
 		claims, _ := auth.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID)
 		if err != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		premium, err := bill.HasEntitlement(c, customer, "premium", time.Now())
+		allowed, err := bill.HasEntitlement(c, customer, entitlement, time.Now())
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		if !premium {
-			productKey := "video-" + c.Param("id")
-			access, err := bill.CheckProductAccess(c, customer, billing.CheckProductAccessParams{ProductKeys: []string{productKey}})
-			if err != nil {
-				c.AbortWithStatus(http.StatusServiceUnavailable)
-				return
-			}
-			if !access[productKey] {
-				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
-				return
-			}
+		if !allowed {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
+			return
 		}
-		c.File("videos/" + c.Param("id") + ".mp4")
+		c.File("videos/" + id + ".mp4")
 	})
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {

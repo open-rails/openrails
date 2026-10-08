@@ -1,66 +1,61 @@
 # catalog.yaml
 schema_version: 1 # the file format
 products:
-  - key: premium
-    display_name: Premium
-    entitlements_spec: {premium: null} # named feature; follows the subscription's access policy
-    prices:
-      - key: monthly
-        currency: USD
-        unit_amount: 9990000 # $9.99; amounts are currency micros (millionths of a dollar)
-        access_duration_hours: 720 # a 30-day paid period; also the recurring billing interval
-        auto_renew: true
-
-  - key: video-101
-    display_name: Video 101
-    entitlements_spec: {} # access to this product is recorded without a separate feature name
+  - key: post-101
+    display_name: Post 101 — Behind the scenes
+    entitlements_spec: {"post:101": null}
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 4990000 # $4.99, paid once
-        access_duration_hours: null # permanent ownership; no time-based expiry
+        unit_amount: 4990000 # $4.99; every USD amount is in micros
+        access_duration_hours: null # permanent access to this post
         auto_renew: false
       - key: rental-3-days
         currency: USD
         unit_amount: 1990000 # $1.99, paid once
-        access_duration_hours: 72 # access ends after three days
+        access_duration_hours: 72 # three days of access
         auto_renew: false
 
-  - key: api-credit-10
-    display_name: $10 prepaid API balance
-    credit_grant:
-      currency: USD
-      amount: 10000000 # $10 of spendable API balance
-      # expires_after_days defaults to 365, starting when payment succeeds
+  - key: post-102
+    display_name: Post 102 — The full shoot
+    entitlements_spec: {"post:102": null}
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 10000000 # pay $10
+        unit_amount: 6990000 # $6.99, paid once
+        access_duration_hours: null
         auto_renew: false
 
-  - key: api-credit-100
-    display_name: $100 prepaid API balance
-    credit_grant:
-      currency: USD
-      amount: 100000000
-      expires_after_days: 365
+  - key: featured-posts-bundle
+    display_name: Featured posts — 101 and 102
+    entitlements_spec: {"post:101": null, "post:102": null} # the same keys as individual sales
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        unit_amount: 9990000 # $9.99 for both, instead of $11.98 separately
+        access_duration_hours: null
         auto_renew: false
 
-  - key: api-deposit
-    display_name: Top up your prepaid API balance
-    credit_grant:
-      currency: USD
-      from_payment: true # grant exactly the amount paid
-      expires_after_days: 365
+  - key: channel-main-monthly
+    display_name: Main channel — 30-day membership
+    entitlements_spec: {"channel:main:membership": null}
+    tier_group: channel-main # the two term products are mutually exclusive memberships
+    tier_rank: 1
     prices:
-      - key: deposit
+      - key: subscription
         currency: USD
-        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
-        customer_amount:
-          min_amount: 1000000 # at least $1
-          max_amount: 1000000000 # at most $1,000
-        auto_renew: false
+        unit_amount: 9990000 # $9.99 every 30 days
+        access_duration_hours: 720
+        auto_renew: true
+
+  - key: channel-main-yearly
+    display_name: Main channel — 365-day membership
+    entitlements_spec: {"channel:main:membership": null} # same benefit, separate product
+    tier_group: channel-main
+    tier_rank: 1
+    prices:
+      - key: subscription
+        currency: USD
+        unit_amount: 99990000 # $99.99 every 365 days
+        access_duration_hours: 8760
+        auto_renew: true

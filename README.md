@@ -35,7 +35,7 @@ OpenRails integrates with several payment-processors:
 
 You'll need a Go webserver, and Postgres (v18 or higher).
 
-Here we build a members-only video site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy a monthly "premium" plan or an individual video with a card, and watch what they have access to.
+Here we build an OnlyDemo-style creator site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy individual posts or a bundle, and subscribe to a channel for 30-day or 365-day terms. Each term is a separate product granting the same membership key. See [OnlyDemo](https://github.com/open-rails/onlydemo) for the complete creator application. An independent [prepaid API-balance catalog](#prepaid-api-balance-catalog) appears later.
 
 First install:
 
@@ -49,151 +49,112 @@ Next, declare your catalog as a YAML config file:
 # catalog.yaml
 schema_version: 1 # the file format
 products:
-  - key: premium
-    display_name: Premium
-    entitlements_spec: {premium: null} # named feature; follows the subscription's access policy
-    prices:
-      - key: monthly
-        currency: USD
-        unit_amount: 9990000 # $9.99; amounts are currency micros (millionths of a dollar)
-        access_duration_hours: 720 # a 30-day paid period; also the recurring billing interval
-        auto_renew: true
-
-  - key: video-101
-    display_name: Video 101
-    entitlements_spec: {} # access to this product is recorded without a separate feature name
+  - key: post-101
+    display_name: Post 101 — Behind the scenes
+    entitlements_spec: {"post:101": null}
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 4990000 # $4.99, paid once
-        access_duration_hours: null # permanent ownership; no time-based expiry
+        unit_amount: 4990000 # $4.99; every USD amount is in micros
+        access_duration_hours: null # permanent access to this post
         auto_renew: false
       - key: rental-3-days
         currency: USD
         unit_amount: 1990000 # $1.99, paid once
-        access_duration_hours: 72 # access ends after three days
+        access_duration_hours: 72 # three days of access
         auto_renew: false
 
-  - key: api-credit-10
-    display_name: $10 prepaid API balance
-    credit_grant:
-      currency: USD
-      amount: 10000000 # $10 of spendable API balance
-      # expires_after_days defaults to 365, starting when payment succeeds
+  - key: post-102
+    display_name: Post 102 — The full shoot
+    entitlements_spec: {"post:102": null}
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 10000000 # pay $10
+        unit_amount: 6990000 # $6.99, paid once
+        access_duration_hours: null
         auto_renew: false
 
-  - key: api-credit-100
-    display_name: $100 prepaid API balance
-    credit_grant:
-      currency: USD
-      amount: 100000000
-      expires_after_days: 365
+  - key: featured-posts-bundle
+    display_name: Featured posts — 101 and 102
+    entitlements_spec: {"post:101": null, "post:102": null} # the same keys as individual sales
     prices:
       - key: purchase
         currency: USD
-        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        unit_amount: 9990000 # $9.99 for both, instead of $11.98 separately
+        access_duration_hours: null
         auto_renew: false
 
-  - key: api-deposit
-    display_name: Top up your prepaid API balance
-    credit_grant:
-      currency: USD
-      from_payment: true # grant exactly the amount paid
-      expires_after_days: 365
+  - key: channel-main-monthly
+    display_name: Main channel — 30-day membership
+    entitlements_spec: {"channel:main:membership": null}
+    tier_group: channel-main # the two term products are mutually exclusive memberships
+    tier_rank: 1
     prices:
-      - key: deposit
+      - key: subscription
         currency: USD
-        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
-        customer_amount:
-          min_amount: 1000000 # at least $1
-          max_amount: 1000000000 # at most $1,000
-        auto_renew: false
+        unit_amount: 9990000 # $9.99 every 30 days
+        access_duration_hours: 720
+        auto_renew: true
+
+  - key: channel-main-yearly
+    display_name: Main channel — 365-day membership
+    entitlements_spec: {"channel:main:membership": null} # same benefit, separate product
+    tier_group: channel-main
+    tier_rank: 1
+    prices:
+      - key: subscription
+        currency: USD
+        unit_amount: 99990000 # $99.99 every 365 days
+        access_duration_hours: 8760
+        auto_renew: true
 ```
 
-Product keys are merchant-wide; price keys belong to their product. `premium.monthly`
-therefore identifies this subscription offer. OpenRails assigns immutable price
-revisions automatically (`premium.monthly.v0`, then `v1` when its terms change).
+Product keys identify commercial offerings; entitlement keys identify the access
+they grant. Buying `post-101` or `featured-posts-bundle` grants `post:101`, so the
+host checks the same key for either purchase. A rental grants that key until its
+expiry. Both membership products grant `channel:main:membership`; the host uses
+that key for membership-included posts. It does not automatically unlock paid
+posts 101 and 102. The shared `tier_group` prevents parallel memberships in the
+same channel.
+
+The short post and channel IDs make this example readable. OnlyDemo derives its
+keys from stable UUIDs, such as `post:<post UUID>`; slugs and titles can change
+without changing what was purchased. OpenRails treats these keys as opaque
+strings. A post can contain several media files; the host decides what access to
+that post includes.
+
+This executable example uses the current schema: `entitlements_spec` is a map
+of keys, with `null` following the purchased access terms. A product's name or key
+does not implicitly grant a same-named entitlement. This schema requires numeric hours and `auto_renew`; plain entitlement lists
+and duration strings are not accepted.
+
+**Access and ownership.** Use `HasEntitlement` to check whether the customer may
+access a post now. That includes individual purchases, bundles and unexpired
+rentals. `ListProductAccess` identifies the product actually acquired and its
+expiry: a bundle purchase records the bundle product, while its entitlement
+grants unlock the constituent posts. Current access alone does not prove a
+permanent purchase. Refunds and revocations can withdraw granted access.
+
+**Paid time and dunning access.** In the current recurring contract,
+`access_duration_hours` specifies both the paid period and billing interval. The
+separate monthly and yearly products above sell the same membership benefit on
+different terms. A one-time annual pass would set `auto_renew: false` on a
+365-day offer. These are fixed day counts, not calendar months or years.
+Dunning can keep access beyond paid coverage through a separate grace policy;
+those extra days do not change the price or become paid time. Independent
+recurring billing and access durations are not supported by this schema yet.
+
+Product keys are merchant-wide; price keys belong to their product. For example,
+`channel-main-monthly.subscription` selects the 30-day membership offer.
+OpenRails assigns immutable price revisions automatically, starting at v0.
 Existing subscribers keep their accepted price and benefits until explicitly
 migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
 
-**Features, ownership, and rental access.** An entitlement is a named permission
-that your application understands. Here, `premium` allows watching the whole
-library. `null` follows the purchased access terms; it does not by itself mean
-forever. The video needs no invented `video:101` feature: OpenRails records access
-to product `video-101` directly. Its purchase price creates permanent ownership;
-its rental price creates access with an expiry. `CheckProductAccess` checks either
-kind; `ListProductAccess` exposes each grant's `EndsAt` (nil for permanent ownership).
-Refunds and revocations can withdraw grants, including permanent ones.
-
-**Paid time and dunning access are separate.** For the current recurring contract,
-`access_duration_hours` is both the paid period and the billing interval. A monthly
-and yearly price can belong to the same Premium product. For a one-off purchase,
-it is the access duration; nil means no time-based expiry. Dunning can maintain
-access after paid coverage ends: 30 paid days plus 15 days of grace is still a
-30-day price, with a separate grace grant. The current dunning policy can keep
-access while collection continues or suspend it; it does not silently label grace
-as paid time. Independent recurring schedules, such as monthly installments buying
-a year of access, are not expressed by this field.
-
-**Prepaid API balance.** Customers pay ahead of time; metered API usage draws down
-the funded balance. Each top-up uses the existing currency balance and usage ledger.
-The two packs above give different value per dollar. Each successful purchase
-automatically and idempotently creates a credit lot; another purchase creates
-another lot. Credit-only products do not create permanent ownership that would
-prevent repeat purchases. The amount and expiry policy are frozen at checkout;
-expiry starts when payment succeeds. Omitted expiry means 365 days. Later catalog
-changes affect new checkouts, preserving existing lots.
-
-The deposit is also a product: it names what is bought, its currency, limits, and
-expiry policy. The amount is selected for each checkout without creating a new
-price revision. For a $100 deposit, your trusted server mints the session with:
-
-```go
-amount := int64(100_000_000) // $100 in USD micros
-session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
-    Customer: billing.CheckoutCustomerIdentity{ID: customerID},
-    ProductKey: "api-deposit",
-    PriceKey: "deposit",
-    Amount: &amount,
-    SuccessURL: "https://example.com/billing/success",
-})
-```
-
-Hand the session to that customer's browser. Its amount cannot be changed after
-minting. Fixed-price packs reject an amount override. Customer-selected deposits
-currently support Stripe and NMI checkout; recurring credit benefits are not yet
-supported. These are monetary API balances, consumed by priced usage, rather than
-a separate request-count or token-count wallet. A voluntary refund requires the
-corresponding credits to remain unused and unheld; forced reversals use the source
-lot and preserve the existing rules for already-authorized usage.
-
 ### Evolving the catalog
-
-Credit benefits evolve through the same partial updates. For example, this changes
-only the expiry offered by new $100-pack checkouts. Existing credit lots keep the
-expiry promised when they were bought:
-
-```yaml
-schema_version: 1
-products:
-  - key: api-credit-100
-    credit_grant: # replaces the complete credit policy; omitted credit_grant preserves it
-      currency: USD
-      amount: 100000000
-      expires_after_days: 180
-```
-
-Archiving the pack or deposit stops new sales. It does not expire, revoke, or
-otherwise change credits already granted.
-
 
 All the changes below are YAML applications. Apply each file through the same
 `catalog.ParseApplicationYAML` → `client.ApplyCatalog` startup path shown below,
-or through `openrails apply-catalog --merchant myvideos --file FILE.yaml`.
+or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
 There are no caller-managed application IDs or version numbers. These examples
 build on the initial `catalog.yaml` above.
 
@@ -213,63 +174,80 @@ product and offer:
 # catalog-update.yaml
 schema_version: 1
 products:
-  - key: premium
-    display_name: Premium Plus # mutate the existing product
+  - key: channel-main-monthly
+    display_name: Main channel Plus — 30-day membership
     prices:
-      - key: monthly
+      - key: subscription
         unit_amount: 12990000 # $12.99; currency, duration and renewal terms are preserved
 ```
 
-For the initial catalog, this creates `premium.monthly.v1` at $12.99 and archives
-`premium.monthly.v0` at $9.99. The old price record is retained unchanged. New
-subscribers buy v1; existing subscribers keep their exact accepted price and
+For the initial catalog, this creates `channel-main-monthly.subscription.v1` at
+$12.99 and archives `channel-main-monthly.subscription.v0` at $9.99. The old price
+record is retained unchanged. New subscribers buy v1; existing subscribers keep their exact accepted price and
 entitlements indefinitely. Product descriptions and `entitlements_spec` can also
 be edited in place; changed entitlements apply to new purchases, not retroactively
 to existing grants. Neither a YAML price change nor archival schedules a
 subscription migration.
 
-**Retire one price and add another.** This stops new monthly signups and adds an
-annual offer on the same product:
+**Retire the monthly offer.** Stop new 30-day memberships while keeping the
+separate yearly product on sale:
 
 ```yaml
-# replace-monthly-with-yearly.yaml
+# retire-monthly.yaml
 schema_version: 1
 products:
-  - key: premium
+  - key: channel-main-monthly
     prices:
-      - key: monthly
+      - key: subscription
         archived: true
-      - key: yearly
-        currency: USD
-        unit_amount: 99990000 # $99.99
-        access_duration_hours: 8760 # 365 days
-        auto_renew: true
 ```
 
-`premium.yearly` is a new price key, starting at v0. It does not replace the
-price ID held by monthly subscribers: their billing continues at their accepted
-monthly terms. Archival prevents new sales; it does not cancel subscriptions,
-revoke paid access, or delete history. A price cannot move to another product.
+The omitted `channel-main-yearly` product stays unchanged. Monthly subscribers
+keep their accepted price and billing schedule. Archiving an offer does not move
+them to another product, cancel them, revoke access, or delete history.
+
+**Replace a rental offer.** Retire the three-day rental and add a seven-day
+rental under the same post product:
+
+```yaml
+# replace-rental.yaml
+schema_version: 1
+products:
+  - key: post-101
+    prices:
+      - key: rental-3-days
+        archived: true
+      - key: rental-7-days
+        currency: USD
+        unit_amount: 2990000 # $2.99, paid once
+        access_duration_hours: 168 # seven days
+        auto_renew: false
+```
+
+The permanent `post-101.purchase` offer and the bundle remain available.
+Existing three-day rentals retain their original expiry; a new offer never
+extends them automatically. A price cannot move to another product.
 
 **Retire an entire product.** There is no need to repeat its prices:
 
 ```yaml
-# retire-video.yaml
+# retire-bundle.yaml
 schema_version: 1
 products:
-  - key: video-101
+  - key: featured-posts-bundle
     archived: true
 ```
 
-The video stops selling, while existing buyers retain their permanent access.
-`premium` is omitted and stays unchanged. To make the video available again,
-apply a new batch:
+The bundle stops selling, while existing buyers keep access to both posts. The
+individual post products and the membership products are omitted and stay
+unchanged. Archiving one product does not retire other products granting the same
+keys. To make the bundle available again, apply a new batch:
 
 ```yaml
-# restore-video.yaml
+# restore-bundle.yaml
 schema_version: 1
 products:
-  - key: video-101
+  - key: featured-posts-bundle
     archived: false
 ```
 
@@ -283,9 +261,9 @@ give the complete financial terms to select the intended historical revision:
 # restore-original-monthly.yaml
 schema_version: 1
 products:
-  - key: premium
+  - key: channel-main-monthly
     prices:
-      - key: monthly
+      - key: subscription
         currency: USD
         unit_amount: 9990000 # the original $9.99 terms
         access_duration_hours: 720
@@ -297,15 +275,15 @@ products:
 
 This restores the original monthly price ID and v0; it does not rewrite history
 or create another copy of the same terms. If a different monthly revision is
-currently live, it is archived. The yearly offer remains available because it is
-omitted. Complete terms, including explicit null trial fields, avoid ambiguity
+currently live, it is archived. The separate yearly product remains available
+because it is omitted. Complete terms, including explicit null trial fields, avoid ambiguity
 when a key has several archived revisions; a known immutable price `id` can also
 select a particular revision.
 
 **Replay is not rollback.** Each successful application's canonical content hash
 is remembered per merchant. Reapplying any of these files changes nothing, even
 after later edits. Reapplying the initial `catalog.yaml` therefore does not undo
-the price increase or restore an archived video. The same rule applies to already
+the price increase or restore an archived bundle. The same rule applies to already
 used archive and restore files. Comments, formatting, and product/price ordering
 do not make a new application. A new document is a new atomic batch; different,
 previously unseen documents have no ordering guarantee, so apply intended changes
@@ -385,7 +363,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		TestMode:          openrails.Sandbox,            // Sandbox or Live: which PSP credentials are accepted
 		ProviderWriteMode: openrails.ProviderWritesFull, // ProviderWritesReadOnly never charges anyone
 		Merchant: openrails.MerchantDeclaration{
-			Slug: "myvideos", // you, the seller
+			Slug: "onlydemo", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
 		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
@@ -472,39 +450,43 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Premium members can watch any video; a one-off buyer can watch the video they bought.
-	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
+	// The host decides which key grants access to each post. Paid posts stay
+	// separate from membership-included posts; a bundle grants both paid keys.
+	postAccess := map[string]string{
+		"101": "post:101",
+		"102": "post:102",
+		"103": "channel:main:membership",
+	}
+	r.GET("/posts/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
+		id := c.Param("id")
+		entitlement, exists := postAccess[id]
+		if !exists {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
 		claims, _ := auth.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID)
 		if err != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		premium, err := bill.HasEntitlement(c, customer, "premium", time.Now())
+		allowed, err := bill.HasEntitlement(c, customer, entitlement, time.Now())
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		if !premium {
-			productKey := "video-" + c.Param("id")
-			access, err := bill.CheckProductAccess(c, customer, billing.CheckProductAccessParams{ProductKeys: []string{productKey}})
-			if err != nil {
-				c.AbortWithStatus(http.StatusServiceUnavailable)
-				return
-			}
-			if !access[productKey] {
-				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
-				return
-			}
+		if !allowed {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
+			return
 		}
-		c.File("videos/" + c.Param("id") + ".mp4")
+		c.File("videos/" + id + ".mp4")
 	})
 
 	return r.Run(":8080")
 }
 ```
 
-That's the whole integration, and it is the program in [`examples/embedded`](examples/embedded). Your server never touches a card number: the browser hands the card to the processor's tokenization iframe, and OpenRails charges the stored token, rebills it every 30 days, retries failed renewals, and keeps `HasEntitlement` up to date.
+That's the whole integration, and it is the program in [`examples/embedded`](examples/embedded). Your server never touches a card number: the browser hands the card to the processor's tokenization iframe, and OpenRails charges the stored token, rebills subscriptions at their selected interval, retries failed renewals, and keeps `HasEntitlement` up to date.
 
 Mounting gives your users these routes under `/billing`:
 
@@ -602,7 +584,12 @@ export function App() {
   return (
     <BillingUiProvider appearance={{ theme: "auto" }}>
       <BillingProvider client={billing}>
-        <UpgradeButton />
+        <BuyButton productKey="post-101" priceKey="purchase" label="Buy Post 101 — $4.99" />
+        <BuyButton productKey="post-101" priceKey="rental-3-days" label="Rent Post 101 for 3 days — $1.99" />
+        <BuyButton productKey="post-102" priceKey="purchase" label="Buy Post 102 — $6.99" />
+        <BuyButton productKey="featured-posts-bundle" priceKey="purchase" label="Buy both posts — $9.99" />
+        <BuyButton productKey="channel-main-monthly" priceKey="subscription" label="Join for $9.99 every 30 days" />
+        <BuyButton productKey="channel-main-yearly" priceKey="subscription" label="Join for $99.99 every 365 days" />
         {/* Subscriptions (cancel, resume, change card), saved cards and payment history. */}
         <AccountBilling plansHref="/plans" collectionCurrency="USD" />
       </BillingProvider>
@@ -610,23 +597,23 @@ export function App() {
   )
 }
 
-function UpgradeButton() {
+function BuyButton({ productKey, priceKey, label }: { productKey: string; priceKey: string; label: string }) {
   const [sessionId, setSessionId] = useState<string>()
-  async function upgrade() {
+  async function buy() {
     // POST /billing/v1/me/checkout-sessions: OpenRails prices it from the catalog, for the signed-in user.
-    const session = await billing.createCheckoutSession({ productKey: "premium", priceKey: "monthly" })
+    const session = await billing.createCheckoutSession({ productKey, priceKey })
     setSessionId(session.id)
   }
   return (
     <>
-      <button onClick={upgrade}>Go premium, $9.99/month</button>
+      <button onClick={buy}>{label}</button>
       {sessionId && (
         <CheckoutModal
           open
           onOpenChange={(open) => !open && setSessionId(undefined)}
-          // Card entry happens in the processor's iframe; paying saves the card and starts the subscription.
+          // Card entry happens in the processor's iframe; the selected offer determines what is bought.
           source={billing.checkoutSource(sessionId)}
-          onComplete={() => location.assign("/videos")}
+          onComplete={() => location.assign("/posts")}
         />
       )}
     </>
@@ -634,11 +621,118 @@ function UpgradeButton() {
 }
 ```
 
-Once the checkout succeeds, `HasEntitlement(user, "premium")` is true on your server and `/videos/:id` starts streaming. When the card is declined at renewal, OpenRails retries on a schedule, emails the user (with an email sender configured), and `AccountBilling` shows them a "fix your card" prompt; the entitlement stays until the subscription actually ends.
+After a bundle checkout, the same `post:101` and `post:102` checks used for
+individual purchases allow both videos. A rental makes its post accessible until
+expiry. Either membership product allows membership-included post 103 through
+`channel:main:membership`; it does not mark posts 101 and 102 as purchased. Failed
+renewals follow the configured dunning policy, and `AccountBilling` lets members
+fix their payment method.
 
 Several sites selling for one merchant can share one payment page instead: set `HTTP.Checkout.PageURL` (where the page is served) and `EmbedOrigins` (the sites allowed to frame it). The payment host serves billing-ui's `<CheckoutPage>`; each site creates its session as above and shows `<CheckoutFrame url={session.url} />`. See [billing-ui's README](sdk/billing-ui/README.md).
 
 ---
+
+### Prepaid API-balance catalog
+
+An API service can apply this separate catalog through the same
+`catalog.ParseApplicationYAML` and `client.ApplyCatalog` flow. These products top
+up a currency balance that metered API usage consumes; they are independent of
+the creator-site catalog above.
+
+```yaml
+# api-catalog.yaml
+schema_version: 1
+products:
+  - key: api-credit-10
+    display_name: $10 prepaid API balance
+    credit_grant:
+      currency: USD
+      amount: 10000000 # $10 of spendable API balance
+      # expires_after_days defaults to 365, starting when payment succeeds
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 10000000 # pay $10
+        auto_renew: false
+
+  - key: api-credit-100
+    display_name: $100 prepaid API balance
+    credit_grant:
+      currency: USD
+      amount: 100000000
+      expires_after_days: 365
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        auto_renew: false
+
+  - key: api-deposit
+    display_name: Top up your prepaid API balance
+    credit_grant:
+      currency: USD
+      from_payment: true # grant exactly the amount paid
+      expires_after_days: 365
+    prices:
+      - key: deposit
+        currency: USD
+        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
+        customer_amount:
+          min_amount: 1000000 # at least $1
+          max_amount: 1000000000 # at most $1,000
+        auto_renew: false
+```
+
+Customers pay ahead of time; metered API usage draws down
+the funded balance. Each top-up uses the existing currency balance and usage ledger.
+The two packs above give different value per dollar. Each successful purchase
+automatically and idempotently creates a credit lot; another purchase creates
+another lot. Credit-only products do not create permanent ownership that would
+prevent repeat purchases. The amount and expiry policy are frozen at checkout;
+expiry starts when payment succeeds. Omitted expiry means 365 days. Later catalog
+changes affect new checkouts, preserving existing lots.
+
+The deposit is also a product: it names what is bought, its currency, limits, and
+expiry policy. The amount is selected for each checkout without creating a new
+price revision. For a $100 deposit, your trusted server mints the session with:
+
+```go
+amount := int64(100_000_000) // $100 in USD micros
+session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
+    Customer: billing.CheckoutCustomerIdentity{ID: customerID},
+    ProductKey: "api-deposit",
+    PriceKey: "deposit",
+    Amount: &amount,
+    SuccessURL: "https://example.com/billing/success",
+})
+```
+
+Hand the session to that customer's browser. Its amount cannot be changed after
+minting. Fixed-price packs reject an amount override. Customer-selected deposits
+currently support Stripe and NMI checkout; recurring credit benefits are not yet
+supported. These are monetary API balances, consumed by priced usage, rather than
+a separate request-count or token-count wallet. A voluntary refund requires the
+corresponding credits to remain unused and unheld; forced reversals use the source
+lot and preserve the existing rules for already-authorized usage.
+
+#### Updating prepaid offers
+
+Credit benefits evolve through the same partial updates. For example, this changes
+only the expiry offered by new $100-pack checkouts. Existing credit lots keep the
+expiry promised when they were bought:
+
+```yaml
+schema_version: 1
+products:
+  - key: api-credit-100
+    credit_grant: # replaces the complete credit policy; omitted credit_grant preserves it
+      currency: USD
+      amount: 100000000
+      expires_after_days: 180
+```
+
+Archiving the pack or deposit stops new sales. It does not expire, revoke, or
+otherwise change credits already granted.
 
 ### How It Works
 
