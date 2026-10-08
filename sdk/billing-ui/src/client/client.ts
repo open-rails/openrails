@@ -405,7 +405,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           method: "POST",
           body: {
             price_id: input.priceId,
-          auto_renew: input.autoRenew,
             signature: input.signature,
           } satisfies wire.CustomerChangeTierParams,
           headers: { "Idempotency-Key": input.idempotencyKey },

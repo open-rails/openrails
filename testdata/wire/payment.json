@@ -17,7 +17,7 @@
     "unit_amount": "9223372036854775807",
     "currency": "USD",
     "access_duration_hours": 720,
-    "auto_renew": true,
+    "billing_interval_hours": 720,
     "trial_unit_amount": null,
     "trial_duration_hours": null,
     "psps": {

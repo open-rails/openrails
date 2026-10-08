@@ -150,12 +150,13 @@ export type CheckoutSessionPayResult = {
 }
 
 export type CheckoutSessionPlan = {
+  auto_renew: boolean
   display_name: string
   unit_amount: string
   currency: string
   unit_decimals: number
-  period_hours: number | null
-  automatically_renews: boolean
+  billing_interval_hours: number | null
+  access_duration_hours: number | null
 }
 
 export type CheckoutSessionSavedMethod = {
@@ -326,6 +327,7 @@ export type MintCheckoutSessionParams = {
   price_key?: string
   product_key?: string
   amount?: string
+  auto_renew?: boolean
   success_url?: string
 }
 
@@ -509,7 +511,7 @@ export type Price = {
   unit_amount: string
   currency: string
   access_duration_hours: number | null
-  auto_renew: boolean
+  billing_interval_hours: number | null
   trial_unit_amount: string | null
   trial_duration_hours: number | null
   psps: Record<string, PSPLinkState> | null

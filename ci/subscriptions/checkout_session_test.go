@@ -222,7 +222,7 @@ func TestHostedCheckoutAcrossHosts(t *testing.T) {
 	require.Equal(t, "created", doc["status"])
 	require.Equal(t, hostedAppOrigin, doc["embed_origin"], "the page talks only to the app that minted the session")
 	require.Equal(t, hostedAppOrigin+"/welcome", doc["success_url"])
-	require.Equal(t, map[string]any{"display_name": "Membership", "unit_amount": "9990000", "currency": "USD", "unit_decimals": float64(6), "billing_interval_hours": float64(monthHours), "access_duration_hours": float64(monthHours)}, doc["plan"])
+	require.Equal(t, map[string]any{"auto_renew": true, "display_name": "Membership", "unit_amount": "9990000", "currency": "USD", "unit_decimals": float64(6), "billing_interval_hours": float64(monthHours), "access_duration_hours": float64(monthHours)}, doc["plan"])
 	require.Equal(t, "9990000", doc["due_today"])
 	require.Equal(t, map[string]any{"display_name": app.slug}, doc["merchant"])
 

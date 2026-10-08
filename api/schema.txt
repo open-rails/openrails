@@ -8,6 +8,7 @@ migration 0004_catalog_credit_benefits.up.sql sha256:70d01a7b2e045503724d00488ff
 migration 0005_purchased_credit_accounting.up.sql sha256:a60a5b3a64bbe0a882350e3decadc89566e09fcfe008cd22cacc6e22c6899e41
 migration 0006_catalog_snapshots.up.sql sha256:e45102e6cb5b778a67aa5dbdfb95c095efd4df018a237969b84e74c07773fb12
 migration 0007_checkout_session_directory.up.sql sha256:28f5ee3c7d980e9d607fb82e6bb76f94b43315e1f5c4531117fcc1b4076546e6
+migration 0008_billing_access_intervals.up.sql sha256:711cdfd7a4611d00d15617823e7964214fe2f0bba9688327f20150cc628f9b94
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1466,35 +1467,35 @@ table billing.prices
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column merchant_id uuid NOT NULL
   column access_duration_hours integer
-  column auto_renew boolean NOT NULL
   column trial_unit_amount bigint
   column trial_duration_hours integer
   column key text NOT NULL
   column revision bigint NOT NULL
   column customer_amount jsonb
+  column billing_interval_hours integer
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
-  constraint prices_auto_renew_needs_duration_check CHECK (((NOT auto_renew) OR (access_duration_hours IS NOT NULL)))
+  constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
   constraint prices_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (NOT auto_renew) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
+  constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (billing_interval_hours IS NULL) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
   constraint prices_id_product_id_key UNIQUE (merchant_id, id, product_id)
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint prices_pkey PRIMARY KEY (merchant_id, id)
-  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, customer_amount)
+  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount)
   constraint prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
   constraint prices_product_key_revision_key UNIQUE (merchant_id, product_id, key, revision)
   constraint prices_revision_nonnegative CHECK ((revision >= 0))
   constraint prices_trial_amount_nonneg_check CHECK (((trial_unit_amount IS NULL) OR (trial_unit_amount >= 0)))
   constraint prices_trial_both_or_neither_check CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL)))
-  constraint prices_trial_needs_auto_renew_check CHECK (((trial_unit_amount IS NULL) OR auto_renew))
+  constraint prices_trial_needs_billing_interval_check CHECK (((trial_unit_amount IS NULL) OR (billing_interval_hours IS NOT NULL)))
   constraint prices_trial_period_positive_check CHECK (((trial_duration_hours IS NULL) OR (trial_duration_hours > 0)))
   index CREATE INDEX prices_created_at_id_idx ON billing.prices USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX prices_id_product_id_key ON billing.prices USING btree (merchant_id, id, product_id)
   index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
   index CREATE UNIQUE INDEX prices_key_key ON billing.prices USING btree (merchant_id, product_id, key) WHERE (NOT archived)
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
-  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, customer_amount) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
@@ -2026,6 +2027,8 @@ table billing.subscriptions
   column lifecycle_rev bigint NOT NULL DEFAULT 0
   column row_version bigint NOT NULL DEFAULT 0
   column dunning_policy jsonb
+  column access_duration_hours_snapshot integer
+  constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint subscriptions_canceled_has_type_check CHECK (((status <> 'canceled'::text) OR (cancel_type IS NOT NULL)))

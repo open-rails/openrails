@@ -938,13 +938,6 @@
         ],
         "parameters": [
           {
-            "name": "auto_renew",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
             "name": "currency",
             "in": "query",
             "schema": {
@@ -970,6 +963,13 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "recurring",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -2420,13 +2420,6 @@
             }
           },
           {
-            "name": "auto_renew",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
             "name": "currency",
             "in": "query",
             "schema": {
@@ -2452,6 +2445,13 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "recurring",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -13392,17 +13392,21 @@
           "access_duration_hours": {
             "oneOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2562047
               },
               {
                 "type": "null"
               }
             ]
           },
-          "auto_renew": {
+          "billing_interval_hours": {
             "oneOf": [
               {
-                "type": "boolean"
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2562047
               },
               {
                 "type": "null"
@@ -13432,7 +13436,9 @@
           "trial_duration_hours": {
             "oneOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2562047
               },
               {
                 "type": "null"
@@ -13477,8 +13483,68 @@
                 "type": "null"
               }
             ]
+          },
+          "access_duration": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to access_duration_hours. Calendar months and years are not supported."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billing_interval": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to billing_interval_hours. Calendar months and years are not supported."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_duration": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to trial_duration_hours. Calendar months and years are not supported."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "access_duration",
+                "access_duration_hours"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "billing_interval",
+                "billing_interval_hours"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "trial_duration",
+                "trial_duration_hours"
+              ]
+            }
+          }
+        ],
+        "description": "Omitted fields preserve existing terms on updates. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive."
       },
       "ApplyProduct": {
         "type": "object",
@@ -15286,6 +15352,9 @@
       "CheckoutSessionPlan": {
         "type": "object",
         "properties": {
+          "auto_renew": {
+            "type": "boolean"
+          },
           "display_name": {
             "type": "string"
           },
@@ -15299,7 +15368,7 @@
           "unit_decimals": {
             "type": "integer"
           },
-          "period_hours": {
+          "billing_interval_hours": {
             "oneOf": [
               {
                 "type": "integer"
@@ -15309,17 +15378,25 @@
               }
             ]
           },
-          "automatically_renews": {
-            "type": "boolean"
+          "access_duration_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
+          "auto_renew",
           "display_name",
           "unit_amount",
           "currency",
           "unit_decimals",
-          "period_hours",
-          "automatically_renews"
+          "billing_interval_hours",
+          "access_duration_hours"
         ]
       },
       "CheckoutSessionSavedMethod": {
@@ -15437,6 +15514,9 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "auto_renew": {
+            "type": "boolean"
+          },
           "entitlement": {
             "type": "string"
           },
@@ -15490,6 +15570,9 @@
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "auto_renew": {
+            "type": "boolean"
           },
           "success_url": {
             "type": "string"
@@ -15736,8 +15819,8 @@
           "access_duration_hours": {
             "type": "integer"
           },
-          "auto_renew": {
-            "type": "boolean"
+          "billing_interval_hours": {
+            "type": "integer"
           },
           "trial_unit_amount": {
             "type": "string",
@@ -18843,6 +18926,9 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "auto_renew": {
+            "type": "boolean"
+          },
           "success_url": {
             "type": "string"
           }
@@ -19122,8 +19208,15 @@
               }
             ]
           },
-          "auto_renew": {
-            "type": "boolean"
+          "billing_interval_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -19137,7 +19230,7 @@
           "unit_amount",
           "currency",
           "access_duration_hours",
-          "auto_renew"
+          "billing_interval_hours"
         ]
       },
       "OfferListParams": {
@@ -20745,8 +20838,15 @@
               }
             ]
           },
-          "auto_renew": {
-            "type": "boolean"
+          "billing_interval_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "trial_unit_amount": {
             "oneOf": [
@@ -20806,7 +20906,7 @@
           "unit_amount",
           "currency",
           "access_duration_hours",
-          "auto_renew",
+          "billing_interval_hours",
           "trial_unit_amount",
           "trial_duration_hours",
           "psps",

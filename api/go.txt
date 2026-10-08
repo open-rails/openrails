@@ -1471,6 +1471,7 @@ pkg openrails/billing, type CreateAlertWebhookParams struct, Name string `json:"
 pkg openrails/billing, type CreateAlertWebhookParams struct, URL string `json:"url"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, Amount *int64 `json:"amount,string,omitempty"`
+pkg openrails/billing, type CreateCheckoutAttemptParams struct, AutoRenew *bool `json:"auto_renew,omitempty"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, CancelURL string `json:"cancel_url"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, Customer CheckoutCustomerIdentity `json:"customer"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, Entitlement string `json:"entitlement"`
@@ -1484,6 +1485,7 @@ pkg openrails/billing, type CreateCheckoutAttemptParams struct, ProductKey strin
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, SuccessURL string `json:"success_url"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct
 pkg openrails/billing, type CreateCheckoutSessionParams struct, Amount *int64 `json:"amount,string,omitempty"`
+pkg openrails/billing, type CreateCheckoutSessionParams struct, AutoRenew *bool `json:"auto_renew,omitempty"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct, Customer CheckoutCustomerIdentity `json:"customer"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct, PriceID PriceID `json:"price_id"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct, PriceKey string `json:"price_key"`
@@ -1542,7 +1544,7 @@ pkg openrails/billing, type CreatePlanMigrationParams struct, TargetProductKey s
 pkg openrails/billing, type CreatePriceParams struct
 pkg openrails/billing, type CreatePriceParams struct, AccessDurationHours *int `json:"access_duration_hours,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Archived bool `json:"archived,omitempty"`
-pkg openrails/billing, type CreatePriceParams struct, AutoRenew bool `json:"auto_renew,omitempty"`
+pkg openrails/billing, type CreatePriceParams struct, BillingIntervalHours *int `json:"billing_interval_hours,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Currency string `json:"currency"`
 pkg openrails/billing, type CreatePriceParams struct, CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Key string `json:"key,omitempty"`
@@ -2232,7 +2234,7 @@ pkg openrails/billing, type NotificationData struct, UserEmail string `json:"use
 pkg openrails/billing, type NotificationID [16]byte
 pkg openrails/billing, type Offer struct
 pkg openrails/billing, type Offer struct, AccessDurationHours *int `json:"access_duration_hours"`
-pkg openrails/billing, type Offer struct, AutoRenew bool `json:"auto_renew"`
+pkg openrails/billing, type Offer struct, BillingIntervalHours *int `json:"billing_interval_hours"`
 pkg openrails/billing, type Offer struct, Currency string `json:"currency"`
 pkg openrails/billing, type Offer struct, EntitlementsSpec map[string]*int `json:"entitlements_spec"`
 pkg openrails/billing, type Offer struct, Kind OfferKind `json:"kind"`
@@ -2514,7 +2516,7 @@ pkg openrails/billing, type PreviewRepriceBatchParams struct, ProductKey string 
 pkg openrails/billing, type Price struct
 pkg openrails/billing, type Price struct, AccessDurationHours *int `json:"access_duration_hours"`
 pkg openrails/billing, type Price struct, Archived bool `json:"archived"`
-pkg openrails/billing, type Price struct, AutoRenew bool `json:"auto_renew"`
+pkg openrails/billing, type Price struct, BillingIntervalHours *int `json:"billing_interval_hours"`
 pkg openrails/billing, type Price struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Price struct, Currency string `json:"currency"`
 pkg openrails/billing, type Price struct, CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
@@ -2545,9 +2547,9 @@ pkg openrails/billing, type PriceKeyMovement struct, EffectiveAt time.Time `json
 pkg openrails/billing, type PriceKeyMovement struct, Price Price `json:"price"`
 pkg openrails/billing, type PriceListParams struct
 pkg openrails/billing, type PriceListParams struct, Archived *bool
-pkg openrails/billing, type PriceListParams struct, AutoRenew *bool
 pkg openrails/billing, type PriceListParams struct, Currency string
 pkg openrails/billing, type PriceListParams struct, ProductID ProductID
+pkg openrails/billing, type PriceListParams struct, Recurring *bool
 pkg openrails/billing, type PriceListParams struct, embedded PageRequest
 pkg openrails/billing, type Product struct
 pkg openrails/billing, type Product struct, Archived bool `json:"archived"`
@@ -3132,6 +3134,7 @@ pkg openrails/catalog, const AggregationUniqueCount Aggregation = "unique_count"
 pkg openrails/catalog, const ApplicationSchemaVersion untyped int = 1
 pkg openrails/catalog, const MaxApplicationBytes untyped int = 1048576
 pkg openrails/catalog, const MaxApplicationItems untyped int = 2000
+pkg openrails/catalog, const MaxDurationHours int = 2562047
 pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
 pkg openrails/catalog, const ModelPerUnit Model = "per_unit"
@@ -3146,7 +3149,9 @@ pkg openrails/catalog, const TierModeVolume TierMode = "volume"
 pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
+pkg openrails/catalog, func ParseDurationHours(string) (int, error)
 pkg openrails/catalog, func Value[T any](T) Field[T]
+pkg openrails/catalog, method (*ApplyPrice) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*CreditGrantSpec) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*CustomerAmount) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*Field[T]) UnmarshalJSON([]byte) error
@@ -3174,7 +3179,7 @@ pkg openrails/catalog, type ApplyMeter struct, ValueProperty Field[string] `json
 pkg openrails/catalog, type ApplyPrice struct
 pkg openrails/catalog, type ApplyPrice struct, AccessDurationHours Field[int] `json:"access_duration_hours,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, Archived Field[bool] `json:"archived,omitzero"`
-pkg openrails/catalog, type ApplyPrice struct, AutoRenew Field[bool] `json:"auto_renew,omitzero"`
+pkg openrails/catalog, type ApplyPrice struct, BillingIntervalHours Field[int] `json:"billing_interval_hours,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, Currency Field[string] `json:"currency,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, CustomerAmount Field[CustomerAmount] `json:"customer_amount,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, ID string `json:"id,omitempty"`
