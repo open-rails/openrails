@@ -13,6 +13,7 @@ sql:
       - "internal/migrate/postgres/0008_billing_access_intervals.up.sql"
       - "internal/migrate/postgres/0009_invoice_collection_cadence.up.sql"
       - "internal/migrate/postgres/0010_entitlement_names.up.sql"
+      - "internal/migrate/postgres/0011_currency_codes.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

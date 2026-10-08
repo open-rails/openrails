@@ -335,7 +335,7 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
-FROM billing.subscriptions
+FROM billing.subscriptions subscriptions
 LEFT JOIN billing.prices price ON price.merchant_id = subscriptions.merchant_id AND price.id = subscriptions.price_id
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.rail = ANY (sqlc.arg(rails)::text[])
   AND subscriptions.deleted_at IS NULL
