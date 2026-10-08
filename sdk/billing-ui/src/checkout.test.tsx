@@ -935,7 +935,9 @@ describe("accepted processing", () => {
     const getSession = vi
       .fn()
       .mockResolvedValue(
-        fixtureSession({ expires_at: new Date(Date.now() + 100).toISOString() })
+        fixtureSession({
+          expires_at: new Date(Date.now() + 3000).toISOString(),
+        })
       )
     render(<Checkout source={{ getSession, pay }} />)
     const button = await screen.findByRole("button", {
