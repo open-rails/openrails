@@ -413,7 +413,7 @@ func nilIfEmpty(s string) *string {
 
 // importAdminGrants records each comp as a source_type=admin grant and
 // materializes its window, idempotent by SourceID. A product without an
-// entitlements_spec has nothing to grant and is reported as blocked.
+// entitlement list has nothing to grant and is reported as blocked.
 func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, declared []DeclaredAdminGrant, res *Result) error {
 	if len(declared) == 0 {
 		return nil
@@ -433,12 +433,14 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 			if err != nil {
 				return fmt.Errorf("import admin grant %s: load product %s: %w", g.SourceID, g.Product, err)
 			}
-			feats = productEntitlementKeys(product.EntitlementsSpec)
+			if err := json.Unmarshal(product.Entitlements, &feats); err != nil {
+				return fmt.Errorf("import admin grant %s: decode product entitlements: %w", g.SourceID, err)
+			}
 			specs[g.Product.UUID()] = feats
 		}
 		if len(feats) == 0 {
 			res.Blocked = append(res.Blocked, g.SourceID)
-			res.Reasons[g.SourceID] = "product has no entitlements_spec"
+			res.Reasons[g.SourceID] = "product has no entitlements"
 			continue
 		}
 		created, alreadyExists, err := ledger.GrantAdmin(ctx, g.Customer.UUID(), g.SourceID, feats, g.StartsAt.UTC(), g.EndsAt)
@@ -456,26 +458,6 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		}
 	}
 	return nil
-}
-
-// productEntitlementKeys returns the sorted feature names of a product's
-// entitlements_spec ({name: hours} JSONB).
-func productEntitlementKeys(raw []byte) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		return nil
-	}
-	keys := make([]string, 0, len(spec))
-	for k := range spec {
-		if k = strings.TrimSpace(k); k != "" {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // FindingNoRecurringAnchor is an imported NMI schedule OpenRails cannot dun:
