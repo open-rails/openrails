@@ -139,22 +139,25 @@ separate release evidence.
 Provider reference: NMI's [transaction processing](https://docs.nmi.com/reference/transactions-processing)
 describes merchant order correlation and processor-dependent duplicate checking;
 its [Query API](https://docs.nmi.com/reference/query) does not establish a
-terminal-negative guarantee for a missing search result. Absence is therefore
-inconclusive, with one bounded exception below.
+terminal-negative guarantee for a missing search result. Absence is inconclusive.
 
-**Lost engine renewal submissions.** A submitted engine renewal
-(`subscription_collection`) whose provider read finds nothing under its
-reference — NMI's Query API by order id (no transaction of any outcome), or
-Stripe's customer PaymentIntent list (no intent carrying the operation) — is
-treated as never executed once `LostSubmissionSettle` (5 minutes) has passed
-since the latest submission. The same operation is then re-sent under the same
-reference (Stripe: the same idempotency key), at most twice, each behind its
-own write-once fence. One matching approved charge is adopted; one recorded
-decline is adopted as the decline. A read that fails, an order holding anything
-else, or a spent cap never re-sends: the operation stays unknown and raises a
-standing `life.submission.unresolved` finding, closed when it completes.
-Custodian-held (HyperSwitch) instruments are excluded. Initial payments, sales,
-invoices and manual rebills keep the rule above.
+**Lost engine renewal submissions.** An NMI renewal whose request may have
+reached the gateway stays unknown until provider evidence resolves it. Neither
+an empty order/vault read nor waiting five minutes authorizes another sale.
+A matching approved receipt completes the accepted payment; a definitive decline
+must identify the exact attempt in `order_description`, in addition to its
+shared period order, account, instrument, amount and currency. A previous
+attempt's decline cannot release the current one. A sender that is still alive
+may retain a sealed proof of failure before dispatch; a successor cannot invent
+that proof from an empty query. After the observation delay, unresolved outcomes
+raise `life.submission.unresolved`, closed when the operation completes.
+
+Stripe engine renewals may replay the same idempotency key after the five-minute
+observation delay, at most twice and only before its minimum 24-hour retention
+window ends (with clock and provider-call margins). This relies on provider key
+semantics, not a claim that an absent list result proves nothing happened.
+Custodian-held instruments, initial payments, sales, invoices and manual rebills
+retain their existing no-automatic-resend rule.
 
 A Stripe tier change is a `stripe_tier_change` operation on the same ledger,
 keyed by the request's `Idempotency-Key`. The payload freezes the

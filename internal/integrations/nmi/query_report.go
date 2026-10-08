@@ -24,13 +24,14 @@ type QueryTransaction struct {
 	TransactionID string `xml:"transaction_id"`
 	// SubscriptionID is set only when NMI names the schedule; live accounts
 	// usually do not.
-	SubscriptionID  string `xml:"subscription_id"`
-	OrderID         string `xml:"order_id"`
-	CustomerID      string `xml:"customerid"`
-	CustomerVaultID string `xml:"customer_vault_id"`
-	Email           string `xml:"email"`
-	Condition       string `xml:"condition"`
-	Currency        string `xml:"currency"`
+	SubscriptionID   string `xml:"subscription_id"`
+	OrderID          string `xml:"order_id"`
+	OrderDescription string `xml:"order_description"`
+	CustomerID       string `xml:"customerid"`
+	CustomerVaultID  string `xml:"customer_vault_id"`
+	Email            string `xml:"email"`
+	Condition        string `xml:"condition"`
+	Currency         string `xml:"currency"`
 	// CCNumber is masked (first six and last four digits).
 	CCNumber    string        `xml:"cc_number"`
 	CCBin       string        `xml:"cc_bin"`

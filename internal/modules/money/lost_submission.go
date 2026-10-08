@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -18,35 +17,32 @@ import (
 
 // FindingSubmissionUnresolved is a submitted engine charge the provider's
 // reads cannot settle: the read is unavailable or contradictory, or the
-// resend cap is spent. The member keeps the renewal allowance meanwhile.
+// Stripe resend cap is spent. The member keeps the renewal allowance meanwhile.
 const FindingSubmissionUnresolved = "life.submission.unresolved"
 
-// lostSubmission decides a submitted charge the provider has no record of.
-// Absence is the provider's answer only after the settle delay; for NMI also
-// only when the vault shows no transaction at all since the fence, since any
-// charge there, under any order, may be this one. The operation is then armed
-// for one gated resend under the same order (Stripe: idempotency key).
+// lostSubmission keeps ambiguous NMI submissions pending. The Query API has
+// no documented visibility bound, and dup_seconds is processor-dependent;
+// absence cannot prove nonexecution. Stripe alone can replay its original
+// provider idempotency key inside its retention window.
 func (h *SubscriptionCollectionHandler) lostSubmission(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
 	history, err := intents.LoadSubmissionHistory(in)
 	if err != nil {
 		return h.unresolved(ctx, in, p, err.Error())
 	}
 	if !history.Settled(h.now()) {
-		return intents.Ambiguous("the provider has no transaction yet; absence is conclusive after the settle delay")
+		return intents.Ambiguous("the provider has no transaction yet; waiting for receipt visibility")
 	}
 	if refused, ok := intents.DuplicateRefusedAt(in); ok {
 		return h.duplicateUnresolved(ctx, in, p, refused)
 	}
+	if in.Rail != "stripe" {
+		return h.unresolved(ctx, in, p, "NMI has no visible transaction for the submitted charge; provider evidence is required, never an automatic resend")
+	}
 	if history.Resends >= intents.MaxLostSubmissionResends {
 		return h.unresolved(ctx, in, p, fmt.Sprintf("the provider has no transaction after %d resends", history.Resends))
 	}
-	if in.Rail == "stripe" && !history.StripeReplaySafe(h.now()) {
+	if !history.StripeReplaySafe(h.now()) {
 		return h.unresolved(ctx, in, p, "Stripe idempotency retention window elapsed; provider receipt required")
-	}
-	if in.Rail != "stripe" {
-		if reason := h.vaultActivity(ctx, in, history); reason != "" {
-			return h.unresolved(ctx, in, p, reason)
-		}
 	}
 	next := history.Resends + 1
 	if history.Armed < next {
@@ -55,18 +51,6 @@ func (h *SubscriptionCollectionHandler) lostSubmission(ctx context.Context, in g
 		}
 	}
 	return intents.Retryable("the provider has no transaction for the submitted charge; resending under the same order")
-}
-
-// vaultActivity is why the vault read does not prove absence, or "".
-func (h *SubscriptionCollectionHandler) vaultActivity(ctx context.Context, in gen.BillingProviderIntent, history intents.SubmissionHistory) string {
-	txns, err := intents.ReadNMIVaultTransactions(ctx, in, h.Resolver, history.Window())
-	if err != nil {
-		return "vault read is inconclusive: " + err.Error()
-	}
-	if len(txns) > 0 {
-		return fmt.Sprintf("the vault holds %d transaction(s) since the submission, first %s under order %q", len(txns), txns[0].TransactionID, txns[0].OrderID)
-	}
-	return ""
 }
 
 // duplicateLookback bounds the vault read after a duplicate refusal: NMI's
@@ -107,54 +91,8 @@ func armedResend(in gen.BillingProviderIntent) int {
 	return history.Armed
 }
 
-// resendLostNMISubmission re-reads the order and the vault immediately before
-// an armed resend; anything but a clean absence returns to verification. The
-// resend carries dup_seconds back to the original fence, so NMI refuses it if
-// the original charged but was not yet searchable.
-func (h *SubscriptionCollectionHandler) resendLostNMISubmission(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
-	attempt := armedResend(in)
-	if attempt == 0 || p.Instrument.CustodianHeld() {
-		return h.Verify(ctx, in)
-	}
-	if _, refused := intents.DuplicateRefusedAt(in); refused {
-		return h.Verify(ctx, in)
-	}
-	if reason := h.submissionHeld(in); reason != "" {
-		return intents.Parked(reason)
-	}
-	history, err := intents.LoadSubmissionHistory(in)
-	if err != nil {
-		return h.Verify(ctx, in)
-	}
-	if attempts, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver); err != nil || attempts.Transactions != 0 {
-		return h.Verify(ctx, in)
-	}
-	if h.vaultActivity(ctx, in, history) != "" {
-		return h.Verify(ctx, in)
-	}
-	method, _, _, err := h.validateAndFence(ctx, in, p, nil)
-	if err != nil {
-		return h.closeChangedResend(ctx, in, p, attempt, err)
-	}
-	charger, err := prepareEngineNMICharge(ctx, h.Resolver, method, p.Instrument.PSPID, p.HyperSwitch)
-	if err != nil {
-		return intents.Parked("arm accepted recurring charge: " + err.Error())
-	}
-	_, proof, first, err := h.validateAndFence(ctx, in, p, h.resendSubmission(in, attempt))
-	if err != nil {
-		return h.closeChangedResend(ctx, in, p, attempt, err)
-	}
-	if !first {
-		return h.Verify(ctx, in)
-	}
-	if err := h.hit(ctx, in, failpoint.AfterFence); err != nil {
-		return intents.Ambiguous(err.Error())
-	}
-	return h.dispatchNMI(ctx, in, p, charger, proof, history.DupSeconds(h.now()))
-}
-
-// closeChangedResend ends an operation whose obligation changed while its
-// lost submission waited: the provider showed nothing, so nothing executed.
+// closeChangedResend ends a Stripe retry whose obligation changed after its
+// provider lookup returned no payment inside the key retention window.
 func (h *SubscriptionCollectionHandler) closeChangedResend(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, attempt int, cause error) intents.Outcome {
 	if !errors.Is(cause, errEngineObligationChanged) && !errors.Is(cause, charge.ErrInstrumentChanged) {
 		return intents.Parked("fence engine resend: " + cause.Error())

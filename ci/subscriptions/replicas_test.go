@@ -147,8 +147,8 @@ type crashPoint struct {
 
 // Scenario 3: the replica running a renewal dies at each point; a survivor
 // takes it over and the membership is charged exactly once. A submission
-// lost before the provider is re-sent once, only after the provider's read
-// proves it never executed.
+// lost before the provider may be replayed only with Stripe's idempotency key.
+// An unknown NMI submission stays held even when its provider reads are empty.
 func TestReplicasCrashMidRenewal(t *testing.T) {
 	t.Parallel()
 	points := []crashPoint{
@@ -221,6 +221,17 @@ func TestReplicasCrashMidRenewal(t *testing.T) {
 				f.unhold()
 				f.recover()
 				f.passes()
+				if rail == "nmi" && point.name == "lost_before_provider" {
+					f.until(func() bool { return len(f.base.openFindings("life.submission.unresolved")) == 1 }, "a survivor retains the unknown NMI submission")
+					f.advance(time.Hour)
+					f.wake()
+					f.revive(dead)
+					f.passes()
+					require.Len(t, f.charges(e), 1)
+					require.True(t, f.periodEnd(e).Equal(end))
+					require.Len(t, f.collections(e), 1, "neither replica creates a replacement operation")
+					return
+				}
 				f.until(func() bool { return f.periodEnd(e).After(end) }, "a survivor completes the renewal")
 				f.advance(time.Hour)
 				f.wake()

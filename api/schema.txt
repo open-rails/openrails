@@ -9,6 +9,7 @@ migration 0005_purchased_credit_accounting.up.sql sha256:a60a5b3a64bbe0a882350e3
 migration 0006_catalog_snapshots.up.sql sha256:e45102e6cb5b778a67aa5dbdfb95c095efd4df018a237969b84e74c07773fb12
 migration 0007_checkout_session_directory.up.sql sha256:28f5ee3c7d980e9d607fb82e6bb76f94b43315e1f5c4531117fcc1b4076546e6
 migration 0008_billing_access_intervals.up.sql sha256:711cdfd7a4611d00d15617823e7964214fe2f0bba9688327f20150cc628f9b94
+migration 0009_invoice_collection_cadence.up.sql sha256:b90e15a74c20dd154c34bbb4deb115eac0541299eae862d728153e291ca4e95d
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -655,6 +656,15 @@ table billing.idempotency_keys
   constraint idempotency_keys_status_check CHECK ((status = ANY (ARRAY['processing'::text, 'succeeded'::text, 'failed'::text])))
   index CREATE INDEX idempotency_keys_expires_at_idx ON billing.idempotency_keys USING btree (expires_at)
   index CREATE UNIQUE INDEX idempotency_keys_pkey ON billing.idempotency_keys USING btree (merchant_id, operation, idempotency_key)
+
+table billing.invoice_collection_cadence
+  column merchant_id uuid NOT NULL
+  column monthly_period_started_at timestamp with time zone NOT NULL
+  column completed_at timestamp with time zone NOT NULL
+  constraint invoice_collection_cadence_check CHECK ((completed_at >= monthly_period_started_at))
+  constraint invoice_collection_cadence_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint invoice_collection_cadence_pkey PRIMARY KEY (merchant_id)
+  index CREATE UNIQUE INDEX invoice_collection_cadence_pkey ON billing.invoice_collection_cadence USING btree (merchant_id)
 
 table billing.invoice_items
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2533,6 +2543,7 @@ function billing.guard_billing_restore_receipt()
                     'grants',
                     'host_outbox',
                     'idempotency_keys',
+                    'invoice_collection_cadence',
                     'invoice_items',
                     'invoice_payments',
                     'invoices',

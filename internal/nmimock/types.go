@@ -64,6 +64,7 @@ type Schedule struct {
 // Sale is a sale NMI processed, approved or declined.
 type Sale struct {
 	TransactionID, OrderID, Vault, BillingID string
+	OrderDescription                         string
 	// Amount is the wire decimal ("9.99").
 	Amount, Currency string
 	Card             Card

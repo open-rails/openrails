@@ -720,6 +720,8 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
 	}, &river.PeriodicJobOpts{RunOnStart: true}))
 
+	// Recover overdue invoice work at startup; River period uniqueness preserves
+	// each cadence across replicas and repeated restarts.
 	// Every hour: invoice collection (#241). (Low-balance alert scheduling was
 	// removed with its worker registration — no Alerter implementation exists.)
 	jobs = append(jobs, r.healthPeriodic(
@@ -732,7 +734,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 			return args, opts
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 	// Monthly invoice sweep (#301): collect the long tail above the merchant's
 	// floor that the hourly threshold trigger leaves behind.
@@ -749,7 +751,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 			return args, opts
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Daily: finalize the previous merchant-configured itemized invoice period
@@ -762,7 +764,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Every 15 minutes: arrears delinquency evaluation (or#878). Tighter than

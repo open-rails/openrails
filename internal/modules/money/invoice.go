@@ -75,6 +75,13 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		payerID := payer.UUID()
 		pfrom, pto := from.UTC(), to.UTC()
 
+		// Serialize the period lookup with concurrent finalizers and money
+		// writes. A uniqueness failure after both readers see no invoice would
+		// abort one replica's merchant pass instead of returning the first bill.
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tenantID, ID: payerID}); err != nil {
+			return fmt.Errorf("lock invoice payer for finalization: %w", err)
+		}
+
 		// Idempotency: one invoice per (payer, period, currency).
 		existing, gerr := q.GetInvoiceByPeriod(ctx, gen.GetInvoiceByPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID,
