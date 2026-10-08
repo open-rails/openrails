@@ -16,7 +16,9 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "#orck/*": ["./src/*"]
+      "#orck/*": ["./src/*"],
+      "react": ["./node_modules/@types/react"],
+      "class-variance-authority": ["./node_modules/class-variance-authority"]
     },
     "types": ["vite/client", "vitest/globals"]
   },
