@@ -322,6 +322,13 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), next.UUID()).Scan(&status)
 				return err == nil && status == "paid"
 			}, 30*time.Second, 50*time.Millisecond, "the next monthly period recovers the remaining small invoice")
+			// The scan records its cadence after paying; killing the worker in
+			// between would leave the period for the next pass to close.
+			require.Eventually(t, func() bool {
+				var completed int
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed)
+				return err == nil && completed > 0
+			}, 15*time.Second, 50*time.Millisecond, "the next monthly scan completes before shutdown")
 			fourth.kill(t)
 			w.start()
 			requireInvoicePaidOnce(f, next, 3, 3, 10_000_000, 1)
